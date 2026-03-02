@@ -1,0 +1,124 @@
+# ========================
+# Python
+# ========================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.pyd
+*.pyo
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+*.egg
+eggs/
+wheels/
+*.whl
+sdist/
+develop-eggs/
+.eggs/
+MANIFEST
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# ========================
+# Virtual environments
+# ========================
+.venv/
+venv/
+env/
+ENV/
+
+# ========================
+# Environment / secrets
+# ========================
+.env
+!.env.example
+
+# ========================
+# Testing / coverage
+# ========================
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+*.py,cover
+nosetests.xml
+
+# ========================
+# Type checkers / linters
+# ========================
+.mypy_cache/
+.pytype/
+.ruff_cache/
+.ty/
+
+# ========================
+# IDE / editors
+# ========================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.sublime-project
+*.sublime-workspace
+.project
+.settings/
+
+# ========================
+# OS files
+# ========================
+.DS_Store
+Thumbs.db
+Desktop.ini
+ehthumbs.db
+
+# ========================
+# Logs
+# ========================
+logs/
+*.log
+
+# ========================
+# Certificates (sensitive)
+# ========================
+certs/
+
+# ========================
+# Databases
+# ========================
+*.db
+*.sqlite3
+
+# ========================
+# Alembic
+# ========================
+alembic/tmp/
+
+# ========================
+# uv
+# ========================
+.uv_cache/
+
+# ========================
+# Misc
+# ========================
+*.bak
+*.tmp
+*.temp
+
+# ========================
+# Project-specific ignores
+# ========================
+pyrightconfig.json
+testclient/
+plans/

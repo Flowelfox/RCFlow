@@ -1,0 +1,75 @@
+# ========================
+# Default
+# ========================
+* text=auto eol=lf
+
+# ========================
+# Python
+# ========================
+*.py text diff=python
+*.pyi text diff=python
+*.pyx text diff=python
+
+# ========================
+# Shell scripts
+# ========================
+*.sh text eol=lf
+*.bash text eol=lf
+
+# ========================
+# Web / Data
+# ========================
+*.json text
+*.yaml text
+*.yml text
+*.toml text
+*.xml text
+*.csv text
+*.ini text
+*.cfg text
+
+# ========================
+# Documentation
+# ========================
+*.md text diff=markdown
+*.txt text
+*.rst text
+LICENSE text
+CHANGELOG text
+
+# ========================
+# Config / CI
+# ========================
+Makefile text eol=lf
+Dockerfile text eol=lf
+*.dockerfile text eol=lf
+.gitignore text
+.gitattributes text
+.editorconfig text
+.env.example text
+
+# ========================
+# Lock files (do not diff)
+# ========================
+uv.lock text -diff linguist-generated=true
+poetry.lock text -diff linguist-generated=true
+package-lock.json text -diff linguist-generated=true
+
+# ========================
+# Binary files
+# ========================
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.svg text
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.eot binary
+*.pdf binary
+*.zip binary
+*.tar.gz binary
+*.gz binary

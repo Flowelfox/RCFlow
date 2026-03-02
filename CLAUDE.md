@@ -1,0 +1,21 @@
+# CLAUDE.md — RCFlow Project Instructions
+
+## Critical Rules
+
+1. **Read `Design.md` before starting any new task in this project.** The design document is the single source of truth for architecture, conventions, and decisions.
+2. **Any changes to the system design must be reflected in `Design.md`.** If a task modifies architecture, adds endpoints, changes data models, or alters any documented behavior, update `Design.md` as part of that task.
+3. Do not introduce new dependencies without documenting them in `Design.md` under the Technology Stack section.
+4. Do not add or remove WebSocket endpoints, tool definition fields, or database models without updating the corresponding sections in `Design.md`.
+5. **Keep all endpoints well-documented with docstrings, type hints, and OpenAPI metadata** (summary, description, tags, response models) so that FastAPI can auto-generate accurate API documentation. Every endpoint must be self-documenting.
+
+## Project Conventions
+
+- Python 3.12+ required
+- Use `uv` for dependency management
+- Use `ruff` for linting and formatting
+- Use `ty` for type checking
+- Use `pytest` for testing
+- Use SQLAlchemy 2.0 async style (not legacy 1.x patterns)
+- Use FastAPI with async endpoints and WebSocket handlers
+- All configuration via environment variables / `.env` file
+- Type-annotate all public functions and class attributes

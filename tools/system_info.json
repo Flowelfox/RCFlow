@@ -1,0 +1,28 @@
+{
+  "name": "system_info",
+  "description": "Retrieve system information from the host machine. Returns structured JSON data about the requested category: cpu, memory, disk, network, os, or all.",
+  "version": "1.1.0",
+  "session_type": "one-shot",
+  "llm_context": "stateless",
+  "executor": "shell",
+
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "category": {
+        "type": "string",
+        "enum": ["cpu", "memory", "disk", "network", "os", "all"],
+        "description": "The category of system information to retrieve. 'cpu' for processor info, 'memory' for RAM usage, 'disk' for filesystem usage, 'network' for network interfaces, 'os' for OS/kernel info, 'all' for everything."
+      }
+    },
+    "required": ["category"]
+  },
+
+  "executor_config": {
+    "shell": {
+      "command_template": "python3 -m src.tools.scripts.system_info {category}",
+      "capture_stderr": true,
+      "stream_output": false
+    }
+  }
+}

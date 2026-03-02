@@ -1,0 +1,15 @@
+[Unit]
+Description=RCFlow Action Server
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=rcflow
+WorkingDirectory=/opt/rcflow
+EnvironmentFile=/opt/rcflow/.env
+ExecStart=/opt/rcflow/.venv/bin/rcflow
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

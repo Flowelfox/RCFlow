@@ -1,0 +1,40 @@
+{
+  "name": "claude_code",
+  "description": "Start a Claude Code coding agent session. Claude Code can read, write, and execute code autonomously. Use for complex tasks: implementing features, fixing bugs, refactoring, writing tests, etc. The working_directory must be an existing project directory. User projects live under the projects directory mentioned in the system prompt, so when the user mentions a project by name, use the absolute path from the system prompt as the working_directory. Always verify the directory exists before calling this tool. If the exact name does not match, list the projects directory to find a case-insensitive or partial match.",
+  "version": "1.0.0",
+  "session_type": "long-running",
+  "llm_context": "session-scoped",
+  "executor": "claude_code",
+
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "prompt": {
+        "type": "string",
+        "description": "Task instructions for Claude Code"
+      },
+      "working_directory": {
+        "type": "string",
+        "description": "Project directory to work in"
+      },
+      "allowed_tools": {
+        "type": "string",
+        "description": "Space-separated allowed tools (e.g. 'Bash Edit Read Write Glob Grep')"
+      },
+      "model": {
+        "type": "string",
+        "description": "Model override (e.g. 'sonnet', 'opus')"
+      }
+    },
+    "required": ["prompt", "working_directory"]
+  },
+
+  "executor_config": {
+    "claude_code": {
+      "binary_path": "claude",
+      "default_permission_mode": "bypassPermissions",
+      "max_turns": 200,
+      "timeout": 1800
+    }
+  }
+}

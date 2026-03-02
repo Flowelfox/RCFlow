@@ -1,0 +1,155 @@
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+
+import '../../../models/ws_messages.dart';
+import '../../../state/pane_state.dart';
+import '../../../theme.dart';
+
+class ToolBlock extends StatelessWidget {
+  final DisplayMessage message;
+  const ToolBlock({super.key, required this.message});
+
+  /// Extract a short summary from [toolInput] based on the tool name.
+  static String? _toolSummary(String name, Map<String, dynamic>? input) {
+    if (input == null || input.isEmpty) return null;
+    final lowerName = name.toLowerCase();
+
+    if (lowerName == 'read' ||
+        lowerName == 'write' ||
+        lowerName == 'edit' ||
+        lowerName == 'notebookedit') {
+      final path = input['file_path'] ?? input['notebook_path'];
+      if (path is String && path.isNotEmpty) return path;
+    }
+
+    if (lowerName == 'bash' || lowerName == 'shell_exec') {
+      final cmd = input['command'];
+      if (cmd is String && cmd.isNotEmpty) return cmd;
+    }
+
+    if (lowerName == 'grep' || lowerName == 'glob') {
+      final pattern = input['pattern'];
+      if (pattern is String && pattern.isNotEmpty) return pattern;
+    }
+
+    if (lowerName == 'task') {
+      final desc = input['description'];
+      if (desc is String && desc.isNotEmpty) return desc;
+    }
+
+    if (lowerName == 'webfetch') {
+      final url = input['url'];
+      if (url is String && url.isNotEmpty) return url;
+    }
+
+    for (final v in input.values) {
+      if (v is String && v.isNotEmpty) return v;
+    }
+    return null;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final name = message.toolName ?? 'tool';
+    final output = message.content;
+    final finished = message.finished;
+    final expanded = message.expanded;
+    final summary = _toolSummary(name, message.toolInput);
+    final hasExpandableContent = output.isNotEmpty || !finished;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Container(
+        decoration: BoxDecoration(
+          color: kToolBg,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: kDivider),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            GestureDetector(
+              onTap: hasExpandableContent
+                  ? () {
+                      message.expanded = !message.expanded;
+                      context.read<PaneState>().refresh();
+                    }
+                  : null,
+              child: Container(
+                color: Colors.transparent,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                child: Row(
+                  children: [
+                    if (hasExpandableContent)
+                      Icon(
+                        expanded
+                            ? Icons.expand_less_rounded
+                            : Icons.expand_more_rounded,
+                        color: kToolAccent,
+                        size: 18,
+                      )
+                    else
+                      const SizedBox(width: 18),
+                    const SizedBox(width: 8),
+                    Icon(
+                      finished
+                          ? Icons.check_circle_outline_rounded
+                          : Icons.sync_rounded,
+                      color: finished ? kSuccessText : kToolAccent,
+                      size: 14,
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            name,
+                            style: const TextStyle(
+                              color: kToolAccent,
+                              fontSize: 13,
+                              fontFamily: 'monospace',
+                              fontWeight: FontWeight.w600,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          if (summary != null)
+                            Text(
+                              summary,
+                              style: const TextStyle(
+                                color: kToolOutputText,
+                                fontSize: 11,
+                                fontFamily: 'monospace',
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            if (expanded && output.isNotEmpty)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+                child: Text(
+                  output,
+                  style: const TextStyle(
+                    color: kToolOutputText,
+                    fontSize: 11,
+                    fontFamily: 'monospace',
+                    height: 1.3,
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
