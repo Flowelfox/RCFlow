@@ -123,4 +123,4 @@ pyrightconfig.json
 testclient/
 plans/
 data/
-.claude/output/
+.claude/
