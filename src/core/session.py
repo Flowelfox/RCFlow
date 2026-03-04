@@ -307,7 +307,10 @@ class SessionManager:
 
         session_type = SessionType(row.session_type)
         session = ActiveSession(session_id, session_type)
-        session.created_at = row.created_at
+        created_at = row.created_at
+        if created_at and created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=UTC)
+        session.created_at = created_at
         session.status = SessionStatus.ACTIVE
         session._activity_state = ActivityState.IDLE
         session._title = row.title
@@ -393,7 +396,10 @@ class SessionManager:
                     }
                 )
 
-        result.sort(key=lambda x: x["created_at"], reverse=True)
+        result.sort(
+            key=lambda x: x["created_at"].replace(tzinfo=None) if x["created_at"] else datetime.min,
+            reverse=True,
+        )
         return result
 
     async def archive_all_completed(self, db: AsyncSession) -> None:

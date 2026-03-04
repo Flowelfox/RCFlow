@@ -13,6 +13,8 @@ import '../../theme.dart';
 bool get _isDesktop =>
     Platform.isWindows || Platform.isLinux || Platform.isMacOS;
 
+enum _MentionType { project, tool }
+
 class InputArea extends StatefulWidget {
   const InputArea({super.key});
 
@@ -28,9 +30,11 @@ class _InputAreaState extends State<InputArea> {
 
   // Mention overlay state
   OverlayEntry? _overlayEntry;
-  List<String> _suggestions = [];
+  List<String> _projectSuggestions = [];
+  List<Map<String, String>> _toolSuggestions = [];
   int _selectedIndex = 0;
   int? _mentionStart;
+  _MentionType? _mentionType;
   Timer? _debounceTimer;
   bool _showingNoResults = false;
 
@@ -64,38 +68,41 @@ class _InputAreaState extends State<InputArea> {
     }
     final cursor = selection.baseOffset;
 
-    // Walk backwards from cursor to find the nearest unescaped '@'
-    int? atPos;
+    // Walk backwards from cursor to find the nearest unescaped '@' or '#'
+    int? triggerPos;
+    String? triggerChar;
     for (var i = cursor - 1; i >= 0; i--) {
       final ch = text[i];
-      if (ch == '@') {
-        atPos = i;
+      if (ch == '@' || ch == '#') {
+        triggerPos = i;
+        triggerChar = ch;
         break;
       }
-      if (ch == ' ' || ch == '\n') {
-        break;
-      }
+      if (ch == ' ' || ch == '\n') break;
     }
 
-    if (atPos == null) {
+    if (triggerPos == null || triggerChar == null) {
       _dismissOverlay();
       return;
     }
 
-    // '@' must be at start of text or preceded by whitespace
-    if (atPos > 0 && text[atPos - 1] != ' ' && text[atPos - 1] != '\n') {
+    // Trigger char must be at start of text or preceded by whitespace
+    if (triggerPos > 0 &&
+        text[triggerPos - 1] != ' ' &&
+        text[triggerPos - 1] != '\n') {
       _dismissOverlay();
       return;
     }
 
-    final query = text.substring(atPos + 1, cursor);
-    // If query contains a newline, dismiss
+    final query = text.substring(triggerPos + 1, cursor);
     if (query.contains('\n')) {
       _dismissOverlay();
       return;
     }
 
-    _mentionStart = atPos;
+    _mentionStart = triggerPos;
+    _mentionType =
+        triggerChar == '@' ? _MentionType.project : _MentionType.tool;
     _fetchSuggestions(query);
   }
 
@@ -112,14 +119,29 @@ class _InputAreaState extends State<InputArea> {
           return;
         }
         final ws = state.wsForWorker(wid);
-        final projects = await ws.fetchProjects(query: query);
-        if (!mounted) return;
-        if (projects.isEmpty) {
-          _showNoResults();
-          return;
+
+        if (_mentionType == _MentionType.project) {
+          final projects = await ws.fetchProjects(query: query);
+          if (!mounted) return;
+          if (projects.isEmpty) {
+            _showNoResults();
+            return;
+          }
+          _showingNoResults = false;
+          _projectSuggestions = projects.take(6).toList();
+          _toolSuggestions = [];
+        } else {
+          final tools = await ws.fetchTools(query: query);
+          if (!mounted) return;
+          if (tools.isEmpty) {
+            _showNoResults();
+            return;
+          }
+          _showingNoResults = false;
+          _toolSuggestions = tools.take(6).toList();
+          _projectSuggestions = [];
         }
-        _showingNoResults = false;
-        _suggestions = projects.take(6).toList();
+
         _selectedIndex = 0;
         _updateOverlay();
       } catch (_) {
@@ -130,7 +152,8 @@ class _InputAreaState extends State<InputArea> {
 
   void _showNoResults() {
     _showingNoResults = true;
-    _suggestions = [];
+    _projectSuggestions = [];
+    _toolSuggestions = [];
     _selectedIndex = 0;
     _updateOverlay();
     // Auto-dismiss after a short delay
@@ -142,7 +165,9 @@ class _InputAreaState extends State<InputArea> {
   }
 
   void _updateOverlay() {
-    if (_suggestions.isEmpty && !_showingNoResults) {
+    if (_projectSuggestions.isEmpty &&
+        _toolSuggestions.isEmpty &&
+        !_showingNoResults) {
       _removeOverlay();
       return;
     }
@@ -156,7 +181,9 @@ class _InputAreaState extends State<InputArea> {
 
   void _dismissOverlay() {
     _mentionStart = null;
-    _suggestions = [];
+    _mentionType = null;
+    _projectSuggestions = [];
+    _toolSuggestions = [];
     _selectedIndex = 0;
     _showingNoResults = false;
     _debounceTimer?.cancel();
@@ -170,13 +197,19 @@ class _InputAreaState extends State<InputArea> {
 
   bool get _overlayVisible => _overlayEntry != null;
 
+  int get _suggestionCount {
+    if (_mentionType == _MentionType.tool) return _toolSuggestions.length;
+    return _projectSuggestions.length;
+  }
+
   void _selectSuggestion(String name) {
-    if (_mentionStart == null) return;
+    if (_mentionStart == null || _mentionType == null) return;
     final text = _controller.text;
     final cursor = _controller.selection.baseOffset;
     final before = text.substring(0, _mentionStart!);
     final after = text.substring(cursor);
-    final insertion = '@$name ';
+    final prefix = _mentionType == _MentionType.project ? '@' : '#';
+    final insertion = '$prefix$name ';
     _controller.text = '$before$insertion$after';
     _controller.selection = TextSelection.collapsed(
       offset: before.length + insertion.length,
@@ -185,10 +218,11 @@ class _InputAreaState extends State<InputArea> {
   }
 
   void _moveSelection(int delta) {
-    if (_suggestions.isEmpty) return;
+    final count = _suggestionCount;
+    if (count == 0) return;
     setState(() {
-      _selectedIndex = (_selectedIndex + delta) % _suggestions.length;
-      if (_selectedIndex < 0) _selectedIndex = _suggestions.length - 1;
+      _selectedIndex = (_selectedIndex + delta) % count;
+      if (_selectedIndex < 0) _selectedIndex = count - 1;
     });
     _overlayEntry?.markNeedsBuild();
   }
@@ -223,8 +257,11 @@ class _InputAreaState extends State<InputArea> {
       }
       if (event.logicalKey == LogicalKeyboardKey.enter ||
           event.logicalKey == LogicalKeyboardKey.tab) {
-        if (_suggestions.isNotEmpty) {
-          _selectSuggestion(_suggestions[_selectedIndex]);
+        if (_suggestionCount > 0) {
+          final name = _mentionType == _MentionType.tool
+              ? _toolSuggestions[_selectedIndex]['name']!
+              : _projectSuggestions[_selectedIndex];
+          _selectSuggestion(name);
           return KeyEventResult.handled;
         }
       }
@@ -254,11 +291,35 @@ class _InputAreaState extends State<InputArea> {
 
         Widget content;
         if (_showingNoResults) {
-          content = const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          final label = _mentionType == _MentionType.tool
+              ? 'No tools found'
+              : 'No projects found';
+          content = Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             child: Text(
-              'No projects found',
-              style: TextStyle(color: kTextMuted, fontSize: 13),
+              label,
+              style: const TextStyle(color: kTextMuted, fontSize: 13),
+            ),
+          );
+        } else if (_mentionType == _MentionType.tool &&
+            _toolSuggestions.isNotEmpty) {
+          content = ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 240),
+            child: ListView.builder(
+              padding: EdgeInsets.zero,
+              shrinkWrap: true,
+              itemCount: _toolSuggestions.length,
+              itemBuilder: (context, index) {
+                final tool = _toolSuggestions[index];
+                final selected = index == _selectedIndex;
+                return _ToolMentionItem(
+                  name: tool['name']!,
+                  description: tool['description']!,
+                  query: mentionQuery,
+                  selected: selected,
+                  onTap: () => _selectSuggestion(tool['name']!),
+                );
+              },
             ),
           );
         } else {
@@ -267,9 +328,9 @@ class _InputAreaState extends State<InputArea> {
             child: ListView.builder(
               padding: EdgeInsets.zero,
               shrinkWrap: true,
-              itemCount: _suggestions.length,
+              itemCount: _projectSuggestions.length,
               itemBuilder: (context, index) {
-                final name = _suggestions[index];
+                final name = _projectSuggestions[index];
                 final selected = index == _selectedIndex;
                 return _MentionItem(
                   name: name,
@@ -282,6 +343,9 @@ class _InputAreaState extends State<InputArea> {
           );
         }
 
+        final overlayWidth =
+            _mentionType == _MentionType.tool ? 320.0 : 280.0;
+
         return CompositedTransformFollower(
           link: _layerLink,
           showWhenUnlinked: false,
@@ -293,7 +357,7 @@ class _InputAreaState extends State<InputArea> {
             child: Align(
               alignment: Alignment.bottomLeft,
               child: Container(
-                width: 280,
+                width: overlayWidth,
                 decoration: BoxDecoration(
                   color: kBgElevated,
                   borderRadius: BorderRadius.circular(8),
@@ -622,6 +686,96 @@ class _MentionItem extends StatelessWidget {
         TextSpan(
           text: name.substring(matchIndex, matchIndex + query.length),
           style: const TextStyle(color: kAccentLight, fontSize: 13, fontWeight: FontWeight.w600),
+        ),
+        if (matchIndex + query.length < name.length)
+          TextSpan(
+            text: name.substring(matchIndex + query.length),
+            style: const TextStyle(color: kTextPrimary, fontSize: 13),
+          ),
+      ]),
+      overflow: TextOverflow.ellipsis,
+    );
+  }
+}
+
+class _ToolMentionItem extends StatelessWidget {
+  final String name;
+  final String description;
+  final String query;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _ToolMentionItem({
+    required this.name,
+    required this.description,
+    required this.query,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        color: selected ? kBgOverlay : Colors.transparent,
+        child: Row(
+          children: [
+            const Icon(Icons.build_rounded, size: 16, color: kTextMuted),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildHighlightedName(),
+                  Text(
+                    description,
+                    style: const TextStyle(color: kTextMuted, fontSize: 11),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHighlightedName() {
+    if (query.isEmpty) {
+      return Text(
+        name,
+        style: const TextStyle(color: kTextPrimary, fontSize: 13),
+        overflow: TextOverflow.ellipsis,
+      );
+    }
+
+    final lowerName = name.toLowerCase();
+    final lowerQuery = query.toLowerCase();
+    final matchIndex = lowerName.indexOf(lowerQuery);
+
+    if (matchIndex < 0) {
+      return Text(
+        name,
+        style: const TextStyle(color: kTextPrimary, fontSize: 13),
+        overflow: TextOverflow.ellipsis,
+      );
+    }
+
+    return Text.rich(
+      TextSpan(children: [
+        if (matchIndex > 0)
+          TextSpan(
+            text: name.substring(0, matchIndex),
+            style: const TextStyle(color: kTextPrimary, fontSize: 13),
+          ),
+        TextSpan(
+          text: name.substring(matchIndex, matchIndex + query.length),
+          style: const TextStyle(
+              color: kAccentLight, fontSize: 13, fontWeight: FontWeight.w600),
         ),
         if (matchIndex + query.length < name.length)
           TextSpan(

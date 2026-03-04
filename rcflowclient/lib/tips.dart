@@ -2,6 +2,7 @@ import 'dart:math';
 
 const List<String> _tips = [
   'Use the @ symbol to reference projects by name in your messages',
+  'Use the # symbol to suggest which tools to use (e.g. #claude_code, #codex)',
   'Try the RCFlow Android app for on-the-go access to your sessions',
   'You can split the view to work with multiple sessions side by side',
   'Drag a session from the sidebar to split panes and multitask',

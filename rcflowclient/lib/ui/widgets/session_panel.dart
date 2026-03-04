@@ -327,7 +327,23 @@ class _WorkerGroup extends StatelessWidget {
                   context, details.globalPosition, state, s),
               child: Opacity(
                 opacity: dimmed ? 0.5 : 1.0,
-                child: ListTile(
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: isActiveSession
+                        ? kAccent.withAlpha(25)
+                        : isViewedByAnyPane
+                            ? kAccent.withAlpha(12)
+                            : null,
+                    border: isActiveSession
+                        ? const Border(
+                            left: BorderSide(color: kAccent, width: 3))
+                        : isViewedByAnyPane
+                            ? Border(
+                                left: BorderSide(
+                                    color: kAccent.withAlpha(80), width: 2))
+                            : null,
+                  ),
+                  child: ListTile(
                   leading: _SessionLeadingIcon(session: s),
                   title: Text(
                     s.title ?? s.shortId,
@@ -348,26 +364,6 @@ class _WorkerGroup extends StatelessWidget {
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      if (isActiveSession)
-                        Container(
-                          width: 8,
-                          height: 8,
-                          margin: const EdgeInsets.only(right: 8),
-                          decoration: const BoxDecoration(
-                            color: kAccent,
-                            shape: BoxShape.circle,
-                          ),
-                        )
-                      else if (isViewedByAnyPane)
-                        Container(
-                          width: 6,
-                          height: 6,
-                          margin: const EdgeInsets.only(right: 8),
-                          decoration: BoxDecoration(
-                            color: kAccent.withAlpha(100),
-                            shape: BoxShape.circle,
-                          ),
-                        ),
                       if (_isTerminal(s.status))
                         SizedBox(
                           width: 26,
@@ -437,6 +433,7 @@ class _WorkerGroup extends StatelessWidget {
                   onTap: () => onSessionTap(s.sessionId),
                   onLongPress: () =>
                       _showRenameDialog(context, state, s),
+                ),
                 ),
               ),
             );

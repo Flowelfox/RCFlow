@@ -624,10 +624,15 @@ class PromptRouter:
         return self._executors[executor_type]
 
     _MENTION_RE = re.compile(r"(?:^|(?<=\s))@(\S+)")
+    _TOOL_MENTION_RE = re.compile(r"(?:^|(?<=\s))#(\S+)")
 
     def _extract_project_mentions(self, text: str) -> list[str]:
         """Extract @ProjectName mentions from user text."""
         return self._MENTION_RE.findall(text)
+
+    def _extract_tool_mentions(self, text: str) -> list[str]:
+        """Extract #ToolName mentions from user text."""
+        return self._TOOL_MENTION_RE.findall(text)
 
     def _build_project_context(self, mentions: list[str]) -> str | None:
         """Resolve mentions to project directories and build a context string.
@@ -659,6 +664,36 @@ class PromptRouter:
         return (
             f"[Context: This message references projects: {lines}. "
             f"All instructions in this message relate to these projects.]"
+        )
+
+    def _build_tool_context(self, mentions: list[str]) -> str | None:
+        """Resolve #tool mentions against the tool registry and build a context string.
+
+        Returns None if no mentions resolve to valid tools.
+        """
+        resolved: list[tuple[str, str]] = []  # (name, description)
+        seen: set[str] = set()
+        for name in mentions:
+            tool = self._tool_registry.get(name)
+            if tool is None:
+                # Try case-insensitive lookup
+                for t in self._tool_registry.list_tools():
+                    if t.name.lower() == name.lower():
+                        tool = t
+                        break
+            if tool is not None and tool.name not in seen:
+                seen.add(tool.name)
+                resolved.append((tool.name, tool.description))
+
+        if not resolved:
+            return None
+
+        tool_lines = "\n".join(f'- "{name}": {desc}' for name, desc in resolved)
+        return (
+            f"[Tool preference: The user has explicitly requested that you use "
+            f"the following tool(s) to accomplish this task:\n{tool_lines}\n"
+            f"Prioritize using these tools. If the task can be accomplished with "
+            f"the mentioned tools, use them rather than alternatives.]"
         )
 
     async def handle_prompt(self, text: str, session_id: str | None = None) -> str:
@@ -701,15 +736,25 @@ class PromptRouter:
             session.set_activity(ActivityState.PROCESSING_LLM)
             self._resolve_session_end_ask(session, accepted=False)
 
-            # Detect @ProjectName mentions and build LLM context
+            # Detect @ProjectName and #ToolName mentions, build LLM context
             mentions = self._extract_project_mentions(text)
             project_context = self._build_project_context(mentions) if mentions else None
 
+            tool_mentions = self._extract_tool_mentions(text)
+            tool_context = self._build_tool_context(tool_mentions) if tool_mentions else None
+
+            context_blocks: list[dict[str, Any]] = []
             if project_context:
-                content: str | list[dict[str, Any]] = [
+                context_blocks.append(
                     {"type": "text", "text": project_context, "cache_control": {"type": "ephemeral"}},
-                    {"type": "text", "text": text},
-                ]
+                )
+            if tool_context:
+                context_blocks.append(
+                    {"type": "text", "text": tool_context, "cache_control": {"type": "ephemeral"}},
+                )
+
+            if context_blocks:
+                content: str | list[dict[str, Any]] = [*context_blocks, {"type": "text", "text": text}]
             else:
                 content = text
 

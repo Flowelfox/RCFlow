@@ -240,11 +240,23 @@ async def get_session_messages(
 @router.get(
     "/tools",
     summary="List available tools",
-    description="Returns all registered tool definitions that the LLM can use.",
+    description=(
+        "Returns registered tool definitions that the LLM can use. "
+        "Optionally filters by a case-insensitive substring match on the tool name."
+    ),
     dependencies=[Depends(verify_http_api_key)],
 )
-async def list_tools(request: Request) -> dict[str, Any]:
+async def list_tools(
+    request: Request,
+    q: str | None = Query(None, description="Case-insensitive substring filter for tool names"),
+) -> dict[str, Any]:
     tool_registry = request.app.state.tool_registry
+    all_tools = tool_registry.list_tools()
+
+    if q:
+        q_lower = q.lower()
+        all_tools = [t for t in all_tools if q_lower in t.name.lower()]
+
     tools = [
         {
             "name": t.name,
@@ -253,7 +265,7 @@ async def list_tools(request: Request) -> dict[str, Any]:
             "session_type": t.session_type,
             "executor": t.executor,
         }
-        for t in tool_registry.list_tools()
+        for t in sorted(all_tools, key=lambda t: t.name)
     ]
     return {"tools": tools}
 

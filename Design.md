@@ -196,7 +196,7 @@ The client can connect to multiple RCFlow servers simultaneously. Each server co
 | GET    | `/api/info`                             | Yes  | Server metadata — returns `{"os", "os_version", "architecture", "hostname"}` |
 | GET    | `/api/sessions`                         | Yes  | List all sessions (in-memory + archived) sorted by `created_at` descending. Includes `title`. |
 | GET    | `/api/sessions/{session_id}/messages`   | Yes  | Get message history for a session (in-memory buffer or archived DB messages). Supports cursor-based pagination via `?limit=N` and `?before=SEQ` query params. Response includes `pagination: {total_count, has_more, next_cursor}`. When `limit` is omitted, returns all messages (backward compatible). |
-| GET    | `/api/tools`                            | Yes  | List registered tool definitions                 |
+| GET    | `/api/tools`                            | Yes  | List registered tool names and descriptions. Optional `?q=` for case-insensitive substring filter. Returns `{"tools": [{"name": "...", "description": "..."}]}`. |
 | GET    | `/api/projects`                         | Yes  | List directory names under `PROJECTS_DIR`. Optional `?q=` for case-insensitive substring filter. Returns `{"projects": [...]}`. |
 | POST   | `/api/sessions/{session_id}/cancel`     | Yes  | Cancel a running session (kills subprocess)      |
 | POST   | `/api/sessions/{session_id}/end`        | Yes  | Gracefully end a session (user-confirmed completion) |
@@ -778,6 +778,28 @@ Key behavior:
 - The original user text is preserved — the context is an additional content block, not a replacement.
 - The injected context block uses `cache_control: {"type": "ephemeral"}` to avoid polluting prompt caching.
 - The client-side buffer receives the original text only (no injected context).
+
+### #Mention Tool Preference Injection
+
+When a user message contains `#ToolName` tokens (e.g. `#claude_code`, `#codex`), `PromptRouter.handle_prompt()` detects the mentions and resolves them against the tool registry. If a mentioned name matches a registered tool (case-insensitive), a tool preference context block is prepended to the user message content sent to the LLM:
+
+```
+[Tool preference: The user has explicitly requested that you use the following tool(s) to accomplish this task:
+- "claude_code": Claude Code autonomous coding agent...
+Prioritize using these tools. If the task can be accomplished with the mentioned tools, use them rather than alternatives.]
+```
+
+Key behavior:
+- The `#` must appear at the start of the text or after whitespace.
+- Tool name matching is case-insensitive: `#Claude` resolves to `claude_code`.
+- Only mentions that resolve to registered tools produce context; unresolved mentions are silently ignored.
+- Duplicate tool mentions are deduplicated — each tool appears at most once in the context.
+- Multiple tool mentions combine with AND logic: `#claude_code #shell_exec` means use both tools.
+- The original user text is preserved — the tool context is an additional content block, not a replacement.
+- The injected context block uses `cache_control: {"type": "ephemeral"}` to avoid polluting prompt caching.
+- Both `@` project and `#` tool mentions can appear in the same message; each produces a separate context block.
+
+The client provides autocomplete suggestions via `GET /api/tools?q=<query>`, triggered when the user types `#` in the input area. The autocomplete shows tool names with descriptions to help users identify the right tool.
 
 ---
 
