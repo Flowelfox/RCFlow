@@ -24,6 +24,10 @@ void showSettingsMenu(BuildContext context) {
       context: context,
       builder: (_) => const _DesktopSettingsDialog(),
     );
+  } else if (Platform.isAndroid) {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const _AndroidSettingsPage()),
+    );
   } else {
     showModalBottomSheet(
       context: context,
@@ -229,6 +233,56 @@ class _MobileSettingsSheet extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Android: full-screen settings page
+// ---------------------------------------------------------------------------
+
+class _AndroidSettingsPage extends StatelessWidget {
+  const _AndroidSettingsPage();
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: kBgBase,
+      appBar: AppBar(
+        backgroundColor: kBgSurface,
+        foregroundColor: kTextPrimary,
+        title: const Text(
+          'Settings',
+          style: TextStyle(
+            color: kTextPrimary,
+            fontSize: 20,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        elevation: 0,
+      ),
+      body: SingleChildScrollView(
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+          left: 24,
+          right: 24,
+          top: 24,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _WorkersSection(
+              onClose: () => Navigator.of(context).pop(),
+            ),
+            const _SectionDivider(),
+            const _AppearanceSection(),
+            const _SectionDivider(),
+            const _NotificationsSection(),
+            const _SectionDivider(),
+            const _AboutSection(),
+          ],
+        ),
+      ),
     );
   }
 }

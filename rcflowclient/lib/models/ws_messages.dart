@@ -8,6 +8,7 @@ enum DisplayMessageType {
   sessionEndAsk,
   planModeAsk,
   planReviewAsk,
+  permissionRequest,
   agentGroup,
 }
 

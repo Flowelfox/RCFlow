@@ -4,7 +4,9 @@ from pathlib import Path
 
 from poml import poml as render_poml
 
-_DEFAULT_TEMPLATES_DIR = Path(__file__).parent / "templates"
+from src.paths import get_templates_dir
+
+_DEFAULT_TEMPLATES_DIR = get_templates_dir()
 
 
 class PromptBuilder:

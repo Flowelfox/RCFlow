@@ -1,7 +1,9 @@
 import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:window_manager/window_manager.dart';
 
 import '../../state/app_state.dart';
 import '../../state/pane_state.dart';
@@ -23,12 +25,33 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WindowListener {
   static const _defaultFraction = 0.15;
   static const _maxFraction = 0.50;
   static const _minPixels = 150.0;
 
   double _sidebarFraction = _defaultFraction;
+
+  @override
+  void initState() {
+    super.initState();
+    if (_isDesktop) windowManager.addListener(this);
+  }
+
+  @override
+  void dispose() {
+    if (_isDesktop) windowManager.removeListener(this);
+    super.dispose();
+  }
+
+  @override
+  void onWindowFocus() {
+    // When the window regains focus, clear stale keyboard modifier state.
+    // Without this, modifier keys (Alt, Ctrl, etc.) get "stuck" if the user
+    // switched away while holding them (e.g. Alt+Tab, Alt+Win).
+    // ignore: invalid_use_of_visible_for_testing_member
+    HardwareKeyboard.instance.clearState();
+  }
 
   @override
   Widget build(BuildContext context) {

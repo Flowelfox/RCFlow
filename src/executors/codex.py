@@ -144,6 +144,22 @@ class CodexExecutor(BaseExecutor):
         # Start draining stderr in background to prevent pipe deadlock
         self._stderr_task = asyncio.create_task(self._drain_stderr())
 
+        # Yield to the event loop so we can detect immediate startup failures
+        # (e.g. binary not found, permission denied, crash on init).
+        await asyncio.sleep(0)
+        if process.returncode is not None:
+            # Let stderr drain briefly so we get a useful error message
+            if self._stderr_task and not self._stderr_task.done():
+                try:
+                    await asyncio.wait_for(self._stderr_task, timeout=1.0)
+                except TimeoutError:
+                    self._stderr_task.cancel()
+            stderr_hint = self._stderr_output.strip()
+            raise RuntimeError(
+                f"Codex process exited immediately with code {process.returncode}"
+                + (f": {stderr_hint}" if stderr_hint else "")
+            )
+
         return process
 
     _STDERR_MAX_BYTES = 64 * 1024
@@ -201,8 +217,39 @@ class CodexExecutor(BaseExecutor):
         """Write the prompt to stdin and close it (Codex one-shot model)."""
         if not self._process or not self._process.stdin:
             raise RuntimeError("Codex process not started or stdin not available")
-        self._process.stdin.write(prompt.encode("utf-8"))
-        self._process.stdin.close()
+
+        if self._process.returncode is not None:
+            # Process already exited before we could write — collect stderr
+            # and raise a descriptive error.
+            if self._stderr_task and not self._stderr_task.done():
+                try:
+                    await asyncio.wait_for(self._stderr_task, timeout=1.0)
+                except TimeoutError:
+                    self._stderr_task.cancel()
+            stderr_hint = self._stderr_output.strip()
+            raise RuntimeError(
+                f"Codex process exited (code {self._process.returncode}) before prompt could be sent"
+                + (f": {stderr_hint}" if stderr_hint else "")
+            )
+
+        try:
+            self._process.stdin.write(prompt.encode("utf-8"))
+            await self._process.stdin.drain()
+            self._process.stdin.close()
+            await self._process.stdin.wait_closed()
+        except (BrokenPipeError, ConnectionResetError, OSError) as exc:
+            # The process died between our check and the write/drain.
+            if self._stderr_task and not self._stderr_task.done():
+                try:
+                    await asyncio.wait_for(self._stderr_task, timeout=1.0)
+                except TimeoutError:
+                    self._stderr_task.cancel()
+            stderr_hint = self._stderr_output.strip()
+            raise RuntimeError(
+                "Failed to write prompt to Codex stdin (transport closed)"
+                + (f": {stderr_hint}" if stderr_hint else "")
+            ) from exc
+
         logger.debug("Sent prompt to Codex stdin and closed [thread=%s]", self._thread_id)
 
     async def _read_events(self) -> AsyncGenerator[ExecutionChunk, None]:

@@ -14,6 +14,14 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from src.config import Settings
 from src.core.buffer import MessageType
 from src.core.llm import LLMClient, StreamDone, TextChunk, ToolCallRequest, TurnUsage
+from src.core.permissions import (
+    PermissionDecision,
+    PermissionManager,
+    PermissionScope,
+    classify_risk,
+    describe_tool_action,
+    get_scope_options,
+)
 from src.core.session import ActiveSession, ActivityState, SessionManager, SessionStatus, SessionType
 from src.executors.base import BaseExecutor, ExecutionChunk
 from src.executors.claude_code import ClaudeCodeExecutor
@@ -107,6 +115,10 @@ class PromptRouter:
             with contextlib.suppress(asyncio.CancelledError):
                 await session._codex_stream_task
         session._codex_stream_task = None
+
+        # Auto-deny any pending permission requests
+        if session.permission_manager is not None:
+            session.permission_manager.cancel_all_pending()
 
         # Close any open agent group before ending the session
         if had_claude_code or had_codex:
@@ -212,6 +224,36 @@ class PromptRouter:
             raise ValueError(f"Session not found: {session_id}")
         self._resolve_session_end_ask(session, accepted=False)
 
+    def resolve_permission(
+        self,
+        session_id: str,
+        request_id: str,
+        decision: str,
+        scope: str,
+        path_prefix: str | None = None,
+    ) -> None:
+        """Resolve a pending permission request from the client.
+
+        Raises:
+            ValueError: If the session does not exist.
+            RuntimeError: If the session does not have interactive permissions
+                enabled, or the request_id is unknown.
+        """
+        session = self._session_manager.get_session(session_id)
+        if session is None:
+            raise ValueError(f"Session not found: {session_id}")
+        if session.permission_manager is None:
+            raise RuntimeError("Session does not have interactive permissions enabled")
+
+        resolved = session.permission_manager.resolve_request(
+            request_id=request_id,
+            decision=PermissionDecision(decision),
+            scope=PermissionScope(scope),
+            path_prefix=path_prefix,
+        )
+        if not resolved:
+            raise RuntimeError(f"Unknown or already-resolved permission request: {request_id}")
+
     async def pause_session(self, session_id: str) -> ActiveSession:
         """Pause an active session.
 
@@ -255,6 +297,10 @@ class PromptRouter:
         session._codex_stream_task = None
 
         had_agent = had_claude_code or had_codex
+
+        # Auto-deny any pending permission requests
+        if session.permission_manager is not None:
+            session.permission_manager.cancel_all_pending()
 
         session.pause()
 
@@ -357,6 +403,13 @@ class PromptRouter:
                 session.claude_code_executor = executor
                 session.session_type = SessionType.LONG_RUNNING
 
+        # Restore permission rules if they were saved
+        saved_rules = session.metadata.get("permission_rules")
+        if saved_rules:
+            pm = PermissionManager()
+            pm.restore_rules(saved_rules)
+            session.permission_manager = pm
+
         # If this was a Codex session, set up executor for lazy restart
         codex_thread_id = session.metadata.get("codex_thread_id")
         codex_tool_name = session.metadata.get("codex_tool_name")
@@ -438,13 +491,76 @@ class PromptRouter:
     def _build_codex_extra_env(self) -> dict[str, str]:
         """Build extra environment variables for Codex CLI subprocesses."""
         extra_env: dict[str, str] = {}
-        if self._settings and self._settings.CODEX_API_KEY:
+
+        # Check if the tool has its own provider configured — if so,
+        # inject env vars from the per-tool settings instead of the
+        # global CODEX_API_KEY.  Unlike Claude Code (which natively reads
+        # settings.json via CLAUDE_CONFIG_DIR), Codex CLI only reads API
+        # keys from actual environment variables, so we must inject them.
+        tool_settings: dict[str, Any] = {}
+        if self._tool_settings:
+            tool_settings = self._tool_settings.get_settings("codex")
+
+        tool_provider = tool_settings.get("provider", "")
+
+        if tool_provider == "chatgpt":
+            # ChatGPT subscription auth — no API key needed; Codex CLI
+            # reads OAuth tokens from $CODEX_HOME/auth.json instead.
+            pass
+        elif tool_provider:
+            # Inject env vars from the per-tool settings env section
+            tool_env = tool_settings.get("env", {})
+            if isinstance(tool_env, dict):
+                extra_env.update(tool_env)
+        elif self._settings and self._settings.CODEX_API_KEY:
             extra_env["CODEX_API_KEY"] = self._settings.CODEX_API_KEY
+
         if self._tool_settings:
             config_dir = self._tool_settings.get_config_dir("codex")
             config_dir.mkdir(parents=True, exist_ok=True)
             extra_env["CODEX_HOME"] = str(config_dir)
+
+            # For ChatGPT auth, symlink the default auth.json into CODEX_HOME
+            # so the isolated Codex instance can use the user's OAuth tokens.
+            if tool_provider == "chatgpt":
+                self._ensure_codex_auth_symlink(config_dir)
+
         return extra_env
+
+    @staticmethod
+    def _ensure_codex_auth_symlink(codex_home: Path) -> None:
+        """Symlink ``~/.codex/auth.json`` into *codex_home* if not already present.
+
+        Uses a symlink so that token refreshes by the Codex CLI are
+        automatically visible to both the user's default install and RCFlow.
+        """
+        default_auth = Path.home() / ".codex" / "auth.json"
+        target_auth = codex_home / "auth.json"
+
+        if target_auth.is_file() and not target_auth.is_symlink():
+            # A real file already exists (e.g. user ran codex login with
+            # this CODEX_HOME) — don't overwrite it.
+            return
+
+        if target_auth.is_symlink() and not target_auth.exists():
+            # Broken symlink — remove it so we can recreate.
+            target_auth.unlink()
+
+        if target_auth.exists():
+            return
+
+        if not default_auth.is_file():
+            logger.warning(
+                "ChatGPT auth selected but ~/.codex/auth.json not found. "
+                "Run 'codex login' first to authenticate."
+            )
+            return
+
+        try:
+            target_auth.symlink_to(default_auth)
+            logger.info("Symlinked %s -> %s", target_auth, default_auth)
+        except OSError:
+            logger.warning("Failed to symlink auth.json", exc_info=True)
 
     def _get_managed_config_overrides(self, tool_name: str) -> dict[str, Any]:
         """Read tool settings and return overrides for managed tools only."""
@@ -878,6 +994,14 @@ class PromptRouter:
         session.session_type = SessionType.LONG_RUNNING
         session.set_activity(ActivityState.RUNNING_SUBPROCESS)
 
+        # Enable interactive permissions if configured
+        effective_config = {**tool_def.executor_config.get("claude_code", {})}
+        for k, v in self._get_managed_config_overrides("claude_code").items():
+            if v not in (None, ""):
+                effective_config[k] = v
+        if effective_config.get("default_permission_mode") == "interactive":
+            session.permission_manager = PermissionManager()
+
         # Store CC metadata for potential session restore
         session.metadata["claude_code_session_id"] = executor.session_id
         session.metadata["claude_code_working_directory"] = str(working_path)
@@ -890,6 +1014,71 @@ class PromptRouter:
 
         return f"Claude Code session started in {working_path}"
 
+    async def _handle_permission_check(
+        self,
+        session: ActiveSession,
+        tool_name: str,
+        tool_input: dict[str, Any],
+    ) -> PermissionDecision:
+        """Check permissions for a tool use, potentially asking the user.
+
+        If the session has a :class:`PermissionManager` and no cached rule
+        covers the request, a ``PERMISSION_REQUEST`` message is pushed to the
+        buffer and the coroutine blocks until the user responds or the timeout
+        expires.
+
+        Returns the final decision (``ALLOW`` or ``DENY``).
+        """
+        pm = session.permission_manager
+        if pm is None:
+            return PermissionDecision.ALLOW
+
+        # 1. Check cached rules first
+        cached = pm.check_cached(tool_name, tool_input)
+        if cached is not None:
+            logger.debug(
+                "Permission cache hit: %s for %s (session=%s)",
+                cached.value,
+                tool_name,
+                session.id,
+            )
+            return cached
+
+        # 2. No cached rule — ask the user
+        pending = pm.create_request(tool_name, tool_input)
+        risk_level = classify_risk(tool_name, tool_input)
+        description = describe_tool_action(tool_name, tool_input)
+
+        session.set_activity(ActivityState.AWAITING_PERMISSION)
+
+        session.buffer.push_text(
+            MessageType.PERMISSION_REQUEST,
+            {
+                "session_id": session.id,
+                "request_id": pending.request_id,
+                "tool_name": tool_name,
+                "tool_input": tool_input,
+                "description": description,
+                "risk_level": risk_level,
+                "scope_options": get_scope_options(tool_name),
+            },
+        )
+
+        # 3. Wait for user response (blocks the stream reading)
+        resolved = await pm.wait_for_response(pending.request_id)
+
+        session.set_activity(ActivityState.RUNNING_SUBPROCESS)
+
+        if resolved.timed_out:
+            logger.warning(
+                "Permission request timed out for %s (session=%s, request=%s)",
+                tool_name,
+                session.id,
+                pending.request_id,
+            )
+
+        return resolved.decision if resolved.decision else PermissionDecision.DENY
+
     async def _relay_claude_code_stream(
         self,
         session: ActiveSession,
@@ -900,6 +1089,10 @@ class PromptRouter:
         Translates raw JSON event lines into the same message types used by the
         RCFlow LLM pipeline (TEXT_CHUNK, TOOL_START) instead of forwarding
         opaque TOOL_OUTPUT blobs.
+
+        When the session has a :class:`PermissionManager`, ``tool_use`` blocks
+        in ``assistant`` events are intercepted for permission approval before
+        execution proceeds.
         """
         async for chunk in stream:
             line = chunk.content.strip()
@@ -937,6 +1130,25 @@ class PromptRouter:
                         )
                     elif block_type == "tool_use":
                         tool_name = block.get("name", "unknown")
+                        tool_input = block.get("input", {})
+
+                        # Permission check for interactive sessions
+                        if session.permission_manager is not None:
+                            decision = await self._handle_permission_check(
+                                session, tool_name, tool_input
+                            )
+                            if decision == PermissionDecision.DENY:
+                                session.buffer.push_text(
+                                    MessageType.TOOL_START,
+                                    {
+                                        "session_id": session.id,
+                                        "tool_name": tool_name,
+                                        "tool_input": tool_input,
+                                        "permission_denied": True,
+                                    },
+                                )
+                                continue
+
                         if tool_name == "EnterPlanMode":
                             session.buffer.push_text(
                                 MessageType.PLAN_MODE_ASK,
@@ -953,7 +1165,7 @@ class PromptRouter:
                                 {
                                     "session_id": session.id,
                                     "tool_name": tool_name,
-                                    "tool_input": block.get("input", {}),
+                                    "tool_input": tool_input,
                                 },
                             )
             elif event_type == "result":
@@ -1137,6 +1349,8 @@ class PromptRouter:
         """
         # Track last emitted text for agent_message items to enable incremental updates
         last_agent_text: dict[str, str] = {}
+        # Collect agent_message text after the last tool call for the summary
+        post_tool_text_chunks: list[str] = []
 
         async for chunk in stream:
             line = chunk.content.strip()
@@ -1171,6 +1385,7 @@ class PromptRouter:
                 item = event.get("item", {})
                 item_type = item.get("type")
                 if item_type == "command_execution":
+                    post_tool_text_chunks.clear()
                     session.buffer.push_text(
                         MessageType.TOOL_START,
                         {
@@ -1180,6 +1395,7 @@ class PromptRouter:
                         },
                     )
                 elif item_type == "file_change":
+                    post_tool_text_chunks.clear()
                     session.buffer.push_text(
                         MessageType.TOOL_START,
                         {
@@ -1189,6 +1405,7 @@ class PromptRouter:
                         },
                     )
                 elif item_type == "mcp_tool_call":
+                    post_tool_text_chunks.clear()
                     session.buffer.push_text(
                         MessageType.TOOL_START,
                         {
@@ -1208,6 +1425,7 @@ class PromptRouter:
                     prev = last_agent_text.get(item_id, "")
                     delta = full_text[len(prev) :]
                     if delta:
+                        post_tool_text_chunks.append(delta)
                         session.buffer.push_text(
                             MessageType.TEXT_CHUNK,
                             {
@@ -1228,6 +1446,7 @@ class PromptRouter:
                     prev = last_agent_text.get(item_id, "")
                     delta = full_text[len(prev) :]
                     if delta:
+                        post_tool_text_chunks.append(delta)
                         session.buffer.push_text(
                             MessageType.TEXT_CHUNK,
                             {
@@ -1252,7 +1471,8 @@ class PromptRouter:
 
             elif event_type == "turn.completed":
                 session.set_activity(ActivityState.IDLE)
-                self._fire_summary_task(session, "Codex task completed", push_session_end_ask=True)
+                summary_text = "".join(post_tool_text_chunks).strip() or "Codex task completed"
+                self._fire_summary_task(session, summary_text, push_session_end_ask=True)
 
             elif event_type == "turn.failed":
                 error = event.get("error", {})
@@ -1672,6 +1892,11 @@ class PromptRouter:
 
     def _fire_archive_task(self, session_id: str) -> None:
         """Schedule a fire-and-forget background task to archive a session to the database."""
+        # Snapshot permission rules into metadata before archiving
+        session = self._session_manager.get_session(session_id)
+        if session is not None and session.permission_manager is not None:
+            session.metadata["permission_rules"] = session.permission_manager.get_rules_snapshot()
+
         if self._db_session_factory is None:
             return
         task = asyncio.create_task(self._archive_session(session_id))

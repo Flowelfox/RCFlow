@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../../state/app_state.dart';
 import '../../state/pane_state.dart';
 import '../../theme.dart';
+import '../../tips.dart';
 import 'message_bubble.dart';
 import 'session_panel.dart';
 
@@ -18,6 +19,7 @@ class OutputDisplay extends StatefulWidget {
 
 class _OutputDisplayState extends State<OutputDisplay> {
   final ScrollController _scrollController = ScrollController();
+  String _tip = getRandomTip();
   int _lastMessageCount = 0;
   String _lastContent = '';
   Timer? _loadMoreDebounce;
@@ -143,6 +145,9 @@ class _OutputDisplayState extends State<OutputDisplay> {
             final contentChanged = msgs.length != _lastMessageCount ||
                 currentContent != _lastContent;
             if (contentChanged) {
+              if (msgs.isEmpty && _lastMessageCount > 0) {
+                _tip = getRandomTip();
+              }
               _lastMessageCount = msgs.length;
               _lastContent = currentContent;
               if (_isStuck) {
@@ -227,6 +232,25 @@ class _OutputDisplayState extends State<OutputDisplay> {
                     const SizedBox(height: 12),
                     const Text('Send a message to get started',
                         style: TextStyle(color: kTextMuted, fontSize: 15)),
+                    const SizedBox(height: 20),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 380),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.lightbulb_outline_rounded,
+                              size: 14, color: kTextMuted),
+                          const SizedBox(width: 6),
+                          Flexible(
+                            child: Text(
+                              _tip,
+                              style: const TextStyle(
+                                  color: kTextMuted, fontSize: 12.5),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ],
                 ),
               );

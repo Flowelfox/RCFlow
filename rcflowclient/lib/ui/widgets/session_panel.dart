@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -15,12 +16,10 @@ void showSessionSheet(BuildContext context) {
   context.read<AppState>().refreshSessions();
   showModalBottomSheet(
     context: context,
+    isScrollControlled: true,
     builder: (_) => ChangeNotifierProvider.value(
       value: context.read<AppState>(),
       child: const _SessionSheetContent(),
-    ),
-    constraints: BoxConstraints(
-      maxHeight: MediaQuery.of(context).size.height * 0.6,
     ),
   );
 }
@@ -58,6 +57,26 @@ class _SessionListPanelState extends State<SessionListPanel> {
                         fontSize: 18,
                         fontWeight: FontWeight.w600)),
                 const Spacer(),
+                Consumer<AppState>(
+                  builder: (context, state, _) {
+                    final hiding = state.hideTerminalSessions;
+                    return IconButton(
+                      icon: Icon(
+                        hiding ? Icons.filter_alt : Icons.filter_alt_outlined,
+                        color: hiding ? kAccentLight : kTextSecondary,
+                        size: 20,
+                      ),
+                      onPressed: () => state.toggleHideTerminalSessions(),
+                      mouseCursor: SystemMouseCursors.click,
+                      tooltip: hiding
+                          ? 'Show all sessions'
+                          : 'Hide finished sessions',
+                      constraints: const BoxConstraints(
+                          maxWidth: 36, maxHeight: 36),
+                      padding: EdgeInsets.zero,
+                    );
+                  },
+                ),
                 IconButton(
                   icon: const Icon(Icons.add_rounded,
                       color: kTextSecondary, size: 20),
@@ -139,29 +158,31 @@ class _SessionListPanelState extends State<SessionListPanel> {
             },
           ),
         ),
-        const Divider(height: 1),
-        // Bottom bar: Settings
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          child: InkWell(
-            borderRadius: BorderRadius.circular(10),
-            onTap: () => showSettingsMenu(context),
-            child: const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.settings_outlined,
-                      color: kTextMuted, size: 20),
-                  SizedBox(width: 10),
-                  Text('Settings',
-                      style:
-                          TextStyle(color: kTextSecondary, fontSize: 14)),
-                ],
+        if (defaultTargetPlatform != TargetPlatform.android) ...[
+          const Divider(height: 1),
+          // Bottom bar: Settings
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(10),
+              onTap: () => showSettingsMenu(context),
+              child: const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.settings_outlined,
+                        color: kTextMuted, size: 20),
+                    SizedBox(width: 10),
+                    Text('Settings',
+                        style:
+                            TextStyle(color: kTextSecondary, fontSize: 14)),
+                  ],
+                ),
               ),
             ),
           ),
-        ),
+        ],
       ],
     );
   }
@@ -400,7 +421,7 @@ class _WorkerGroup extends StatelessWidget {
                             padding: EdgeInsets.zero,
                             icon: const Icon(Icons.stop_circle_outlined,
                                 color: kErrorText, size: 16),
-                            tooltip: 'Cancel session',
+                            tooltip: 'End session',
                             onPressed: dimmed
                                 ? null
                                 : () => _confirmCancelSession(
@@ -486,10 +507,7 @@ class _WorkerGroup extends StatelessWidget {
           '${local.hour.toString().padLeft(2, '0')}:'
           '${local.minute.toString().padLeft(2, '0')}');
     }
-    if (s.title != null) {
-      parts.add(s.shortId);
-    }
-    parts.add('${s.sessionType} \u00B7 ${s.status}');
+    parts.add(s.shortId);
     return parts.join(' \u00B7 ');
   }
 
@@ -557,13 +575,13 @@ class _WorkerGroup extends StatelessWidget {
           child: Row(
             children: [
               Icon(
-                isConnected ? Icons.settings_outlined : Icons.edit_outlined,
+                Icons.edit_outlined,
                 color: kTextSecondary,
                 size: 18,
               ),
               const SizedBox(width: 8),
               Text(
-                isConnected ? 'Settings' : 'Edit Worker',
+                'Edit Worker',
                 style: const TextStyle(color: kTextPrimary),
               ),
             ],
@@ -700,7 +718,7 @@ class _WorkerGroup extends StatelessWidget {
                 Icon(Icons.stop_circle_outlined,
                     color: kErrorText, size: 18),
                 SizedBox(width: 8),
-                Text('Cancel session',
+                Text('End session',
                     style: TextStyle(color: kErrorText)),
               ],
             ),
@@ -730,10 +748,10 @@ class _WorkerGroup extends StatelessWidget {
         backgroundColor: kBgSurface,
         shape:
             RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Cancel session?',
+        title: const Text('End session?',
             style: TextStyle(color: kTextPrimary, fontSize: 18)),
         content: Text(
-          'This will cancel session ${session.shortId} on the server.',
+          'This will end session ${session.shortId} on the server.',
           style: const TextStyle(color: kTextSecondary, fontSize: 14),
         ),
         actions: [
@@ -749,7 +767,7 @@ class _WorkerGroup extends StatelessWidget {
               onSessionSelected?.call();
               state.activePane.cancelSession(session.sessionId);
             },
-            child: const Text('Cancel session',
+            child: const Text('End session',
                 style: TextStyle(color: Colors.white)),
           ),
         ],
@@ -821,7 +839,11 @@ class _SessionLeadingIcon extends StatelessWidget {
     final icon = _sessionIcon(session);
     final color = _sessionIconColor(session);
     final bgColor = _sessionIconBg(session);
+    final isAwaitingPermission =
+        session.activityState == 'awaiting_permission' &&
+            (session.status == 'active' || session.status == 'executing');
     final isProcessing = session.isProcessing &&
+        !isAwaitingPermission &&
         (session.status == 'active' || session.status == 'executing');
 
     return Container(
@@ -838,6 +860,10 @@ class _SessionLeadingIcon extends StatelessWidget {
   }
 
   static IconData _sessionIcon(SessionInfo s) {
+    if (s.activityState == 'awaiting_permission' &&
+        (s.status == 'active' || s.status == 'executing')) {
+      return Icons.shield_outlined;
+    }
     if ((s.status == 'active' || s.status == 'executing') &&
         !s.isProcessing) {
       return Icons.chat_bubble_outline_rounded;
@@ -853,6 +879,10 @@ class _SessionLeadingIcon extends StatelessWidget {
   }
 
   static Color _sessionIconColor(SessionInfo s) {
+    if (s.activityState == 'awaiting_permission' &&
+        (s.status == 'active' || s.status == 'executing')) {
+      return kToolAccent;
+    }
     if ((s.status == 'active' || s.status == 'executing') &&
         !s.isProcessing) {
       return kAccentLight;
@@ -868,6 +898,10 @@ class _SessionLeadingIcon extends StatelessWidget {
   }
 
   static Color _sessionIconBg(SessionInfo s) {
+    if (s.activityState == 'awaiting_permission' &&
+        (s.status == 'active' || s.status == 'executing')) {
+      return const Color(0xFF2A2000);
+    }
     if ((s.status == 'active' || s.status == 'executing') &&
         !s.isProcessing) {
       return const Color(0xFF112233);
@@ -930,32 +964,53 @@ class _SpinningIconState extends State<_SpinningIcon>
   }
 }
 
-/// Bottom-sheet wrapper.
+/// Bottom-sheet wrapper with draggable support.
 class _SessionSheetContent extends StatelessWidget {
   const _SessionSheetContent();
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        const SizedBox(height: 12),
-        Center(
-          child: Container(
-            width: 40,
-            height: 4,
-            decoration: BoxDecoration(
-              color: kTextMuted.withAlpha(100),
-              borderRadius: BorderRadius.circular(2),
+    final screenHeight = MediaQuery.of(context).size.height;
+    final statusBarHeight = MediaQuery.of(context).padding.top;
+    final maxSize = (screenHeight - statusBarHeight) / screenHeight;
+
+    return DraggableScrollableSheet(
+      initialChildSize: 0.6,
+      minChildSize: 0.3,
+      maxChildSize: maxSize,
+      expand: false,
+      builder: (context, scrollController) {
+        return CustomScrollView(
+          controller: scrollController,
+          slivers: [
+            // Drag handle
+            SliverToBoxAdapter(
+              child: Column(
+                children: [
+                  const SizedBox(height: 12),
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: kTextMuted.withAlpha(100),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                ],
+              ),
             ),
-          ),
-        ),
-        Expanded(
-          child: SessionListPanel(
-            onSessionSelected: () => Navigator.of(context).pop(),
-          ),
-        ),
-      ],
+            // Session list as a sliver that fills remaining space
+            SliverFillRemaining(
+              child: SessionListPanel(
+                onSessionSelected: () => Navigator.of(context).pop(),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }

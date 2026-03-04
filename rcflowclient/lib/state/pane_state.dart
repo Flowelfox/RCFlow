@@ -65,9 +65,11 @@ class PaneState extends ChangeNotifier {
   // Prevents duplicate display when the server replays user messages.
   int _pendingLocalUserMessages = 0;
 
-  // Agent group tracking (Claude Code collapsible blocks)
+  // Agent group tracking (Claude Code / Codex collapsible blocks)
   // True between agent_group_start and agent_group_end.
   bool _inAgentMode = false;
+  // The tool name for the current agent group (e.g. 'claude_code', 'codex').
+  String _agentToolName = 'claude_code';
   // Index in _messages of the current tool sub-group being built.
   // Null when no tool group is open (e.g. between text and next tool batch).
   int? _agentToolGroupIndex;
@@ -380,6 +382,24 @@ class PaneState extends ChangeNotifier {
     notifyListeners();
   }
 
+  void sendPermissionResponse({
+    required String sessionId,
+    required String requestId,
+    required String decision,
+    required String scope,
+    String? pathPrefix,
+  }) {
+    if (!_host.connected) return;
+    _ws?.sendPermissionResponse(
+      sessionId: sessionId,
+      requestId: requestId,
+      decision: decision,
+      scope: scope,
+      pathPrefix: pathPrefix,
+    );
+    notifyListeners();
+  }
+
   void handleSessionNotFound(String sessionId) {
     if (_sessionId != sessionId) return;
     _loadSessionMessages(sessionId);
@@ -432,6 +452,7 @@ class PaneState extends ChangeNotifier {
   void startAgentGroup(String name, Map<String, dynamic>? input) {
     finalizeStream();
     _inAgentMode = true;
+    _agentToolName = name;
     // Don't create a message yet — wait for the first tool_start.
     notifyListeners();
   }
@@ -450,7 +471,7 @@ class PaneState extends ChangeNotifier {
     _messages.add(DisplayMessage(
       type: DisplayMessageType.agentGroup,
       sessionId: _sessionId,
-      toolName: 'claude_code',
+      toolName: _agentToolName,
       children: [],
       expanded: true,
     ));

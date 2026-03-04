@@ -10,7 +10,6 @@ from collections.abc import Sequence
 
 import sqlalchemy as sa
 from alembic import op
-from sqlalchemy.dialects.postgresql import JSONB
 
 # revision identifiers, used by Alembic.
 revision: str = "b7a4f2e8c1d3"
@@ -21,7 +20,7 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     """Add conversation_history JSONB column to sessions table."""
-    op.add_column("sessions", sa.Column("conversation_history", JSONB, nullable=True))
+    op.add_column("sessions", sa.Column("conversation_history", sa.JSON(), nullable=True))
 
 
 def downgrade() -> None:

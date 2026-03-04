@@ -7,6 +7,12 @@ from typing import Any
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from src.paths import get_default_tools_dir
+
+
+def _default_tools_dir() -> Path:
+    return get_default_tools_dir()
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -26,7 +32,7 @@ class Settings(BaseSettings):
     SSL_KEYFILE: str = ""
 
     # Database
-    DATABASE_URL: str
+    DATABASE_URL: str = "sqlite+aiosqlite:///./data/rcflow.db"
 
     # LLM provider: "anthropic" (direct API) or "bedrock" (AWS Bedrock)
     LLM_PROVIDER: str = "anthropic"
@@ -52,7 +58,7 @@ class Settings(BaseSettings):
     PROJECTS_DIR: Path = Field(default=Path("~/Projects"))
 
     # Tools
-    TOOLS_DIR: Path = Field(default=Path("./tools"))
+    TOOLS_DIR: Path = Field(default_factory=_default_tools_dir)
 
     # Codex CLI (OpenAI Codex)
     CODEX_API_KEY: str = ""

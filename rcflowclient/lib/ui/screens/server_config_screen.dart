@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../models/server_config.dart';
 import '../../services/websocket_service.dart';
@@ -108,6 +109,14 @@ class ServerConfigContentState extends State<ServerConfigContent> {
   final Set<String> _toolSettingsExpanded = {};
   final Map<String, Map<String, TextEditingController>>
       _toolSettingsControllers = {};
+
+  // Codex ChatGPT login state
+  bool? _codexLoggedIn;
+  bool _codexLoggingIn = false;
+  String? _codexDeviceUrl;
+  String? _codexDeviceCode;
+  String? _codexAuthUrl; // Browser OAuth URL (non-device-code flow)
+  String? _codexLoginError;
 
   @override
   void initState() {
@@ -392,6 +401,75 @@ class ServerConfigContentState extends State<ServerConfigContent> {
       setState(() {
         _toolSettingsError[toolName] = e.toString();
         _toolSettingsSaving[toolName] = false;
+      });
+    }
+  }
+
+  Future<void> _checkCodexLoginStatus() async {
+    try {
+      final data = await widget.ws.codexLoginStatus();
+      if (!mounted) return;
+      setState(() {
+        _codexLoggedIn = data['logged_in'] as bool? ?? false;
+        _codexLoginError = null;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _codexLoggedIn = null;
+        _codexLoginError = e.toString();
+      });
+    }
+  }
+
+  Future<void> _startCodexLogin({bool deviceCode = false}) async {
+    setState(() {
+      _codexLoggingIn = true;
+      _codexDeviceUrl = null;
+      _codexDeviceCode = null;
+      _codexAuthUrl = null;
+      _codexLoginError = null;
+    });
+    try {
+      await widget.ws.codexLogin(
+        deviceCode: deviceCode,
+        onProgress: (event) {
+          if (!mounted) return;
+          final step = event['step'] as String?;
+          setState(() {
+            if (step == 'device_code') {
+              _codexDeviceUrl = event['url'] as String?;
+              _codexDeviceCode = event['code'] as String?;
+            } else if (step == 'auth_url') {
+              _codexAuthUrl = event['url'] as String?;
+              // Auto-open the URL in the browser
+              final url = event['url'] as String?;
+              if (url != null) {
+                launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+              }
+            } else if (step == 'complete') {
+              _codexLoggingIn = false;
+              _codexLoggedIn = true;
+              _codexDeviceUrl = null;
+              _codexDeviceCode = null;
+              _codexAuthUrl = null;
+            }
+          });
+        },
+      );
+      if (!mounted) return;
+      setState(() {
+        _codexLoggingIn = false;
+        _codexLoggedIn = true;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _codexLoggingIn = false;
+        _codexLoginError = e.toString();
+        _codexDeviceUrl = null;
+        _codexDeviceCode = null;
+        _codexAuthUrl = null;
       });
     }
   }
@@ -805,7 +883,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
                   )
                 else if (managed)
                   _SourceBadge(label: 'managed', accent: true)
-                else
+                else if (installed)
                   _SourceBadge(label: 'external', accent: false),
                 const Spacer(),
                 SizedBox(
@@ -844,13 +922,13 @@ class ServerConfigContentState extends State<ServerConfigContent> {
                         isUpdating ? null : () => _updateSingleTool(key),
                   ),
                 ],
-                // Show "Install managed" when only external is available
-                if (installed && managedPath == null && !canSwitch) ...[
+                // Show "Install" when no managed binary exists
+                if (managedPath == null && !canSwitch) ...[
                   const SizedBox(width: 4),
                   _ToolActionButton(
-                    label: 'Install managed',
+                    label: installed ? 'Install managed' : 'Install',
                     loading: isInstalling,
-                    accent: false,
+                    accent: !installed,
                     onPressed: isInstalling
                         ? null
                         : () => _installManagedTool(key),
@@ -934,6 +1012,259 @@ class ServerConfigContentState extends State<ServerConfigContent> {
     return false;
   }
 
+  /// Get the current effective value for a tool setting field.
+  String _getToolFieldValue(String toolName, String key) {
+    final edits = _toolSettingsEdited[toolName];
+    if (edits != null && edits.containsKey(key)) {
+      return edits[key]?.toString() ?? '';
+    }
+    final fields = _toolSettings[toolName];
+    if (fields != null) {
+      for (final f in fields) {
+        if (f['key'] == key) return f['value']?.toString() ?? '';
+      }
+    }
+    return '';
+  }
+
+  Widget _buildCodexLoginSection() {
+    // Fetch status on first render
+    if (_codexLoggedIn == null && !_codexLoggingIn && _codexLoginError == null) {
+      Future.microtask(() => _checkCodexLoginStatus());
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: kBgSurface,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: kBgOverlay),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'ChatGPT Authentication',
+            style: TextStyle(
+              color: kTextPrimary,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 6),
+          // Status indicator
+          if (_codexLoggedIn == null && _codexLoginError == null)
+            const Row(
+              children: [
+                SizedBox(
+                  width: 12,
+                  height: 12,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 1.5,
+                    color: kTextMuted,
+                  ),
+                ),
+                SizedBox(width: 8),
+                Text('Checking status...',
+                    style: TextStyle(color: kTextMuted, fontSize: 11)),
+              ],
+            )
+          else if (_codexLoggedIn == true && !_codexLoggingIn)
+            Row(
+              children: [
+                const Icon(Icons.check_circle, color: kSuccessText, size: 14),
+                const SizedBox(width: 6),
+                const Text('Logged in',
+                    style: TextStyle(color: kSuccessText, fontSize: 11)),
+                const Spacer(),
+                _ToolActionButton(
+                  label: 'Re-login',
+                  loading: false,
+                  accent: false,
+                  onPressed: () => _startCodexLogin(),
+                ),
+              ],
+            )
+          else if (!_codexLoggingIn) ...[
+            Row(
+              children: [
+                const Icon(Icons.cancel_outlined,
+                    color: kTextMuted, size: 14),
+                const SizedBox(width: 6),
+                const Text('Not logged in',
+                    style: TextStyle(color: kTextMuted, fontSize: 11)),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: _ToolActionButton(
+                    label: 'Login with ChatGPT',
+                    loading: false,
+                    accent: true,
+                    onPressed: () => _startCodexLogin(),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _ToolActionButton(
+                    label: 'Use device code',
+                    loading: false,
+                    accent: false,
+                    onPressed: () => _startCodexLogin(deviceCode: true),
+                  ),
+                ),
+              ],
+            ),
+          ],
+          // Active login flow display
+          if (_codexLoggingIn) ...[
+            // Browser OAuth flow — URL opened automatically
+            if (_codexAuthUrl != null) ...[
+              const SizedBox(height: 8),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: kBgBase,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Column(
+                  children: [
+                    const Text(
+                      'Complete sign-in in your browser.',
+                      style: TextStyle(color: kTextSecondary, fontSize: 11),
+                    ),
+                    const SizedBox(height: 6),
+                    const Text(
+                      'If the browser did not open, click the link:',
+                      style: TextStyle(color: kTextMuted, fontSize: 10),
+                    ),
+                    const SizedBox(height: 4),
+                    GestureDetector(
+                      onTap: () => launchUrl(
+                        Uri.parse(_codexAuthUrl!),
+                        mode: LaunchMode.externalApplication,
+                      ),
+                      child: Text(
+                        _codexAuthUrl!.length > 80
+                            ? '${_codexAuthUrl!.substring(0, 80)}...'
+                            : _codexAuthUrl!,
+                        style: const TextStyle(
+                          color: kAccentLight,
+                          fontSize: 10,
+                          decoration: TextDecoration.underline,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 6),
+              const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  SizedBox(
+                    width: 12,
+                    height: 12,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 1.5, color: kAccent),
+                  ),
+                  SizedBox(width: 8),
+                  Text('Waiting for browser authentication...',
+                      style: TextStyle(color: kTextMuted, fontSize: 11)),
+                ],
+              ),
+            ]
+            // Device code flow
+            else if (_codexDeviceCode != null &&
+                _codexDeviceUrl != null) ...[
+              const SizedBox(height: 8),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: kBgBase,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Column(
+                  children: [
+                    const Text(
+                      'Enter this code in your browser:',
+                      style: TextStyle(color: kTextSecondary, fontSize: 11),
+                    ),
+                    const SizedBox(height: 6),
+                    SelectableText(
+                      _codexDeviceCode!,
+                      style: const TextStyle(
+                        color: kAccentLight,
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 3,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    GestureDetector(
+                      onTap: () => launchUrl(
+                        Uri.parse(_codexDeviceUrl!),
+                        mode: LaunchMode.externalApplication,
+                      ),
+                      child: Text(
+                        _codexDeviceUrl!,
+                        style: const TextStyle(
+                          color: kAccentLight,
+                          fontSize: 11,
+                          decoration: TextDecoration.underline,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 6),
+              const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  SizedBox(
+                    width: 12,
+                    height: 12,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 1.5, color: kAccent),
+                  ),
+                  SizedBox(width: 8),
+                  Text('Waiting for browser authentication...',
+                      style: TextStyle(color: kTextMuted, fontSize: 11)),
+                ],
+              ),
+            ] else ...[
+              const SizedBox(height: 6),
+              const Row(
+                children: [
+                  SizedBox(
+                    width: 12,
+                    height: 12,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 1.5, color: kAccent),
+                  ),
+                  SizedBox(width: 8),
+                  Text('Starting login...',
+                      style: TextStyle(color: kTextMuted, fontSize: 11)),
+                ],
+              ),
+            ],
+          ],
+          if (_codexLoginError != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(_codexLoginError!,
+                  style: const TextStyle(color: kErrorText, fontSize: 10)),
+            ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildToolSettingsPanel(String toolName) {
     final loading = _toolSettingsLoading[toolName] ?? false;
     final error = _toolSettingsError[toolName];
@@ -965,12 +1296,21 @@ class ServerConfigContentState extends State<ServerConfigContent> {
                 style: const TextStyle(color: kErrorText, fontSize: 11)),
           )
         else if (fields != null) ...[
-          for (final field in fields)
+          for (final field in fields) ...[
             if (_isToolFieldVisible(toolName, field))
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
                 child: _buildToolSettingField(toolName, field),
               ),
+            // Show ChatGPT login section right after the provider field
+            if (toolName == 'codex' &&
+                field['key'] == 'provider' &&
+                _getToolFieldValue(toolName, 'provider') == 'chatgpt')
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: _buildCodexLoginSection(),
+              ),
+          ],
           if (hasEdits || saving)
             Row(
               children: [

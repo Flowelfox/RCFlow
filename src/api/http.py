@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio
 import json as json_mod
 import logging
+import os
 import platform
+import re as re_mod
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -23,6 +25,8 @@ from src.speech.stt import create_stt_provider
 from src.speech.tts import create_tts_provider
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
+
     from src.core.prompt_router import PromptRouter
     from src.core.session import SessionManager
     from src.services.tool_manager import ManagedTool, ToolManager
@@ -469,6 +473,301 @@ async def update_tool_settings(request: Request, tool_name: str, body: UpdateToo
         raise HTTPException(status_code=422, detail=str(e)) from None
     logger.info("Tool settings updated for '%s': %s", tool_name, list(body.updates.keys()))
     return result
+
+
+# ---------------------------------------------------------------------------
+# Codex ChatGPT login
+# ---------------------------------------------------------------------------
+
+# Regex to strip ANSI escape codes from CLI output.
+_ANSI_RE = re_mod.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+# Timeout for the interactive device-auth flow (user must complete in browser).
+_CODEX_LOGIN_TIMEOUT = 300  # 5 minutes
+
+
+@router.post(
+    "/tools/codex/login",
+    summary="Start Codex ChatGPT login",
+    description=(
+        "Spawns `codex login` with the managed CODEX_HOME and streams NDJSON "
+        "progress events. Use `?device_code=true` for device-auth flow (shows "
+        "a code to enter in the browser). Without it, uses browser-based OAuth "
+        "(returns a URL for the client to open)."
+    ),
+    tags=["Tools"],
+    dependencies=[Depends(verify_http_api_key)],
+)
+async def codex_login(
+    request: Request,
+    device_code: bool = Query(False, description="Use device-code auth instead of browser OAuth"),
+) -> StreamingResponse:
+    """Stream login progress for Codex ChatGPT subscription."""
+    tool_manager: ToolManager = request.app.state.tool_manager
+    tool_settings: ToolSettingsManager = request.app.state.tool_settings
+
+    binary_path = tool_manager.get_binary_path("codex")
+    if not binary_path:
+        raise HTTPException(status_code=400, detail="Codex is not installed")
+
+    config_dir = tool_settings.get_config_dir("codex")
+    config_dir.mkdir(parents=True, exist_ok=True)
+
+    if device_code:
+        return StreamingResponse(
+            _stream_device_auth(binary_path, config_dir),
+            media_type="application/x-ndjson",
+        )
+    return StreamingResponse(
+        _stream_browser_auth(binary_path, config_dir),
+        media_type="application/x-ndjson",
+    )
+
+
+async def _stream_browser_auth(binary_path: str, config_dir: Path) -> AsyncGenerator[str, None]:
+    """Run ``codex login`` (browser OAuth) and stream progress events.
+
+    The CLI starts a local callback server, then prints a URL for the user
+    to open. We extract that URL and send it to the client, then wait for
+    the process to exit (which means auth completed or was cancelled).
+    """
+    env = dict(os.environ)
+    env["CODEX_HOME"] = str(config_dir)
+    # Prevent the CLI from trying to open a browser on the server.
+    env["BROWSER"] = "echo"
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            binary_path,
+            "login",
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+            env=env,
+        )
+    except Exception as exc:
+        yield json_mod.dumps({"step": "error", "message": str(exc)}) + "\n"
+        return
+
+    try:
+        assert proc.stdout is not None
+        deadline = asyncio.get_event_loop().time() + _CODEX_LOGIN_TIMEOUT
+        url_sent = False
+
+        while True:
+            remaining = deadline - asyncio.get_event_loop().time()
+            if remaining <= 0:
+                yield json_mod.dumps({"step": "error", "message": "Login timed out"}) + "\n"
+                break
+
+            try:
+                raw_line = await asyncio.wait_for(proc.stdout.readline(), timeout=remaining)
+            except TimeoutError:
+                yield json_mod.dumps({"step": "error", "message": "Login timed out"}) + "\n"
+                break
+
+            if not raw_line:
+                break
+
+            line = _ANSI_RE.sub("", raw_line.decode("utf-8", errors="replace")).strip()
+            if not line:
+                continue
+
+            # Look for the OAuth URL
+            url_match = re_mod.search(r"(https?://\S+)", line)
+            if url_match and not url_sent:
+                auth_url = url_match.group(1)
+                # The CLI prints a localhost URL first (callback server), then the
+                # real auth URL.  Only send the auth.openai.com one.
+                # Check the host portion only — the query string contains an
+                # encoded localhost redirect_uri which is expected.
+                if auth_url.lower().startswith("https://auth."):
+                    yield json_mod.dumps({"step": "auth_url", "url": auth_url}) + "\n"
+                    yield (
+                        json_mod.dumps({"step": "waiting", "message": "Waiting for browser authentication..."}) + "\n"
+                    )
+                    url_sent = True
+
+            lower = line.lower()
+            if "logged in" in lower or "success" in lower or "authenticated" in lower:
+                yield json_mod.dumps({"step": "complete", "message": "Logged in successfully"}) + "\n"
+                break
+
+        # Wait for process to finish
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=5)
+        except TimeoutError:
+            proc.kill()
+
+        verify_proc = await asyncio.create_subprocess_exec(
+            binary_path,
+            "login",
+            "status",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+            env=env,
+        )
+        verify_out, _ = await asyncio.wait_for(verify_proc.communicate(), timeout=10)
+        verify_text = verify_out.decode("utf-8", errors="replace").lower() if verify_out else ""
+
+        if verify_proc.returncode == 0 and ("logged in" in verify_text or "chatgpt" in verify_text):
+            yield json_mod.dumps({"step": "complete", "message": "Logged in successfully"}) + "\n"
+        elif proc.returncode == 0:
+            yield json_mod.dumps({"step": "complete", "message": "Login completed"}) + "\n"
+
+    except Exception as exc:
+        logger.exception("Codex browser login failed")
+        yield json_mod.dumps({"step": "error", "message": str(exc)}) + "\n"
+    finally:
+        if proc.returncode is None:
+            proc.kill()
+
+
+async def _stream_device_auth(binary_path: str, config_dir: Path) -> AsyncGenerator[str, None]:
+    """Run ``codex login --device-auth`` and stream progress events."""
+    env = dict(os.environ)
+    env["CODEX_HOME"] = str(config_dir)
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            binary_path,
+            "login",
+            "--device-auth",
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+            env=env,
+        )
+    except Exception as exc:
+        yield json_mod.dumps({"step": "error", "message": str(exc)}) + "\n"
+        return
+
+    found_url: str | None = None
+    found_code: str | None = None
+
+    try:
+        assert proc.stdout is not None
+        deadline = asyncio.get_event_loop().time() + _CODEX_LOGIN_TIMEOUT
+
+        while True:
+            remaining = deadline - asyncio.get_event_loop().time()
+            if remaining <= 0:
+                yield json_mod.dumps({"step": "error", "message": "Login timed out"}) + "\n"
+                break
+
+            try:
+                raw_line = await asyncio.wait_for(proc.stdout.readline(), timeout=remaining)
+            except TimeoutError:
+                yield json_mod.dumps({"step": "error", "message": "Login timed out"}) + "\n"
+                break
+
+            if not raw_line:
+                break
+
+            line = _ANSI_RE.sub("", raw_line.decode("utf-8", errors="replace")).strip()
+            if not line:
+                continue
+
+            # Extract device URL (on its own line)
+            url_match = re_mod.search(r"(https?://\S+)", line)
+            if url_match and "auth" in url_match.group(1).lower():
+                found_url = url_match.group(1)
+
+            # Extract device code — variable length alphanumeric groups
+            # separated by a dash (e.g. "DI4H-4AL16").
+            # The URL and code appear on separate lines, so we accumulate
+            # them and emit once both are captured.
+            code_match = re_mod.search(r"\b([A-Z0-9]{4,6}-[A-Z0-9]{4,6})\b", line)
+            if code_match:
+                found_code = code_match.group(1)
+
+            if found_url and found_code:
+                yield (json_mod.dumps({"step": "device_code", "url": found_url, "code": found_code}) + "\n")
+                yield (json_mod.dumps({"step": "waiting", "message": "Waiting for browser authentication..."}) + "\n")
+                found_url = None
+                found_code = None
+
+            lower = line.lower()
+            if "logged in" in lower or "success" in lower or "authenticated" in lower:
+                yield (json_mod.dumps({"step": "complete", "message": "Logged in successfully"}) + "\n")
+                break
+
+        # Wait for process to finish
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=5)
+        except TimeoutError:
+            proc.kill()
+
+        # Verify login status
+        verify_proc = await asyncio.create_subprocess_exec(
+            binary_path,
+            "login",
+            "status",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+            env=env,
+        )
+        verify_out, _ = await asyncio.wait_for(verify_proc.communicate(), timeout=10)
+        verify_text = verify_out.decode("utf-8", errors="replace").lower() if verify_out else ""
+
+        if verify_proc.returncode == 0 and ("logged in" in verify_text or "chatgpt" in verify_text):
+            yield (json_mod.dumps({"step": "complete", "message": "Logged in successfully"}) + "\n")
+        elif proc.returncode == 0:
+            yield json_mod.dumps({"step": "complete", "message": "Login completed"}) + "\n"
+
+    except Exception as exc:
+        logger.exception("Codex device-auth login failed")
+        yield json_mod.dumps({"step": "error", "message": str(exc)}) + "\n"
+    finally:
+        if proc.returncode is None:
+            proc.kill()
+
+
+@router.get(
+    "/tools/codex/login/status",
+    summary="Check Codex ChatGPT login status",
+    description=(
+        "Runs `codex login status` with the managed CODEX_HOME and returns "
+        "whether the user is logged in via ChatGPT subscription."
+    ),
+    tags=["Tools"],
+    dependencies=[Depends(verify_http_api_key)],
+)
+async def codex_login_status(request: Request) -> dict[str, Any]:
+    """Check whether Codex is authenticated via ChatGPT subscription."""
+    tool_manager: ToolManager = request.app.state.tool_manager
+    tool_settings: ToolSettingsManager = request.app.state.tool_settings
+
+    binary_path = tool_manager.get_binary_path("codex")
+    if not binary_path:
+        return {"logged_in": False, "method": None}
+
+    config_dir = tool_settings.get_config_dir("codex")
+    config_dir.mkdir(parents=True, exist_ok=True)
+
+    env = dict(os.environ)
+    env["CODEX_HOME"] = str(config_dir)
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            binary_path,
+            "login",
+            "status",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+            env=env,
+        )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
+        output = _ANSI_RE.sub("", stdout.decode("utf-8", errors="replace")).lower() if stdout else ""
+
+        if proc.returncode == 0 and ("logged in" in output or "chatgpt" in output):
+            method = "ChatGPT" if "chatgpt" in output else None
+            return {"logged_in": True, "method": method}
+
+        return {"logged_in": False, "method": None}
+    except Exception:
+        logger.warning("Failed to check Codex login status", exc_info=True)
+        return {"logged_in": False, "method": None}
 
 
 @router.post(

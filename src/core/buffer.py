@@ -19,6 +19,7 @@ class MessageType(StrEnum):
     SESSION_RESUMED = "session_resumed"
     PLAN_MODE_ASK = "plan_mode_ask"
     PLAN_REVIEW_ASK = "plan_review_ask"
+    PERMISSION_REQUEST = "permission_request"
     SESSION_RESTORED = "session_restored"
     SESSION_UPDATE = "session_update"  # For broadcasting session metadata updates
 

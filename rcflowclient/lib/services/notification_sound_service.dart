@@ -28,8 +28,6 @@ class NotificationSoundService {
       : _settings = settings;
 
   Future<void> playNotificationSound() async {
-    if (!_settings.soundEnabled) return;
-
     final soundId = _settings.notificationSound;
     await _playSound(soundId);
   }

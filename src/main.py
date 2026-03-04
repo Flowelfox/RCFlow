@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 
 from fastapi import FastAPI
-from sqlalchemy import update
+from sqlalchemy import select
 
 from src.api.http import router as http_router
 from src.api.ws.input_audio import router as input_audio_router
@@ -50,19 +50,22 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     db_factory = get_session_factory()
     async with db_factory() as db:
         stale_statuses = ("created", "active", "executing", "paused")
-        result = await db.execute(
-            update(SessionModel)
-            .where(SessionModel.status.in_(stale_statuses))
-            .where(SessionModel.backend_id == settings.RCFLOW_BACKEND_ID)
-            .values(
-                status="failed",
-                ended_at=datetime.now(UTC),
-                metadata_=SessionModel.metadata_.concat({"error": "Server restarted while session was active"}),
+        stale_rows = (
+            await db.execute(
+                select(SessionModel).where(
+                    SessionModel.status.in_(stale_statuses),
+                    SessionModel.backend_id == settings.RCFLOW_BACKEND_ID,
+                )
             )
-        )
-        if result.rowcount:
+        ).scalars().all()
+        for row in stale_rows:
+            row.status = "failed"
+            row.ended_at = datetime.now(UTC)
+            meta = row.metadata_ or {}
+            row.metadata_ = {**meta, "error": "Server restarted while session was active"}
+        if stale_rows:
             await db.commit()
-            logger.info("Marked %d stale sessions as failed after restart", result.rowcount)
+            logger.info("Marked %d stale sessions as failed after restart", len(stale_rows))
 
     # Settings
     app.state.settings = settings

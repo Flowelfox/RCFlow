@@ -1,8 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, Uuid, func
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, Uuid, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -31,8 +30,8 @@ class Session(Base):
     session_type: Mapped[str] = mapped_column(String(20), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False)
     title: Mapped[str | None] = mapped_column(String(200))
-    metadata_: Mapped[dict] = mapped_column("metadata", JSONB, default=dict)
-    conversation_history: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    metadata_: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
+    conversation_history: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
     messages: Mapped[list["SessionMessage"]] = relationship(
         back_populates="session", order_by="SessionMessage.sequence"
@@ -49,7 +48,7 @@ class SessionMessage(Base):
     sequence: Mapped[int] = mapped_column(Integer, nullable=False)
     message_type: Mapped[str] = mapped_column(String(30), nullable=False)
     content: Mapped[str | None] = mapped_column(Text)
-    metadata_: Mapped[dict] = mapped_column("metadata", JSONB, default=dict)
+    metadata_: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     session: Mapped[Session] = relationship(back_populates="messages")
@@ -61,7 +60,7 @@ class ToolExecution(Base):
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     session_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("sessions.id"), nullable=False)
     tool_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    tool_input: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    tool_input: Mapped[dict] = mapped_column(JSON, nullable=False)
     tool_output: Mapped[str | None] = mapped_column(Text)
     exit_code: Mapped[int | None] = mapped_column(Integer)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -92,7 +91,7 @@ class LLMCall(Base):
     ended_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     stop_reason: Mapped[str] = mapped_column(String(50), nullable=False)
     has_tool_calls: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    request_messages: Mapped[dict | list] = mapped_column(JSONB, nullable=False)
+    request_messages: Mapped[dict | list] = mapped_column(JSON, nullable=False)
     response_text: Mapped[str | None] = mapped_column(Text)
     service_tier: Mapped[str | None] = mapped_column(String(50))
     inference_geo: Mapped[str | None] = mapped_column(String(100))

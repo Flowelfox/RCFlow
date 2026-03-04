@@ -26,6 +26,7 @@ class SettingsService {
   static const _soundOnCompleteEnabledKey = 'rcflow_sound_on_complete';
   static const _notificationSoundKey = 'rcflow_notification_sound';
   static const _customSoundPathKey = 'rcflow_custom_sound_path';
+  static const _hideTerminalSessionsKey = 'rcflow_hide_terminal_sessions';
   static const _defaultHost = '192.168.1.100:8765';
 
   late final SharedPreferences _prefs;
@@ -163,4 +164,9 @@ class SettingsService {
       _prefs.getString(_customSoundPathKey) ?? '';
   set customSoundPath(String value) =>
       _prefs.setString(_customSoundPathKey, value);
+
+  bool get hideTerminalSessions =>
+      _prefs.getBool(_hideTerminalSessionsKey) ?? false;
+  set hideTerminalSessions(bool value) =>
+      _prefs.setBool(_hideTerminalSessionsKey, value);
 }

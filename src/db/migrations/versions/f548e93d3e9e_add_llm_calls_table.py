@@ -10,7 +10,6 @@ from collections.abc import Sequence
 
 import sqlalchemy as sa
 from alembic import op
-from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision: str = "f548e93d3e9e"
@@ -27,7 +26,7 @@ def upgrade() -> None:
         sa.Column("id", sa.Uuid(), nullable=False),
         sa.Column("key_hash", sa.String(length=128), nullable=False),
         sa.Column("name", sa.String(length=255), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.current_timestamp(), nullable=False),
         sa.Column("revoked_at", sa.DateTime(timezone=True), nullable=True),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("key_hash"),
@@ -46,7 +45,7 @@ def upgrade() -> None:
         sa.Column("ended_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("stop_reason", sa.String(length=50), nullable=False),
         sa.Column("has_tool_calls", sa.Boolean(), nullable=False),
-        sa.Column("request_messages", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
+        sa.Column("request_messages", sa.JSON(), nullable=False),
         sa.Column("response_text", sa.Text(), nullable=True),
         sa.Column("service_tier", sa.String(length=50), nullable=True),
         sa.Column("inference_geo", sa.String(length=100), nullable=True),
@@ -61,7 +60,7 @@ def upgrade() -> None:
         sa.Column("ended_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("session_type", sa.String(length=20), nullable=False),
         sa.Column("status", sa.String(length=20), nullable=False),
-        sa.Column("metadata", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
+        sa.Column("metadata", sa.JSON(), nullable=False),
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_table(
@@ -71,8 +70,8 @@ def upgrade() -> None:
         sa.Column("sequence", sa.Integer(), nullable=False),
         sa.Column("message_type", sa.String(length=30), nullable=False),
         sa.Column("content", sa.Text(), nullable=True),
-        sa.Column("metadata", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column("metadata", sa.JSON(), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.current_timestamp(), nullable=False),
         sa.ForeignKeyConstraint(
             ["session_id"],
             ["sessions.id"],
@@ -85,7 +84,7 @@ def upgrade() -> None:
         sa.Column("id", sa.Uuid(), nullable=False),
         sa.Column("session_id", sa.Uuid(), nullable=False),
         sa.Column("tool_name", sa.String(length=255), nullable=False),
-        sa.Column("tool_input", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
+        sa.Column("tool_input", sa.JSON(), nullable=False),
         sa.Column("tool_output", sa.Text(), nullable=True),
         sa.Column("exit_code", sa.Integer(), nullable=True),
         sa.Column("started_at", sa.DateTime(timezone=True), nullable=False),

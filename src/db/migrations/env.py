@@ -1,5 +1,6 @@
 import asyncio
 from logging.config import fileConfig
+from pathlib import Path
 
 from alembic import context
 from sqlalchemy import pool
@@ -17,7 +18,12 @@ target_metadata = Base.metadata
 
 
 def get_url() -> str:
-    return get_settings().DATABASE_URL
+    url = get_settings().DATABASE_URL
+    # Ensure parent directory exists for SQLite database files
+    if url.startswith("sqlite"):
+        db_path = url.split("///", 1)[-1]
+        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+    return url
 
 
 def run_migrations_offline() -> None:

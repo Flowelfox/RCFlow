@@ -1,4 +1,4 @@
-.PHONY: help install dev lint format typecheck test coverage check run migrate-gen migrate migrate-down start-emulator setup-emulator flutter-run flutter-build flutter-release flutter-windows clean
+.PHONY: help install dev lint format typecheck test coverage check run migrate-gen migrate migrate-down bundle bundle-linux bundle-windows start-emulator setup-emulator flutter-run flutter-build flutter-release flutter-windows clean
 .DEFAULT_GOAL := help
 
 help: ## Show available targets
@@ -40,6 +40,15 @@ migrate: ## Apply migrations
 
 migrate-down: ## Rollback last migration
 	uv run alembic downgrade -1
+
+bundle: ## Build distributable package for current platform
+	uv run python scripts/bundle.py
+
+bundle-linux: ## Build Linux distributable (must be on Linux)
+	uv run python scripts/bundle.py --platform linux
+
+bundle-windows: ## Build Windows distributable (must be on Windows)
+	uv run python scripts/bundle.py --platform windows
 
 start-emulator: ## Start Windows Android emulator (cold boot)
 	./scripts/start-emulator.sh

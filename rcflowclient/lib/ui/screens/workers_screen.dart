@@ -287,30 +287,28 @@ class _WorkerCard extends StatelessWidget {
                   style: TextStyle(color: kTextMuted, fontSize: 11)),
             ),
           const SizedBox(height: 12),
-          Row(
+          Wrap(
+            spacing: 8,
+            runSpacing: 4,
             children: [
               _SmallButton(
                 label: 'Edit',
                 icon: Icons.edit_outlined,
                 onPressed: onEdit,
               ),
-              const SizedBox(width: 8),
-              if (onSettings != null) ...[
+              if (onSettings != null)
                 _SmallButton(
                   label: 'Settings',
                   icon: Icons.settings_outlined,
                   onPressed: onSettings,
                   color: kAccentLight,
                 ),
-                const SizedBox(width: 8),
-              ],
               _SmallButton(
                 label: 'Remove',
                 icon: Icons.delete_outline,
                 onPressed: onRemove,
                 color: kErrorText,
               ),
-              const Spacer(),
               _SmallButton(
                 label: status == WorkerConnectionStatus.connected
                     ? 'Disconnect'

@@ -10,6 +10,11 @@ class AgentGroupBlock extends StatelessWidget {
   final DisplayMessage message;
   const AgentGroupBlock({super.key, required this.message});
 
+  static const _displayNames = <String, String>{
+    'claude_code': 'Claude Code',
+    'codex': 'Codex',
+  };
+
   @override
   Widget build(BuildContext context) {
     final expanded = message.expanded;
@@ -17,6 +22,8 @@ class AgentGroupBlock extends StatelessWidget {
     final toolCount = message.toolCount;
     final children = message.children ?? [];
     final hasChildren = children.isNotEmpty;
+    final displayName =
+        _displayNames[message.toolName] ?? message.toolName ?? 'Agent';
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
@@ -63,9 +70,9 @@ class AgentGroupBlock extends StatelessWidget {
                         size: 14,
                       ),
                     const SizedBox(width: 6),
-                    const Text(
-                      'Claude Code',
-                      style: TextStyle(
+                    Text(
+                      displayName,
+                      style: const TextStyle(
                         color: kAccentLight,
                         fontSize: 13,
                         fontFamily: 'monospace',

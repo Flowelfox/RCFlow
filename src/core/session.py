@@ -16,6 +16,7 @@ from src.models.db import ToolExecution as ToolExecutionModel
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from src.core.permissions import PermissionManager
     from src.executors.claude_code import ClaudeCodeExecutor
     from src.executors.codex import CodexExecutor
 
@@ -37,6 +38,7 @@ class ActivityState(StrEnum):
     PROCESSING_LLM = "processing_llm"
     EXECUTING_TOOL = "executing_tool"
     RUNNING_SUBPROCESS = "running_subprocess"
+    AWAITING_PERMISSION = "awaiting_permission"
 
 
 class SessionType(StrEnum):
@@ -69,6 +71,8 @@ class ActiveSession:
         self.codex_executor: CodexExecutor | None = None
         self._codex_stream_task: asyncio.Task[None] | None = None
         self._prompt_lock: asyncio.Lock = asyncio.Lock()
+        # Interactive permission approval manager (None = bypass/auto mode)
+        self.permission_manager: PermissionManager | None = None
 
     def touch(self) -> None:
         """Update last activity timestamp."""
@@ -259,6 +263,7 @@ class SessionManager:
             conversation_history=session.conversation_history or None,
         )
         db.add(db_session)
+        await db.flush()
 
         for msg in session.buffer.text_history:
             db_msg = SessionMessageModel(

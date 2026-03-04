@@ -73,12 +73,31 @@ class AppState extends ChangeNotifier implements PaneHost {
     return all;
   }
 
+  // --- Hide terminal sessions ---
+
+  bool get hideTerminalSessions => _settings.hideTerminalSessions;
+
+  void toggleHideTerminalSessions() {
+    _settings.hideTerminalSessions = !_settings.hideTerminalSessions;
+    notifyListeners();
+  }
+
+  static const _terminalStatuses = {'completed', 'failed', 'cancelled'};
+
   /// Sessions grouped by workerId.
   Map<String, List<SessionInfo>> get sessionsByWorker {
+    final hide = hideTerminalSessions;
     final map = <String, List<SessionInfo>>{};
     for (final config in _workerConfigs) {
       final worker = _workers[config.id];
-      map[config.id] = worker?.sessions ?? [];
+      var sessions = worker?.sessions ?? <SessionInfo>[];
+      if (hide) {
+        sessions = sessions.where((s) {
+          if (!_terminalStatuses.contains(s.status)) return true;
+          return isSessionViewed(s.sessionId);
+        }).toList();
+      }
+      map[config.id] = sessions;
     }
     return map;
   }

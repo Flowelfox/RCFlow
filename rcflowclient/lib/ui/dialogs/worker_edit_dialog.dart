@@ -265,9 +265,10 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
               ],
             ),
             // Tab views
-            SizedBox(
-              height: contentHeight,
-              child: TabBarView(
+            Flexible(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(maxHeight: contentHeight),
+                child: TabBarView(
                 controller: _tabController,
                 children: [
                   _buildMainTab(),
@@ -275,7 +276,7 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
                   if (_hasWorker) _buildServerTab(),
                 ],
               ),
-            ),
+            ),),
             // Test connection area
             _buildTestArea(),
             const Divider(height: 1, color: kDivider),

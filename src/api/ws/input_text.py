@@ -135,6 +135,31 @@ async def ws_input_text(
                     )
                 continue
 
+            if msg_type == "permission_response":
+                pr_session_id = message.get("session_id")
+                if not pr_session_id:
+                    await websocket.send_json(
+                        {"type": "error", "content": "Missing session_id", "code": "MISSING_SESSION_ID"}
+                    )
+                    continue
+                request_id = message.get("request_id")
+                if not request_id:
+                    await websocket.send_json(
+                        {"type": "error", "content": "Missing request_id", "code": "MISSING_REQUEST_ID"}
+                    )
+                    continue
+                decision = message.get("decision", "deny")
+                scope = message.get("scope", "once")
+                path_prefix = message.get("path_prefix")
+                try:
+                    prompt_router.resolve_permission(pr_session_id, request_id, decision, scope, path_prefix)
+                    await websocket.send_json({"type": "ack", "session_id": pr_session_id})
+                except (ValueError, RuntimeError) as e:
+                    await websocket.send_json(
+                        {"type": "error", "content": str(e), "code": "PERMISSION_RESPONSE_ERROR"}
+                    )
+                continue
+
             if msg_type == "question_answer":
                 qa_session_id = message.get("session_id")
                 if not qa_session_id:

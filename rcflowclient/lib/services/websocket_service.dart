@@ -159,6 +159,25 @@ class WebSocketService {
     _inputChannel!.sink.add(jsonEncode(msg));
   }
 
+  void sendPermissionResponse({
+    required String sessionId,
+    required String requestId,
+    required String decision,
+    required String scope,
+    String? pathPrefix,
+  }) {
+    if (_inputChannel == null) return;
+    final msg = <String, dynamic>{
+      'type': 'permission_response',
+      'session_id': sessionId,
+      'request_id': requestId,
+      'decision': decision,
+      'scope': scope,
+      if (pathPrefix != null) 'path_prefix': pathPrefix,
+    };
+    _inputChannel!.sink.add(jsonEncode(msg));
+  }
+
   void dismissSessionEndAsk(String sessionId) {
     if (_inputChannel == null) return;
     final msg = {
@@ -532,6 +551,72 @@ class WebSocketService {
         return {'tool': lastComplete['tool']};
       }
       throw Exception('Stream ended without completion event');
+    } finally {
+      client.close();
+    }
+  }
+
+  /// Start Codex ChatGPT login, streaming NDJSON progress.
+  ///
+  /// When [deviceCode] is true, uses device-code auth (shows a code to enter
+  /// in the browser). Otherwise uses browser-based OAuth (returns a URL to open).
+  /// [onProgress] is called for each event. Returns on completion or error.
+  Future<void> codexLogin({
+    bool deviceCode = false,
+    void Function(Map<String, dynamic> event)? onProgress,
+  }) async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final queryParams = <String, String>{};
+    if (deviceCode) queryParams['device_code'] = 'true';
+    final url = _serverUrl!.http(
+      '/api/tools/codex/login',
+      queryParams.isNotEmpty ? queryParams : null,
+    );
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.postUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      final response = await request.close();
+      if (response.statusCode != 200) {
+        final body =
+            await response.transform(const io.SystemEncoding().decoder).join();
+        throw Exception('Server returned ${response.statusCode}: $body');
+      }
+
+      await for (final line in response
+          .transform(const io.SystemEncoding().decoder)
+          .transform(const LineSplitter())) {
+        if (line.trim().isEmpty) continue;
+        final event = jsonDecode(line) as Map<String, dynamic>;
+        final step = event['step'] as String?;
+        if (step == 'error') {
+          throw Exception(event['message'] ?? 'Unknown error');
+        }
+        onProgress?.call(event);
+        if (step == 'complete') break;
+      }
+    } finally {
+      client.close();
+    }
+  }
+
+  /// Check Codex ChatGPT login status.
+  ///
+  /// Returns `{"logged_in": bool, "method": String?}`.
+  Future<Map<String, dynamic>> codexLoginStatus() async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url = _serverUrl!.http('/api/tools/codex/login/status');
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.getUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      final response = await request.close();
+      final body =
+          await response.transform(const io.SystemEncoding().decoder).join();
+      if (response.statusCode != 200) {
+        throw Exception('Server returned ${response.statusCode}: $body');
+      }
+      return jsonDecode(body) as Map<String, dynamic>;
     } finally {
       client.close();
     }

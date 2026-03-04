@@ -122,3 +122,5 @@ alembic/tmp/
 pyrightconfig.json
 testclient/
 plans/
+data/
+.claude/output/

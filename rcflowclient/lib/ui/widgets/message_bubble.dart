@@ -4,6 +4,7 @@ import '../../models/ws_messages.dart';
 import '../../theme.dart';
 import 'message_components/agent_group_block.dart';
 import 'message_components/assistant_bubble.dart';
+import 'message_components/permission_request_card.dart';
 import 'message_components/plan_mode_ask_card.dart';
 import 'message_components/plan_review_ask_card.dart';
 import 'message_components/question_block.dart';
@@ -46,6 +47,8 @@ final Map<DisplayMessageType, MessageRenderer> messageRenderers = {
   DisplayMessageType.planModeAsk: (msg) => PlanModeAskCard(message: msg),
   DisplayMessageType.planReviewAsk: (msg) =>
       PlanReviewAskCard(message: msg),
+  DisplayMessageType.permissionRequest: (msg) =>
+      PermissionRequestCard(message: msg),
   DisplayMessageType.agentGroup: (msg) => AgentGroupBlock(message: msg),
 };
 

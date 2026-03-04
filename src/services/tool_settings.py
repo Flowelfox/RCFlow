@@ -24,6 +24,12 @@ _PROVIDER_KEYS = frozenset({
     "aws_secret_access_key",
 })
 
+# Keys related to Codex provider configuration (used for env sync detection).
+_CODEX_PROVIDER_KEYS = frozenset({
+    "provider",
+    "codex_api_key",
+})
+
 _MASK_CHAR = "*"
 _MASK_VISIBLE_CHARS = 4
 
@@ -137,6 +143,7 @@ CLAUDE_CODE_SETTINGS_SCHEMA: list[dict[str, Any]] = [
             {"value": "", "label": "Default"},
             {"value": "bypassPermissions", "label": "Bypass Permissions"},
             {"value": "allowEdits", "label": "Allow Edits"},
+            {"value": "interactive", "label": "Interactive (Ask User)"},
         ],
         "managed_only": True,
     },
@@ -159,6 +166,28 @@ CLAUDE_CODE_SETTINGS_SCHEMA: list[dict[str, Any]] = [
 ]
 
 CODEX_SETTINGS_SCHEMA: list[dict[str, Any]] = [
+    {
+        "key": "provider",
+        "label": "API Provider",
+        "type": "select",
+        "default": "",
+        "description": "API key source for Codex. 'Global' uses server-level config.",
+        "options": [
+            {"value": "", "label": "Global"},
+            {"value": "openai", "label": "OpenAI"},
+            {"value": "chatgpt", "label": "ChatGPT (Subscription)"},
+        ],
+        "managed_only": True,
+    },
+    {
+        "key": "codex_api_key",
+        "label": "OpenAI API Key",
+        "type": "secret",
+        "default": "",
+        "description": "API key for OpenAI provider.",
+        "managed_only": True,
+        "visible_when": {"key": "provider", "value": "openai"},
+    },
     {
         "key": "model",
         "label": "Model",
@@ -254,6 +283,28 @@ def _sync_provider_env(settings: dict[str, Any]) -> None:
             if val:
                 env[env_key] = val
         settings["env"] = env
+    else:
+        # Global / empty — remove env section so global config takes over.
+        settings.pop("env", None)
+
+
+def _sync_codex_provider_env(settings: dict[str, Any]) -> None:
+    """Rebuild the ``env`` section of Codex settings based on provider fields.
+
+    Called after provider-related keys are updated. Mutates *settings* in place.
+    """
+    provider = settings.get("provider", "")
+
+    if provider == "openai":
+        api_key = settings.get("codex_api_key", "")
+        env: dict[str, str] = {}
+        if api_key:
+            env["CODEX_API_KEY"] = api_key
+        settings["env"] = env if env else {}
+    elif provider == "chatgpt":
+        # ChatGPT subscription auth uses OAuth tokens from auth.json,
+        # not an API key.  Clear the env section so no key is injected.
+        settings["env"] = {}
     else:
         # Global / empty — remove env section so global config takes over.
         settings.pop("env", None)
@@ -369,6 +420,8 @@ class ToolSettingsManager:
         # Sync the env section in settings.json when provider-related keys change.
         if tool_name == "claude_code" and _PROVIDER_KEYS & set(updates.keys()):
             _sync_provider_env(current)
+        elif tool_name == "codex" and _CODEX_PROVIDER_KEYS & set(updates.keys()):
+            _sync_codex_provider_env(current)
 
         rel = _TOOL_CONFIG_PATHS.get(tool_name)
         assert rel is not None

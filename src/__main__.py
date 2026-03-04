@@ -47,6 +47,47 @@ def _cmd_run(args: argparse.Namespace) -> None:
     )
 
 
+def _cmd_migrate(args: argparse.Namespace) -> None:
+    """Run database migrations to the latest version."""
+    from alembic import command  # noqa: PLC0415
+    from alembic.config import Config  # noqa: PLC0415
+
+    from src.paths import get_alembic_ini, get_install_dir, get_migrations_dir  # noqa: PLC0415
+
+    ini_path = get_alembic_ini()
+    if not ini_path.exists():
+        print(f"ERROR: alembic.ini not found at {ini_path}", file=sys.stderr)
+        sys.exit(1)
+
+    alembic_cfg = Config(str(ini_path))
+    alembic_cfg.set_main_option("script_location", str(get_migrations_dir()))
+    alembic_cfg.set_main_option("prepend_sys_path", str(get_install_dir()))
+
+    revision = getattr(args, "revision", "head")
+    print(f"Running migrations to: {revision}")
+    command.upgrade(alembic_cfg, revision)
+    print("Migrations complete.")
+
+
+def _cmd_version(args: argparse.Namespace) -> None:
+    """Print the RCFlow version."""
+    from importlib.metadata import PackageNotFoundError, version  # noqa: PLC0415
+
+    from src.paths import get_install_dir, is_frozen  # noqa: PLC0415
+
+    if is_frozen():
+        version_file = get_install_dir() / "VERSION"
+        if version_file.exists():
+            print(f"rcflow {version_file.read_text().strip()}")
+        else:
+            print("rcflow (version unknown — frozen build)")
+    else:
+        try:
+            print(f"rcflow {version('rcflow')}")
+        except PackageNotFoundError:
+            print("rcflow (development — version not installed)")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="rcflow", description="RCFlow action server")
     subparsers = parser.add_subparsers(dest="command")
@@ -54,6 +95,15 @@ def main() -> None:
     # rcflow run
     run_parser = subparsers.add_parser("run", help="Start the RCFlow server")
     run_parser.set_defaults(func=_cmd_run)
+
+    # rcflow migrate [revision]
+    migrate_parser = subparsers.add_parser("migrate", help="Run database migrations")
+    migrate_parser.add_argument("revision", nargs="?", default="head", help="Target revision (default: head)")
+    migrate_parser.set_defaults(func=_cmd_migrate)
+
+    # rcflow version
+    version_parser = subparsers.add_parser("version", help="Print version")
+    version_parser.set_defaults(func=_cmd_version)
 
     args = parser.parse_args()
 

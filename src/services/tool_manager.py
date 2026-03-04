@@ -41,6 +41,12 @@ _DOWNLOAD_TIMEOUT = 300
 # Timeout for version/metadata checks
 _CHECK_TIMEOUT = 15
 
+# Minimum glibc version known to work with recent Codex releases.
+# When the system glibc is older, we proactively use the musl (static) variant
+# to avoid a failed install + retry.  The post-install verification still acts
+# as a safety net in case this threshold becomes stale.
+_CODEX_MIN_GLIBC = (2, 38)
+
 # ---------------------------------------------------------------------------
 # Data model
 # ---------------------------------------------------------------------------
@@ -97,7 +103,11 @@ def _detect_claude_platform() -> str:
 
 
 def _detect_codex_target() -> str:
-    """Return Codex release target triple for GitHub downloads."""
+    """Return Codex release target triple for GitHub downloads.
+
+    On Linux, prefers the ``gnu`` variant but falls back to ``musl``
+    (statically linked) when the system glibc is too old or absent.
+    """
     machine = platform.machine()
 
     if sys.platform == "win32":
@@ -115,8 +125,20 @@ def _detect_codex_target() -> str:
     else:
         raise RuntimeError(f"Unsupported architecture: {machine}")
 
-    libc = "musl" if _is_musl() else "gnu"
+    libc = "musl" if _is_musl() or _glibc_too_old() else "gnu"
     return f"{arch}-unknown-linux-{libc}"
+
+
+def _glibc_too_old() -> bool:
+    """Return True if system glibc is older than what Codex requires."""
+    try:
+        _, version_str = platform.libc_ver()
+        if not version_str:
+            return True
+        parts = tuple(int(x) for x in version_str.split("."))
+        return parts < _CODEX_MIN_GLIBC
+    except (ValueError, TypeError):
+        return True
 
 
 def _parse_version(name: str, raw: str) -> str | None:
@@ -229,6 +251,7 @@ class ToolManager:
     async def uninstall_tool(self, name: str) -> ManagedTool:
         """Remove the managed binary (and .version file) but preserve settings.
 
+        For Codex, also removes the ``codex-proxy`` sibling binary.
         Returns the re-detected tool (which may fall back to an external PATH binary).
         """
         tool = self._tools.get(name)
@@ -243,6 +266,14 @@ class ToolManager:
         vf = mp.with_suffix(".version")
         if vf.is_file():
             vf.unlink()
+
+        # Clean up legacy codex-proxy sibling if present from older installs
+        if name == "codex":
+            exe = ".exe" if sys.platform == "win32" else ""
+            for legacy_name in (f"codex-proxy{exe}",):
+                legacy = mp.parent / legacy_name
+                if legacy.is_file():
+                    legacy.unlink()
 
         updated = await self.detect_tool(name)
         self._tools[name] = updated
@@ -418,6 +449,9 @@ class ToolManager:
 
         logger.info("Installed Claude Code %s to %s", version, binary_path)
         self._write_version_file("claude_code", version)
+        which_str = shutil.which("claude")
+        if which_str and Path(which_str).resolve() == binary_path.resolve():
+            which_str = None
         return ManagedTool(
             name="claude_code",
             binary_name="claude",
@@ -425,6 +459,8 @@ class ToolManager:
             current_version=version,
             latest_version=version,
             managed=True,
+            managed_path=str(binary_path),
+            external_path=which_str,
         )
 
     async def _install_codex(self) -> ManagedTool:
@@ -440,16 +476,46 @@ class ToolManager:
             raise RuntimeError("Could not determine latest Codex version")
 
         target = _detect_codex_target()
+        await self._download_codex_binary(install_dir, binary_path, tag, version, target)
 
+        # Verify the binary can actually run on this system
+        if sys.platform != "win32":
+            ok, err = await _verify_binary(str(binary_path))
+            if not ok and "GLIBC" in err and "musl" not in target:
+                musl_target = target.replace("-gnu", "-musl")
+                logger.warning(
+                    "Codex gnu binary requires newer glibc (%s), retrying with musl variant",
+                    err.splitlines()[0] if err else "unknown",
+                )
+                await self._download_codex_binary(install_dir, binary_path, tag, version, musl_target)
+
+        logger.info("Installed Codex %s to %s", version, binary_path)
+        self._write_version_file("codex", version)
+        which_str = shutil.which("codex")
+        if which_str and Path(which_str).resolve() == binary_path.resolve():
+            which_str = None
+        return ManagedTool(
+            name="codex",
+            binary_name="codex",
+            binary_path=str(binary_path),
+            current_version=version,
+            latest_version=version,
+            managed=True,
+            managed_path=str(binary_path),
+            external_path=which_str,
+        )
+
+    @staticmethod
+    async def _download_codex_binary(
+        install_dir: Path, binary_path: Path, tag: str, version: str, target: str
+    ) -> None:
+        """Download and place the codex binary for a specific target triple."""
         if sys.platform == "win32":
-            # Windows: download the bare .exe directly (no archive)
             asset_name = f"codex-{target}.exe"
             download_url = f"{CODEX_RELEASE_BASE}/{tag}/{asset_name}"
-
             async with httpx.AsyncClient(follow_redirects=True) as client:
                 resp = await client.get(download_url, timeout=_DOWNLOAD_TIMEOUT)
                 resp.raise_for_status()
-
                 tmp_path = install_dir / f".codex-{version}.tmp"
                 try:
                     tmp_path.write_bytes(resp.content)
@@ -457,7 +523,6 @@ class ToolManager:
                 finally:
                     tmp_path.unlink(missing_ok=True)
         else:
-            # Linux: download .tar.gz and extract
             asset_name = f"codex-{target}.tar.gz"
             download_url = f"{CODEX_RELEASE_BASE}/{tag}/{asset_name}"
 
@@ -471,28 +536,14 @@ class ToolManager:
 
                     with tarfile.open(tar_path, "r:gz") as tf:
                         members = tf.getnames()
-                        codex_member = next(
-                            (m for m in members if m.startswith("codex") and "proxy" not in m),
-                            None,
-                        )
-                        if codex_member is None:
+                        if not members:
+                            raise RuntimeError("Codex tarball is empty")
+                        tf.extractall(tmp_dir, filter="data")
+                        extracted = _find_codex_binary(Path(tmp_dir), members)
+                        if not extracted:
                             raise RuntimeError(f"Could not find codex binary in tarball: {members}")
-                        tf.extract(codex_member, tmp_dir, filter="data")
-
-                    extracted = Path(tmp_dir) / codex_member
-                    extracted.chmod(0o755)
-                    shutil.move(str(extracted), str(binary_path))
-
-        logger.info("Installed Codex %s to %s", version, binary_path)
-        self._write_version_file("codex", version)
-        return ManagedTool(
-            name="codex",
-            binary_name="codex",
-            binary_path=str(binary_path),
-            current_version=version,
-            latest_version=version,
-            managed=True,
-        )
+                        extracted.chmod(0o755)
+                        shutil.move(str(extracted), str(binary_path))
 
     # ------------------------------------------------------------------
     # Streaming install (with progress events)
@@ -583,6 +634,9 @@ class ToolManager:
                 tmp_path.unlink(missing_ok=True)
 
         self._write_version_file("claude_code", version)
+        which_str = shutil.which("claude")
+        if which_str and Path(which_str).resolve() == binary_path.resolve():
+            which_str = None
         tool = ManagedTool(
             name="claude_code",
             binary_name="claude",
@@ -590,6 +644,8 @@ class ToolManager:
             current_version=version,
             latest_version=version,
             managed=True,
+            managed_path=str(binary_path),
+            external_path=which_str,
         )
         self._tools["claude_code"] = tool
         logger.info("Installed Claude Code %s to %s", version, binary_path)
@@ -612,17 +668,88 @@ class ToolManager:
         yield {"step": "checking_version", "message": f"Found version {version}"}
 
         target = _detect_codex_target()
+
+        async for event in self._stream_codex_download(install_dir, binary_path, tag, version, target):
+            yield event
+
+        # Verify the binary can actually run on this system (glibc compat)
+        if sys.platform != "win32":
+            ok, err = await _verify_binary(str(binary_path))
+            if not ok and "GLIBC" in err and "musl" not in target:
+                musl_target = target.replace("-gnu", "-musl")
+                logger.warning("Codex gnu binary requires newer glibc, retrying with musl")
+                yield {"step": "installing", "message": "Incompatible glibc, downloading musl variant..."}
+                async for event in self._stream_codex_download(
+                    install_dir, binary_path, tag, version, musl_target
+                ):
+                    yield event
+
+        self._write_version_file("codex", version)
+        which_str = shutil.which("codex")
+        if which_str and Path(which_str).resolve() == binary_path.resolve():
+            which_str = None
+        tool = ManagedTool(
+            name="codex",
+            binary_name="codex",
+            binary_path=str(binary_path),
+            current_version=version,
+            latest_version=version,
+            managed=True,
+            managed_path=str(binary_path),
+            external_path=which_str,
+        )
+        self._tools["codex"] = tool
+        logger.info("Installed Codex %s to %s", version, binary_path)
+        yield {"step": "done", "message": f"Installed v{version}"}
+
+    @staticmethod
+    async def _stream_codex_download(
+        install_dir: Path, binary_path: Path, tag: str, version: str, target: str
+    ) -> AsyncGenerator[dict[str, Any], None]:
+        """Download and install codex for a target triple, yielding progress events."""
         if sys.platform == "win32":
-            # Windows: download the bare .exe directly (no archive)
             asset_name = f"codex-{target}.exe"
+            download_url = f"{CODEX_RELEASE_BASE}/{tag}/{asset_name}"
+
+            yield {"step": "downloading", "progress": 0.0, "message": "Starting download..."}
+
+            async with (
+                httpx.AsyncClient(follow_redirects=True) as client,
+                client.stream("GET", download_url, timeout=_DOWNLOAD_TIMEOUT) as stream,
+            ):
+                total = int(stream.headers.get("content-length", 0))
+                received = 0
+                chunks: list[bytes] = []
+                async for chunk in stream.aiter_bytes(65536):
+                    chunks.append(chunk)
+                    received += len(chunk)
+                    if total > 0:
+                        pct = received / total
+                        mb_recv = received / 1_048_576
+                        mb_total = total / 1_048_576
+                        yield {
+                            "step": "downloading",
+                            "progress": round(pct, 3),
+                            "message": f"Downloading... {mb_recv:.1f} / {mb_total:.1f} MB",
+                        }
+
+            yield {"step": "installing", "message": "Installing..."}
+            tmp_path = install_dir / f".codex-{version}.tmp"
+            try:
+                tmp_path.write_bytes(b"".join(chunks))
+                tmp_path.rename(binary_path)
+            finally:
+                tmp_path.unlink(missing_ok=True)
         else:
             asset_name = f"codex-{target}.tar.gz"
-        download_url = f"{CODEX_RELEASE_BASE}/{tag}/{asset_name}"
+            download_url = f"{CODEX_RELEASE_BASE}/{tag}/{asset_name}"
 
-        yield {"step": "downloading", "progress": 0.0, "message": "Starting download..."}
+            yield {"step": "downloading", "progress": 0.0, "message": "Starting download..."}
 
-        async with httpx.AsyncClient(follow_redirects=True) as client:
-            async with client.stream("GET", download_url, timeout=_DOWNLOAD_TIMEOUT) as stream:
+            async with (
+                httpx.AsyncClient(follow_redirects=True) as client,
+                client.stream("GET", download_url, timeout=_DOWNLOAD_TIMEOUT) as stream,
+            ):
                 total = int(stream.headers.get("content-length", 0))
                 received = 0
                 chunks: list[bytes] = []
@@ -641,46 +768,20 @@ class ToolManager:
 
             yield {"step": "installing", "message": "Installing..."}
 
-            if sys.platform == "win32":
-                # Write the bare .exe directly
-                tmp_path = install_dir / f".codex-{version}.tmp"
-                try:
-                    tmp_path.write_bytes(b"".join(chunks))
-                    tmp_path.rename(binary_path)
-                finally:
-                    tmp_path.unlink(missing_ok=True)
-            else:
-                with tempfile.TemporaryDirectory(dir=str(install_dir)) as tmp_dir:
-                    tar_path = Path(tmp_dir) / asset_name
-                    tar_path.write_bytes(b"".join(chunks))
+            with tempfile.TemporaryDirectory(dir=str(install_dir)) as tmp_dir:
+                tar_path = Path(tmp_dir) / asset_name
+                tar_path.write_bytes(b"".join(chunks))
 
-                    with tarfile.open(tar_path, "r:gz") as tf:
-                        members = tf.getnames()
-                        codex_member = next(
-                            (m for m in members if m.startswith("codex") and "proxy" not in m),
-                            None,
-                        )
-                        if codex_member is None:
-                            yield {"step": "error", "message": f"Could not find codex binary in tarball: {members}"}
-                            return
-                        tf.extract(codex_member, tmp_dir, filter="data")
-
-                    extracted = Path(tmp_dir) / codex_member
+                with tarfile.open(tar_path, "r:gz") as tf:
+                    members = tf.getnames()
+                    if not members:
+                        raise RuntimeError("Codex tarball is empty")
+                    tf.extractall(tmp_dir, filter="data")
+                    extracted = _find_codex_binary(Path(tmp_dir), members)
+                    if not extracted:
+                        raise RuntimeError(f"Could not find codex binary in tarball: {members}")
                     extracted.chmod(0o755)
                     shutil.move(str(extracted), str(binary_path))
-
-        self._write_version_file("codex", version)
-        tool = ManagedTool(
-            name="codex",
-            binary_name="codex",
-            binary_path=str(binary_path),
-            current_version=version,
-            latest_version=version,
-            managed=True,
-        )
-        self._tools["codex"] = tool
-        logger.info("Installed Codex %s to %s", version, binary_path)
-        yield {"step": "done", "message": f"Installed v{version}"}
 
     # ------------------------------------------------------------------
     # Updates
@@ -875,6 +976,46 @@ class ToolManager:
             return text or None
         except OSError:
             return None
+
+
+async def _verify_binary(binary_path: str) -> tuple[bool, str]:
+    """Check if a binary can execute on this system.
+
+    Returns ``(True, "")`` on success, or ``(False, stderr_output)`` on failure.
+    Used to detect glibc mismatches so the installer can fall back to musl.
+    """
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            binary_path,
+            "--version",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=10)
+        if proc.returncode == 0:
+            return True, ""
+        return False, stderr.decode("utf-8", errors="replace").strip()
+    except FileNotFoundError:
+        return False, "binary not found"
+    except Exception as exc:
+        return False, str(exc)
+
+
+def _find_codex_binary(extract_dir: Path, members: list[str]) -> Path | None:
+    """Find the main codex binary among extracted tarball members.
+
+    The release tarball contains a single file named ``codex-<target>``
+    (e.g. ``codex-x86_64-unknown-linux-gnu``).  This helper locates that
+    file regardless of the exact target suffix or directory nesting.
+    """
+    for member in members:
+        p = extract_dir / member
+        if not p.is_file():
+            continue
+        name = p.name
+        if name.startswith("codex") and "proxy" not in name and "runner" not in name and "sandbox" not in name:
+            return p
+    return None
 
 
 def _is_executable(path: Path) -> bool:

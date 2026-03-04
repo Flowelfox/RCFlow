@@ -12,7 +12,7 @@ RCFlow is a background server running on Linux or Windows that provides a WebSoc
 | Package Manager      | uv                            |
 | Web Framework        | FastAPI                       |
 | ORM                  | SQLAlchemy 2.0 (async)        |
-| Database             | PostgreSQL                    |
+| Database             | SQLite (default) or PostgreSQL |
 | LLM                  | Anthropic Messages API or AWS Bedrock |
 | STT                  | Pluggable (Wispr Flow default)|
 | TTS                  | Pluggable (provider TBD)      |
@@ -27,6 +27,7 @@ RCFlow is a background server running on Linux or Windows that provides a WebSoc
 | Android Keep-Alive   | flutter_foreground_task       |
 | Audio Playback       | audioplayers                  |
 | File Picker          | file_picker (Windows custom sounds) |
+| Bundling             | PyInstaller (self-contained distributable) |
 
 ---
 
@@ -94,8 +95,8 @@ RCFlow is a background server running on Linux or Windows that provides a WebSoc
              │
              ▼
 ┌─────────────────────────┐
-│   PostgreSQL             │
-│   (session archive)      │
+│   Database               │
+│   (SQLite / PostgreSQL)  │
 └──────────────────────────┘
 ```
 
@@ -116,7 +117,7 @@ RCFlow is a background server running on Linux or Windows that provides a WebSoc
     If the LLM included [SessionEndAsk], the server pushes a session_end_ask
     message; the client shows a confirmation card. The session only ends
     when the user explicitly confirms or sends POST /api/sessions/{id}/end.
-12. Completed sessions are archived from memory to PostgreSQL
+12. Completed sessions are archived from memory to the database
 ```
 
 ### Flutter Client — Multi-Platform
@@ -150,7 +151,7 @@ On wide layouts (>700px), the main content area supports multiple simultaneous s
 
 ### Workers (Multi-Server)
 
-The client can connect to multiple RCFlow servers simultaneously. Each server connection is a "Worker". Each backend instance is identified by a unique `RCFLOW_BACKEND_ID` (auto-generated UUID, persisted to `.env`). When multiple backends share the same PostgreSQL database, sessions are isolated per backend via the `backend_id` column on the `sessions` table — each backend only sees and manages its own sessions.
+The client can connect to multiple RCFlow servers simultaneously. Each server connection is a "Worker". Each backend instance is identified by a unique `RCFLOW_BACKEND_ID` (auto-generated UUID, persisted to `.env`). When multiple backends share the same database, sessions are isolated per backend via the `backend_id` column on the `sessions` table — each backend only sees and manages its own sessions.
 
 **Data model**:
 - `WorkerConfig` (`lib/models/worker_config.dart`): Client-side configuration with `id` (UUID, generated locally), `name`, `host`, `apiKey`, `useSSL`, `autoConnect`, and `sortOrder`. Serialized to/from JSON. ID generated using `dart:math` Random.secure.
@@ -209,6 +210,8 @@ The client can connect to multiple RCFlow servers simultaneously. Each server co
 | POST   | `/api/tools/update`                     | Yes  | Check for and install updates to RCFlow-managed CLI tools. Only updates tools managed by RCFlow (not user-installed ones). |
 | GET    | `/api/tools/{tool_name}/settings`       | Yes  | Get per-tool settings schema and current values for a managed CLI tool. |
 | PATCH  | `/api/tools/{tool_name}/settings`       | Yes  | Update per-tool settings. Body: `{"updates": {"key": value, ...}}`. Returns updated schema+values. |
+| POST   | `/api/tools/codex/login`                | Yes  | Start Codex ChatGPT login. Optional `?device_code=true` for device-code flow. Streams NDJSON events: `auth_url` or `device_code`, `waiting`, `complete`, `error`. Times out after 5 min. |
+| GET    | `/api/tools/codex/login/status`         | Yes  | Check Codex ChatGPT login status. Returns `{"logged_in": bool, "method": "ChatGPT"|null}`. |
 
 Authentication for HTTP endpoints uses the `X-API-Key` header with the same key as `RCFLOW_API_KEY`.
 
@@ -302,6 +305,25 @@ Answer a question from Claude Code (AskUserQuestion):
 }
 ```
 
+Respond to a permission request (allow/deny a tool use):
+
+```json
+{
+  "type": "permission_response",
+  "session_id": "uuid",
+  "request_id": "uuid",
+  "decision": "allow",
+  "scope": "tool_session",
+  "path_prefix": null
+}
+```
+
+The `decision` field is `"allow"` or `"deny"`. The `scope` field determines how broadly the decision is cached:
+- `"once"` — applies to this single request only
+- `"tool_session"` — applies to all uses of this tool for the rest of the session
+- `"tool_path"` — applies to this tool for files under `path_prefix` (file tools only)
+- `"all_session"` — applies to ALL tools for the rest of the session
+
 ### Input Audio Protocol
 
 Client sends audio following the Wispr Flow format:
@@ -391,6 +413,19 @@ Server sends JSON messages:
 {
   "type": "agent_group_end",
   "session_id": "uuid"
+}
+```
+
+```json
+{
+  "type": "permission_request",
+  "session_id": "uuid",
+  "request_id": "uuid",
+  "tool_name": "Bash",
+  "tool_input": {"command": "npm install"},
+  "description": "Execute command: npm install",
+  "risk_level": "high",
+  "scope_options": ["once", "tool_session", "all_session"]
 }
 ```
 
@@ -587,6 +622,7 @@ Separate from the lifecycle `SessionStatus`, each active session tracks a fine-g
 | `processing_llm`       | LLM is generating a response / agentic loop  |
 | `executing_tool`       | A shell/HTTP tool is running                 |
 | `running_subprocess`   | Claude Code subprocess is actively processing|
+| `awaiting_permission`  | Blocked waiting for user to approve/deny a tool use |
 
 Activity state is transient (in-memory only — not stored in the database). Archived sessions are always `idle`. The state is included in:
 - `session_update` WebSocket messages (`activity_state` field)
@@ -611,10 +647,10 @@ The tool JSON definition specifies which type a tool uses (see Tool Definitions 
 
 - **Active sessions**: Held in memory with full output buffer (text + audio references).
 - **Paused sessions**: Remain in memory like active sessions. Any running Claude Code or Codex subprocess is killed on pause. Not reaped by inactivity timer. Archived only after being resumed and reaching a terminal state.
-- **Completed sessions**: Automatically archived to PostgreSQL when a session reaches a terminal state (completed, failed, or cancelled). The prompt router fires a background task after each `session.complete()`, `session.fail()`, or `session.cancel()` call. Stores: session ID, timestamps, all prompts, all LLM responses, tool calls, tool outputs, metadata, and `conversation_history` (the raw LLM message list for restoration).
+- **Completed sessions**: Automatically archived to the database when a session reaches a terminal state (completed, failed, or cancelled). The prompt router fires a background task after each `session.complete()`, `session.fail()`, or `session.cancel()` call. Stores: session ID, timestamps, all prompts, all LLM responses, tool calls, tool outputs, metadata, and `conversation_history` (the raw LLM message list for restoration).
 - **Restored sessions**: Archived sessions can be restored back to active state via `POST /api/sessions/{id}/restore` or the `restore_session` WebSocket message. The session's conversation history, buffer messages, and metadata are loaded from the DB. For Claude Code sessions, the CC `session_id`, `working_directory`, tool name, and parameters are stored in `metadata_` during archiving and used to reconstruct the executor on restore. The first message sent to a restored CC session triggers a `restart_with_prompt` using the stored `--session-id`, allowing Claude Code to resume its internal conversation context.
 - **On server restart**: Active sessions are lost. Archived sessions remain queryable via `GET /api/sessions` and `GET /api/sessions/{session_id}/messages`, and can be restored.
-- **Session listing**: `GET /api/sessions` and the WebSocket `list_sessions` command both merge in-memory sessions with archived sessions from PostgreSQL (excluding duplicates), sorted by `created_at` descending. Each session entry includes a `created_at` ISO 8601 timestamp and `title`. Archived sessions are filtered by `backend_id` so each backend instance only sees its own sessions.
+- **Session listing**: `GET /api/sessions` and the WebSocket `list_sessions` command both merge in-memory sessions with archived sessions from the database (excluding duplicates), sorted by `created_at` descending. Each session entry includes a `created_at` ISO 8601 timestamp and `title`. Archived sessions are filtered by `backend_id` so each backend instance only sees its own sessions.
 
 ### Session Titles
 
@@ -627,6 +663,67 @@ Multiple sessions can run simultaneously. Each session is independent with its o
 - Tool execution subprocess(es)
 - Output buffer
 - Subscriber list
+
+---
+
+## Interactive Permission Approval
+
+When a Claude Code session is configured with `default_permission_mode: "interactive"` in tool settings, the server intercepts tool-use events from the subprocess and asks the user for approval before each tool executes.
+
+### How It Works
+
+1. Claude Code emits `tool_use` blocks in its stream-json output (within `assistant` events).
+2. `PromptRouter._relay_claude_code_stream()` detects these blocks.
+3. The `PermissionManager` checks its in-memory cache of rules. If a cached rule covers this tool/path, the decision is applied silently.
+4. If no cached rule matches, a `PERMISSION_REQUEST` message is pushed to the session buffer, the session activity state changes to `awaiting_permission`, and the stream reading coroutine blocks on an `asyncio.Event`.
+5. The client displays a `PermissionRequestCard` with the tool name, description, risk level, and scope options (just this once / all uses of this tool / all tools).
+6. The user's response arrives as a `permission_response` message on the input WebSocket.
+7. `PromptRouter.resolve_permission()` resolves the pending request, optionally stores a rule in the `PermissionManager`, and signals the event.
+8. The stream reading coroutine resumes. If denied, a `TOOL_START` message is emitted with `permission_denied: true`. If allowed, the tool proceeds normally.
+
+### Key Components
+
+| Component | File | Purpose |
+|-----------|------|---------|
+| `PermissionManager` | `src/core/permissions.py` | Per-session permission cache, pending request tracking, rule storage |
+| `PermissionDecision` / `PermissionScope` | `src/core/permissions.py` | Enums for allow/deny and scope levels |
+| `classify_risk()` | `src/core/permissions.py` | Classifies tool invocations as low/medium/high/critical risk |
+| `PERMISSION_REQUEST` | `src/core/buffer.py` | New `MessageType` for permission request messages |
+| `AWAITING_PERMISSION` | `src/core/session.py` | New `ActivityState` for blocked-on-approval |
+| `PermissionRequestCard` | `rcflowclient/.../permission_request_card.dart` | Flutter widget for the approval UI |
+
+### Permission Scopes
+
+| Scope | Meaning |
+|-------|---------|
+| `once` | Applies to this single request only |
+| `tool_session` | Applies to all uses of this tool for the rest of the session |
+| `tool_path` | Applies to this tool for files under a directory prefix (Read/Write/Edit/Glob/Grep) |
+| `all_session` | Blanket allow/deny for ALL tools for the rest of the session |
+
+### Risk Classification
+
+Tools are classified by risk level to help the user make informed decisions:
+
+| Risk | Tools | Description |
+|------|-------|-------------|
+| Low | Read, Glob, Grep, WebFetch | Read-only operations |
+| Medium | Write, Edit, NotebookEdit, Agent | File modifications, sub-agent launches |
+| High | Bash | Shell command execution |
+| Critical | Bash (destructive patterns) | `rm`, `git push --force`, `kill`, etc. |
+
+### Edge Cases
+
+- **Timeout**: If no response arrives within 120 seconds, the request is auto-denied.
+- **Client disconnect**: Pending requests stay active. Timeout eventually auto-denies. Reconnecting clients can still respond to unexpired requests.
+- **Session pause/cancel**: All pending permission requests are auto-denied via `PermissionManager.cancel_all_pending()`.
+- **Session restore**: Permission rules saved in `session.metadata["permission_rules"]` are restored so the user doesn't re-approve previously approved tools.
+- **Multiple clients**: Only the first response for a given `request_id` takes effect; subsequent responses are silently ignored.
+
+### Limitations
+
+- Currently supported for Claude Code sessions only. Codex uses a one-shot process model where stdin is closed after writing the prompt, making interactive approval infeasible without a fundamental I/O change. Codex interactive permissions are planned for a future release.
+- The server uses `--permission-mode bypassPermissions` on the CLI side and handles permission logic server-side. This means the actual Claude Code process runs all tools — the server-side check happens *before* the tool_use event is processed, but the subprocess may proceed concurrently. For true pre-execution gating, a future enhancement could use Claude Code's native permission protocol or an MCP permission hook.
 
 ---
 
@@ -889,7 +986,10 @@ The `codex` executor manages an OpenAI Codex CLI subprocess for delegating codin
 
 **Result summarization:** When Codex emits a `turn.completed` event, the prompt router fires a summary task and pushes a `session_end_ask`, same as Claude Code.
 
-**Authentication:** The `CODEX_API_KEY` environment variable is injected into the subprocess environment from the server config.
+**Authentication:** Codex supports two auth methods, selectable via the per-tool `provider` setting:
+- **OpenAI API key** (`provider: "openai"`): `CODEX_API_KEY` is injected into the subprocess environment from the per-tool settings.
+- **ChatGPT subscription** (`provider: "chatgpt"`): OAuth tokens from `~/.codex/auth.json` are used. RCFlow symlinks this file into `CODEX_HOME` so the isolated instance can access the user's cached login. The user must run `codex login` on the host machine first.
+- **Global** (`provider: ""`): Falls back to the server-level `CODEX_API_KEY` environment variable.
 
 **JSONL event types:**
 - `thread.started` — contains `thread_id` for session continuity
@@ -942,7 +1042,7 @@ RCFlow automatically manages the installation and updating of external CLI tools
 **Installation methods:**
 
 - **Claude Code**: Native binary downloaded from Anthropic's GCS bucket (`storage.googleapis.com/claude-code-dist-.../claude-code-releases`). SHA256 checksum verified against the official manifest. Binary placed at `~/.local/share/rcflow/tools/claude-code/claude` (Linux) or `%LOCALAPPDATA%\rcflow\tools\claude-code\claude.exe` (Windows).
-- **Codex**: Native binary downloaded from GitHub Releases (`github.com/openai/codex/releases`). Tarball extracted on Linux; bare `.exe` downloaded directly on Windows. Binary placed at `~/.local/share/rcflow/tools/codex/codex` (Linux) or `%LOCALAPPDATA%\rcflow\tools\codex\codex.exe` (Windows).
+- **Codex**: Native binary downloaded from GitHub Releases (`github.com/openai/codex/releases`). The release tarball contains a single binary named `codex-<target>` (e.g. `codex-x86_64-unknown-linux-gnu`) which is extracted and renamed to `codex`. On Windows, the `.exe` is downloaded directly and renamed to `codex.exe`. The responses API proxy is built into the main binary as a subcommand. Binary placed at `~/.local/share/rcflow/tools/codex/codex` (Linux) or `%LOCALAPPDATA%\rcflow\tools\codex\codex.exe` (Windows).
 
 **Platform strings:**
 
@@ -1024,9 +1124,24 @@ When the tool has a non-empty `provider`, `PromptRouter._build_claude_code_extra
 
 | Key              | Type   | Managed-only | Description                                |
 |------------------|--------|--------------|--------------------------------------------|
+| `provider`       | select | yes          | Auth method: Global / OpenAI / ChatGPT (Subscription) |
+| `codex_api_key`  | secret | yes          | OpenAI API key (visible when provider=openai) |
 | `model`          | string | no           | Model name for Codex sessions              |
 | `approval_mode`  | select | no           | Tool-call approval (full-auto / yolo)      |
 | `timeout`        | string | yes          | Process timeout in seconds (default 600)   |
+
+Provider sync behavior:
+- **OpenAI** (`provider=openai`): sets `env.CODEX_API_KEY` from `codex_api_key`. RCFlow injects this into the subprocess environment.
+- **ChatGPT** (`provider=chatgpt`): clears the `env` section (no API key). RCFlow symlinks `~/.codex/auth.json` into `CODEX_HOME` so Codex CLI uses cached OAuth tokens. The UI shows a "Login with ChatGPT" button that triggers device-auth flow via `POST /api/tools/codex/login`.
+- **Global** (`provider=""`): removes the `env` section so that `PromptRouter` injects the server-level `CODEX_API_KEY` instead.
+
+**Codex ChatGPT login flow:**
+
+- `POST /api/tools/codex/login` — Starts Codex ChatGPT login with managed `CODEX_HOME`. Two modes controlled by `?device_code=true|false` (default false):
+  - **Browser OAuth** (default): runs `codex login`, streams `{"step": "auth_url", "url": "..."}` with the OAuth URL (client opens in browser), then waits for completion.
+  - **Device code**: runs `codex login --device-auth`, streams `{"step": "device_code", "url": "...", "code": "XXXX-XXXXX"}` for the user to enter in a browser.
+  - Both modes stream `{"step": "waiting", ...}` while waiting, `{"step": "complete", ...}` on success, `{"step": "error", ...}` on failure. Times out after 5 minutes. Verifies with `codex login status` after process exit.
+- `GET /api/tools/codex/login/status` — Runs `codex login status` with managed `CODEX_HOME`. Returns `{"logged_in": true/false, "method": "ChatGPT"|null}`.
 
 **Config overrides:** When a managed tool has settings configured, `PromptRouter` reads them at executor creation time and passes non-empty values as `config_overrides` to the executor constructor. These overrides are merged on top of the tool definition's `executor_config` when building subprocess commands.
 
@@ -1126,9 +1241,12 @@ The chosen provider will be implemented behind the pluggable interface.
 
 ## Database Schema
 
+Both SQLite and PostgreSQL are supported. The ORM uses `sa.JSON` columns (maps to JSONB on PostgreSQL, TEXT with JSON serialization on SQLite). UUIDs are stored as CHAR(32) on SQLite. Timestamps are stored as ISO 8601 strings on SQLite.
+
 ### Tables
 
 ```sql
+-- Logical schema (PostgreSQL syntax for illustration; SQLAlchemy ORM handles dialect differences)
 -- API keys for WebSocket authentication
 CREATE TABLE api_keys (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1213,7 +1331,7 @@ All configuration is via environment variables, loaded from a `.env` file in dev
 | `RCFLOW_BACKEND_ID`     | no       | auto-generated  | Unique backend instance ID (UUID). Auto-generated and persisted to `.env` on first run. Used to isolate sessions per backend when multiple backends share one database. |
 | `SSL_CERTFILE`          | no       |                 | Path to TLS certificate (enables WSS when both cert+key set) |
 | `SSL_KEYFILE`           | no       |                 | Path to TLS private key (enables WSS when both cert+key set) |
-| `DATABASE_URL`          | yes      |                 | PostgreSQL connection string         |
+| `DATABASE_URL`          | no       | `sqlite+aiosqlite:///./data/rcflow.db` | Database connection string (SQLite or PostgreSQL) |
 | `LLM_PROVIDER`          | no       | `anthropic`     | LLM provider: `anthropic` or `bedrock` |
 | `ANTHROPIC_API_KEY`     | cond.    |                 | Anthropic API key (required when `LLM_PROVIDER=anthropic`) |
 | `ANTHROPIC_MODEL`       | no       | `claude-sonnet-4-20250514`| Model to use (use Bedrock model IDs when `LLM_PROVIDER=bedrock`) |
@@ -1398,7 +1516,9 @@ RCFlow supports **Linux (x64, arm64)** and **Windows (x64)**.
 
 ### Database
 
-PostgreSQL is required on all platforms. On Windows, install PostgreSQL natively or via Docker Desktop. The `DATABASE_URL` format is identical: `postgresql+asyncpg://user:pass@localhost:5432/rcflow`.
+SQLite is the default database — no external server required. The database file is created automatically at the path specified in `DATABASE_URL` (default: `./data/rcflow.db`). SQLite WAL mode and foreign keys are enabled automatically.
+
+For heavier workloads or multi-backend deployments, PostgreSQL is supported. Install the `postgres` extra (`pip install rcflow[postgres]` or `uv pip install rcflow[postgres]`) and set `DATABASE_URL=postgresql+asyncpg://user:pass@localhost:5432/rcflow`.
 
 ### Cross-Platform Process Management
 
@@ -1425,7 +1545,7 @@ uv run rcflow                    # or: uv run rcflow run — starts the server
 # systemd/rcflow.service
 [Unit]
 Description=RCFlow Action Server
-After=network.target postgresql.service
+After=network.target
 
 [Service]
 Type=simple
@@ -1445,6 +1565,53 @@ sudo systemctl enable rcflow
 sudo systemctl start rcflow
 sudo journalctl -u rcflow -f     # View logs
 ```
+
+---
+
+## Bundling & Distribution
+
+RCFlow is distributed as a self-contained package built with PyInstaller. End users download a single archive, run an install script, and get RCFlow running as a system service.
+
+### Build
+
+| Target | Command | Output |
+|--------|---------|--------|
+| Current platform | `make bundle` | `dist/rcflow-{version}-{platform}-{arch}.tar.gz` (or `.zip`) |
+| Linux x64/arm64 | `make bundle-linux` | `dist/rcflow-{version}-linux-{arch}.tar.gz` |
+| Windows x64 | `make bundle-windows` | `dist/rcflow-{version}-windows-x64.zip` |
+
+Build script: `scripts/bundle.py`. Requires PyInstaller (`uv add --dev pyinstaller`). Cross-compilation is not supported — build on the target platform.
+
+### Bundle Contents
+
+The archive contains: the PyInstaller executable + runtime (`_internal/`), tool JSON definitions (`tools/`), alembic migrations (`migrations/`), prompt templates (`templates/`), install/uninstall scripts, systemd service template (Linux), `.env.example`, and a `VERSION` file.
+
+### Installation
+
+**Linux:** `sudo ./install.sh` — installs to `/opt/rcflow/`, creates `rcflow` system user, sets up systemd service, generates `.env` with random API key, runs migrations.
+
+**Windows:** `.\install.ps1` (as Administrator) — installs to `C:\RCFlow\`, downloads NSSM, registers Windows Service, generates `.env` with random API key, runs migrations, creates firewall rule.
+
+Both scripts are idempotent — safe to run again for upgrades. Existing `.env` and `data/` are preserved.
+
+### Path Resolution
+
+The `src/paths.py` module provides functions that resolve paths correctly in both development (source) and frozen (PyInstaller) environments:
+
+- `get_bundle_dir()` — `sys._MEIPASS` when frozen, project root otherwise
+- `get_install_dir()` — directory containing the executable
+- `get_default_tools_dir()` — `{install_dir}/tools`
+- `get_migrations_dir()` — `{install_dir}/migrations` when frozen
+- `get_templates_dir()` — `{_MEIPASS}/templates` when frozen
+- `get_alembic_ini()` — `{install_dir}/alembic.ini` when frozen
+
+### CLI Commands
+
+The `rcflow` entry point supports subcommands relevant to bundled operation:
+
+- `rcflow` / `rcflow run` — Start the server
+- `rcflow migrate [revision]` — Run database migrations (default: `head`)
+- `rcflow version` — Print version
 
 ---
 

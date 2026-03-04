@@ -107,6 +107,23 @@ void handlePlanReviewAsk(Map<String, dynamic> msg, PaneState pane) {
   ));
 }
 
+void handlePermissionRequest(Map<String, dynamic> msg, PaneState pane) {
+  pane.finalizeStream();
+  pane.addDisplayMessage(DisplayMessage(
+    type: DisplayMessageType.permissionRequest,
+    sessionId: msg['session_id'] as String?,
+    content: msg['description'] as String? ?? '',
+    toolInput: {
+      'request_id': msg['request_id'],
+      'tool_name': msg['tool_name'],
+      'tool_input': msg['tool_input'],
+      'description': msg['description'],
+      'risk_level': msg['risk_level'],
+      'scope_options': msg['scope_options'],
+    },
+  ));
+}
+
 void handleAgentGroupStart(Map<String, dynamic> msg, PaneState pane) {
   pane.startAgentGroup(
     msg['tool_name'] as String? ?? 'claude_code',
@@ -166,6 +183,7 @@ final Map<String, OutputHandler> outputHandlerRegistry = {
   'agent_group_end': handleAgentGroupEnd,
   'plan_mode_ask': handlePlanModeAsk,
   'plan_review_ask': handlePlanReviewAsk,
+  'permission_request': handlePermissionRequest,
 };
 
 // ---------------------------------------------------------------------------
@@ -338,6 +356,25 @@ void buildPlanReviewAskHistory(Map<String, dynamic> msg, String sessionId,
   ));
 }
 
+void buildPermissionRequestHistory(Map<String, dynamic> msg, String sessionId,
+    List<DisplayMessage> messages) {
+  final metadata = msg['metadata'] as Map<String, dynamic>? ?? {};
+  messages.add(DisplayMessage(
+    type: DisplayMessageType.permissionRequest,
+    sessionId: sessionId,
+    content: metadata['description'] as String? ?? '',
+    accepted: metadata['accepted'] as bool? ?? true,
+    toolInput: {
+      'request_id': metadata['request_id'],
+      'tool_name': metadata['tool_name'],
+      'tool_input': metadata['tool_input'],
+      'description': metadata['description'],
+      'risk_level': metadata['risk_level'],
+      'scope_options': metadata['scope_options'],
+    },
+  ));
+}
+
 /// Maps archived message type strings to history builder functions.
 final Map<String, HistoryBuilder> historyBuilderRegistry = {
   'text_chunk': buildTextChunkHistory,
@@ -351,4 +388,5 @@ final Map<String, HistoryBuilder> historyBuilderRegistry = {
   'session_resumed': buildSessionResumedHistory,
   'plan_mode_ask': buildPlanModeAskHistory,
   'plan_review_ask': buildPlanReviewAskHistory,
+  'permission_request': buildPermissionRequestHistory,
 };
