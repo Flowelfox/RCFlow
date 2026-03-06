@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import logging
+import secrets
 import uuid
 from pathlib import Path
 from typing import Any
@@ -7,34 +10,91 @@ from typing import Any
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from src.paths import get_default_tools_dir
+from src.paths import get_default_tools_dir, get_install_dir
 
 
 def _default_tools_dir() -> Path:
     return get_default_tools_dir()
 
 
+def _get_settings_path() -> Path:
+    """Return the path to settings.json (next to the executable or project root)."""
+    return get_install_dir() / "settings.json"
+
+
+def _load_settings_into_env() -> None:
+    """Read settings.json and inject values into os.environ (if not already set).
+
+    This is called before pydantic_settings constructs a Settings instance so
+    that values from settings.json are available as environment variables.
+    Environment variables explicitly set in the shell take precedence.
+    """
+    import os  # noqa: PLC0415
+
+    cfg_path = _get_settings_path()
+
+    # Migrate from .env on first run if settings.json doesn't exist yet
+    _migrate_env_to_json(cfg_path)
+
+    if not cfg_path.exists():
+        return
+
+    data = json.loads(cfg_path.read_text(encoding="utf-8"))
+
+    for key, value in data.items():
+        env_key = key.upper()
+        if env_key not in os.environ:
+            os.environ[env_key] = str(value)
+
+
+def _migrate_env_to_json(json_path: Path) -> None:
+    """If a .env file exists but settings.json does not, migrate settings."""
+    if json_path.exists():
+        return
+
+    env_path = json_path.parent / ".env"
+    if not env_path.exists():
+        return
+
+    logger = logging.getLogger(__name__)
+    logger.info("Migrating settings from .env to settings.json")
+
+    updates: dict[str, str] = {}
+    for line in env_path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        eq_pos = stripped.find("=")
+        if eq_pos > 0:
+            key = stripped[:eq_pos].strip()
+            value = stripped[eq_pos + 1:].strip()
+            updates[key] = value
+
+    if updates:
+        update_settings_file(updates)
+        logger.info("Migrated %d settings from .env to settings.json", len(updates))
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
         case_sensitive=False,
     )
 
     # Server
     RCFLOW_HOST: str = "0.0.0.0"
     RCFLOW_PORT: int = 8765
-    RCFLOW_API_KEY: str
+    RCFLOW_API_KEY: str = ""
     RCFLOW_BACKEND_ID: str = ""
 
-    # SSL/TLS (set both to enable WSS)
+    # SSL/TLS (WSS)
+    WSS_ENABLED: bool = True
     SSL_CERTFILE: str = ""
     SSL_KEYFILE: str = ""
 
     # Database
     DATABASE_URL: str = "sqlite+aiosqlite:///./data/rcflow.db"
 
-    # LLM provider: "anthropic" (direct API) or "bedrock" (AWS Bedrock)
+    # LLM provider: "anthropic" (direct API), "bedrock" (AWS Bedrock), or "openai"
     LLM_PROVIDER: str = "anthropic"
 
     # Anthropic LLM (used when LLM_PROVIDER = "anthropic")
@@ -45,6 +105,10 @@ class Settings(BaseSettings):
     AWS_REGION: str = "us-east-1"
     AWS_ACCESS_KEY_ID: str = ""
     AWS_SECRET_ACCESS_KEY: str = ""
+
+    # OpenAI (used when LLM_PROVIDER = "openai")
+    OPENAI_API_KEY: str = ""
+    OPENAI_MODEL: str = "gpt-4o"
 
     # STT (Speech-to-Text)
     STT_PROVIDER: str = "wispr_flow"
@@ -77,10 +141,16 @@ class Settings(BaseSettings):
 
 
 def get_settings() -> Settings:
+    logger = logging.getLogger(__name__)
     settings = Settings()  # type: ignore[call-arg]
+    if not settings.RCFLOW_API_KEY:
+        api_key = secrets.token_urlsafe(32)
+        update_settings_file({"RCFLOW_API_KEY": api_key})
+        settings.RCFLOW_API_KEY = api_key
+        logger.info("Generated new RCFLOW_API_KEY: %s", api_key)
     if not settings.RCFLOW_BACKEND_ID:
         backend_id = str(uuid.uuid4())
-        update_env_file({"RCFLOW_BACKEND_ID": backend_id})
+        update_settings_file({"RCFLOW_BACKEND_ID": backend_id})
         settings.RCFLOW_BACKEND_ID = backend_id
     return settings
 
@@ -101,6 +171,7 @@ CONFIG_OPTIONS: list[dict[str, Any]] = [
         "options": [
             {"value": "anthropic", "label": "Anthropic Key"},
             {"value": "bedrock", "label": "Bedrock"},
+            {"value": "openai", "label": "OpenAI"},
         ],
         "group": "LLM",
         "description": "LLM backend to use for inference",
@@ -119,12 +190,13 @@ CONFIG_OPTIONS: list[dict[str, Any]] = [
     },
     {
         "key": "ANTHROPIC_MODEL",
-        "label": "Model",
+        "label": "Anthropic Model",
         "type": "string",
         "group": "LLM",
         "description": "Model ID (e.g. claude-sonnet-4-20250514). For Bedrock use Bedrock model IDs.",
         "required": False,
         "restart_required": True,
+        "visible_when": {"key": "LLM_PROVIDER", "value_not": "openai"},
     },
     {
         "key": "AWS_REGION",
@@ -155,6 +227,26 @@ CONFIG_OPTIONS: list[dict[str, Any]] = [
         "required": False,
         "restart_required": True,
         "visible_when": {"key": "LLM_PROVIDER", "value": "bedrock"},
+    },
+    {
+        "key": "OPENAI_API_KEY",
+        "label": "OpenAI API Key",
+        "type": "secret",
+        "group": "LLM",
+        "description": "API key for OpenAI API access",
+        "required": False,
+        "restart_required": True,
+        "visible_when": {"key": "LLM_PROVIDER", "value": "openai"},
+    },
+    {
+        "key": "OPENAI_MODEL",
+        "label": "OpenAI Model",
+        "type": "string",
+        "group": "LLM",
+        "description": "OpenAI model ID (e.g. gpt-4o, gpt-4.1, o3)",
+        "required": False,
+        "restart_required": True,
+        "visible_when": {"key": "LLM_PROVIDER", "value": "openai"},
     },
     {
         "key": "SUMMARY_MODEL",
@@ -297,33 +389,27 @@ def get_config_schema(settings: Settings) -> list[dict[str, Any]]:
 CONFIGURABLE_KEYS: set[str] = {opt["key"] for opt in CONFIG_OPTIONS}
 
 
-def update_env_file(updates: dict[str, str], env_path: str = ".env") -> None:
-    """Apply key=value updates to the .env file, preserving comments and order.
+def update_settings_file(updates: dict[str, str]) -> None:
+    """Apply key=value updates to settings.json.
 
-    New keys that don't exist in the file are appended at the end.
+    Creates the file if it does not exist. Existing keys are updated; new keys
+    are added. Also updates ``os.environ`` so that any subsequent ``Settings()``
+    call picks up the new values.
     """
-    path = Path(env_path)
-    lines: list[str] = []
+    import os  # noqa: PLC0415
+
+    path = _get_settings_path()
+    data: dict[str, str] = {}
+
     if path.exists():
-        lines = path.read_text().splitlines()
-
-    updated_keys: set[str] = set()
-    new_lines: list[str] = []
-
-    for line in lines:
-        stripped = line.strip()
-        if stripped and not stripped.startswith("#"):
-            eq_pos = stripped.find("=")
-            if eq_pos > 0:
-                env_key = stripped[:eq_pos].strip()
-                if env_key in updates:
-                    new_lines.append(f"{env_key}={updates[env_key]}")
-                    updated_keys.add(env_key)
-                    continue
-        new_lines.append(line)
+        data = json.loads(path.read_text(encoding="utf-8"))
 
     for key, value in updates.items():
-        if key not in updated_keys:
-            new_lines.append(f"{key}={value}")
+        data[key] = value
+        os.environ[key.upper()] = value
 
-    path.write_text("\n".join(new_lines) + "\n")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+
+_load_settings_into_env()

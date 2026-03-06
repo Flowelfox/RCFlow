@@ -295,10 +295,10 @@ class _InputAreaState extends State<InputArea> {
               ? 'No tools found'
               : 'No projects found';
           content = Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             child: Text(
               label,
-              style: const TextStyle(color: kTextMuted, fontSize: 13),
+              style: TextStyle(color: context.appColors.textMuted, fontSize: 13),
             ),
           );
         } else if (_mentionType == _MentionType.tool &&
@@ -351,7 +351,7 @@ class _InputAreaState extends State<InputArea> {
           showWhenUnlinked: false,
           targetAnchor: Alignment.topLeft,
           followerAnchor: Alignment.bottomLeft,
-          offset: const Offset(0, -4),
+          offset: Offset(0, -4),
           child: Material(
             color: Colors.transparent,
             child: Align(
@@ -359,9 +359,9 @@ class _InputAreaState extends State<InputArea> {
               child: Container(
                 width: overlayWidth,
                 decoration: BoxDecoration(
-                  color: kBgElevated,
+                  color: context.appColors.bgElevated,
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: kDivider),
+                  border: Border.all(color: context.appColors.divider),
                   boxShadow: const [
                     BoxShadow(
                       color: Color(0x40000000),
@@ -425,11 +425,11 @@ class _InputAreaState extends State<InputArea> {
       controller: _controller,
       focusNode: _focusNode,
       enabled: canSend,
-      style: const TextStyle(color: kTextPrimary, fontSize: 15),
+      style: TextStyle(color: context.appColors.textPrimary, fontSize: 15),
       decoration: InputDecoration(
         hintText: hintText,
         prefixIcon: prefixIcon != null
-            ? Icon(prefixIcon, size: 18, color: kTextMuted)
+            ? Icon(prefixIcon, size: 18, color: context.appColors.textMuted)
             : null,
         prefixIconConstraints:
             const BoxConstraints(minWidth: 40, minHeight: 0),
@@ -450,9 +450,9 @@ class _InputAreaState extends State<InputArea> {
       link: _layerLink,
       child: Container(
         padding: EdgeInsets.fromLTRB(12, 10, 8, 10 + bottom),
-        decoration: const BoxDecoration(
-          color: kBgSurface,
-          border: Border(top: BorderSide(color: kDivider)),
+        decoration: BoxDecoration(
+          color: context.appColors.bgSurface,
+          border: Border(top: BorderSide(color: context.appColors.divider)),
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -473,16 +473,16 @@ class _InputAreaState extends State<InputArea> {
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
+              duration: Duration(milliseconds: 200),
               width: showPauseResume ? 46 : 0,
               height: 46,
               clipBehavior: Clip.hardEdge,
-              decoration: const BoxDecoration(),
+              decoration: BoxDecoration(),
               child: Tooltip(
                 message:
                     sessionPaused ? 'Resume session' : 'Pause session',
                 child: Material(
-                  color: kBgElevated,
+                  color: context.appColors.bgElevated,
                   shape: const CircleBorder(),
                   clipBehavior: Clip.antiAlias,
                   child: InkWell(
@@ -502,8 +502,8 @@ class _InputAreaState extends State<InputArea> {
                             ? Icons.play_arrow_rounded
                             : Icons.pause_rounded,
                         color: sessionPaused
-                            ? kAccentLight
-                            : kTextSecondary,
+                            ? context.appColors.accentLight
+                            : context.appColors.textSecondary,
                         size: 22,
                       ),
                     ),
@@ -516,16 +516,16 @@ class _InputAreaState extends State<InputArea> {
               width: showPauseResume ? 8 : 0,
             ),
             Expanded(child: textField),
-            const SizedBox(width: 8),
+            SizedBox(width: 8),
             AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
+              duration: Duration(milliseconds: 200),
               width: 46,
               height: 46,
               child: Material(
                 color: _hasText && canSend
-                    ? kAccent
-                    : kBgElevated,
-                shape: const CircleBorder(),
+                    ? context.appColors.accent
+                    : context.appColors.bgElevated,
+                shape: CircleBorder(),
                 clipBehavior: Clip.antiAlias,
                 child: InkWell(
                   onTap: _hasText && canSend ? _send : null,
@@ -534,7 +534,7 @@ class _InputAreaState extends State<InputArea> {
                       Icons.arrow_upward_rounded,
                       color: _hasText && canSend
                           ? Colors.white
-                          : kTextMuted,
+                          : context.appColors.textMuted,
                       size: 22,
                     ),
                   ),
@@ -585,7 +585,7 @@ class _WorkerChip extends StatelessWidget {
             offset.dx + box.size.width,
             offset.dy,
           ),
-          color: kBgSurface,
+          color: context.appColors.bgSurface,
           shape:
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
           items: workers
@@ -593,8 +593,8 @@ class _WorkerChip extends StatelessWidget {
                     value: w.id,
                     height: 40,
                     child: Text(w.name,
-                        style: const TextStyle(
-                            color: kTextPrimary, fontSize: 13)),
+                        style: TextStyle(
+                            color: context.appColors.textPrimary, fontSize: 13)),
                   ))
               .toList(),
         ).then((id) {
@@ -602,21 +602,21 @@ class _WorkerChip extends StatelessWidget {
         });
       },
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        padding: EdgeInsets.symmetric(horizontal: 10, vertical: 4),
         decoration: BoxDecoration(
-          color: kBgElevated,
+          color: context.appColors.bgElevated,
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: kDivider),
+          border: Border.all(color: context.appColors.divider),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.dns_outlined, size: 14, color: kTextMuted),
-            const SizedBox(width: 6),
+            Icon(Icons.dns_outlined, size: 14, color: context.appColors.textMuted),
+            SizedBox(width: 6),
             Text(label,
-                style: const TextStyle(color: kTextSecondary, fontSize: 12)),
-            const SizedBox(width: 4),
-            const Icon(Icons.arrow_drop_down, size: 16, color: kTextMuted),
+                style: TextStyle(color: context.appColors.textSecondary, fontSize: 12)),
+            SizedBox(width: 4),
+            Icon(Icons.arrow_drop_down, size: 16, color: context.appColors.textMuted),
           ],
         ),
       ),
@@ -642,24 +642,24 @@ class _MentionItem extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        color: selected ? kBgOverlay : Colors.transparent,
+        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        color: selected ? context.appColors.bgOverlay : Colors.transparent,
         child: Row(
           children: [
-            const Icon(Icons.folder_rounded, size: 16, color: kTextMuted),
+            Icon(Icons.folder_rounded, size: 16, color: context.appColors.textMuted),
             const SizedBox(width: 8),
-            Expanded(child: _buildHighlightedName()),
+            Expanded(child: _buildHighlightedName(context)),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildHighlightedName() {
+  Widget _buildHighlightedName(BuildContext context) {
     if (query.isEmpty) {
       return Text(
         name,
-        style: const TextStyle(color: kTextPrimary, fontSize: 13),
+        style: TextStyle(color: context.appColors.textPrimary, fontSize: 13),
         overflow: TextOverflow.ellipsis,
       );
     }
@@ -671,7 +671,7 @@ class _MentionItem extends StatelessWidget {
     if (matchIndex < 0) {
       return Text(
         name,
-        style: const TextStyle(color: kTextPrimary, fontSize: 13),
+        style: TextStyle(color: context.appColors.textPrimary, fontSize: 13),
         overflow: TextOverflow.ellipsis,
       );
     }
@@ -681,16 +681,16 @@ class _MentionItem extends StatelessWidget {
         if (matchIndex > 0)
           TextSpan(
             text: name.substring(0, matchIndex),
-            style: const TextStyle(color: kTextPrimary, fontSize: 13),
+            style: TextStyle(color: context.appColors.textPrimary, fontSize: 13),
           ),
         TextSpan(
           text: name.substring(matchIndex, matchIndex + query.length),
-          style: const TextStyle(color: kAccentLight, fontSize: 13, fontWeight: FontWeight.w600),
+          style: TextStyle(color: context.appColors.accentLight, fontSize: 13, fontWeight: FontWeight.w600),
         ),
         if (matchIndex + query.length < name.length)
           TextSpan(
             text: name.substring(matchIndex + query.length),
-            style: const TextStyle(color: kTextPrimary, fontSize: 13),
+            style: TextStyle(color: context.appColors.textPrimary, fontSize: 13),
           ),
       ]),
       overflow: TextOverflow.ellipsis,
@@ -718,20 +718,20 @@ class _ToolMentionItem extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        color: selected ? kBgOverlay : Colors.transparent,
+        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        color: selected ? context.appColors.bgOverlay : Colors.transparent,
         child: Row(
           children: [
-            const Icon(Icons.build_rounded, size: 16, color: kTextMuted),
-            const SizedBox(width: 8),
+            Icon(Icons.build_rounded, size: 16, color: context.appColors.textMuted),
+            SizedBox(width: 8),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _buildHighlightedName(),
+                  _buildHighlightedName(context),
                   Text(
                     description,
-                    style: const TextStyle(color: kTextMuted, fontSize: 11),
+                    style: TextStyle(color: context.appColors.textMuted, fontSize: 11),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -744,11 +744,11 @@ class _ToolMentionItem extends StatelessWidget {
     );
   }
 
-  Widget _buildHighlightedName() {
+  Widget _buildHighlightedName(BuildContext context) {
     if (query.isEmpty) {
       return Text(
         name,
-        style: const TextStyle(color: kTextPrimary, fontSize: 13),
+        style: TextStyle(color: context.appColors.textPrimary, fontSize: 13),
         overflow: TextOverflow.ellipsis,
       );
     }
@@ -760,7 +760,7 @@ class _ToolMentionItem extends StatelessWidget {
     if (matchIndex < 0) {
       return Text(
         name,
-        style: const TextStyle(color: kTextPrimary, fontSize: 13),
+        style: TextStyle(color: context.appColors.textPrimary, fontSize: 13),
         overflow: TextOverflow.ellipsis,
       );
     }
@@ -770,17 +770,17 @@ class _ToolMentionItem extends StatelessWidget {
         if (matchIndex > 0)
           TextSpan(
             text: name.substring(0, matchIndex),
-            style: const TextStyle(color: kTextPrimary, fontSize: 13),
+            style: TextStyle(color: context.appColors.textPrimary, fontSize: 13),
           ),
         TextSpan(
           text: name.substring(matchIndex, matchIndex + query.length),
-          style: const TextStyle(
-              color: kAccentLight, fontSize: 13, fontWeight: FontWeight.w600),
+          style: TextStyle(
+              color: context.appColors.accentLight, fontSize: 13, fontWeight: FontWeight.w600),
         ),
         if (matchIndex + query.length < name.length)
           TextSpan(
             text: name.substring(matchIndex + query.length),
-            style: const TextStyle(color: kTextPrimary, fontSize: 13),
+            style: TextStyle(color: context.appColors.textPrimary, fontSize: 13),
           ),
       ]),
       overflow: TextOverflow.ellipsis,

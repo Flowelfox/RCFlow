@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import '../models/session_info.dart';
 import '../models/worker_config.dart';
 import 'settings_service.dart';
+import 'terminal_service.dart';
 import 'websocket_service.dart';
 
 enum WorkerConnectionStatus { disconnected, connecting, connected, reconnecting }
@@ -27,6 +28,13 @@ class WorkerConnection extends ChangeNotifier {
 
   List<SessionInfo> sessions = [];
   final Set<String> subscribedSessions = {};
+
+  /// Lazily-created terminal WebSocket service for this worker.
+  TerminalService? _terminalService;
+  TerminalService get terminalService {
+    _terminalService ??= TerminalService();
+    return _terminalService!;
+  }
 
   // Reconnection state
   static const _maxRetries = 3;
@@ -114,11 +122,23 @@ class WorkerConnection extends ChangeNotifier {
     }
   }
 
+  /// Ensure the terminal WebSocket is connected (lazy connect).
+  Future<void> ensureTerminalConnected() async {
+    if (terminalService.isConnected) return;
+    await terminalService.connect(
+      config.host,
+      config.apiKey,
+      secure: config.useSSL,
+      allowSelfSigned: config.allowSelfSigned,
+    );
+  }
+
   void disconnect() {
     _manualDisconnect = true;
     _cancelReconnect();
     subscribedSessions.clear();
     serverOs = null;
+    _terminalService?.disconnect();
     ws.disconnect();
     _inputSub?.cancel();
     _outputSub?.cancel();

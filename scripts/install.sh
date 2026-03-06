@@ -210,61 +210,48 @@ mkdir -p "$INSTALL_PREFIX/data"
 mkdir -p "$INSTALL_PREFIX/logs"
 mkdir -p "$INSTALL_PREFIX/certs"
 
-# ── Create .env configuration ───────────────────────────────────────────────
+# ── Create settings.json configuration ────────────────────────────────────────
 
-if [[ ! -f "$INSTALL_PREFIX/.env" ]]; then
+if [[ ! -f "$INSTALL_PREFIX/settings.json" ]]; then
     info "Creating default configuration..."
 
     API_KEY=$(generate_api_key)
 
-    cat > "$INSTALL_PREFIX/.env" <<ENVEOF
-# RCFlow Configuration
-# Generated during installation on $(date -Iseconds)
+    cat > "$INSTALL_PREFIX/settings.json" <<JSONEOF
+{
+  "RCFLOW_HOST": "0.0.0.0",
+  "RCFLOW_PORT": "${RCFLOW_PORT}",
+  "RCFLOW_API_KEY": "${API_KEY}",
+  "DATABASE_URL": "sqlite+aiosqlite:///${INSTALL_PREFIX}/data/rcflow.db",
+  "LLM_PROVIDER": "anthropic",
+  "ANTHROPIC_API_KEY": "",
+  "ANTHROPIC_MODEL": "claude-sonnet-4-20250514",
+  "AWS_REGION": "us-east-1",
+  "AWS_ACCESS_KEY_ID": "",
+  "AWS_SECRET_ACCESS_KEY": "",
+  "OPENAI_API_KEY": "",
+  "OPENAI_MODEL": "gpt-4o",
+  "STT_PROVIDER": "wispr_flow",
+  "STT_API_KEY": "",
+  "TTS_PROVIDER": "none",
+  "TTS_API_KEY": "",
+  "PROJECTS_DIR": "~/Projects",
+  "TOOLS_DIR": "${INSTALL_PREFIX}/tools",
+  "TOOL_AUTO_UPDATE": "true",
+  "TOOL_UPDATE_INTERVAL_HOURS": "6",
+  "LOG_LEVEL": "INFO"
+}
+JSONEOF
 
-# Server
-RCFLOW_HOST=0.0.0.0
-RCFLOW_PORT=${RCFLOW_PORT}
-RCFLOW_API_KEY=${API_KEY}
-
-# Database (SQLite default)
-DATABASE_URL=sqlite+aiosqlite:///${INSTALL_PREFIX}/data/rcflow.db
-
-# LLM Provider
-LLM_PROVIDER=anthropic
-ANTHROPIC_API_KEY=
-ANTHROPIC_MODEL=claude-sonnet-4-20250514
-
-# AWS Bedrock (alternative to direct Anthropic API)
-# AWS_REGION=us-east-1
-# AWS_ACCESS_KEY_ID=
-# AWS_SECRET_ACCESS_KEY=
-
-# Speech Services
-STT_PROVIDER=wispr_flow
-STT_API_KEY=
-TTS_PROVIDER=none
-
-# Paths
-PROJECTS_DIR=~/Projects
-TOOLS_DIR=${INSTALL_PREFIX}/tools
-
-# Tool Management
-TOOL_AUTO_UPDATE=true
-TOOL_UPDATE_INTERVAL_HOURS=6
-
-# Logging
-LOG_LEVEL=INFO
-ENVEOF
-
-    chmod 600 "$INSTALL_PREFIX/.env"
+    chmod 600 "$INSTALL_PREFIX/settings.json"
     ok "Configuration created with generated API key"
     echo ""
     echo -e "  ${YELLOW}API Key: ${API_KEY}${NC}"
     echo -e "  ${YELLOW}Save this key — you'll need it to connect clients.${NC}"
-    echo -e "  ${YELLOW}Config file: ${INSTALL_PREFIX}/.env${NC}"
+    echo -e "  ${YELLOW}Config file: ${INSTALL_PREFIX}/settings.json${NC}"
     echo ""
 else
-    ok "Existing configuration preserved at ${INSTALL_PREFIX}/.env"
+    ok "Existing configuration preserved at ${INSTALL_PREFIX}/settings.json"
 fi
 
 # ── Fix ownership ───────────────────────────────────────────────────────────
@@ -277,7 +264,7 @@ ok "Ownership set to ${SERVICE_USER}"
 info "Running database migrations..."
 cd "$INSTALL_PREFIX"
 su -s /bin/bash "$SERVICE_USER" -c "cd ${INSTALL_PREFIX} && ./rcflow migrate" || {
-    error "Migration failed. Check your DATABASE_URL in ${INSTALL_PREFIX}/.env"
+    error "Migration failed. Check your DATABASE_URL in ${INSTALL_PREFIX}/settings.json"
     error "You can retry with: cd ${INSTALL_PREFIX} && sudo -u ${SERVICE_USER} ./rcflow migrate"
 }
 ok "Database migrations complete"
@@ -297,7 +284,7 @@ After=network.target
 Type=simple
 User=${SERVICE_USER}
 WorkingDirectory=${INSTALL_PREFIX}
-EnvironmentFile=${INSTALL_PREFIX}/.env
+# Settings loaded from ${INSTALL_PREFIX}/settings.json by the application
 ExecStart=${INSTALL_PREFIX}/rcflow
 Restart=on-failure
 RestartSec=5
@@ -306,7 +293,7 @@ RestartSec=5
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=${INSTALL_PREFIX}/data ${INSTALL_PREFIX}/logs
+ReadWritePaths=${INSTALL_PREFIX}/data ${INSTALL_PREFIX}/logs ${INSTALL_PREFIX}/certs
 PrivateTmp=true
 
 [Install]
@@ -337,7 +324,7 @@ echo -e "${GREEN}║         Installation complete!           ║${NC}"
 echo -e "${GREEN}╚══════════════════════════════════════════╝${NC}"
 echo ""
 echo "  Install directory:  ${INSTALL_PREFIX}"
-echo "  Configuration:      ${INSTALL_PREFIX}/.env"
+echo "  Configuration:      ${INSTALL_PREFIX}/settings.json"
 echo "  Data directory:     ${INSTALL_PREFIX}/data"
 echo "  Logs directory:     ${INSTALL_PREFIX}/logs"
 echo ""
@@ -348,7 +335,7 @@ echo "    sudo systemctl stop rcflow      # Stop"
 echo "    journalctl -u rcflow -f         # View logs"
 echo ""
 echo "  Edit configuration:"
-echo "    sudo nano ${INSTALL_PREFIX}/.env"
+echo "    sudo nano ${INSTALL_PREFIX}/settings.json"
 echo "    sudo systemctl restart rcflow"
 echo ""
 echo "  Uninstall:"
@@ -356,7 +343,7 @@ echo "    sudo ${INSTALL_PREFIX}/uninstall.sh"
 echo ""
 
 if ! $UPGRADING; then
-    echo -e "  ${YELLOW}IMPORTANT: Edit ${INSTALL_PREFIX}/.env to set your ANTHROPIC_API_KEY${NC}"
+    echo -e "  ${YELLOW}IMPORTANT: Edit ${INSTALL_PREFIX}/settings.json to set your ANTHROPIC_API_KEY${NC}"
     echo -e "  ${YELLOW}before using the server.${NC}"
     echo ""
 fi

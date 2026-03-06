@@ -12,18 +12,18 @@ class PlanModeAskCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: EdgeInsets.symmetric(vertical: 8),
       child: Container(
         width: double.infinity,
-        padding: const EdgeInsets.all(14),
+        padding: EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: kAccentDim.withAlpha(60),
+          color: context.appColors.accentDim.withAlpha(60),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: kAccent.withAlpha(80)),
+          border: Border.all(color: context.appColors.accent.withAlpha(80)),
         ),
         child: message.accepted == null
             ? _buildPending(context)
-            : _buildResolved(),
+            : _buildResolved(context),
       ),
     );
   }
@@ -32,15 +32,15 @@ class PlanModeAskCard extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Row(
+        Row(
           children: [
-            Icon(Icons.edit_note_rounded, color: kAccentLight, size: 18),
+            Icon(Icons.edit_note_rounded, color: context.appColors.accentLight, size: 18),
             SizedBox(width: 8),
             Expanded(
               child: Text(
                 'Claude Code wants to enter plan mode',
                 style: TextStyle(
-                  color: kTextPrimary,
+                  color: context.appColors.textPrimary,
                   fontSize: 14,
                   fontWeight: FontWeight.w500,
                 ),
@@ -58,8 +58,8 @@ class PlanModeAskCard extends StatelessWidget {
                   context.read<PaneState>().sendPrompt('no');
                 },
                 style: OutlinedButton.styleFrom(
-                  foregroundColor: kTextSecondary,
-                  side: const BorderSide(color: kDivider),
+                  foregroundColor: context.appColors.textSecondary,
+                  side: BorderSide(color: context.appColors.divider),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(10),
                   ),
@@ -70,7 +70,7 @@ class PlanModeAskCard extends StatelessWidget {
                         TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
               ),
             ),
-            const SizedBox(width: 10),
+            SizedBox(width: 10),
             Expanded(
               child: FilledButton(
                 onPressed: () {
@@ -78,7 +78,7 @@ class PlanModeAskCard extends StatelessWidget {
                   context.read<PaneState>().sendPrompt('yes');
                 },
                 style: FilledButton.styleFrom(
-                  backgroundColor: kAccent,
+                  backgroundColor: context.appColors.accent,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(10),
                   ),
@@ -95,21 +95,21 @@ class PlanModeAskCard extends StatelessWidget {
     );
   }
 
-  Widget _buildResolved() {
+  Widget _buildResolved(BuildContext context) {
     final allowed = message.accepted!;
     return Row(
       children: [
         Icon(
           allowed ? Icons.edit_note_rounded : Icons.block_rounded,
-          color: allowed ? kAccentLight : kTextSecondary,
+          color: allowed ? context.appColors.accentLight : context.appColors.textSecondary,
           size: 18,
         ),
-        const SizedBox(width: 8),
+        SizedBox(width: 8),
         Expanded(
           child: Text(
             allowed ? 'Plan mode allowed' : 'Plan mode denied',
             style: TextStyle(
-              color: allowed ? kTextPrimary : kTextSecondary,
+              color: allowed ? context.appColors.textPrimary : context.appColors.textSecondary,
               fontSize: 14,
               fontWeight: FontWeight.w500,
             ),

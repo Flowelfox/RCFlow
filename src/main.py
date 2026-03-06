@@ -12,6 +12,7 @@ from src.api.ws.input_audio import router as input_audio_router
 from src.api.ws.input_text import router as input_text_router
 from src.api.ws.output_audio import router as output_audio_router
 from src.api.ws.output_text import router as output_text_router
+from src.api.ws.terminal import router as terminal_router
 from src.config import get_settings
 from src.core.llm import LLMClient
 from src.core.prompt_router import PromptRouter
@@ -23,6 +24,7 @@ from src.services.tool_manager import ToolManager
 from src.services.tool_settings import ToolSettingsManager
 from src.speech.stt import create_stt_provider
 from src.speech.tts import create_tts_provider
+from src.terminal.manager import TerminalSessionManager
 from src.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
@@ -89,6 +91,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     session_manager = SessionManager(backend_id=settings.RCFLOW_BACKEND_ID)
     app.state.session_manager = session_manager
 
+    # Terminal session manager (PTY terminals, separate from LLM sessions)
+    terminal_manager = TerminalSessionManager()
+    app.state.terminal_manager = terminal_manager
+
     # LLM client
     llm_client = LLMClient(settings, tool_registry)
     app.state.llm_client = llm_client
@@ -134,6 +140,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     update_task.cancel()
     reaper_task.cancel()
     logger.info("Shutting down RCFlow server")
+    await terminal_manager.close_all()
     await llm_client.close()
 
     async with db_session_factory() as db:
@@ -157,6 +164,7 @@ def create_app() -> FastAPI:
     app.include_router(input_audio_router)
     app.include_router(output_text_router)
     app.include_router(output_audio_router)
+    app.include_router(terminal_router)
 
     return app
 

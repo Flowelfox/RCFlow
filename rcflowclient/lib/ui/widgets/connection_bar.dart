@@ -37,29 +37,32 @@ class ConnectionBar extends StatelessWidget implements PreferredSizeWidget {
     // Green: all connected, Amber: partial, Red: none
     final Color dotColor;
     if (connecting) {
-      dotColor = kAccentLight;
+      dotColor = context.appColors.accentLight;
     } else if (!connected) {
-      dotColor = kErrorText;
+      dotColor = context.appColors.errorText;
     } else if (allConnected) {
-      dotColor = kSuccessText;
+      dotColor = context.appColors.successText;
     } else {
-      dotColor = kToolAccent;
+      dotColor = context.appColors.toolAccent;
     }
 
     return AppBar(
       titleSpacing: 16,
       title: GestureDetector(
-        onTap: () => context.read<AppState>().activePane.goHome(),
+        onTap: () {
+              final appState = context.read<AppState>();
+              if (!appState.hasNoPanes) appState.activePane.goHome();
+            },
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             if (connecting)
-              const SizedBox(
+              SizedBox(
                 width: 14,
                 height: 14,
                 child: CircularProgressIndicator(
                   strokeWidth: 2,
-                  color: kAccentLight,
+                  color: context.appColors.accentLight,
                 ),
               )
             else
@@ -79,13 +82,13 @@ class ConnectionBar extends StatelessWidget implements PreferredSizeWidget {
                   ],
                 ),
               ),
-            const SizedBox(width: 12),
+            SizedBox(width: 12),
             Text(
               connecting ? 'Connecting...' : 'RCFlow',
               style: TextStyle(
                 fontSize: 20,
                 fontWeight: FontWeight.w700,
-                color: connecting ? kTextSecondary : kTextPrimary,
+                color: connecting ? context.appColors.textSecondary : context.appColors.textPrimary,
               ),
             ),
           ],
@@ -94,37 +97,41 @@ class ConnectionBar extends StatelessWidget implements PreferredSizeWidget {
       actions: [
         if (connected && _isDesktop)
           PopupMenuButton<SplitAxis>(
-            icon: const Icon(Icons.view_column_outlined, color: kTextSecondary),
+            icon: Icon(Icons.view_column_outlined, color: context.appColors.textSecondary),
             tooltip: 'Split pane',
-            color: kBgSurface,
+            color: context.appColors.bgSurface,
             shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12)),
             onSelected: (axis) {
               final appState = context.read<AppState>();
-              appState.splitPane(appState.activePaneId, axis);
+              if (appState.hasNoPanes) {
+                appState.createNewPane();
+              } else {
+                appState.splitPane(appState.activePaneId, axis);
+              }
             },
             itemBuilder: (_) => [
-              const PopupMenuItem(
+              PopupMenuItem(
                 value: SplitAxis.horizontal,
                 child: Row(
                   children: [
                     Icon(Icons.view_column_outlined,
-                        color: kTextSecondary, size: 18),
+                        color: context.appColors.textSecondary, size: 18),
                     SizedBox(width: 10),
                     Text('Split Right',
-                        style: TextStyle(color: kTextPrimary, fontSize: 14)),
+                        style: TextStyle(color: context.appColors.textPrimary, fontSize: 14)),
                   ],
                 ),
               ),
-              const PopupMenuItem(
+              PopupMenuItem(
                 value: SplitAxis.vertical,
                 child: Row(
                   children: [
                     Icon(Icons.view_agenda_outlined,
-                        color: kTextSecondary, size: 18),
+                        color: context.appColors.textSecondary, size: 18),
                     SizedBox(width: 10),
                     Text('Split Down',
-                        style: TextStyle(color: kTextPrimary, fontSize: 14)),
+                        style: TextStyle(color: context.appColors.textPrimary, fontSize: 14)),
                   ],
                 ),
               ),
@@ -132,18 +139,18 @@ class ConnectionBar extends StatelessWidget implements PreferredSizeWidget {
           ),
         if (showSessionsButton)
           IconButton(
-            icon: const Icon(Icons.history_rounded, color: kTextSecondary),
+            icon: Icon(Icons.history_rounded, color: context.appColors.textSecondary),
             onPressed: onSessionsTap,
             tooltip: 'Sessions',
           ),
         IconButton(
-          icon: const Icon(Icons.dns_outlined, color: kTextSecondary),
+          icon: Icon(Icons.dns_outlined, color: context.appColors.textSecondary),
           onPressed: () => showWorkersScreen(context),
           tooltip: 'Workers',
         ),
         if (showSettingsButton)
           IconButton(
-            icon: const Icon(Icons.settings_outlined, color: kTextSecondary),
+            icon: Icon(Icons.settings_outlined, color: context.appColors.textSecondary),
             onPressed: () => showSettingsMenu(context),
             tooltip: 'Settings',
           ),

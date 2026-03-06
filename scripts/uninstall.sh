@@ -8,7 +8,7 @@
 # Options:
 #   --prefix /path      Install directory (default: /opt/rcflow)
 #   --keep-data         Preserve data/ directory (database)
-#   --keep-config       Preserve .env configuration
+#   --keep-config       Preserve settings.json configuration
 #   --yes               Skip confirmation prompt
 # ============================================================================
 
@@ -62,7 +62,7 @@ if ! $KEEP_DATA; then
     echo -e "${YELLOW}  Including: database, data files${NC}"
 fi
 if ! $KEEP_CONFIG; then
-    echo -e "${YELLOW}  Including: .env configuration${NC}"
+    echo -e "${YELLOW}  Including: settings.json configuration${NC}"
 fi
 echo ""
 
@@ -102,10 +102,10 @@ if $KEEP_DATA && [[ -d "$INSTALL_PREFIX/data" ]]; then
     ok "Data backed up"
 fi
 
-if $KEEP_CONFIG && [[ -f "$INSTALL_PREFIX/.env" ]]; then
-    BACKUP_CONFIG="/tmp/rcflow-env-backup-$(date +%s)"
+if $KEEP_CONFIG && [[ -f "$INSTALL_PREFIX/settings.json" ]]; then
+    BACKUP_CONFIG="/tmp/rcflow-cfg-backup-$(date +%s)"
     info "Backing up config to ${BACKUP_CONFIG}..."
-    cp "$INSTALL_PREFIX/.env" "$BACKUP_CONFIG"
+    cp "$INSTALL_PREFIX/settings.json" "$BACKUP_CONFIG"
     ok "Config backed up"
 fi
 

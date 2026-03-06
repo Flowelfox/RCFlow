@@ -26,12 +26,12 @@ class AgentGroupBlock extends StatelessWidget {
         _displayNames[message.toolName] ?? message.toolName ?? 'Agent';
 
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+      padding: EdgeInsets.symmetric(vertical: 4),
       child: Container(
         decoration: BoxDecoration(
-          color: kToolBg,
+          color: context.appColors.toolBg,
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: kDivider),
+          border: Border.all(color: context.appColors.divider),
         ),
         clipBehavior: Clip.antiAlias,
         child: Column(
@@ -47,7 +47,7 @@ class AgentGroupBlock extends StatelessWidget {
               child: Container(
                 color: Colors.transparent,
                 padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 child: Row(
                   children: [
                     if (hasChildren)
@@ -55,43 +55,43 @@ class AgentGroupBlock extends StatelessWidget {
                         expanded
                             ? Icons.expand_less_rounded
                             : Icons.expand_more_rounded,
-                        color: kAccentLight,
+                        color: context.appColors.accentLight,
                         size: 18,
                       )
                     else
-                      const SizedBox(width: 18),
-                    const SizedBox(width: 8),
+                      SizedBox(width: 18),
+                    SizedBox(width: 8),
                     if (running)
-                      const _SpinningIcon()
+                      _SpinningIcon()
                     else
-                      const Icon(
+                      Icon(
                         Icons.check_circle_outline_rounded,
-                        color: kSuccessText,
+                        color: context.appColors.successText,
                         size: 14,
                       ),
-                    const SizedBox(width: 6),
+                    SizedBox(width: 6),
                     Text(
                       displayName,
-                      style: const TextStyle(
-                        color: kAccentLight,
+                      style: TextStyle(
+                        color: context.appColors.accentLight,
                         fontSize: 13,
                         fontFamily: 'monospace',
                         fontWeight: FontWeight.w600,
                       ),
                     ),
                     if (toolCount > 0) ...[
-                      const SizedBox(width: 8),
+                      SizedBox(width: 8),
                       Container(
-                        padding: const EdgeInsets.symmetric(
+                        padding: EdgeInsets.symmetric(
                             horizontal: 6, vertical: 1),
                         decoration: BoxDecoration(
-                          color: kAccentDim,
+                          color: context.appColors.accentDim,
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: Text(
                           '$toolCount tool${toolCount == 1 ? '' : 's'}',
-                          style: const TextStyle(
-                            color: kAccentLight,
+                          style: TextStyle(
+                            color: context.appColors.accentLight,
                             fontSize: 10,
                             fontFamily: 'monospace',
                           ),
@@ -149,9 +149,9 @@ class _SpinningIconState extends State<_SpinningIcon>
   Widget build(BuildContext context) {
     return RotationTransition(
       turns: _controller,
-      child: const Icon(
+      child: Icon(
         Icons.sync_rounded,
-        color: kAccentLight,
+        color: context.appColors.accentLight,
         size: 14,
       ),
     );

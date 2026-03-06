@@ -17,7 +17,7 @@ for i in 1 2 3 4 5; do
         break
     fi
     if [ "$i" -eq 5 ]; then
-        echo "ERROR: Failed to connect. Is the emulator running? (make start-emulator)"
+        echo "ERROR: Failed to connect. Is the emulator running? (just start-emulator)"
         exit 1
     fi
     echo "    Retry $i..."
@@ -29,4 +29,4 @@ echo "==> Connected devices:"
 "$LINUX_ADB" devices
 
 echo ""
-echo "Done. You can now run: make flutter-run"
+echo "Done. You can now run: just flutter-run"

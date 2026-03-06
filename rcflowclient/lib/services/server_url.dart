@@ -35,6 +35,9 @@ class ServerUrl {
   Uri wsOutputText() =>
       Uri.parse('$_wsScheme://$host/ws/output/text?api_key=$_encodedKey');
 
+  Uri wsTerminal() =>
+      Uri.parse('$_wsScheme://$host/ws/terminal?api_key=$_encodedKey');
+
   Uri http(String path, [Map<String, String>? queryParams]) {
     final params = {'api_key': apiKey, ...?queryParams};
     return Uri.parse('$_httpScheme://$host$path')

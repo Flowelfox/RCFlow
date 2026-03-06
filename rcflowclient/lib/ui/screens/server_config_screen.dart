@@ -26,24 +26,24 @@ class _ServerConfigPage extends StatelessWidget {
   final WebSocketService ws;
   final String workerName;
 
-  const _ServerConfigPage({required this.ws, required this.workerName});
+  _ServerConfigPage({required this.ws, required this.workerName});
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: kBgBase,
+      backgroundColor: context.appColors.bgBase,
       body: Column(
         children: [
-          const CustomTitleBar(),
+          CustomTitleBar(),
           AppBar(
-            backgroundColor: kBgBase,
+            backgroundColor: context.appColors.bgBase,
             leading: IconButton(
-              icon: const Icon(Icons.arrow_back, color: kTextPrimary),
+              icon: Icon(Icons.arrow_back, color: context.appColors.textPrimary),
               onPressed: () => Navigator.of(context).pop(),
             ),
             title: Text(
               '$workerName Settings',
-              style: const TextStyle(color: kTextPrimary, fontSize: 18),
+              style: TextStyle(color: context.appColors.textPrimary, fontSize: 18),
             ),
           ),
           Expanded(
@@ -288,19 +288,19 @@ class ServerConfigContentState extends State<ServerConfigContent> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: kBgSurface,
+        backgroundColor: context.appColors.bgSurface,
         title: Text('Uninstall $displayName?',
-            style: const TextStyle(color: kTextPrimary, fontSize: 16)),
-        content: const Text('The managed binary will be removed. Settings will be preserved.',
-            style: TextStyle(color: kTextSecondary, fontSize: 13)),
+            style: TextStyle(color: context.appColors.textPrimary, fontSize: 16)),
+        content: Text('The managed binary will be removed. Settings will be preserved.',
+            style: TextStyle(color: context.appColors.textSecondary, fontSize: 13)),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Cancel'),
+            child: Text('Cancel'),
           ),
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(true),
-            style: TextButton.styleFrom(foregroundColor: kErrorText),
+            style: TextButton.styleFrom(foregroundColor: context.appColors.errorText),
             child: const Text('Uninstall'),
           ),
         ],
@@ -606,8 +606,8 @@ class ServerConfigContentState extends State<ServerConfigContent> {
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      return const Center(
-        child: CircularProgressIndicator(color: kAccent),
+      return Center(
+        child: CircularProgressIndicator(color: context.appColors.accent),
       );
     }
     if (_error != null) {
@@ -615,15 +615,15 @@ class ServerConfigContentState extends State<ServerConfigContent> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.error_outline, color: kErrorText, size: 40),
-            const SizedBox(height: 12),
+            Icon(Icons.error_outline, color: context.appColors.errorText, size: 40),
+            SizedBox(height: 12),
             Text(_error!,
-                style: const TextStyle(color: kErrorText, fontSize: 13)),
-            const SizedBox(height: 16),
+                style: TextStyle(color: context.appColors.errorText, fontSize: 13)),
+            SizedBox(height: 16),
             TextButton(
               onPressed: _loadConfig,
-              child: const Text('Retry',
-                  style: TextStyle(color: kAccentLight)),
+              child: Text('Retry',
+                  style: TextStyle(color: context.appColors.accentLight)),
             ),
           ],
         ),
@@ -637,8 +637,8 @@ class ServerConfigContentState extends State<ServerConfigContent> {
         // Sidebar
         Container(
           width: 180,
-          decoration: const BoxDecoration(
-            border: Border(right: BorderSide(color: kDivider, width: 1)),
+          decoration: BoxDecoration(
+            border: Border(right: BorderSide(color: context.appColors.divider, width: 1)),
           ),
           child: ListView(
             padding: const EdgeInsets.symmetric(vertical: 8),
@@ -675,8 +675,8 @@ class ServerConfigContentState extends State<ServerConfigContent> {
                             _saveMessage!,
                             style: TextStyle(
                               color: _saveMessage!.startsWith('Error')
-                                  ? kErrorText
-                                  : kSuccessText,
+                                  ? context.appColors.errorText
+                                  : context.appColors.successText,
                               fontSize: 12,
                             ),
                           ),
@@ -685,7 +685,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
                         FilledButton(
                           onPressed: _saving ? null : _save,
                           style: FilledButton.styleFrom(
-                            backgroundColor: kAccent,
+                            backgroundColor: context.appColors.accent,
                             foregroundColor: Colors.white,
                             padding: const EdgeInsets.symmetric(
                                 horizontal: 16, vertical: 8),
@@ -779,24 +779,24 @@ class ServerConfigContentState extends State<ServerConfigContent> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const _SectionHeader(title: 'Tools', icon: Icons.build_outlined),
+        _SectionHeader(title: 'Tools', icon: Icons.build_outlined),
         if (_toolsLoading && _tools == null)
-          const Padding(
+          Padding(
             padding: EdgeInsets.symmetric(vertical: 12),
             child: Center(
               child: SizedBox(
                 width: 20,
                 height: 20,
                 child:
-                    CircularProgressIndicator(strokeWidth: 2, color: kAccent),
+                    CircularProgressIndicator(strokeWidth: 2, color: context.appColors.accent),
               ),
             ),
           )
         else if (_toolsError != null && _tools == null)
           Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8),
+            padding: EdgeInsets.symmetric(vertical: 8),
             child: Text(_toolsError!,
-                style: const TextStyle(color: kErrorText, fontSize: 12)),
+                style: TextStyle(color: context.appColors.errorText, fontSize: 12)),
           )
         else if (_tools != null) ...[
           for (final entry in _tools!.entries)
@@ -827,9 +827,9 @@ class ServerConfigContentState extends State<ServerConfigContent> {
           ),
           if (_toolsError != null)
             Padding(
-              padding: const EdgeInsets.only(top: 6),
+              padding: EdgeInsets.only(top: 6),
               child: Text(_toolsError!,
-                  style: const TextStyle(color: kErrorText, fontSize: 11)),
+                  style: TextStyle(color: context.appColors.errorText, fontSize: 11)),
             ),
         ],
       ],
@@ -855,11 +855,11 @@ class ServerConfigContentState extends State<ServerConfigContent> {
     final progress = _toolProgress[key];
 
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+      padding: EdgeInsets.only(bottom: 8),
       child: Container(
-        padding: const EdgeInsets.all(12),
+        padding: EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: kBgElevated,
+          color: context.appColors.bgElevated,
           borderRadius: BorderRadius.circular(10),
         ),
         child: Column(
@@ -869,8 +869,8 @@ class ServerConfigContentState extends State<ServerConfigContent> {
             Row(
               children: [
                 Text(displayName,
-                    style: const TextStyle(
-                        color: kTextPrimary,
+                    style: TextStyle(
+                        color: context.appColors.textPrimary,
                         fontSize: 13,
                         fontWeight: FontWeight.w600)),
                 const SizedBox(width: 8),
@@ -896,7 +896,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
                       settingsExpanded
                           ? Icons.settings
                           : Icons.settings_outlined,
-                      color: settingsExpanded ? kAccentLight : kTextMuted,
+                      color: settingsExpanded ? context.appColors.accentLight : context.appColors.textMuted,
                     ),
                     onPressed: () {
                       setState(() {
@@ -948,34 +948,34 @@ class ServerConfigContentState extends State<ServerConfigContent> {
                 ],
               ],
             ),
-            const SizedBox(height: 6),
+            SizedBox(height: 6),
             // Version info
             if (!installed)
-              const Text('Not installed',
-                  style: TextStyle(color: kTextMuted, fontSize: 12))
+              Text('Not installed',
+                  style: TextStyle(color: context.appColors.textMuted, fontSize: 12))
             else ...[
               Row(
                 children: [
                   Text('v$currentVersion',
                       style:
-                          const TextStyle(color: kTextSecondary, fontSize: 12)),
+                          TextStyle(color: context.appColors.textSecondary, fontSize: 12)),
                   if (updateAvailable && latestVersion != null) ...[
-                    const SizedBox(width: 6),
-                    const Icon(Icons.arrow_forward_rounded,
-                        color: kTextMuted, size: 12),
-                    const SizedBox(width: 6),
+                    SizedBox(width: 6),
+                    Icon(Icons.arrow_forward_rounded,
+                        color: context.appColors.textMuted, size: 12),
+                    SizedBox(width: 6),
                     Text('v$latestVersion',
                         style:
-                            const TextStyle(color: kAccentLight, fontSize: 12)),
+                            TextStyle(color: context.appColors.accentLight, fontSize: 12)),
                   ],
                 ],
               ),
             ],
             if (error != null)
               Padding(
-                padding: const EdgeInsets.only(top: 4),
+                padding: EdgeInsets.only(top: 4),
                 child: Text(error,
-                    style: const TextStyle(color: kErrorText, fontSize: 11)),
+                    style: TextStyle(color: context.appColors.errorText, fontSize: 11)),
               ),
             // Progress bar for install/update
             if (progress != null)
@@ -1034,19 +1034,19 @@ class ServerConfigContentState extends State<ServerConfigContent> {
     }
 
     return Container(
-      padding: const EdgeInsets.all(10),
+      padding: EdgeInsets.all(10),
       decoration: BoxDecoration(
-        color: kBgSurface,
+        color: context.appColors.bgSurface,
         borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: kBgOverlay),
+        border: Border.all(color: context.appColors.bgOverlay),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
+          Text(
             'ChatGPT Authentication',
             style: TextStyle(
-              color: kTextPrimary,
+              color: context.appColors.textPrimary,
               fontSize: 12,
               fontWeight: FontWeight.w600,
             ),
@@ -1054,28 +1054,28 @@ class ServerConfigContentState extends State<ServerConfigContent> {
           const SizedBox(height: 6),
           // Status indicator
           if (_codexLoggedIn == null && _codexLoginError == null)
-            const Row(
+            Row(
               children: [
                 SizedBox(
                   width: 12,
                   height: 12,
                   child: CircularProgressIndicator(
                     strokeWidth: 1.5,
-                    color: kTextMuted,
+                    color: context.appColors.textMuted,
                   ),
                 ),
                 SizedBox(width: 8),
                 Text('Checking status...',
-                    style: TextStyle(color: kTextMuted, fontSize: 11)),
+                    style: TextStyle(color: context.appColors.textMuted, fontSize: 11)),
               ],
             )
           else if (_codexLoggedIn == true && !_codexLoggingIn)
             Row(
               children: [
-                const Icon(Icons.check_circle, color: kSuccessText, size: 14),
-                const SizedBox(width: 6),
-                const Text('Logged in',
-                    style: TextStyle(color: kSuccessText, fontSize: 11)),
+                Icon(Icons.check_circle, color: context.appColors.successText, size: 14),
+                SizedBox(width: 6),
+                Text('Logged in',
+                    style: TextStyle(color: context.appColors.successText, fontSize: 11)),
                 const Spacer(),
                 _ToolActionButton(
                   label: 'Re-login',
@@ -1088,11 +1088,11 @@ class ServerConfigContentState extends State<ServerConfigContent> {
           else if (!_codexLoggingIn) ...[
             Row(
               children: [
-                const Icon(Icons.cancel_outlined,
-                    color: kTextMuted, size: 14),
-                const SizedBox(width: 6),
-                const Text('Not logged in',
-                    style: TextStyle(color: kTextMuted, fontSize: 11)),
+                Icon(Icons.cancel_outlined,
+                    color: context.appColors.textMuted, size: 14),
+                SizedBox(width: 6),
+                Text('Not logged in',
+                    style: TextStyle(color: context.appColors.textMuted, fontSize: 11)),
               ],
             ),
             const SizedBox(height: 8),
@@ -1122,24 +1122,24 @@ class ServerConfigContentState extends State<ServerConfigContent> {
           if (_codexLoggingIn) ...[
             // Browser OAuth flow — URL opened automatically
             if (_codexAuthUrl != null) ...[
-              const SizedBox(height: 8),
+              SizedBox(height: 8),
               Container(
                 width: double.infinity,
-                padding: const EdgeInsets.all(10),
+                padding: EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: kBgBase,
+                  color: context.appColors.bgBase,
                   borderRadius: BorderRadius.circular(4),
                 ),
                 child: Column(
                   children: [
-                    const Text(
+                    Text(
                       'Complete sign-in in your browser.',
-                      style: TextStyle(color: kTextSecondary, fontSize: 11),
+                      style: TextStyle(color: context.appColors.textSecondary, fontSize: 11),
                     ),
-                    const SizedBox(height: 6),
-                    const Text(
+                    SizedBox(height: 6),
+                    Text(
                       'If the browser did not open, click the link:',
-                      style: TextStyle(color: kTextMuted, fontSize: 10),
+                      style: TextStyle(color: context.appColors.textMuted, fontSize: 10),
                     ),
                     const SizedBox(height: 4),
                     GestureDetector(
@@ -1151,8 +1151,8 @@ class ServerConfigContentState extends State<ServerConfigContent> {
                         _codexAuthUrl!.length > 80
                             ? '${_codexAuthUrl!.substring(0, 80)}...'
                             : _codexAuthUrl!,
-                        style: const TextStyle(
-                          color: kAccentLight,
+                        style: TextStyle(
+                          color: context.appColors.accentLight,
                           fontSize: 10,
                           decoration: TextDecoration.underline,
                         ),
@@ -1161,50 +1161,50 @@ class ServerConfigContentState extends State<ServerConfigContent> {
                   ],
                 ),
               ),
-              const SizedBox(height: 6),
-              const Row(
+              SizedBox(height: 6),
+              Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   SizedBox(
                     width: 12,
                     height: 12,
                     child: CircularProgressIndicator(
-                      strokeWidth: 1.5, color: kAccent),
+                      strokeWidth: 1.5, color: context.appColors.accent),
                   ),
                   SizedBox(width: 8),
                   Text('Waiting for browser authentication...',
-                      style: TextStyle(color: kTextMuted, fontSize: 11)),
+                      style: TextStyle(color: context.appColors.textMuted, fontSize: 11)),
                 ],
               ),
             ]
             // Device code flow
             else if (_codexDeviceCode != null &&
                 _codexDeviceUrl != null) ...[
-              const SizedBox(height: 8),
+              SizedBox(height: 8),
               Container(
                 width: double.infinity,
-                padding: const EdgeInsets.all(10),
+                padding: EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: kBgBase,
+                  color: context.appColors.bgBase,
                   borderRadius: BorderRadius.circular(4),
                 ),
                 child: Column(
                   children: [
-                    const Text(
+                    Text(
                       'Enter this code in your browser:',
-                      style: TextStyle(color: kTextSecondary, fontSize: 11),
+                      style: TextStyle(color: context.appColors.textSecondary, fontSize: 11),
                     ),
-                    const SizedBox(height: 6),
+                    SizedBox(height: 6),
                     SelectableText(
                       _codexDeviceCode!,
-                      style: const TextStyle(
-                        color: kAccentLight,
+                      style: TextStyle(
+                        color: context.appColors.accentLight,
                         fontSize: 20,
                         fontWeight: FontWeight.bold,
                         letterSpacing: 3,
                       ),
                     ),
-                    const SizedBox(height: 6),
+                    SizedBox(height: 6),
                     GestureDetector(
                       onTap: () => launchUrl(
                         Uri.parse(_codexDeviceUrl!),
@@ -1212,8 +1212,8 @@ class ServerConfigContentState extends State<ServerConfigContent> {
                       ),
                       child: Text(
                         _codexDeviceUrl!,
-                        style: const TextStyle(
-                          color: kAccentLight,
+                        style: TextStyle(
+                          color: context.appColors.accentLight,
                           fontSize: 11,
                           decoration: TextDecoration.underline,
                         ),
@@ -1222,43 +1222,43 @@ class ServerConfigContentState extends State<ServerConfigContent> {
                   ],
                 ),
               ),
-              const SizedBox(height: 6),
-              const Row(
+              SizedBox(height: 6),
+              Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   SizedBox(
                     width: 12,
                     height: 12,
                     child: CircularProgressIndicator(
-                      strokeWidth: 1.5, color: kAccent),
+                      strokeWidth: 1.5, color: context.appColors.accent),
                   ),
                   SizedBox(width: 8),
                   Text('Waiting for browser authentication...',
-                      style: TextStyle(color: kTextMuted, fontSize: 11)),
+                      style: TextStyle(color: context.appColors.textMuted, fontSize: 11)),
                 ],
               ),
             ] else ...[
-              const SizedBox(height: 6),
-              const Row(
+              SizedBox(height: 6),
+              Row(
                 children: [
                   SizedBox(
                     width: 12,
                     height: 12,
                     child: CircularProgressIndicator(
-                      strokeWidth: 1.5, color: kAccent),
+                      strokeWidth: 1.5, color: context.appColors.accent),
                   ),
                   SizedBox(width: 8),
                   Text('Starting login...',
-                      style: TextStyle(color: kTextMuted, fontSize: 11)),
+                      style: TextStyle(color: context.appColors.textMuted, fontSize: 11)),
                 ],
               ),
             ],
           ],
           if (_codexLoginError != null)
             Padding(
-              padding: const EdgeInsets.only(top: 4),
+              padding: EdgeInsets.only(top: 4),
               child: Text(_codexLoginError!,
-                  style: const TextStyle(color: kErrorText, fontSize: 10)),
+                  style: TextStyle(color: context.appColors.errorText, fontSize: 10)),
             ),
         ],
       ),
@@ -1276,24 +1276,24 @@ class ServerConfigContentState extends State<ServerConfigContent> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Divider(color: kBgOverlay, height: 16),
+        Divider(color: context.appColors.bgOverlay, height: 16),
         if (loading && fields == null)
-          const Padding(
+          Padding(
             padding: EdgeInsets.symmetric(vertical: 8),
             child: Center(
               child: SizedBox(
                 width: 16,
                 height: 16,
                 child: CircularProgressIndicator(
-                    strokeWidth: 2, color: kAccent),
+                    strokeWidth: 2, color: context.appColors.accent),
               ),
             ),
           )
         else if (error != null && fields == null)
           Padding(
-            padding: const EdgeInsets.symmetric(vertical: 4),
+            padding: EdgeInsets.symmetric(vertical: 4),
             child: Text(error,
-                style: const TextStyle(color: kErrorText, fontSize: 11)),
+                style: TextStyle(color: context.appColors.errorText, fontSize: 11)),
           )
         else if (fields != null) ...[
           for (final field in fields) ...[
@@ -1324,9 +1324,9 @@ class ServerConfigContentState extends State<ServerConfigContent> {
             ),
           if (error != null)
             Padding(
-              padding: const EdgeInsets.only(top: 4),
+              padding: EdgeInsets.only(top: 4),
               child: Text(error,
-                  style: const TextStyle(color: kErrorText, fontSize: 11)),
+                  style: TextStyle(color: context.appColors.errorText, fontSize: 11)),
             ),
         ],
       ],
@@ -1366,16 +1366,16 @@ class ServerConfigContentState extends State<ServerConfigContent> {
             SwitchListTile(
               title: Text(label,
                   style:
-                      const TextStyle(color: kTextPrimary, fontSize: 13)),
+                      TextStyle(color: context.appColors.textPrimary, fontSize: 13)),
               value: currentValue is bool ? currentValue : currentValue == true,
-              activeTrackColor: kAccent,
+              activeTrackColor: context.appColors.accent,
               contentPadding: EdgeInsets.zero,
               dense: true,
               onChanged: (v) => onChanged(v),
             ),
             if (description.isNotEmpty)
               Text(description,
-                  style: const TextStyle(color: kTextMuted, fontSize: 10)),
+                  style: TextStyle(color: context.appColors.textMuted, fontSize: 10)),
           ],
         );
       case 'select':
@@ -1384,9 +1384,9 @@ class ServerConfigContentState extends State<ServerConfigContent> {
             [];
         final values = options.map((o) => o['value'] as String).toList();
         input = Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10),
+          padding: EdgeInsets.symmetric(horizontal: 10),
           decoration: BoxDecoration(
-            color: kBgSurface,
+            color: context.appColors.bgSurface,
             borderRadius: BorderRadius.circular(8),
           ),
           child: DropdownButtonHideUnderline(
@@ -1395,8 +1395,8 @@ class ServerConfigContentState extends State<ServerConfigContent> {
                   ? currentValue?.toString()
                   : null,
               isExpanded: true,
-              dropdownColor: kBgSurface,
-              style: const TextStyle(color: kTextPrimary, fontSize: 13),
+              dropdownColor: context.appColors.bgSurface,
+              style: TextStyle(color: context.appColors.textPrimary, fontSize: 13),
               items: options
                   .map((o) => DropdownMenuItem(
                       value: o['value'] as String,
@@ -1421,7 +1421,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
         final controller = _toolSettingsControllers[toolName]?[key];
         input = TextField(
           controller: controller,
-          style: const TextStyle(color: kTextPrimary, fontSize: 13),
+          style: TextStyle(color: context.appColors.textPrimary, fontSize: 13),
           maxLines: 3,
           minLines: 2,
           onChanged: (v) {
@@ -1434,34 +1434,34 @@ class ServerConfigContentState extends State<ServerConfigContent> {
           },
           decoration: InputDecoration(
             hintText: 'One entry per line',
-            hintStyle: const TextStyle(color: kTextMuted, fontSize: 12),
-            fillColor: kBgSurface,
+            hintStyle: TextStyle(color: context.appColors.textMuted, fontSize: 12),
+            fillColor: context.appColors.bgSurface,
             filled: true,
             border: OutlineInputBorder(
               borderSide: BorderSide.none,
               borderRadius: BorderRadius.circular(8),
             ),
             contentPadding:
-                const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                EdgeInsets.symmetric(horizontal: 10, vertical: 8),
           ),
         );
       default:
         final controller = _toolSettingsControllers[toolName]?[key];
         input = TextField(
           controller: controller,
-          style: const TextStyle(color: kTextPrimary, fontSize: 13),
+          style: TextStyle(color: context.appColors.textPrimary, fontSize: 13),
           onChanged: (v) => onChanged(v),
           decoration: InputDecoration(
             hintText: label,
-            hintStyle: const TextStyle(color: kTextMuted, fontSize: 12),
-            fillColor: kBgSurface,
+            hintStyle: TextStyle(color: context.appColors.textMuted, fontSize: 12),
+            fillColor: context.appColors.bgSurface,
             filled: true,
             border: OutlineInputBorder(
               borderSide: BorderSide.none,
               borderRadius: BorderRadius.circular(8),
             ),
             contentPadding:
-                const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                EdgeInsets.symmetric(horizontal: 10, vertical: 8),
           ),
         );
     }
@@ -1470,14 +1470,14 @@ class ServerConfigContentState extends State<ServerConfigContent> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(label,
-            style: const TextStyle(color: kTextSecondary, fontSize: 11)),
-        const SizedBox(height: 4),
+            style: TextStyle(color: context.appColors.textSecondary, fontSize: 11)),
+        SizedBox(height: 4),
         input,
         if (description.isNotEmpty)
           Padding(
-            padding: const EdgeInsets.only(top: 3),
+            padding: EdgeInsets.only(top: 3),
             child: Text(description,
-                style: const TextStyle(color: kTextMuted, fontSize: 10)),
+                style: TextStyle(color: context.appColors.textMuted, fontSize: 10)),
           ),
       ],
     );
@@ -1540,24 +1540,24 @@ class _SectionHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
+      padding: EdgeInsets.only(bottom: 16),
       child: Row(
         children: [
-          Icon(icon, color: kAccentLight, size: 20),
-          const SizedBox(width: 8),
+          Icon(icon, color: context.appColors.accentLight, size: 20),
+          SizedBox(width: 8),
           Text(
             title,
-            style: const TextStyle(
-              color: kTextPrimary,
+            style: TextStyle(
+              color: context.appColors.textPrimary,
               fontSize: 17,
               fontWeight: FontWeight.w600,
             ),
           ),
           if (hasModified)
-            const Padding(
+            Padding(
               padding: EdgeInsets.only(left: 8),
               child: Text('\u2022 modified',
-                  style: TextStyle(color: kAccentLight, fontSize: 10)),
+                  style: TextStyle(color: context.appColors.accentLight, fontSize: 10)),
             ),
         ],
       ),
@@ -1583,26 +1583,26 @@ class _ConfigSidebarItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      padding: EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       child: Material(
-        color: selected ? kBgElevated : Colors.transparent,
+        color: selected ? context.appColors.bgElevated : Colors.transparent,
         borderRadius: BorderRadius.circular(10),
         child: InkWell(
           borderRadius: BorderRadius.circular(10),
           onTap: onTap,
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             child: Row(
               children: [
                 Icon(icon,
                     size: 18,
-                    color: selected ? kAccentLight : kTextMuted),
-                const SizedBox(width: 10),
+                    color: selected ? context.appColors.accentLight : context.appColors.textMuted),
+                SizedBox(width: 10),
                 Expanded(
                   child: Text(
                     label,
                     style: TextStyle(
-                      color: selected ? kTextPrimary : kTextSecondary,
+                      color: selected ? context.appColors.textPrimary : context.appColors.textSecondary,
                       fontSize: 14,
                       fontWeight:
                           selected ? FontWeight.w600 : FontWeight.normal,
@@ -1614,8 +1614,8 @@ class _ConfigSidebarItem extends StatelessWidget {
                   Container(
                     width: 6,
                     height: 6,
-                    decoration: const BoxDecoration(
-                      color: kAccentLight,
+                    decoration: BoxDecoration(
+                      color: context.appColors.accentLight,
                       shape: BoxShape.circle,
                     ),
                   ),
@@ -1652,11 +1652,11 @@ class _TextField extends StatelessWidget {
       isModified: isModified,
       child: TextField(
         controller: controller,
-        style: const TextStyle(color: kTextPrimary, fontSize: 14),
+        style: TextStyle(color: context.appColors.textPrimary, fontSize: 14),
         onChanged: onChanged,
         decoration: InputDecoration(
           hintText: option.label,
-          fillColor: kBgElevated,
+          fillColor: context.appColors.bgElevated,
           border: OutlineInputBorder(
             borderSide: BorderSide.none,
             borderRadius: BorderRadius.circular(10),
@@ -1699,23 +1699,23 @@ class _SecretFieldState extends State<_SecretField> {
           ? TextField(
               controller: widget.controller,
               obscureText: _obscure,
-              style: const TextStyle(color: kTextPrimary, fontSize: 14),
+              style: TextStyle(color: context.appColors.textPrimary, fontSize: 14),
               onChanged: widget.onChanged,
               decoration: InputDecoration(
                 hintText: 'Enter new value',
-                fillColor: kBgElevated,
+                fillColor: context.appColors.bgElevated,
                 border: OutlineInputBorder(
                   borderSide: BorderSide.none,
                   borderRadius: BorderRadius.circular(10),
                 ),
                 contentPadding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 suffixIcon: IconButton(
                   icon: Icon(
                     _obscure
                         ? Icons.visibility_off_outlined
                         : Icons.visibility_outlined,
-                    color: kTextMuted,
+                    color: context.appColors.textMuted,
                     size: 18,
                   ),
                   onPressed: () => setState(() => _obscure = !_obscure),
@@ -1726,27 +1726,27 @@ class _SecretFieldState extends State<_SecretField> {
               children: [
                 Expanded(
                   child: Container(
-                    padding: const EdgeInsets.symmetric(
+                    padding: EdgeInsets.symmetric(
                         horizontal: 12, vertical: 10),
                     decoration: BoxDecoration(
-                      color: kBgElevated,
+                      color: context.appColors.bgElevated,
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: Text(
                       widget.option.value?.toString() ?? '',
                       style:
-                          const TextStyle(color: kTextSecondary, fontSize: 14),
+                          TextStyle(color: context.appColors.textSecondary, fontSize: 14),
                     ),
                   ),
                 ),
-                const SizedBox(width: 8),
+                SizedBox(width: 8),
                 TextButton(
                   onPressed: () {
                     widget.controller.clear();
                     setState(() => _editing = true);
                   },
-                  child: const Text('Change',
-                      style: TextStyle(color: kAccentLight, fontSize: 12)),
+                  child: Text('Change',
+                      style: TextStyle(color: context.appColors.accentLight, fontSize: 12)),
                 ),
               ],
             ),
@@ -1775,19 +1775,19 @@ class _SelectField extends StatelessWidget {
       option: option,
       isModified: isModified,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12),
+        padding: EdgeInsets.symmetric(horizontal: 12),
         decoration: BoxDecoration(
-          color: kBgElevated,
+          color: context.appColors.bgElevated,
           borderRadius: BorderRadius.circular(10),
         ),
         child: DropdownButtonHideUnderline(
           child: DropdownButton<String>(
             value: values.contains(value) ? value : null,
             isExpanded: true,
-            dropdownColor: kBgSurface,
-            style: const TextStyle(color: kTextPrimary, fontSize: 14),
+            dropdownColor: context.appColors.bgSurface,
+            style: TextStyle(color: context.appColors.textPrimary, fontSize: 14),
             hint: Text(option.label,
-                style: const TextStyle(color: kTextMuted, fontSize: 14)),
+                style: TextStyle(color: context.appColors.textMuted, fontSize: 14)),
             items: items
                 .map((o) =>
                     DropdownMenuItem(value: o.value, child: Text(o.label)))
@@ -1822,9 +1822,9 @@ class _BoolField extends StatelessWidget {
       isModified: isModified,
       child: SwitchListTile(
         title: Text(option.label,
-            style: const TextStyle(color: kTextPrimary, fontSize: 14)),
+            style: TextStyle(color: context.appColors.textPrimary, fontSize: 14)),
         value: value,
-        activeTrackColor: kAccent,
+        activeTrackColor: context.appColors.accent,
         contentPadding: EdgeInsets.zero,
         onChanged: onChanged,
       ),
@@ -1867,8 +1867,8 @@ class _ToolSecretFieldState extends State<_ToolSecretField> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(widget.label,
-            style: const TextStyle(color: kTextSecondary, fontSize: 11)),
-        const SizedBox(height: 4),
+            style: TextStyle(color: context.appColors.textSecondary, fontSize: 11)),
+        SizedBox(height: 4),
         if (!_editing) ...[
           Row(
             children: [
@@ -1876,7 +1876,7 @@ class _ToolSecretFieldState extends State<_ToolSecretField> {
                 child: Text(
                   hasValue ? widget.maskedValue : 'Not set',
                   style: TextStyle(
-                    color: hasValue ? kTextPrimary : kTextMuted,
+                    color: hasValue ? context.appColors.textPrimary : context.appColors.textMuted,
                     fontSize: 13,
                     fontFamily: 'monospace',
                   ),
@@ -1891,13 +1891,13 @@ class _ToolSecretFieldState extends State<_ToolSecretField> {
                     widget.controller?.clear();
                   }),
                   style: TextButton.styleFrom(
-                    foregroundColor: kAccent,
+                    foregroundColor: context.appColors.accent,
                     padding: const EdgeInsets.symmetric(horizontal: 8),
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(6)),
                   ),
                   child: Text(hasValue ? 'Change' : 'Set',
-                      style: const TextStyle(fontSize: 11)),
+                      style: TextStyle(fontSize: 11)),
                 ),
               ),
             ],
@@ -1906,19 +1906,19 @@ class _ToolSecretFieldState extends State<_ToolSecretField> {
           TextField(
             controller: widget.controller,
             obscureText: _obscure,
-            style: const TextStyle(color: kTextPrimary, fontSize: 13),
+            style: TextStyle(color: context.appColors.textPrimary, fontSize: 13),
             onChanged: (v) => widget.onChanged(v),
             decoration: InputDecoration(
               hintText: 'Enter new value',
-              hintStyle: const TextStyle(color: kTextMuted, fontSize: 12),
-              fillColor: kBgSurface,
+              hintStyle: TextStyle(color: context.appColors.textMuted, fontSize: 12),
+              fillColor: context.appColors.bgSurface,
               filled: true,
               border: OutlineInputBorder(
                 borderSide: BorderSide.none,
                 borderRadius: BorderRadius.circular(8),
               ),
               contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  EdgeInsets.symmetric(horizontal: 10, vertical: 8),
               suffixIcon: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -1926,13 +1926,13 @@ class _ToolSecretFieldState extends State<_ToolSecretField> {
                     icon: Icon(
                       _obscure ? Icons.visibility_off : Icons.visibility,
                       size: 18,
-                      color: kTextMuted,
+                      color: context.appColors.textMuted,
                     ),
                     onPressed: () => setState(() => _obscure = !_obscure),
                     splashRadius: 16,
                   ),
                   IconButton(
-                    icon: const Icon(Icons.close, size: 18, color: kTextMuted),
+                    icon: Icon(Icons.close, size: 18, color: context.appColors.textMuted),
                     onPressed: () => setState(() {
                       _editing = false;
                       widget.controller?.clear();
@@ -1948,9 +1948,9 @@ class _ToolSecretFieldState extends State<_ToolSecretField> {
           ),
         if (widget.description.isNotEmpty)
           Padding(
-            padding: const EdgeInsets.only(top: 3),
+            padding: EdgeInsets.only(top: 3),
             child: Text(widget.description,
-                style: const TextStyle(color: kTextMuted, fontSize: 10)),
+                style: TextStyle(color: context.appColors.textMuted, fontSize: 10)),
           ),
       ],
     );
@@ -1979,18 +1979,18 @@ class _ToolActionButton extends StatelessWidget {
       child: TextButton(
         onPressed: onPressed,
         style: TextButton.styleFrom(
-          backgroundColor: accent ? kAccent : kBgElevated,
-          foregroundColor: accent ? Colors.white : kTextSecondary,
-          padding: const EdgeInsets.symmetric(horizontal: 12),
+          backgroundColor: accent ? context.appColors.accent : context.appColors.bgElevated,
+          foregroundColor: accent ? Colors.white : context.appColors.textSecondary,
+          padding: EdgeInsets.symmetric(horizontal: 12),
           shape:
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         ),
         child: loading
-            ? const SizedBox(
+            ? SizedBox(
                 width: 14,
                 height: 14,
                 child: CircularProgressIndicator(
-                    strokeWidth: 2, color: kTextSecondary),
+                    strokeWidth: 2, color: context.appColors.textSecondary),
               )
             : Text(label, style: const TextStyle(fontSize: 12)),
       ),
@@ -2024,22 +2024,22 @@ class _ToolProgressBar extends StatelessWidget {
             child: pct != null
                 ? LinearProgressIndicator(
                     value: pct,
-                    backgroundColor: kBgOverlay,
+                    backgroundColor: context.appColors.bgOverlay,
                     valueColor:
-                        const AlwaysStoppedAnimation<Color>(kAccent),
+                        AlwaysStoppedAnimation<Color>(context.appColors.accent),
                   )
-                : const LinearProgressIndicator(
-                    backgroundColor: kBgOverlay,
+                : LinearProgressIndicator(
+                    backgroundColor: context.appColors.bgOverlay,
                     valueColor:
-                        AlwaysStoppedAnimation<Color>(kAccent),
+                        AlwaysStoppedAnimation<Color>(context.appColors.accent),
                   ),
           ),
         ),
         if (message.isNotEmpty)
           Padding(
-            padding: const EdgeInsets.only(top: 3),
+            padding: EdgeInsets.only(top: 3),
             child: Text(message,
-                style: const TextStyle(color: kTextMuted, fontSize: 10)),
+                style: TextStyle(color: context.appColors.textMuted, fontSize: 10)),
           ),
       ],
     );
@@ -2054,19 +2054,19 @@ class _SourceBadge extends StatelessWidget {
   final String label;
   final bool accent;
 
-  const _SourceBadge({required this.label, required this.accent});
+  _SourceBadge({required this.label, required this.accent});
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
-        color: accent ? kAccentDim : kBgOverlay,
+        color: accent ? context.appColors.accentDim : context.appColors.bgOverlay,
         borderRadius: BorderRadius.circular(4),
       ),
       child: Text(label,
           style: TextStyle(
-            color: accent ? kAccentLight : kTextMuted,
+            color: accent ? context.appColors.accentLight : context.appColors.textMuted,
             fontSize: 9,
           )),
     );
@@ -2091,40 +2091,40 @@ class _SourceToggle extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (switching) {
-      return const SizedBox(
+      return SizedBox(
         width: 14,
         height: 14,
-        child: CircularProgressIndicator(strokeWidth: 2, color: kAccentLight),
+        child: CircularProgressIndicator(strokeWidth: 2, color: context.appColors.accentLight),
       );
     }
     return Container(
       height: 22,
       decoration: BoxDecoration(
-        color: kBgOverlay,
+        color: context.appColors.bgOverlay,
         borderRadius: BorderRadius.circular(4),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          _toggleOption('managed', managed, () => onSwitch(true)),
-          _toggleOption('external', !managed, () => onSwitch(false)),
+          _toggleOption(context, 'managed', managed, () => onSwitch(true)),
+          _toggleOption(context, 'external', !managed, () => onSwitch(false)),
         ],
       ),
     );
   }
 
-  Widget _toggleOption(String label, bool active, VoidCallback onTap) {
+  Widget _toggleOption(BuildContext context, String label, bool active, VoidCallback onTap) {
     return GestureDetector(
       onTap: active ? null : onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
         decoration: BoxDecoration(
-          color: active ? kAccentDim : Colors.transparent,
+          color: active ? context.appColors.accentDim : Colors.transparent,
           borderRadius: BorderRadius.circular(4),
         ),
         child: Text(label,
             style: TextStyle(
-              color: active ? kAccentLight : kTextMuted,
+              color: active ? context.appColors.accentLight : context.appColors.textMuted,
               fontSize: 9,
               fontWeight: active ? FontWeight.w600 : FontWeight.normal,
             )),
@@ -2159,34 +2159,34 @@ class _FieldWrapper extends StatelessWidget {
               Text(
                 option.label,
                 style: TextStyle(
-                  color: isModified ? kAccentLight : kTextSecondary,
+                  color: isModified ? context.appColors.accentLight : context.appColors.textSecondary,
                   fontSize: 12,
                   fontWeight:
                       isModified ? FontWeight.w600 : FontWeight.normal,
                 ),
               ),
               if (option.restartRequired)
-                const Padding(
+                Padding(
                   padding: EdgeInsets.only(left: 6),
                   child: Text('restart required',
-                      style: TextStyle(color: kToolAccent, fontSize: 10)),
+                      style: TextStyle(color: context.appColors.toolAccent, fontSize: 10)),
                 ),
               if (isModified)
-                const Padding(
+                Padding(
                   padding: EdgeInsets.only(left: 6),
                   child: Text('\u2022 modified',
-                      style: TextStyle(color: kAccentLight, fontSize: 10)),
+                      style: TextStyle(color: context.appColors.accentLight, fontSize: 10)),
                 ),
             ],
           ),
-        if (option.type != 'boolean') const SizedBox(height: 4),
+        if (option.type != 'boolean') SizedBox(height: 4),
         child,
         if (option.description.isNotEmpty)
           Padding(
-            padding: const EdgeInsets.only(top: 4),
+            padding: EdgeInsets.only(top: 4),
             child: Text(
               option.description,
-              style: const TextStyle(color: kTextMuted, fontSize: 11),
+              style: TextStyle(color: context.appColors.textMuted, fontSize: 11),
             ),
           ),
       ],

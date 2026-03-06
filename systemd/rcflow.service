@@ -1,15 +1,22 @@
 [Unit]
 Description=RCFlow Action Server
-After=network.target postgresql.service
+After=network.target
 
 [Service]
 Type=simple
 User=rcflow
 WorkingDirectory=/opt/rcflow
-EnvironmentFile=/opt/rcflow/.env
-ExecStart=/opt/rcflow/.venv/bin/rcflow
+# Settings loaded from /opt/rcflow/settings.json by the application
+ExecStart=/opt/rcflow/rcflow
 Restart=on-failure
 RestartSec=5
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/opt/rcflow/data /opt/rcflow/logs /opt/rcflow/certs
+PrivateTmp=true
 
 [Install]
 WantedBy=multi-user.target

@@ -26,14 +26,14 @@ class _PlanReviewAskCardState extends State<PlanReviewAskCard> {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: EdgeInsets.symmetric(vertical: 8),
       child: Container(
         width: double.infinity,
-        padding: const EdgeInsets.all(14),
+        padding: EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: kAccentDim.withAlpha(60),
+          color: context.appColors.accentDim.withAlpha(60),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: kAccent.withAlpha(80)),
+          border: Border.all(color: context.appColors.accent.withAlpha(80)),
         ),
         child: widget.message.accepted == null
             ? _buildPending(context)
@@ -46,15 +46,15 @@ class _PlanReviewAskCardState extends State<PlanReviewAskCard> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Row(
+        Row(
           children: [
-            Icon(Icons.assignment_rounded, color: kAccentLight, size: 18),
+            Icon(Icons.assignment_rounded, color: context.appColors.accentLight, size: 18),
             SizedBox(width: 8),
             Expanded(
               child: Text(
                 'Plan ready for review',
                 style: TextStyle(
-                  color: kTextPrimary,
+                  color: context.appColors.textPrimary,
                   fontSize: 14,
                   fontWeight: FontWeight.w500,
                 ),
@@ -62,20 +62,20 @@ class _PlanReviewAskCardState extends State<PlanReviewAskCard> {
             ),
           ],
         ),
-        const SizedBox(height: 12),
+        SizedBox(height: 12),
         if (_editing) ...[
           TextField(
             controller: _controller,
             autofocus: true,
-            style: const TextStyle(color: kTextPrimary, fontSize: 13),
+            style: TextStyle(color: context.appColors.textPrimary, fontSize: 13),
             maxLines: 3,
             minLines: 1,
             decoration: InputDecoration(
               hintText: 'Describe what to change...',
               isDense: true,
               contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              fillColor: kBgOverlay,
+                  EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              fillColor: context.appColors.bgOverlay,
               border: OutlineInputBorder(
                 borderSide: BorderSide.none,
                 borderRadius: BorderRadius.circular(8),
@@ -83,15 +83,15 @@ class _PlanReviewAskCardState extends State<PlanReviewAskCard> {
             ),
             onChanged: (_) => setState(() {}),
           ),
-          const SizedBox(height: 10),
+          SizedBox(height: 10),
           Row(
             children: [
               Expanded(
                 child: OutlinedButton(
                   onPressed: () => setState(() => _editing = false),
                   style: OutlinedButton.styleFrom(
-                    foregroundColor: kTextSecondary,
-                    side: const BorderSide(color: kDivider),
+                    foregroundColor: context.appColors.textSecondary,
+                    side: BorderSide(color: context.appColors.divider),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(10),
                     ),
@@ -114,8 +114,8 @@ class _PlanReviewAskCardState extends State<PlanReviewAskCard> {
                               .sendPrompt(_controller.text.trim());
                         },
                   style: FilledButton.styleFrom(
-                    backgroundColor: kAccent,
-                    disabledBackgroundColor: kBgElevated,
+                    backgroundColor: context.appColors.accent,
+                    disabledBackgroundColor: context.appColors.bgElevated,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(10),
                     ),
@@ -135,8 +135,8 @@ class _PlanReviewAskCardState extends State<PlanReviewAskCard> {
                 child: OutlinedButton(
                   onPressed: () => setState(() => _editing = true),
                   style: OutlinedButton.styleFrom(
-                    foregroundColor: kTextSecondary,
-                    side: const BorderSide(color: kDivider),
+                    foregroundColor: context.appColors.textSecondary,
+                    side: BorderSide(color: context.appColors.divider),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(10),
                     ),
@@ -157,7 +157,7 @@ class _PlanReviewAskCardState extends State<PlanReviewAskCard> {
                         .sendPrompt('Looks good, proceed with the plan.');
                   },
                   style: FilledButton.styleFrom(
-                    backgroundColor: kAccent,
+                    backgroundColor: context.appColors.accent,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(10),
                     ),
@@ -180,15 +180,15 @@ class _PlanReviewAskCardState extends State<PlanReviewAskCard> {
       children: [
         Icon(
           approved ? Icons.check_circle_rounded : Icons.rate_review_rounded,
-          color: approved ? kSuccessText : kAccentLight,
+          color: approved ? context.appColors.successText : context.appColors.accentLight,
           size: 18,
         ),
-        const SizedBox(width: 8),
+        SizedBox(width: 8),
         Expanded(
           child: Text(
             approved ? 'Plan approved' : 'Plan feedback sent',
             style: TextStyle(
-              color: approved ? kTextPrimary : kTextSecondary,
+              color: approved ? context.appColors.textPrimary : context.appColors.textSecondary,
               fontSize: 14,
               fontWeight: FontWeight.w500,
             ),

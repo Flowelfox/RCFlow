@@ -12,18 +12,18 @@ class SessionEndAskCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: EdgeInsets.symmetric(vertical: 8),
       child: Container(
         width: double.infinity,
-        padding: const EdgeInsets.all(14),
+        padding: EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: kAccentDim.withAlpha(60),
+          color: context.appColors.accentDim.withAlpha(60),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: kAccent.withAlpha(80)),
+          border: Border.all(color: context.appColors.accent.withAlpha(80)),
         ),
         child: message.accepted == null
             ? _buildPending(context)
-            : _buildResolved(),
+            : _buildResolved(context),
       ),
     );
   }
@@ -34,14 +34,14 @@ class SessionEndAskCard extends StatelessWidget {
       children: [
         Row(
           children: [
-            const Icon(Icons.check_circle_rounded,
-                color: kSuccessText, size: 18),
-            const SizedBox(width: 8),
-            const Expanded(
+            Icon(Icons.check_circle_rounded,
+                color: context.appColors.successText, size: 18),
+            SizedBox(width: 8),
+            Expanded(
               child: Text(
                 'Task complete. End this chat?',
                 style: TextStyle(
-                  color: kTextPrimary,
+                  color: context.appColors.textPrimary,
                   fontSize: 14,
                   fontWeight: FontWeight.w500,
                 ),
@@ -49,7 +49,7 @@ class SessionEndAskCard extends StatelessWidget {
             ),
           ],
         ),
-        const SizedBox(height: 12),
+        SizedBox(height: 12),
         Row(
           children: [
             Expanded(
@@ -58,8 +58,8 @@ class SessionEndAskCard extends StatelessWidget {
                   context.read<PaneState>().dismissSessionEndAsk();
                 },
                 style: OutlinedButton.styleFrom(
-                  foregroundColor: kTextSecondary,
-                  side: const BorderSide(color: kDivider),
+                  foregroundColor: context.appColors.textSecondary,
+                  side: BorderSide(color: context.appColors.divider),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(10),
                   ),
@@ -81,7 +81,7 @@ class SessionEndAskCard extends StatelessWidget {
                   }
                 },
                 style: FilledButton.styleFrom(
-                  backgroundColor: kAccent,
+                  backgroundColor: context.appColors.accent,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(10),
                   ),
@@ -98,21 +98,21 @@ class SessionEndAskCard extends StatelessWidget {
     );
   }
 
-  Widget _buildResolved() {
+  Widget _buildResolved(BuildContext context) {
     final ended = message.accepted!;
     return Row(
       children: [
         Icon(
           ended ? Icons.check_circle_rounded : Icons.arrow_forward_rounded,
-          color: ended ? kSuccessText : kTextSecondary,
+          color: ended ? context.appColors.successText : context.appColors.textSecondary,
           size: 18,
         ),
-        const SizedBox(width: 8),
+        SizedBox(width: 8),
         Expanded(
           child: Text(
             ended ? 'Session ended by user' : 'User continued the session',
             style: TextStyle(
-              color: ended ? kTextPrimary : kTextSecondary,
+              color: ended ? context.appColors.textPrimary : context.appColors.textSecondary,
               fontSize: 14,
               fontWeight: FontWeight.w500,
             ),

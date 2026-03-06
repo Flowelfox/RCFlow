@@ -65,7 +65,7 @@ def get_alembic_ini() -> Path:
 
 
 def get_templates_dir() -> Path:
-    """Return the path to POML prompt templates.
+    """Return the path to Jinja2 prompt templates.
 
     When frozen, templates are bundled via PyInstaller data files.
     When running from source, they're at ``src/prompts/templates``.

@@ -227,10 +227,10 @@ New-Item -ItemType Directory -Path (Join-Path $InstallDir "data") -Force | Out-N
 New-Item -ItemType Directory -Path (Join-Path $InstallDir "logs") -Force | Out-Null
 New-Item -ItemType Directory -Path (Join-Path $InstallDir "certs") -Force | Out-Null
 
-# ── Create .env configuration ────────────────────────────────────────────────
+# ── Create settings.json configuration ────────────────────────────────────────
 
-$envFile = Join-Path $InstallDir ".env"
-if (-not (Test-Path $envFile)) {
+$jsonFile = Join-Path $InstallDir "settings.json"
+if (-not (Test-Path $jsonFile)) {
     Write-Info "Creating default configuration..."
 
     $ApiKey = Generate-ApiKey
@@ -238,56 +238,43 @@ if (-not (Test-Path $envFile)) {
     $dbPath = (Join-Path $InstallDir "data\rcflow.db") -replace '\\', '/'
     $toolsPath = (Join-Path $InstallDir "tools") -replace '\\', '/'
 
-    $envContent = @"
-# RCFlow Configuration
-# Generated during installation on $(Get-Date -Format "yyyy-MM-ddTHH:mm:ss")
-
-# Server
-RCFLOW_HOST=0.0.0.0
-RCFLOW_PORT=$Port
-RCFLOW_API_KEY=$ApiKey
-
-# Database (SQLite default)
-DATABASE_URL=sqlite+aiosqlite:///$dbPath
-
-# LLM Provider
-LLM_PROVIDER=anthropic
-ANTHROPIC_API_KEY=
-ANTHROPIC_MODEL=claude-sonnet-4-20250514
-
-# AWS Bedrock (alternative to direct Anthropic API)
-# AWS_REGION=us-east-1
-# AWS_ACCESS_KEY_ID=
-# AWS_SECRET_ACCESS_KEY=
-
-# Speech Services
-STT_PROVIDER=wispr_flow
-STT_API_KEY=
-TTS_PROVIDER=none
-
-# Paths
-PROJECTS_DIR=~\Projects
-TOOLS_DIR=$toolsPath
-
-# Tool Management
-TOOL_AUTO_UPDATE=true
-TOOL_UPDATE_INTERVAL_HOURS=6
-
-# Logging
-LOG_LEVEL=INFO
+    $jsonContent = @"
+{
+  "RCFLOW_HOST": "0.0.0.0",
+  "RCFLOW_PORT": "$Port",
+  "RCFLOW_API_KEY": "$ApiKey",
+  "DATABASE_URL": "sqlite+aiosqlite:///$dbPath",
+  "LLM_PROVIDER": "anthropic",
+  "ANTHROPIC_API_KEY": "",
+  "ANTHROPIC_MODEL": "claude-sonnet-4-20250514",
+  "AWS_REGION": "us-east-1",
+  "AWS_ACCESS_KEY_ID": "",
+  "AWS_SECRET_ACCESS_KEY": "",
+  "OPENAI_API_KEY": "",
+  "OPENAI_MODEL": "gpt-4o",
+  "STT_PROVIDER": "wispr_flow",
+  "STT_API_KEY": "",
+  "TTS_PROVIDER": "none",
+  "TTS_API_KEY": "",
+  "PROJECTS_DIR": "~\Projects",
+  "TOOLS_DIR": "$toolsPath",
+  "TOOL_AUTO_UPDATE": "true",
+  "TOOL_UPDATE_INTERVAL_HOURS": "6",
+  "LOG_LEVEL": "INFO"
+}
 "@
 
-    Set-Content -Path $envFile -Value $envContent -Encoding UTF8
+    Set-Content -Path $jsonFile -Value $jsonContent -Encoding UTF8
 
     Write-Ok "Configuration created with generated API key"
     Write-Host ""
     Write-Host "  API Key: $ApiKey" -ForegroundColor Yellow
     Write-Host "  Save this key - you'll need it to connect clients." -ForegroundColor Yellow
-    Write-Host "  Config file: $envFile" -ForegroundColor Yellow
+    Write-Host "  Config file: $jsonFile" -ForegroundColor Yellow
     Write-Host ""
 }
 else {
-    Write-Ok "Existing configuration preserved at $envFile"
+    Write-Ok "Existing configuration preserved at $jsonFile"
 }
 
 # ── Run database migrations ──────────────────────────────────────────────────

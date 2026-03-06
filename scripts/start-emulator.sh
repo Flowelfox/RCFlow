@@ -14,7 +14,7 @@ for i in $(seq 1 30); do
     if "$WIN_ADB" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' | grep -q "1"; then
         echo "    Emulator booted!"
         echo ""
-        echo "Done. Run: make setup-emulator"
+        echo "Done. Run: just setup-emulator"
         exit 0
     fi
     sleep 3

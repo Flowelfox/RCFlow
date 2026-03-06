@@ -14,44 +14,6 @@ import 'message_components/summary_bubble.dart';
 import 'message_components/tool_block.dart';
 import 'message_components/user_bubble.dart';
 
-/// Renderer function: given a [DisplayMessage], return the widget for it.
-typedef MessageRenderer = Widget Function(DisplayMessage message);
-
-/// Registry mapping each [DisplayMessageType] to its renderer.
-///
-/// To add a new display type:
-/// 1. Add the value to [DisplayMessageType]
-/// 2. Create a widget in `message_components/`
-/// 3. Add an entry here
-final Map<DisplayMessageType, MessageRenderer> messageRenderers = {
-  DisplayMessageType.user: (msg) => UserBubble(message: msg),
-  DisplayMessageType.assistant: (msg) => AssistantBubble(message: msg),
-  DisplayMessageType.toolBlock: (msg) => msg.isQuestion
-      ? QuestionBlock(message: msg)
-      : ToolBlock(message: msg),
-  DisplayMessageType.error: (msg) => StatusChip(
-        message: msg,
-        icon: Icons.error_outline_rounded,
-        bg: kErrorBg,
-        fg: kErrorText,
-      ),
-  DisplayMessageType.system: (msg) => StatusChip(
-        message: msg,
-        icon: Icons.info_outline_rounded,
-        bg: kBgElevated,
-        fg: kSystemText,
-      ),
-  DisplayMessageType.summary: (msg) => SummaryBubble(message: msg),
-  DisplayMessageType.sessionEndAsk: (msg) =>
-      SessionEndAskCard(message: msg),
-  DisplayMessageType.planModeAsk: (msg) => PlanModeAskCard(message: msg),
-  DisplayMessageType.planReviewAsk: (msg) =>
-      PlanReviewAskCard(message: msg),
-  DisplayMessageType.permissionRequest: (msg) =>
-      PermissionRequestCard(message: msg),
-  DisplayMessageType.agentGroup: (msg) => AgentGroupBlock(message: msg),
-};
-
 /// Dispatches a [DisplayMessage] to its registered renderer widget.
 class MessageBubble extends StatelessWidget {
   final DisplayMessage message;
@@ -60,8 +22,41 @@ class MessageBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final renderer = messageRenderers[message.type];
-    assert(renderer != null, 'No renderer for ${message.type}');
-    return renderer!(message);
+    switch (message.type) {
+      case DisplayMessageType.user:
+        return UserBubble(message: message);
+      case DisplayMessageType.assistant:
+        return AssistantBubble(message: message);
+      case DisplayMessageType.toolBlock:
+        return message.isQuestion
+            ? QuestionBlock(message: message)
+            : ToolBlock(message: message);
+      case DisplayMessageType.error:
+        return StatusChip(
+          message: message,
+          icon: Icons.error_outline_rounded,
+          bg: context.appColors.errorBg,
+          fg: context.appColors.errorText,
+        );
+      case DisplayMessageType.system:
+        return StatusChip(
+          message: message,
+          icon: Icons.info_outline_rounded,
+          bg: context.appColors.bgElevated,
+          fg: context.appColors.systemText,
+        );
+      case DisplayMessageType.summary:
+        return SummaryBubble(message: message);
+      case DisplayMessageType.sessionEndAsk:
+        return SessionEndAskCard(message: message);
+      case DisplayMessageType.planModeAsk:
+        return PlanModeAskCard(message: message);
+      case DisplayMessageType.planReviewAsk:
+        return PlanReviewAskCard(message: message);
+      case DisplayMessageType.permissionRequest:
+        return PermissionRequestCard(message: message);
+      case DisplayMessageType.agentGroup:
+        return AgentGroupBlock(message: message);
+    }
   }
 }

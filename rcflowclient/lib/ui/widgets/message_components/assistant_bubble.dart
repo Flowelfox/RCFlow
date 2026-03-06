@@ -11,42 +11,42 @@ class AssistantBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(top: 4, bottom: 4, right: 32),
+      padding: EdgeInsets.only(top: 4, bottom: 4, right: 32),
       child: MarkdownBody(
         data: message.content.replaceAll('[SessionEndAsk]', '').trimRight(),
         shrinkWrap: true,
         styleSheet: MarkdownStyleSheet(
-          p: const TextStyle(
-            color: kAssistantText,
+          p: TextStyle(
+            color: context.appColors.assistantText,
             fontSize: 13.5,
             height: 1.45,
           ),
           code: TextStyle(
-            color: kAssistantText,
-            backgroundColor: kToolBg.withValues(alpha: 0.6),
+            color: context.appColors.assistantText,
+            backgroundColor: context.appColors.toolBg.withValues(alpha: 0.6),
             fontSize: 12.5,
             fontFamily: 'monospace',
           ),
           codeblockDecoration: BoxDecoration(
-            color: kToolBg,
+            color: context.appColors.toolBg,
             borderRadius: BorderRadius.circular(8),
           ),
-          codeblockPadding: const EdgeInsets.all(12),
-          a: const TextStyle(color: kAccentLight),
-          listBullet: const TextStyle(color: kAssistantText, fontSize: 13.5),
-          h1: const TextStyle(color: kAssistantText, fontSize: 20, fontWeight: FontWeight.bold),
-          h2: const TextStyle(color: kAssistantText, fontSize: 18, fontWeight: FontWeight.bold),
-          h3: const TextStyle(color: kAssistantText, fontSize: 16, fontWeight: FontWeight.bold),
+          codeblockPadding: EdgeInsets.all(12),
+          a: TextStyle(color: context.appColors.accentLight),
+          listBullet: TextStyle(color: context.appColors.assistantText, fontSize: 13.5),
+          h1: TextStyle(color: context.appColors.assistantText, fontSize: 20, fontWeight: FontWeight.bold),
+          h2: TextStyle(color: context.appColors.assistantText, fontSize: 18, fontWeight: FontWeight.bold),
+          h3: TextStyle(color: context.appColors.assistantText, fontSize: 16, fontWeight: FontWeight.bold),
           blockquoteDecoration: BoxDecoration(
-            border: const Border(left: BorderSide(color: kAccentDim, width: 3)),
-            color: kToolBg.withValues(alpha: 0.3),
+            border: Border(left: BorderSide(color: context.appColors.accentDim, width: 3)),
+            color: context.appColors.toolBg.withValues(alpha: 0.3),
           ),
-          blockquotePadding: const EdgeInsets.only(left: 12, top: 4, bottom: 4),
-          tableBorder: TableBorder.all(color: kDivider),
-          tableHead: const TextStyle(color: kAssistantText, fontWeight: FontWeight.bold),
-          tableBody: const TextStyle(color: kAssistantText),
-          horizontalRuleDecoration: const BoxDecoration(
-            border: Border(top: BorderSide(color: kDivider)),
+          blockquotePadding: EdgeInsets.only(left: 12, top: 4, bottom: 4),
+          tableBorder: TableBorder.all(color: context.appColors.divider),
+          tableHead: TextStyle(color: context.appColors.assistantText, fontWeight: FontWeight.bold),
+          tableBody: TextStyle(color: context.appColors.assistantText),
+          horizontalRuleDecoration: BoxDecoration(
+            border: Border(top: BorderSide(color: context.appColors.divider)),
           ),
         ),
       ),

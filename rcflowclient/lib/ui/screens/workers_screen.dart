@@ -11,7 +11,7 @@ import 'server_config_screen.dart';
 
 void showWorkersScreen(BuildContext context) {
   Navigator.of(context).push(
-    MaterialPageRoute(builder: (_) => const _WorkersPage()),
+    MaterialPageRoute(builder: (_) => _WorkersPage()),
   );
 }
 
@@ -20,24 +20,24 @@ void showWorkersScreen(BuildContext context) {
 // ---------------------------------------------------------------------------
 
 class _WorkersPage extends StatelessWidget {
-  const _WorkersPage();
+  _WorkersPage();
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: kBgBase,
+      backgroundColor: context.appColors.bgBase,
       body: Column(
         children: [
-          const CustomTitleBar(),
+          CustomTitleBar(),
           AppBar(
-            backgroundColor: kBgBase,
+            backgroundColor: context.appColors.bgBase,
             leading: IconButton(
-              icon: const Icon(Icons.arrow_back, color: kTextPrimary),
+              icon: Icon(Icons.arrow_back, color: context.appColors.textPrimary),
               onPressed: () => Navigator.of(context).pop(),
             ),
-            title: const Text(
+            title: Text(
               'Manage Workers',
-              style: TextStyle(color: kTextPrimary, fontSize: 18),
+              style: TextStyle(color: context.appColors.textPrimary, fontSize: 18),
             ),
             actions: [
               Consumer<AppState>(
@@ -53,10 +53,10 @@ class _WorkersPage extends StatelessWidget {
                         state.addWorker(config);
                       }
                     },
-                    icon: const Icon(Icons.add_rounded, size: 18),
-                    label: const Text('Add'),
+                    icon: Icon(Icons.add_rounded, size: 18),
+                    label: Text('Add'),
                     style: FilledButton.styleFrom(
-                      backgroundColor: kAccent,
+                      backgroundColor: context.appColors.accent,
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(
                           horizontal: 16, vertical: 8),
@@ -98,20 +98,20 @@ class _WorkersContent extends StatelessWidget {
             if (configs.isEmpty)
               Container(
                 width: double.infinity,
-                padding: const EdgeInsets.all(24),
+                padding: EdgeInsets.all(24),
                 decoration: BoxDecoration(
-                  color: kBgElevated,
+                  color: context.appColors.bgElevated,
                   borderRadius: BorderRadius.circular(14),
                 ),
-                child: const Column(
+                child: Column(
                   children: [
-                    Icon(Icons.dns_outlined, color: kTextMuted, size: 40),
+                    Icon(Icons.dns_outlined, color: context.appColors.textMuted, size: 40),
                     SizedBox(height: 12),
                     Text('No workers configured',
-                        style: TextStyle(color: kTextSecondary, fontSize: 14)),
+                        style: TextStyle(color: context.appColors.textSecondary, fontSize: 14)),
                     SizedBox(height: 4),
                     Text('Add a worker to connect to an RCFlow server',
-                        style: TextStyle(color: kTextMuted, fontSize: 12)),
+                        style: TextStyle(color: context.appColors.textMuted, fontSize: 12)),
                   ],
                 ),
               )
@@ -166,22 +166,22 @@ class _WorkersContent extends StatelessWidget {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: kBgSurface,
+        backgroundColor: context.appColors.bgSurface,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Remove worker?',
-            style: TextStyle(color: kTextPrimary, fontSize: 18)),
+        title: Text('Remove worker?',
+            style: TextStyle(color: context.appColors.textPrimary, fontSize: 18)),
         content: Text(
           'This will disconnect and remove "${config.name}".',
-          style: const TextStyle(color: kTextSecondary, fontSize: 14),
+          style: TextStyle(color: context.appColors.textSecondary, fontSize: 14),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
             child:
-                const Text('Cancel', style: TextStyle(color: kTextSecondary)),
+                Text('Cancel', style: TextStyle(color: context.appColors.textSecondary)),
           ),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: kErrorText),
+            style: FilledButton.styleFrom(backgroundColor: context.appColors.errorText),
             onPressed: () {
               Navigator.of(ctx).pop();
               state.removeWorker(config.id);
@@ -220,19 +220,19 @@ class _WorkerCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final status = worker?.status ?? WorkerConnectionStatus.disconnected;
     final (statusText, statusColor) = switch (status) {
-      WorkerConnectionStatus.connected => ('Connected', kSuccessText),
-      WorkerConnectionStatus.connecting => ('Connecting...', kToolAccent),
-      WorkerConnectionStatus.reconnecting => ('Reconnecting...', kToolAccent),
-      WorkerConnectionStatus.disconnected => ('Disconnected', kTextMuted),
+      WorkerConnectionStatus.connected => ('Connected', context.appColors.successText),
+      WorkerConnectionStatus.connecting => ('Connecting...', context.appColors.toolAccent),
+      WorkerConnectionStatus.reconnecting => ('Reconnecting...', context.appColors.toolAccent),
+      WorkerConnectionStatus.disconnected => ('Disconnected', context.appColors.textMuted),
     };
 
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: kBgElevated,
+        color: context.appColors.bgElevated,
         borderRadius: BorderRadius.circular(14),
         border: status == WorkerConnectionStatus.connected
-            ? Border.all(color: kSuccessText.withAlpha(60), width: 1)
+            ? Border.all(color: context.appColors.successText.withAlpha(60), width: 1)
             : null,
       ),
       child: Column(
@@ -255,12 +255,12 @@ class _WorkerCard extends StatelessWidget {
                   ],
                 ),
               ),
-              const SizedBox(width: 10),
+              SizedBox(width: 10),
               Expanded(
                 child: Text(
                   config.name,
-                  style: const TextStyle(
-                    color: kTextPrimary,
+                  style: TextStyle(
+                    color: context.appColors.textPrimary,
                     fontSize: 15,
                     fontWeight: FontWeight.w600,
                   ),
@@ -269,22 +269,22 @@ class _WorkerCard extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 8),
+          SizedBox(height: 8),
           Text(
             '${config.host}  \u00B7  $statusText',
             style: TextStyle(color: statusColor, fontSize: 12),
           ),
           if (worker?.serverOs != null)
             Padding(
-              padding: const EdgeInsets.only(top: 4),
+              padding: EdgeInsets.only(top: 4),
               child: Text('OS: ${worker!.serverOs}',
-                  style: const TextStyle(color: kTextMuted, fontSize: 11)),
+                  style: TextStyle(color: context.appColors.textMuted, fontSize: 11)),
             ),
           if (config.autoConnect)
-            const Padding(
+            Padding(
               padding: EdgeInsets.only(top: 4),
               child: Text('Auto-connect: ON',
-                  style: TextStyle(color: kTextMuted, fontSize: 11)),
+                  style: TextStyle(color: context.appColors.textMuted, fontSize: 11)),
             ),
           const SizedBox(height: 12),
           Wrap(
@@ -301,13 +301,13 @@ class _WorkerCard extends StatelessWidget {
                   label: 'Settings',
                   icon: Icons.settings_outlined,
                   onPressed: onSettings,
-                  color: kAccentLight,
+                  color: context.appColors.accentLight,
                 ),
               _SmallButton(
                 label: 'Remove',
                 icon: Icons.delete_outline,
                 onPressed: onRemove,
-                color: kErrorText,
+                color: context.appColors.errorText,
               ),
               _SmallButton(
                 label: status == WorkerConnectionStatus.connected
@@ -321,8 +321,8 @@ class _WorkerCard extends StatelessWidget {
                     ? null
                     : onToggleConnect,
                 color: status == WorkerConnectionStatus.connected
-                    ? kTextSecondary
-                    : kAccentLight,
+                    ? context.appColors.textSecondary
+                    : context.appColors.accentLight,
               ),
             ],
           ),
@@ -338,7 +338,7 @@ class _SmallButton extends StatelessWidget {
   final VoidCallback? onPressed;
   final Color? color;
 
-  const _SmallButton({
+  _SmallButton({
     required this.label,
     required this.icon,
     required this.onPressed,
@@ -347,14 +347,14 @@ class _SmallButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = color ?? kTextSecondary;
+    final c = color ?? context.appColors.textSecondary;
     return TextButton.icon(
       onPressed: onPressed,
-      icon: Icon(icon, size: 16, color: onPressed != null ? c : kTextMuted),
+      icon: Icon(icon, size: 16, color: onPressed != null ? c : context.appColors.textMuted),
       label: Text(
         label,
         style: TextStyle(
-          color: onPressed != null ? c : kTextMuted,
+          color: onPressed != null ? c : context.appColors.textMuted,
           fontSize: 12,
         ),
       ),

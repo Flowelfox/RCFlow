@@ -53,10 +53,10 @@ A WebSocket-based action server that translates natural language prompts into to
 git clone <repo-url> && cd rcflow
 
 # Install production dependencies
-make install
+just install
 
 # Or install with dev dependencies (linting, testing, pre-commit hooks)
-make dev
+just dev
 ```
 
 For PostgreSQL support:
@@ -67,11 +67,7 @@ uv sync --extra postgres
 
 ## Configuration
 
-Copy the example environment file and fill in your values:
-
-```bash
-cp .env.example .env
-```
+Settings are stored in `settings.json`. The file is created automatically on first run with default values and a generated API key. You can also create it manually:
 
 Key settings:
 
@@ -90,7 +86,7 @@ Key settings:
 | `TOOLS_DIR` | Directory containing tool JSON definitions | `./tools` |
 | `LOG_LEVEL` | Logging verbosity | `INFO` |
 
-See `.env.example` for the full list including AWS Bedrock, TTS, Codex, and tool management options.
+See `Design.md` for the full list including AWS Bedrock, TTS, Codex, and tool management options. Environment variables set in the shell take precedence over values in `settings.json`.
 
 ## Usage
 
@@ -98,7 +94,7 @@ See `.env.example` for the full list including AWS Bedrock, TTS, Codex, and tool
 
 ```bash
 # Start the server
-make run
+just run
 
 # Or directly
 uv run rcflow
@@ -110,13 +106,13 @@ The server will start on the configured host and port (default: `0.0.0.0:8765`).
 
 ```bash
 # Apply all migrations
-make migrate
+just migrate
 
 # Generate a new migration after model changes
-make migrate-gen msg="describe your change"
+just migrate-gen "describe your change"
 
 # Rollback the last migration
-make migrate-down
+just migrate-down
 ```
 
 ### Production (systemd)
@@ -130,29 +126,29 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now rcflow
 ```
 
-The service expects the application to be installed at `/opt/rcflow` with a `.env` file and virtual environment in place.
+The service expects the application to be installed at `/opt/rcflow` with a `settings.json` file and virtual environment in place.
 
 ### Flutter Client
 
 ```bash
 # Run in hot reload mode (Android emulator)
-make flutter-run
+just flutter-run
 
 # Build debug APK
-make flutter-build
+just flutter-build
 
 # Build release APK (split per ABI)
-make flutter-release
+just flutter-release
 
 # Build Windows desktop release
-make flutter-windows
+just flutter-windows
 ```
 
 Helper scripts for Android emulator setup on WSL2:
 
 ```bash
-make start-emulator    # Start Windows Android emulator (cold boot)
-make setup-emulator    # Setup WSL2 ADB connection
+just start-emulator    # Start Windows Android emulator (cold boot)
+just setup-emulator    # Setup WSL2 ADB connection
 ```
 
 ## API
@@ -206,21 +202,21 @@ Tools are defined as JSON files in the `tools/` directory. Each tool specifies i
 
 ```bash
 # Run tests
-make test
+just test
 
 # Run tests with coverage report
-make coverage
+just coverage
 
 # Run all checks (lint + typecheck + test)
-make check
+just check
 ```
 
 Individual checks:
 
 ```bash
-make lint        # Ruff linting
-make typecheck   # ty type checking
-make format      # Auto-format with Ruff
+just lint        # Ruff linting
+just typecheck   # ty type checking
+just format      # Auto-format with Ruff
 ```
 
 ## Project Structure
@@ -239,7 +235,7 @@ rcflow/
 │   ├── executors/          # Tool executors (shell, http, claude_code, codex)
 │   ├── tools/              # Tool registry and JSON loader
 │   ├── speech/             # STT/TTS provider abstractions
-│   ├── prompts/            # Prompt template builder (POML)
+│   ├── prompts/            # Prompt template builder (Jinja2)
 │   ├── services/           # Tool management and settings
 │   ├── models/             # SQLAlchemy models
 │   ├── db/                 # Database engine and Alembic migrations
@@ -252,7 +248,7 @@ rcflow/
 ├── scripts/                # Helper scripts (emulator setup, icon generation)
 ├── certs/                  # TLS certificates (gitignored)
 ├── alembic.ini             # Alembic migration config
-├── Makefile                # Build, run, test, and deploy commands
+├── justfile                # Build, run, test, and deploy commands
 ├── pyproject.toml          # Python project metadata and dependencies
 └── Design.md               # Detailed design document
 ```

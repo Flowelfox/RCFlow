@@ -86,7 +86,11 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
                       Expanded(
                         child: Consumer<AppState>(
                           builder: (context, appState, _) {
-                            return SplitView(node: appState.splitRoot);
+                            final root = appState.splitRoot;
+                            if (root == null) {
+                              return _WelcomePane(appState: appState);
+                            }
+                            return SplitView(node: root);
                           },
                         ),
                       ),
@@ -123,23 +127,89 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
                     Expanded(
                       child: Consumer<AppState>(
                         builder: (context, appState, _) {
-                          return SplitView(node: appState.splitRoot);
+                          final root = appState.splitRoot;
+                          if (root == null) {
+                            return _WelcomePane(appState: appState);
+                          }
+                          return SplitView(node: root);
                         },
                       ),
                     ),
                   ],
                 )
-              : ChangeNotifierProvider<PaneState>.value(
-                  value: context.read<AppState>().activePane,
-                  child: const Column(
-                    children: [
-                      Expanded(child: OutputDisplay()),
-                      InputArea(),
-                    ],
-                  ),
+              : Consumer<AppState>(
+                  builder: (context, appState, _) {
+                    if (appState.hasNoPanes) {
+                      return _WelcomePane(appState: appState);
+                    }
+                    return ChangeNotifierProvider<PaneState>.value(
+                      value: appState.activePane,
+                      child: const Column(
+                        children: [
+                          Expanded(child: OutputDisplay()),
+                          InputArea(),
+                        ],
+                      ),
+                    );
+                  },
                 ),
         );
       },
+    );
+  }
+}
+
+/// Shown when all panes have been closed. Provides a way to create a new pane.
+class _WelcomePane extends StatelessWidget {
+  final AppState appState;
+
+  const _WelcomePane({required this.appState});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.chat_bubble_outline_rounded,
+            size: 48,
+            color: context.appColors.textMuted,
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'No open panes',
+            style: TextStyle(
+              color: context.appColors.textSecondary,
+              fontSize: 18,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Start a new chat or select a session from the sidebar',
+            style: TextStyle(
+              color: context.appColors.textMuted,
+              fontSize: 14,
+            ),
+          ),
+          const SizedBox(height: 24),
+          FilledButton.icon(
+            style: FilledButton.styleFrom(
+              backgroundColor: context.appColors.accent,
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+            ),
+            icon: const Icon(Icons.add_rounded, color: Colors.white),
+            label: const Text(
+              'New Chat',
+              style: TextStyle(color: Colors.white, fontSize: 14),
+            ),
+            onPressed: () {
+              appState.createNewPane();
+            },
+          ),
+        ],
+      ),
     );
   }
 }
@@ -178,7 +248,9 @@ class _SidebarDividerState extends State<_SidebarDivider> {
               duration: const Duration(milliseconds: 150),
               width: highlighted ? 3 : 1,
               height: double.infinity,
-              color: highlighted ? kAccent.withAlpha(180) : kDivider,
+              color: highlighted
+                  ? context.appColors.accent.withAlpha(180)
+                  : context.appColors.divider,
             ),
           ),
         ),

@@ -1,10 +1,12 @@
 import argparse
+import ipaddress
 import socket
 import sys
+from pathlib import Path
 
 import uvicorn
 
-from src.config import get_settings
+from src.config import _get_settings_path, get_settings
 
 
 def _check_port_available(host: str, port: int) -> None:
@@ -19,12 +21,58 @@ def _check_port_available(host: str, port: int) -> None:
         print(
             f"ERROR: Cannot bind to {host}:{port} — {exc}\n"
             f"\nAnother process is already using port {port}.\n"
-            f"Either stop the existing process or set RCFLOW_PORT to a different port in .env",
+            f"Either stop the existing process or set RCFLOW_PORT to a different port in settings.json",
             file=sys.stderr,
         )
         sys.exit(1)
     finally:
         sock.close()
+
+
+def _ensure_self_signed_certs(certfile: Path, keyfile: Path) -> None:
+    """Generate a self-signed certificate and key if they don't already exist."""
+    if certfile.exists() and keyfile.exists():
+        return
+
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.x509.oid import NameOID
+    import datetime
+
+    print(f"Generating self-signed certificate: {certfile}")
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+
+    subject = issuer = x509.Name([
+        x509.NameAttribute(NameOID.COMMON_NAME, "RCFlow"),
+        x509.NameAttribute(NameOID.ORGANIZATION_NAME, "RCFlow"),
+    ])
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(issuer)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(datetime.datetime.now(datetime.timezone.utc))
+        .not_valid_after(datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=3650))
+        .add_extension(
+            x509.SubjectAlternativeName([
+                x509.DNSName("localhost"),
+                x509.IPAddress(ipaddress.IPv4Address("127.0.0.1")),
+                x509.IPAddress(ipaddress.IPv4Address("0.0.0.0")),
+            ]),
+            critical=False,
+        )
+        .sign(key, hashes.SHA256())
+    )
+
+    certfile.parent.mkdir(parents=True, exist_ok=True)
+    keyfile.parent.mkdir(parents=True, exist_ok=True)
+    certfile.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+    keyfile.write_bytes(
+        key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.TraditionalOpenSSL, serialization.NoEncryption())
+    )
+    print("Self-signed certificate generated successfully.")
 
 
 def _cmd_run(args: argparse.Namespace) -> None:
@@ -34,7 +82,15 @@ def _cmd_run(args: argparse.Namespace) -> None:
     _check_port_available(settings.RCFLOW_HOST, settings.RCFLOW_PORT)
 
     ssl_kwargs: dict[str, str] = {}
-    if settings.SSL_CERTFILE and settings.SSL_KEYFILE:
+    if settings.WSS_ENABLED:
+        from src.paths import get_install_dir
+
+        certfile = Path(settings.SSL_CERTFILE) if settings.SSL_CERTFILE else get_install_dir() / "certs" / "cert.pem"
+        keyfile = Path(settings.SSL_KEYFILE) if settings.SSL_KEYFILE else get_install_dir() / "certs" / "key.pem"
+        _ensure_self_signed_certs(certfile, keyfile)
+        ssl_kwargs["ssl_certfile"] = str(certfile)
+        ssl_kwargs["ssl_keyfile"] = str(keyfile)
+    elif settings.SSL_CERTFILE and settings.SSL_KEYFILE:
         ssl_kwargs["ssl_certfile"] = settings.SSL_CERTFILE
         ssl_kwargs["ssl_keyfile"] = settings.SSL_KEYFILE
 
@@ -69,6 +125,20 @@ def _cmd_migrate(args: argparse.Namespace) -> None:
     print("Migrations complete.")
 
 
+def _cmd_gui(args: argparse.Namespace) -> None:
+    """Run RCFlow with a graphical window interface."""
+    from src.gui import run_gui  # noqa: PLC0415
+
+    run_gui()
+
+
+def _cmd_tray(args: argparse.Namespace) -> None:
+    """Run RCFlow as a Windows tray application (delegates to GUI mode)."""
+    from src.gui import run_gui  # noqa: PLC0415
+
+    run_gui()
+
+
 def _cmd_version(args: argparse.Namespace) -> None:
     """Print the RCFlow version."""
     from importlib.metadata import PackageNotFoundError, version  # noqa: PLC0415
@@ -88,6 +158,40 @@ def _cmd_version(args: argparse.Namespace) -> None:
             print("rcflow (development — version not installed)")
 
 
+def _cmd_info(args: argparse.Namespace) -> None:
+    """Print server configuration info (bind IP, port, WSS status)."""
+    settings = get_settings()
+    protocol = "wss" if settings.WSS_ENABLED else "ws"
+    print("RCFlow Server Info")
+    print(f"  Bind address : {settings.RCFLOW_HOST}")
+    print(f"  Port         : {settings.RCFLOW_PORT}")
+    print(f"  WSS enabled  : {'yes' if settings.WSS_ENABLED else 'no'}")
+    print(f"  URL          : {protocol}://{settings.RCFLOW_HOST}:{settings.RCFLOW_PORT}")
+    print(f"  Settings     : {_get_settings_path()}")
+
+
+def _cmd_api_key(args: argparse.Namespace) -> None:
+    """Print the current API key."""
+    settings = get_settings()
+    if settings.RCFLOW_API_KEY:
+        print(settings.RCFLOW_API_KEY)
+    else:
+        print("No API key configured.", file=sys.stderr)
+        sys.exit(1)
+
+
+def _cmd_set_api_key(args: argparse.Namespace) -> None:
+    """Set a new API key value."""
+    from src.config import update_settings_file  # noqa: PLC0415
+
+    new_key = args.value
+    if not new_key:
+        print("ERROR: API key value cannot be empty.", file=sys.stderr)
+        sys.exit(1)
+    update_settings_file({"RCFLOW_API_KEY": new_key})
+    print("API key updated successfully.")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="rcflow", description="RCFlow action server")
     subparsers = parser.add_subparsers(dest="command")
@@ -101,15 +205,40 @@ def main() -> None:
     migrate_parser.add_argument("revision", nargs="?", default="head", help="Target revision (default: head)")
     migrate_parser.set_defaults(func=_cmd_migrate)
 
+    # rcflow gui
+    gui_parser = subparsers.add_parser("gui", help="Run with graphical window interface")
+    gui_parser.set_defaults(func=_cmd_gui)
+
+    # rcflow tray
+    tray_parser = subparsers.add_parser("tray", help="Run as Windows tray application")
+    tray_parser.set_defaults(func=_cmd_tray)
+
     # rcflow version
     version_parser = subparsers.add_parser("version", help="Print version")
     version_parser.set_defaults(func=_cmd_version)
 
+    # rcflow info
+    info_parser = subparsers.add_parser("info", help="Show server configuration info")
+    info_parser.set_defaults(func=_cmd_info)
+
+    # rcflow api-key
+    api_key_parser = subparsers.add_parser("api-key", help="Print the current API key")
+    api_key_parser.set_defaults(func=_cmd_api_key)
+
+    # rcflow set-api-key <value>
+    set_api_key_parser = subparsers.add_parser("set-api-key", help="Set a new API key")
+    set_api_key_parser.add_argument("value", help="The new API key value")
+    set_api_key_parser.set_defaults(func=_cmd_set_api_key)
+
     args = parser.parse_args()
 
     if args.command is None:
-        # Default: run the server (backwards-compatible)
-        _cmd_run(args)
+        # On Windows frozen builds, default to GUI mode so the user sees a UI.
+        # Otherwise fall back to plain server mode (Linux, dev, etc.).
+        if sys.platform == "win32" and getattr(sys, "frozen", False):
+            _cmd_gui(args)
+        else:
+            _cmd_run(args)
     elif hasattr(args, "func"):
         args.func(args)
     else:

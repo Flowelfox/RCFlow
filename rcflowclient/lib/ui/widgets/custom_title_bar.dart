@@ -29,9 +29,9 @@ class CustomTitleBar extends StatelessWidget {
 
     return Container(
       height: 40,
-      decoration: const BoxDecoration(
-        color: kBgBase,
-        border: Border(bottom: BorderSide(color: kDivider, width: 1)),
+      decoration: BoxDecoration(
+        color: context.appColors.bgBase,
+        border: Border(bottom: BorderSide(color: context.appColors.divider, width: 1)),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -66,7 +66,7 @@ class CustomTitleBar extends StatelessWidget {
                         style: TextStyle(
                           fontSize: 15,
                           fontWeight: FontWeight.w600,
-                          color: connecting ? kTextSecondary : kTextPrimary,
+                          color: connecting ? context.appColors.textSecondary : context.appColors.textPrimary,
                         ),
                       ),
                     ],
@@ -79,27 +79,27 @@ class CustomTitleBar extends StatelessWidget {
           // Split pane button (when connected)
           if (connected)
             PopupMenuButton<SplitAxis>(
-              icon: const Icon(Icons.view_column_outlined,
-                  color: kTextSecondary, size: 18),
+              icon: Icon(Icons.view_column_outlined,
+                  color: context.appColors.textSecondary, size: 18),
               tooltip: 'Split pane',
-              color: kBgSurface,
+              color: context.appColors.bgSurface,
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12)),
               onSelected: (axis) {
                 final appState = context.read<AppState>();
                 appState.splitPane(appState.activePaneId, axis);
               },
-              itemBuilder: (_) => const [
+              itemBuilder: (_) => [
                 PopupMenuItem(
                   value: SplitAxis.horizontal,
                   child: Row(
                     children: [
                       Icon(Icons.view_column_outlined,
-                          color: kTextSecondary, size: 18),
+                          color: context.appColors.textSecondary, size: 18),
                       SizedBox(width: 10),
                       Text('Split Right',
                           style:
-                              TextStyle(color: kTextPrimary, fontSize: 14)),
+                              TextStyle(color: context.appColors.textPrimary, fontSize: 14)),
                     ],
                   ),
                 ),
@@ -108,11 +108,11 @@ class CustomTitleBar extends StatelessWidget {
                   child: Row(
                     children: [
                       Icon(Icons.view_agenda_outlined,
-                          color: kTextSecondary, size: 18),
+                          color: context.appColors.textSecondary, size: 18),
                       SizedBox(width: 10),
                       Text('Split Down',
                           style:
-                              TextStyle(color: kTextPrimary, fontSize: 14)),
+                              TextStyle(color: context.appColors.textPrimary, fontSize: 14)),
                     ],
                   ),
                 ),
@@ -141,20 +141,20 @@ class _StatusIndicator extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (connecting) {
-      return const SizedBox(
+      return SizedBox(
         width: 12,
         height: 12,
-        child: CircularProgressIndicator(strokeWidth: 1.5, color: kAccentLight),
+        child: CircularProgressIndicator(strokeWidth: 1.5, color: context.appColors.accentLight),
       );
     }
     // Green: all workers connected, Amber: partial, Red: none
     final Color dotColor;
     if (!connected) {
-      dotColor = kErrorText;
+      dotColor = context.appColors.errorText;
     } else if (allConnected) {
-      dotColor = kSuccessText;
+      dotColor = context.appColors.successText;
     } else {
-      dotColor = kToolAccent; // amber — partial
+      dotColor = context.appColors.toolAccent; // amber — partial
     }
     return Container(
       width: 8,
@@ -185,13 +185,13 @@ class _WindowControls extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _WindowButton(
-          icon: const _MinimizeIcon(),
+          icon: _MinimizeIcon(),
           onPressed: () => windowManager.minimize(),
         ),
         _MaximizeButton(),
         _WindowButton(
-          icon: const Icon(Icons.close, size: 16, color: kTextSecondary),
-          hoverColor: kErrorText,
+          icon: Icon(Icons.close, size: 16, color: context.appColors.textSecondary),
+          hoverColor: context.appColors.errorText,
           hoverIconColor: Colors.white,
           onPressed: () => windowManager.close(),
         ),
@@ -284,16 +284,16 @@ class _WindowButtonState extends State<_WindowButton> {
       child: GestureDetector(
         onTap: widget.onPressed,
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 100),
+          duration: Duration(milliseconds: 100),
           width: 46,
           color: _hovering
-              ? (widget.hoverColor ?? kBgOverlay)
+              ? (widget.hoverColor ?? context.appColors.bgOverlay)
               : Colors.transparent,
           child: Center(
             child: _hovering && isCloseButton
                 ? IconTheme(
                     data: IconThemeData(
-                        color: widget.hoverIconColor ?? kTextPrimary),
+                        color: widget.hoverIconColor ?? context.appColors.textPrimary),
                     child: widget.icon,
                   )
                 : widget.icon,
@@ -305,7 +305,7 @@ class _WindowButtonState extends State<_WindowButton> {
 }
 
 class _MinimizeIcon extends StatelessWidget {
-  const _MinimizeIcon();
+  _MinimizeIcon();
 
   @override
   Widget build(BuildContext context) {
@@ -313,7 +313,7 @@ class _MinimizeIcon extends StatelessWidget {
       width: 16,
       height: 16,
       child: Center(
-        child: Container(width: 10, height: 1, color: kTextSecondary),
+        child: Container(width: 10, height: 1, color: context.appColors.textSecondary),
       ),
     );
   }
@@ -332,7 +332,7 @@ class _MaximizeIcon extends StatelessWidget {
           width: 10,
           height: 10,
           decoration: BoxDecoration(
-            border: Border.all(color: kTextSecondary, width: 1),
+            border: Border.all(color: context.appColors.textSecondary, width: 1),
           ),
         ),
       ),
@@ -358,7 +358,7 @@ class _RestoreIcon extends StatelessWidget {
                 width: 8,
                 height: 8,
                 decoration: BoxDecoration(
-                  border: Border.all(color: kTextSecondary, width: 1),
+                  border: Border.all(color: context.appColors.textSecondary, width: 1),
                 ),
               ),
             ),
@@ -369,8 +369,8 @@ class _RestoreIcon extends StatelessWidget {
                 width: 8,
                 height: 8,
                 decoration: BoxDecoration(
-                  color: kBgBase,
-                  border: Border.all(color: kTextSecondary, width: 1),
+                  color: context.appColors.bgBase,
+                  border: Border.all(color: context.appColors.textSecondary, width: 1),
                 ),
               ),
             ),

@@ -8,6 +8,8 @@ import '../../theme.dart';
 import 'input_area.dart';
 import 'output_display.dart';
 import 'pane_header.dart';
+import 'session_panel.dart' show TerminalDragData;
+import 'terminal_pane.dart';
 
 /// Data carried during a session drag from the sidebar.
 class SessionDragData {
@@ -62,8 +64,9 @@ class _SessionPaneState extends State<SessionPane> {
 
     return ChangeNotifierProvider<PaneState>.value(
       value: widget.pane,
-      child: DragTarget<SessionDragData>(
-        onWillAcceptWithDetails: (_) => true,
+      child: DragTarget<Object>(
+        onWillAcceptWithDetails: (details) =>
+            details.data is SessionDragData || details.data is TerminalDragData,
         onMove: (details) {
           final box = context.findRenderObject() as RenderBox?;
           if (box == null || !box.hasSize) return;
@@ -81,15 +84,39 @@ class _SessionPaneState extends State<SessionPane> {
           final zone = _hitTestDropZone(box.size, local);
           setState(() => _hoverZone = null);
           if (zone == null) return;
-          appState.splitPaneWithSession(
-            widget.pane.paneId,
-            zone,
-            details.data.sessionId,
-          );
+          final data = details.data;
+          if (data is SessionDragData) {
+            appState.splitPaneWithSession(
+              widget.pane.paneId,
+              zone,
+              data.sessionId,
+            );
+          } else if (data is TerminalDragData) {
+            appState.splitPaneWithTerminal(
+              widget.pane.paneId,
+              zone,
+              data.terminalId,
+            );
+          }
         },
         builder: (context, candidateData, rejectedData) {
+          final paneType = appState.getPaneType(widget.pane.paneId);
+          final isTerminalPane = paneType == PaneType.terminal;
+          final terminalInfo = isTerminalPane
+              ? appState.getTerminalPaneInfo(widget.pane.paneId)
+              : null;
+
           return Listener(
-            onPointerDown: (_) => appState.setActivePane(widget.pane.paneId),
+            onPointerDown: (_) {
+              // Defer to a microtask so the rebuild from notifyListeners()
+              // doesn't happen synchronously during pointer event dispatch.
+              // This prevents disrupting gesture recognizers and focus
+              // handling in child widgets (e.g. TerminalView).
+              if (appState.activePaneId != widget.pane.paneId) {
+                Future.microtask(
+                    () => appState.setActivePane(widget.pane.paneId));
+              }
+            },
             child: Stack(
               children: [
                 Container(
@@ -97,19 +124,37 @@ class _SessionPaneState extends State<SessionPane> {
                     border: multiPane
                         ? Border.all(
                             color: isActive
-                                ? kAccent.withAlpha(100)
+                                ? context.appColors.accent.withAlpha(100)
                                 : Colors.transparent,
                             width: 1,
                           )
                         : null,
                   ),
-                  child: Column(
-                    children: [
-                      if (multiPane) const PaneHeader(),
-                      const Expanded(child: OutputDisplay()),
-                      const InputArea(),
-                    ],
-                  ),
+                  child: isTerminalPane && terminalInfo != null
+                      ? Column(
+                          children: [
+                            _TerminalPaneHeader(
+                              paneId: widget.pane.paneId,
+                              info: terminalInfo,
+                              appState: appState,
+                            ),
+                            Expanded(
+                              child: TerminalPane(
+                                key: appState.terminalPaneKey(widget.pane.paneId),
+                                paneId: widget.pane.paneId,
+                                info: terminalInfo,
+                                appState: appState,
+                              ),
+                            ),
+                          ],
+                        )
+                      : Column(
+                          children: [
+                            const PaneHeader(),
+                            const Expanded(child: OutputDisplay()),
+                            const InputArea(),
+                          ],
+                        ),
                 ),
                 if (_hoverZone != null) _DropZoneOverlay(zone: _hoverZone!),
               ],
@@ -145,8 +190,8 @@ class _DropZoneOverlay extends StatelessWidget {
                 (zone == DropZone.top || zone == DropZone.bottom) ? 0.5 : 1.0,
             child: Container(
               decoration: BoxDecoration(
-                color: kAccent.withAlpha(40),
-                border: Border.all(color: kAccent.withAlpha(80), width: 2),
+                color: context.appColors.accent.withAlpha(40),
+                border: Border.all(color: context.appColors.accent.withAlpha(80), width: 2),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Center(
@@ -157,13 +202,73 @@ class _DropZoneOverlay extends StatelessWidget {
                     DropZone.top => Icons.arrow_upward_rounded,
                     DropZone.bottom => Icons.arrow_downward_rounded,
                   },
-                  color: kAccentLight.withAlpha(180),
+                  color: context.appColors.accentLight.withAlpha(180),
                   size: 32,
                 ),
               ),
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Header bar for terminal panes (similar to PaneHeader for chat panes).
+class _TerminalPaneHeader extends StatelessWidget {
+  final String paneId;
+  final TerminalSessionInfo info;
+  final AppState appState;
+
+  const _TerminalPaneHeader({
+    required this.paneId,
+    required this.info,
+    required this.appState,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final worker = appState.getWorker(info.workerId);
+    final workerName = worker?.config.name ?? 'Unknown';
+
+    return Container(
+      height: 32,
+      decoration: BoxDecoration(
+        color: context.appColors.bgSurface,
+        border: Border(
+          bottom: BorderSide(color: context.appColors.divider, width: 1),
+        ),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      child: Row(
+        children: [
+          Icon(Icons.terminal_rounded,
+              color: context.appColors.textSecondary, size: 16),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              '${info.title} \u00B7 $workerName',
+              style: TextStyle(
+                color: context.appColors.textSecondary,
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          SizedBox(
+            width: 24,
+            height: 24,
+            child: IconButton(
+              padding: EdgeInsets.zero,
+              icon: Icon(Icons.close_rounded,
+                  color: context.appColors.textMuted, size: 16),
+              onPressed: () => appState.closePane(paneId),
+              tooltip: 'Close terminal pane',
+              constraints: const BoxConstraints(maxWidth: 24, maxHeight: 24),
+            ),
+          ),
+        ],
       ),
     );
   }

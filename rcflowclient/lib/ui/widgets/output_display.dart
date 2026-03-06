@@ -114,20 +114,20 @@ class _OutputDisplayState extends State<OutputDisplay> {
     required int remaining,
   }) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: EdgeInsets.symmetric(vertical: 8),
       child: Center(
         child: loading
-            ? const SizedBox(
+            ? SizedBox(
                 width: 20,
                 height: 20,
                 child: CircularProgressIndicator(
                   strokeWidth: 2,
-                  color: kToolAccent,
+                  color: context.appColors.toolAccent,
                 ),
               )
             : Text(
                 '$remaining older message${remaining == 1 ? '' : 's'}',
-                style: const TextStyle(color: kTextMuted, fontSize: 12),
+                style: TextStyle(color: context.appColors.textMuted, fontSize: 12),
               ),
       ),
     );
@@ -172,25 +172,25 @@ class _OutputDisplayState extends State<OutputDisplay> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Icon(Icons.chat_bubble_outline_rounded,
-                        size: 48, color: kTextMuted.withAlpha(80)),
-                    const SizedBox(height: 16),
-                    const Text('Welcome to RCFlow',
+                        size: 48, color: context.appColors.textMuted.withAlpha(80)),
+                    SizedBox(height: 16),
+                    Text('Welcome to RCFlow',
                         style: TextStyle(
-                          color: kTextPrimary,
+                          color: context.appColors.textPrimary,
                           fontSize: 18,
                           fontWeight: FontWeight.w600,
                         )),
-                    const SizedBox(height: 6),
-                    const Text('Start a new chat or continue a previous one',
-                        style: TextStyle(color: kTextMuted, fontSize: 13)),
-                    const SizedBox(height: 24),
+                    SizedBox(height: 6),
+                    Text('Start a new chat or continue a previous one',
+                        style: TextStyle(color: context.appColors.textMuted, fontSize: 13)),
+                    SizedBox(height: 24),
                     if (connected) ...[
                       FilledButton.icon(
                         onPressed: () => pane.startNewChat(),
-                        icon: const Icon(Icons.add_rounded, size: 18),
-                        label: const Text('New Chat'),
+                        icon: Icon(Icons.add_rounded, size: 18),
+                        label: Text('New Chat'),
                         style: FilledButton.styleFrom(
-                          backgroundColor: kAccent,
+                          backgroundColor: context.appColors.accent,
                           foregroundColor: Colors.white,
                           padding: const EdgeInsets.symmetric(
                               horizontal: 24, vertical: 12),
@@ -199,15 +199,15 @@ class _OutputDisplayState extends State<OutputDisplay> {
                           ),
                         ),
                       ),
-                      const SizedBox(height: 12),
+                      SizedBox(height: 12),
                       OutlinedButton.icon(
                         onPressed: () => showSessionSheet(context),
-                        icon: const Icon(Icons.history_rounded, size: 18),
-                        label: const Text('View Sessions'),
+                        icon: Icon(Icons.history_rounded, size: 18),
+                        label: Text('View Sessions'),
                         style: OutlinedButton.styleFrom(
-                          foregroundColor: kTextSecondary,
-                          side: const BorderSide(color: kDivider),
-                          padding: const EdgeInsets.symmetric(
+                          foregroundColor: context.appColors.textSecondary,
+                          side: BorderSide(color: context.appColors.divider),
+                          padding: EdgeInsets.symmetric(
                               horizontal: 24, vertical: 12),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),
@@ -215,8 +215,8 @@ class _OutputDisplayState extends State<OutputDisplay> {
                         ),
                       ),
                     ] else
-                      const Text('Connect to get started',
-                          style: TextStyle(color: kTextMuted, fontSize: 13)),
+                      Text('Connect to get started',
+                          style: TextStyle(color: context.appColors.textMuted, fontSize: 13)),
                   ],
                 ),
               );
@@ -228,24 +228,24 @@ class _OutputDisplayState extends State<OutputDisplay> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Icon(Icons.terminal_rounded,
-                        size: 48, color: kTextMuted.withAlpha(80)),
-                    const SizedBox(height: 12),
-                    const Text('Send a message to get started',
-                        style: TextStyle(color: kTextMuted, fontSize: 15)),
-                    const SizedBox(height: 20),
+                        size: 48, color: context.appColors.textMuted.withAlpha(80)),
+                    SizedBox(height: 12),
+                    Text('Send a message to get started',
+                        style: TextStyle(color: context.appColors.textMuted, fontSize: 15)),
+                    SizedBox(height: 20),
                     ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 380),
+                      constraints: BoxConstraints(maxWidth: 380),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Icon(Icons.lightbulb_outline_rounded,
-                              size: 14, color: kTextMuted),
-                          const SizedBox(width: 6),
+                          Icon(Icons.lightbulb_outline_rounded,
+                              size: 14, color: context.appColors.textMuted),
+                          SizedBox(width: 6),
                           Flexible(
                             child: Text(
                               _tip,
-                              style: const TextStyle(
-                                  color: kTextMuted, fontSize: 12.5),
+                              style: TextStyle(
+                                  color: context.appColors.textMuted, fontSize: 12.5),
                             ),
                           ),
                         ],
@@ -272,12 +272,12 @@ class _OutputDisplayState extends State<OutputDisplay> {
                         remaining: pane.totalMessageCount - msgs.length,
                       );
                     }
-                    return const Padding(
+                    return Padding(
                       padding: EdgeInsets.symmetric(vertical: 12),
                       child: Center(
                         child: Text(
                           'Beginning of session',
-                          style: TextStyle(color: kTextMuted, fontSize: 12),
+                          style: TextStyle(color: context.appColors.textMuted, fontSize: 12),
                         ),
                       ),
                     );
@@ -302,30 +302,30 @@ class _OutputDisplayState extends State<OutputDisplay> {
                 curve: Curves.easeOut,
                 child: AnimatedOpacity(
                   opacity: isReconnecting ? 1.0 : 0.0,
-                  duration: const Duration(milliseconds: 250),
+                  duration: Duration(milliseconds: 250),
                   child: Container(
                     width: double.infinity,
-                    padding: const EdgeInsets.symmetric(
+                    padding: EdgeInsets.symmetric(
                         horizontal: 16, vertical: 10),
-                    decoration: const BoxDecoration(
-                      color: kBgElevated,
-                      border: Border(top: BorderSide(color: kDivider)),
+                    decoration: BoxDecoration(
+                      color: context.appColors.bgElevated,
+                      border: Border(top: BorderSide(color: context.appColors.divider)),
                     ),
-                    child: const Row(
+                    child: Row(
                       children: [
                         SizedBox(
                           width: 16,
                           height: 16,
                           child: CircularProgressIndicator(
                             strokeWidth: 2,
-                            color: kToolAccent,
+                            color: context.appColors.toolAccent,
                           ),
                         ),
                         SizedBox(width: 12),
                         Text(
                           'Reconnecting...',
                           style: TextStyle(
-                            color: kTextSecondary,
+                            color: context.appColors.textSecondary,
                             fontSize: 13,
                           ),
                         ),
@@ -356,14 +356,14 @@ class _OutputDisplayState extends State<OutputDisplay> {
                     _hasUnseenMessages = false;
                   });
                 },
-                backgroundColor: kBgOverlay,
+                backgroundColor: context.appColors.bgOverlay,
                 elevation: 4,
                 child: Stack(
                   clipBehavior: Clip.none,
                   children: [
-                    const Center(
+                    Center(
                       child: Icon(Icons.keyboard_arrow_down_rounded,
-                          color: kTextSecondary, size: 22),
+                          color: context.appColors.textSecondary, size: 22),
                     ),
                     if (_hasUnseenMessages)
                       Positioned(
@@ -372,8 +372,8 @@ class _OutputDisplayState extends State<OutputDisplay> {
                         child: Container(
                           width: 8,
                           height: 8,
-                          decoration: const BoxDecoration(
-                            color: kAccent,
+                          decoration: BoxDecoration(
+                            color: context.appColors.accent,
                             shape: BoxShape.circle,
                           ),
                         ),

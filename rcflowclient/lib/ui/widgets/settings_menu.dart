@@ -26,7 +26,7 @@ void showSettingsMenu(BuildContext context) {
     );
   } else if (Platform.isAndroid) {
     Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const _AndroidSettingsPage()),
+      MaterialPageRoute(builder: (_) => _AndroidSettingsPage()),
     );
   } else {
     showModalBottomSheet(
@@ -54,7 +54,7 @@ class _DesktopSettingsDialogState extends State<_DesktopSettingsDialog> {
   @override
   Widget build(BuildContext context) {
     return Dialog(
-      backgroundColor: kBgSurface,
+      backgroundColor: context.appColors.bgSurface,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: SizedBox(
         width: 550,
@@ -64,19 +64,19 @@ class _DesktopSettingsDialogState extends State<_DesktopSettingsDialog> {
             // Sidebar
             Container(
               width: 160,
-              decoration: const BoxDecoration(
-                color: kBgBase,
+              decoration: BoxDecoration(
+                color: context.appColors.bgBase,
                 borderRadius: BorderRadius.horizontal(left: Radius.circular(16)),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Padding(
+                  Padding(
                     padding: EdgeInsets.fromLTRB(20, 24, 20, 20),
                     child: Text(
                       'Settings',
                       style: TextStyle(
-                        color: kTextPrimary,
+                        color: context.appColors.textPrimary,
                         fontSize: 18,
                         fontWeight: FontWeight.w700,
                       ),
@@ -139,25 +139,25 @@ class _SidebarItem extends StatelessWidget {
     };
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      padding: EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       child: Material(
-        color: selected ? kBgElevated : Colors.transparent,
+        color: selected ? context.appColors.bgElevated : Colors.transparent,
         borderRadius: BorderRadius.circular(10),
         child: InkWell(
           borderRadius: BorderRadius.circular(10),
           onTap: onTap,
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             child: Row(
               children: [
                 Icon(icon,
                     size: 18,
-                    color: selected ? kAccentLight : kTextMuted),
-                const SizedBox(width: 10),
+                    color: selected ? context.appColors.accentLight : context.appColors.textMuted),
+                SizedBox(width: 10),
                 Text(
                   label,
                   style: TextStyle(
-                    color: selected ? kTextPrimary : kTextSecondary,
+                    color: selected ? context.appColors.textPrimary : context.appColors.textSecondary,
                     fontSize: 14,
                     fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
                   ),
@@ -202,18 +202,18 @@ class _MobileSettingsSheet extends StatelessWidget {
                   width: 40,
                   height: 4,
                   decoration: BoxDecoration(
-                    color: kTextMuted.withAlpha(100),
+                    color: context.appColors.textMuted.withAlpha(100),
                     borderRadius: BorderRadius.circular(2),
                   ),
                 ),
               ),
-              const SizedBox(height: 20),
-              const Align(
+              SizedBox(height: 20),
+              Align(
                 alignment: Alignment.centerLeft,
                 child: Text(
                   'Settings',
                   style: TextStyle(
-                    color: kTextPrimary,
+                    color: context.appColors.textPrimary,
                     fontSize: 22,
                     fontWeight: FontWeight.w700,
                   ),
@@ -223,12 +223,12 @@ class _MobileSettingsSheet extends StatelessWidget {
               _WorkersSection(
                 onClose: () => Navigator.of(ctx).pop(),
               ),
-              const _SectionDivider(),
-              const _AppearanceSection(),
-              const _SectionDivider(),
-              const _NotificationsSection(),
-              const _SectionDivider(),
-              const _AboutSection(),
+              _SectionDivider(),
+              _AppearanceSection(),
+              _SectionDivider(),
+              _NotificationsSection(),
+              _SectionDivider(),
+              _AboutSection(),
             ],
           ),
         );
@@ -242,19 +242,19 @@ class _MobileSettingsSheet extends StatelessWidget {
 // ---------------------------------------------------------------------------
 
 class _AndroidSettingsPage extends StatelessWidget {
-  const _AndroidSettingsPage();
+  _AndroidSettingsPage();
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: kBgBase,
+      backgroundColor: context.appColors.bgBase,
       appBar: AppBar(
-        backgroundColor: kBgSurface,
-        foregroundColor: kTextPrimary,
-        title: const Text(
+        backgroundColor: context.appColors.bgSurface,
+        foregroundColor: context.appColors.textPrimary,
+        title: Text(
           'Settings',
           style: TextStyle(
-            color: kTextPrimary,
+            color: context.appColors.textPrimary,
             fontSize: 20,
             fontWeight: FontWeight.w700,
           ),
@@ -274,12 +274,12 @@ class _AndroidSettingsPage extends StatelessWidget {
             _WorkersSection(
               onClose: () => Navigator.of(context).pop(),
             ),
-            const _SectionDivider(),
-            const _AppearanceSection(),
-            const _SectionDivider(),
-            const _NotificationsSection(),
-            const _SectionDivider(),
-            const _AboutSection(),
+            _SectionDivider(),
+            _AppearanceSection(),
+            _SectionDivider(),
+            _NotificationsSection(),
+            _SectionDivider(),
+            _AboutSection(),
           ],
         ),
       ),
@@ -288,13 +288,13 @@ class _AndroidSettingsPage extends StatelessWidget {
 }
 
 class _SectionDivider extends StatelessWidget {
-  const _SectionDivider();
+  _SectionDivider();
 
   @override
   Widget build(BuildContext context) {
-    return const Padding(
+    return Padding(
       padding: EdgeInsets.symmetric(vertical: 20),
-      child: Divider(color: kDivider, height: 1),
+      child: Divider(color: context.appColors.divider, height: 1),
     );
   }
 }
@@ -307,20 +307,20 @@ class _SectionHeader extends StatelessWidget {
   final String title;
   final IconData icon;
 
-  const _SectionHeader({required this.title, required this.icon});
+  _SectionHeader({required this.title, required this.icon});
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
+      padding: EdgeInsets.only(bottom: 16),
       child: Row(
         children: [
-          Icon(icon, color: kAccentLight, size: 20),
-          const SizedBox(width: 8),
+          Icon(icon, color: context.appColors.accentLight, size: 20),
+          SizedBox(width: 8),
           Text(
             title,
-            style: const TextStyle(
-              color: kTextPrimary,
+            style: TextStyle(
+              color: context.appColors.textPrimary,
               fontSize: 17,
               fontWeight: FontWeight.w600,
             ),
@@ -354,12 +354,12 @@ class _WorkersSection extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const _SectionHeader(title: 'Workers', icon: Icons.dns_outlined),
+            _SectionHeader(title: 'Workers', icon: Icons.dns_outlined),
             Container(
               width: double.infinity,
-              padding: const EdgeInsets.all(16),
+              padding: EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: kBgElevated,
+                color: context.appColors.bgElevated,
                 borderRadius: BorderRadius.circular(14),
               ),
               child: Column(
@@ -372,14 +372,14 @@ class _WorkersSection extends StatelessWidget {
                         height: 10,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          color: conn > 0 ? kSuccessText : kTextMuted,
+                          color: conn > 0 ? context.appColors.successText : context.appColors.textMuted,
                         ),
                       ),
-                      const SizedBox(width: 10),
+                      SizedBox(width: 10),
                       Text(
                         summary,
-                        style: const TextStyle(
-                          color: kTextPrimary,
+                        style: TextStyle(
+                          color: context.appColors.textPrimary,
                           fontSize: 15,
                         ),
                       ),
@@ -419,12 +419,12 @@ class _WorkersSection extends StatelessWidget {
                             state.addWorker(config);
                           }
                         },
-                        icon: const Icon(Icons.add_rounded, size: 18),
-                        label: const Text('Add Worker',
+                        icon: Icon(Icons.add_rounded, size: 18),
+                        label: Text('Add Worker',
                             style: TextStyle(fontSize: 13)),
                         style: OutlinedButton.styleFrom(
-                          foregroundColor: kTextSecondary,
-                          side: const BorderSide(color: kDivider),
+                          foregroundColor: context.appColors.textSecondary,
+                          side: BorderSide(color: context.appColors.divider),
                           shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(10)),
                         ),
@@ -446,12 +446,12 @@ class _WorkersSection extends StatelessWidget {
                               }
                             });
                           },
-                          icon: const Icon(Icons.settings_outlined, size: 18),
-                          label: const Text('Manage Workers',
+                          icon: Icon(Icons.settings_outlined, size: 18),
+                          label: Text('Manage Workers',
                               style: TextStyle(
                                   fontSize: 14, fontWeight: FontWeight.w600)),
                           style: FilledButton.styleFrom(
-                            backgroundColor: kAccent,
+                            backgroundColor: context.appColors.accent,
                             foregroundColor: Colors.white,
                             shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(12)),
@@ -485,10 +485,10 @@ class _WorkerRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final status = worker?.status ?? WorkerConnectionStatus.disconnected;
     final statusColor = switch (status) {
-      WorkerConnectionStatus.connected => kSuccessText,
-      WorkerConnectionStatus.connecting => kToolAccent,
-      WorkerConnectionStatus.reconnecting => kToolAccent,
-      WorkerConnectionStatus.disconnected => kTextMuted,
+      WorkerConnectionStatus.connected => context.appColors.successText,
+      WorkerConnectionStatus.connecting => context.appColors.toolAccent,
+      WorkerConnectionStatus.reconnecting => context.appColors.toolAccent,
+      WorkerConnectionStatus.disconnected => context.appColors.textMuted,
     };
 
     return Padding(
@@ -503,12 +503,12 @@ class _WorkerRow extends StatelessWidget {
               color: statusColor,
             ),
           ),
-          const SizedBox(width: 8),
+          SizedBox(width: 8),
           Expanded(
             child: Text(
               config.name,
-              style: const TextStyle(
-                color: kTextSecondary,
+              style: TextStyle(
+                color: context.appColors.textSecondary,
                 fontSize: 13,
               ),
               overflow: TextOverflow.ellipsis,
@@ -519,8 +519,8 @@ class _WorkerRow extends StatelessWidget {
             height: 28,
             child: IconButton(
               padding: EdgeInsets.zero,
-              icon: const Icon(Icons.edit_outlined,
-                  color: kTextMuted, size: 16),
+              icon: Icon(Icons.edit_outlined,
+                  color: context.appColors.textMuted, size: 16),
               onPressed: onEdit,
               tooltip: 'Edit worker',
               constraints: const BoxConstraints(
@@ -558,37 +558,37 @@ class _AppearanceSectionState extends State<_AppearanceSection> {
     _compactMode = settings.compactMode;
   }
 
-  void _save(SettingsService settings) {
-    settings.themeMode = _themeMode;
-    settings.fontSize = _fontSize;
-    settings.compactMode = _compactMode;
+  void _save() {
+    context.read<AppState>().updateAppearance(
+      themeMode: _themeMode,
+      fontSize: _fontSize,
+      compactMode: _compactMode,
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final settings = context.read<AppState>().settings;
-
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const _SectionHeader(
+        _SectionHeader(
             title: 'Appearance', icon: Icons.palette_outlined),
-        const Text('Theme',
-            style: TextStyle(color: kTextSecondary, fontSize: 13)),
+        Text('Theme',
+            style: TextStyle(color: context.appColors.textSecondary, fontSize: 13)),
         const SizedBox(height: 8),
         _SegmentedSelector(
           options: const ['system', 'dark', 'light'],
-          labels: const ['System', 'Dark', 'Light'],
+          labels: ['System', 'Dark', 'Light'],
           selected: _themeMode,
           onChanged: (v) {
             setState(() => _themeMode = v);
-            _save(settings);
+            _save();
           },
         ),
-        const SizedBox(height: 20),
-        const Text('Message font size',
-            style: TextStyle(color: kTextSecondary, fontSize: 13)),
+        SizedBox(height: 20),
+        Text('Message font size',
+            style: TextStyle(color: context.appColors.textSecondary, fontSize: 13)),
         const SizedBox(height: 8),
         _SegmentedSelector(
           options: const ['small', 'medium', 'large'],
@@ -596,21 +596,21 @@ class _AppearanceSectionState extends State<_AppearanceSection> {
           selected: _fontSize,
           onChanged: (v) {
             setState(() => _fontSize = v);
-            _save(settings);
+            _save();
           },
         ),
-        const SizedBox(height: 16),
+        SizedBox(height: 16),
         SwitchListTile(
-          title: const Text('Compact mode',
-              style: TextStyle(color: kTextPrimary, fontSize: 15)),
-          subtitle: const Text('Reduce padding in message bubbles',
-              style: TextStyle(color: kTextMuted, fontSize: 12)),
+          title: Text('Compact mode',
+              style: TextStyle(color: context.appColors.textPrimary, fontSize: 15)),
+          subtitle: Text('Reduce padding in message bubbles',
+              style: TextStyle(color: context.appColors.textMuted, fontSize: 12)),
           value: _compactMode,
-          activeTrackColor: kAccent,
+          activeTrackColor: context.appColors.accent,
           contentPadding: EdgeInsets.zero,
           onChanged: (v) {
             setState(() => _compactMode = v);
-            _save(settings);
+            _save();
           },
         ),
       ],
@@ -693,16 +693,16 @@ class _NotificationsSectionState extends State<_NotificationsSection> {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const _SectionHeader(
+        _SectionHeader(
             title: 'Notifications', icon: Icons.notifications_outlined),
         SwitchListTile(
-          title: const Text('Sound when done',
-              style: TextStyle(color: kTextPrimary, fontSize: 15)),
-          subtitle: const Text(
+          title: Text('Sound when done',
+              style: TextStyle(color: context.appColors.textPrimary, fontSize: 15)),
+          subtitle: Text(
               'Play a sound when work finishes and waiting for input',
-              style: TextStyle(color: kTextMuted, fontSize: 12)),
+              style: TextStyle(color: context.appColors.textMuted, fontSize: 12)),
           value: _soundOnCompleteEnabled,
-          activeTrackColor: kAccent,
+          activeTrackColor: context.appColors.accent,
           contentPadding: EdgeInsets.zero,
           onChanged: (v) {
             setState(() => _soundOnCompleteEnabled = v);
@@ -710,12 +710,12 @@ class _NotificationsSectionState extends State<_NotificationsSection> {
           },
         ),
         SwitchListTile(
-          title: const Text('Sound on message',
-              style: TextStyle(color: kTextPrimary, fontSize: 15)),
-          subtitle: const Text('Play a sound when a message arrives',
-              style: TextStyle(color: kTextMuted, fontSize: 12)),
+          title: Text('Sound on message',
+              style: TextStyle(color: context.appColors.textPrimary, fontSize: 15)),
+          subtitle: Text('Play a sound when a message arrives',
+              style: TextStyle(color: context.appColors.textMuted, fontSize: 12)),
           value: _soundEnabled,
-          activeTrackColor: kAccent,
+          activeTrackColor: context.appColors.accent,
           contentPadding: EdgeInsets.zero,
           onChanged: (v) {
             setState(() => _soundEnabled = v);
@@ -723,13 +723,13 @@ class _NotificationsSectionState extends State<_NotificationsSection> {
           },
         ),
         if (_anySoundEnabled) ...[
-          const SizedBox(height: 12),
-          const Text('Notification sound',
-              style: TextStyle(color: kTextSecondary, fontSize: 13)),
-          const SizedBox(height: 8),
+          SizedBox(height: 12),
+          Text('Notification sound',
+              style: TextStyle(color: context.appColors.textSecondary, fontSize: 13)),
+          SizedBox(height: 8),
           Container(
             decoration: BoxDecoration(
-              color: kBgElevated,
+              color: context.appColors.bgElevated,
               borderRadius: BorderRadius.circular(14),
             ),
             clipBehavior: Clip.antiAlias,
@@ -765,8 +765,8 @@ class _NotificationsSectionState extends State<_NotificationsSection> {
                         ? () => _soundService?.previewSound('custom')
                         : null,
                     trailing: IconButton(
-                      icon: const Icon(Icons.folder_open,
-                          color: kTextMuted, size: 20),
+                      icon: Icon(Icons.folder_open,
+                          color: context.appColors.textMuted, size: 20),
                       onPressed: () => _pickCustomSound(settings),
                       tooltip: 'Browse...',
                     ),
@@ -776,21 +776,21 @@ class _NotificationsSectionState extends State<_NotificationsSection> {
             ),
           ),
           if (_customSoundError != null) ...[
-            const SizedBox(height: 6),
+            SizedBox(height: 6),
             Text(
               _customSoundError!,
-              style: const TextStyle(color: kErrorText, fontSize: 12),
+              style: TextStyle(color: context.appColors.errorText, fontSize: 12),
             ),
           ],
         ],
         if (Platform.isAndroid || Platform.isIOS)
           SwitchListTile(
-            title: const Text('Vibrate on message',
-                style: TextStyle(color: kTextPrimary, fontSize: 15)),
-            subtitle: const Text('Vibrate when a message arrives',
-                style: TextStyle(color: kTextMuted, fontSize: 12)),
+            title: Text('Vibrate on message',
+                style: TextStyle(color: context.appColors.textPrimary, fontSize: 15)),
+            subtitle: Text('Vibrate when a message arrives',
+                style: TextStyle(color: context.appColors.textMuted, fontSize: 12)),
             value: _vibrateEnabled,
-            activeTrackColor: kAccent,
+            activeTrackColor: context.appColors.accent,
             contentPadding: EdgeInsets.zero,
             onChanged: (v) {
               setState(() => _vibrateEnabled = v);
@@ -826,22 +826,22 @@ class _SoundOption extends StatelessWidget {
         InkWell(
           onTap: onTap,
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             child: Row(
               children: [
                 Icon(
                   selected
                       ? Icons.radio_button_checked
                       : Icons.radio_button_unchecked,
-                  color: selected ? kAccentLight : kTextMuted,
+                  color: selected ? context.appColors.accentLight : context.appColors.textMuted,
                   size: 20,
                 ),
-                const SizedBox(width: 10),
+                SizedBox(width: 10),
                 Expanded(
                   child: Text(
                     label,
                     style: TextStyle(
-                      color: selected ? kTextPrimary : kTextSecondary,
+                      color: selected ? context.appColors.textPrimary : context.appColors.textSecondary,
                       fontSize: 14,
                     ),
                     overflow: TextOverflow.ellipsis,
@@ -850,19 +850,19 @@ class _SoundOption extends StatelessWidget {
                 ?trailing,
                 if (onPreview != null)
                   IconButton(
-                    icon: const Icon(Icons.play_arrow_rounded,
-                        color: kTextMuted, size: 22),
+                    icon: Icon(Icons.play_arrow_rounded,
+                        color: context.appColors.textMuted, size: 22),
                     onPressed: onPreview,
                     tooltip: 'Preview',
                     constraints:
-                        const BoxConstraints(minWidth: 36, minHeight: 36),
+                        BoxConstraints(minWidth: 36, minHeight: 36),
                     padding: EdgeInsets.zero,
                   ),
               ],
             ),
           ),
         ),
-        if (!isLast) const Divider(color: kDivider, height: 1, indent: 42),
+        if (!isLast) Divider(color: context.appColors.divider, height: 1, indent: 42),
       ],
     );
   }
@@ -881,21 +881,21 @@ class _AboutSection extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const _SectionHeader(title: 'About', icon: Icons.info_outline),
+        _SectionHeader(title: 'About', icon: Icons.info_outline),
         Container(
           width: double.infinity,
-          padding: const EdgeInsets.all(16),
+          padding: EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: kBgElevated,
+            color: context.appColors.bgElevated,
             borderRadius: BorderRadius.circular(14),
           ),
-          child: const Column(
+          child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
                 'RCFlow Client',
                 style: TextStyle(
-                  color: kTextPrimary,
+                  color: context.appColors.textPrimary,
                   fontSize: 16,
                   fontWeight: FontWeight.w600,
                 ),
@@ -903,13 +903,13 @@ class _AboutSection extends StatelessWidget {
               SizedBox(height: 4),
               Text(
                 'v0.1.0',
-                style: TextStyle(color: kAccentLight, fontSize: 14),
+                style: TextStyle(color: context.appColors.accentLight, fontSize: 14),
               ),
               SizedBox(height: 12),
               Text(
                 'A client for the RCFlow server — execute actions on your '
                 'host machine via natural language prompts.',
-                style: TextStyle(color: kTextSecondary, fontSize: 13),
+                style: TextStyle(color: context.appColors.textSecondary, fontSize: 13),
               ),
             ],
           ),
@@ -940,7 +940,7 @@ class _SegmentedSelector extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: kBgElevated,
+        color: context.appColors.bgElevated,
         borderRadius: BorderRadius.circular(12),
       ),
       padding: const EdgeInsets.all(4),
@@ -951,10 +951,10 @@ class _SegmentedSelector extends StatelessWidget {
               child: GestureDetector(
                 onTap: () => onChanged(options[i]),
                 child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  duration: Duration(milliseconds: 200),
+                  padding: EdgeInsets.symmetric(vertical: 10),
                   decoration: BoxDecoration(
-                    color: selected == options[i] ? kAccent : Colors.transparent,
+                    color: selected == options[i] ? context.appColors.accent : Colors.transparent,
                     borderRadius: BorderRadius.circular(9),
                   ),
                   alignment: Alignment.center,
@@ -963,7 +963,7 @@ class _SegmentedSelector extends StatelessWidget {
                     style: TextStyle(
                       color: selected == options[i]
                           ? Colors.white
-                          : kTextSecondary,
+                          : context.appColors.textSecondary,
                       fontSize: 13,
                       fontWeight: selected == options[i]
                           ? FontWeight.w600

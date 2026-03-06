@@ -10,29 +10,29 @@ class SummaryBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
+      padding: EdgeInsets.symmetric(vertical: 6),
       child: Container(
         width: double.infinity,
-        padding: const EdgeInsets.all(12),
+        padding: EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: kSummaryBg,
+          color: context.appColors.summaryBg,
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: kAccentDim),
+          border: Border.all(color: context.appColors.accentDim),
         ),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Padding(
+            Padding(
               padding: EdgeInsets.only(top: 2),
               child: Icon(Icons.auto_awesome_rounded,
-                  color: kSummaryText, size: 16),
+                  color: context.appColors.summaryText, size: 16),
             ),
-            const SizedBox(width: 10),
+            SizedBox(width: 10),
             Expanded(
               child: Text(
                 message.content,
-                style: const TextStyle(
-                  color: kSummaryText,
+                style: TextStyle(
+                  color: context.appColors.summaryText,
                   fontSize: 13,
                   height: 1.45,
                 ),

@@ -2,7 +2,7 @@
 
 ## Overview
 
-RCFlow is a background server running on Linux or Windows that provides a WebSocket-based interface for executing actions on the host machine via natural language prompts. Users connect from client applications (Android and Windows desktop), send text or voice prompts, and the server uses an LLM (Anthropic Messages API) to interpret those prompts into tool calls. Tools are pluggable and defined via JSON files. Results — both text and audio — stream back to the client in real time.
+RCFlow is a background server running on Linux or Windows that provides a WebSocket-based interface for executing actions on the host machine via natural language prompts. Users connect from client applications (Android and Windows desktop), send text or voice prompts, and the server uses an LLM (Anthropic Messages API, AWS Bedrock, or OpenAI Chat Completions API) to interpret those prompts into tool calls. Tools are pluggable and defined via JSON files. Results — both text and audio — stream back to the client in real time.
 
 ## Technology Stack
 
@@ -13,21 +13,25 @@ RCFlow is a background server running on Linux or Windows that provides a WebSoc
 | Web Framework        | FastAPI                       |
 | ORM                  | SQLAlchemy 2.0 (async)        |
 | Database             | SQLite (default) or PostgreSQL |
-| LLM                  | Anthropic Messages API or AWS Bedrock |
+| LLM                  | Anthropic Messages API, AWS Bedrock, or OpenAI Chat Completions API |
 | STT                  | Pluggable (Wispr Flow default)|
 | TTS                  | Pluggable (provider TBD)      |
 | Audio Format         | Opus/OGG                      |
-| Prompt Templates     | POML (poml Python SDK)        |
+| Prompt Templates     | Jinja2                        |
 | Linting / Formatting | Ruff                          |
 | Type Checking        | ty                            |
 | Testing              | pytest                        |
-| Config               | Environment variables + .env  |
+| Config               | Environment variables + settings.json       |
 | OS                   | Linux, Windows                |
 | Client Platforms     | Android, Windows (desktop)    |
 | Android Keep-Alive   | flutter_foreground_task       |
 | Audio Playback       | audioplayers                  |
 | File Picker          | file_picker (Windows custom sounds) |
 | Bundling             | PyInstaller (self-contained distributable) |
+| Windows GUI          | tkinter (server control window)            |
+| Windows Tray         | pystray + Pillow (system tray icon)        |
+| Windows Terminal PTY | pywinpty (ConPTY wrapper)                   |
+| Windows Installer    | Inno Setup 6 (setup.exe builder)           |
 
 ---
 
@@ -65,8 +69,9 @@ RCFlow is a background server running on Linux or Windows that provides a WebSoc
              ▼                    │              │
 ┌─────────────────────────┐       │              │
 │   LLM Provider          │       │              │
-│   (Anthropic API or     │       │              │
-│    AWS Bedrock)         │       │              │
+│   (Anthropic API,       │       │              │
+│    AWS Bedrock, or      │       │              │
+│    OpenAI)              │       │              │
 │   + Tool Definitions    │       │              │
 └────────────┬────────────┘       │              │
              │                    │              │
@@ -107,7 +112,7 @@ RCFlow is a background server running on Linux or Windows that provides a WebSoc
 2. If audio → RCFlow forwards to Wispr Flow STT → receives transcribed text
 3. Text prompt is routed to the Prompt Router
 4. Prompt Router creates or resumes a Session
-5. Prompt + tool definitions + session context sent to LLM provider (Anthropic API or AWS Bedrock, streaming)
+5. Prompt + tool definitions + session context sent to LLM provider (Anthropic API, AWS Bedrock, or OpenAI, streaming)
 6. LLM responds with text and/or tool_use blocks
 7. For each tool_use → Tool Executor runs the tool (shell command or HTTP API call)
 8. Tool output fed back to LLM for further reasoning (agentic loop)
@@ -149,9 +154,43 @@ On wide layouts (>700px), the main content area supports multiple simultaneous s
 
 **Edge cases**: Last pane close resets to home (tree always has >= 1 leaf). Same session in multiple panes receives messages independently. Reconnection re-subscribes all pane sessions. Mobile layout remains single-pane, using `activePane` with a `ChangeNotifierProvider`.
 
+### Terminal Sessions (Sidebar Integration)
+
+Terminal panes appear in the session sidebar alongside regular sessions, grouped under their respective worker. Each terminal has a persistent `TerminalSessionInfo` that survives pane close/reopen.
+
+**Data model** (`lib/ui/widgets/terminal_pane.dart`):
+- `TerminalSessionInfo`: Holds `terminalId`, `workerId`, `title` (user-renamable, default "Terminal"), `createdAt`, `paneId?` (null when hidden), plus the xterm `Terminal` and `TerminalController` objects. Connection state (`connected`, `ended`) and stream subscriptions are also stored here so the terminal buffer persists across pane lifecycle.
+
+**AppState terminal management** (`lib/state/app_state.dart`):
+- `_terminalSessions`: `Map<String, TerminalSessionInfo>` keyed by `terminalId`. Terminals registered here on `openTerminal()`.
+- `terminalsByWorker`: Groups terminal sessions by `workerId` for sidebar display.
+- `closePane()` for terminal panes: Detaches the pane (`info.paneId = null`) but does NOT kill the server-side PTY. The terminal buffer (xterm `Terminal` object) stays in `_terminalSessions`.
+- `showTerminalInPane(terminalId)`: Reattaches a hidden terminal to a new or existing pane. If already visible, focuses the pane.
+- `closeTerminalSession(terminalId)`: Actually kills the terminal — sends `close` control message to the server, cancels subscriptions, removes from `_terminalSessions`, and closes the pane.
+- `renameTerminal(terminalId, newTitle)`: Updates the title displayed in sidebar and pane header.
+- `splitPaneWithTerminal(paneId, zone, terminalId)`: Drag-and-drop support for terminal entries in the sidebar.
+
+**Sidebar entries** (`lib/ui/widgets/session_panel.dart`):
+- Terminal sessions shown after regular sessions in each worker group, via `_TerminalSessionTile`.
+- Distinctive terminal icon (`Icons.terminal_rounded`) with green/muted background based on `ended` state.
+- No pause/resume buttons (terminals don't support pause).
+- Close button (X) kills the terminal with confirmation dialog.
+- Right-click context menu: Rename, Close terminal.
+- Long-press: Rename dialog.
+- Tap: Shows terminal in a pane (reattach if hidden, focus if already visible).
+- Draggable with `TerminalDragData` for split-view drop targeting.
+
+**Terminal pane widget** (`lib/ui/widgets/terminal_pane.dart`):
+- `TerminalPane` receives `TerminalSessionInfo` from AppState — does NOT create its own `Terminal`/`TerminalController`.
+- On `initState`: Sets up output/resize handlers and either connects (first time) or reattaches (re-show).
+- On `dispose`: Only cancels stream subscriptions and unregisters from `TerminalService`. Does NOT send close command to server.
+
+**Drop target** (`lib/ui/widgets/session_pane.dart`):
+- `DragTarget<Object>` accepts both `SessionDragData` and `TerminalDragData`, dispatching to `splitPaneWithSession` or `splitPaneWithTerminal` respectively.
+
 ### Workers (Multi-Server)
 
-The client can connect to multiple RCFlow servers simultaneously. Each server connection is a "Worker". Each backend instance is identified by a unique `RCFLOW_BACKEND_ID` (auto-generated UUID, persisted to `.env`). When multiple backends share the same database, sessions are isolated per backend via the `backend_id` column on the `sessions` table — each backend only sees and manages its own sessions.
+The client can connect to multiple RCFlow servers simultaneously. Each server connection is a "Worker". Each backend instance is identified by a unique `RCFLOW_BACKEND_ID` (auto-generated UUID, persisted to `settings.json`). When multiple backends share the same database, sessions are isolated per backend via the `backend_id` column on the `sessions` table — each backend only sees and manages its own sessions.
 
 **Data model**:
 - `WorkerConfig` (`lib/models/worker_config.dart`): Client-side configuration with `id` (UUID, generated locally), `name`, `host`, `apiKey`, `useSSL`, `autoConnect`, and `sortOrder`. Serialized to/from JSON. ID generated using `dart:math` Random.secure.
@@ -205,7 +244,7 @@ The client can connect to multiple RCFlow servers simultaneously. Each server co
 | POST   | `/api/sessions/{session_id}/restore`    | Yes  | Restore an archived (completed/failed/cancelled) session back to active state. Rebuilds conversation history, buffer, and Claude Code executor state. |
 | PATCH  | `/api/sessions/{session_id}/title`      | Yes  | Set or clear a session title (max 200 chars). Body: `{"title": "..."}` or `{"title": null}`. |
 | GET    | `/api/config`                           | Yes  | Get server configuration schema with current values. Secret values are masked. Options grouped by section. |
-| PATCH  | `/api/config`                           | Yes  | Update server configuration. Body: `{"updates": {"KEY": "value", ...}}`. Persists to `.env`, reloads settings, and hot-reloads LLM/STT/TTS components. Returns updated schema. |
+| PATCH  | `/api/config`                           | Yes  | Update server configuration. Body: `{"updates": {"KEY": "value", ...}}`. Persists to `settings.json`, reloads settings, and hot-reloads LLM/STT/TTS components. Returns updated schema. |
 | GET    | `/api/tools/status`                     | Yes  | Get installation status, versions, and update availability for managed CLI tools (Claude Code, Codex). |
 | POST   | `/api/tools/update`                     | Yes  | Check for and install updates to RCFlow-managed CLI tools. Only updates tools managed by RCFlow (not user-installed ones). |
 | GET    | `/api/tools/{tool_name}/settings`       | Yes  | Get per-tool settings schema and current values for a managed CLI tool. |
@@ -729,27 +768,21 @@ Tools are classified by risk level to help the user make informed decisions:
 
 ## System Prompt Templates
 
-The system prompt sent to the LLM is defined in a POML (Prompt Orchestration Markup Language) template file rather than inline Python strings. This separates prompt content from code, provides semantic structure via tags like `<role>` and `<output-format>`, and supports variable substitution.
+The system prompt sent to the LLM is defined in a Jinja2 template file rather than inline Python strings. This separates prompt content from code and supports variable substitution.
 
 ### File Organization
 
 ```
 src/prompts/
 ├── __init__.py              # Exports PromptBuilder
-├── builder.py               # PromptBuilder class (wraps poml Python SDK)
+├── builder.py               # PromptBuilder class (uses Jinja2)
 └── templates/
-    └── system_prompt.poml   # System prompt in POML format
+    └── system_prompt.j2     # System prompt in Jinja2 format
 ```
 
 ### Template Syntax
 
-The template uses [POML](https://microsoft.github.io/poml/latest/) markup with semantic components:
-
-- `<role>` — LLM identity and behavior instructions
-- `<output-format>` — Response format constraints (TTS-friendly rules)
-- `<section>` / `<h>` / `<p>` — Structured content sections
-
-Variable substitution uses POML's built-in template engine with `{{ variable }}` syntax.
+The template uses [Jinja2](https://jinja.palletsprojects.com/) with `{{ variable }}` syntax for variable substitution. `StrictUndefined` is used so that missing variables raise errors immediately.
 
 ### Integration
 
@@ -1343,23 +1376,25 @@ CREATE TABLE tool_executions (
 
 ## Configuration
 
-All configuration is via environment variables, loaded from a `.env` file in development.
+All configuration is via environment variables, loaded from a `settings.json` file. Environment variables set in the shell take precedence over values in `settings.json`. On first run, if a legacy `.env` file exists it is automatically migrated to `settings.json`.
 
 | Variable                | Required | Default         | Description                          |
 |-------------------------|----------|-----------------|--------------------------------------|
 | `RCFLOW_HOST`           | no       | `0.0.0.0`       | Server bind address                  |
 | `RCFLOW_PORT`           | no       | `8765`          | Server port                          |
 | `RCFLOW_API_KEY`        | yes      |                 | API key for WebSocket auth           |
-| `RCFLOW_BACKEND_ID`     | no       | auto-generated  | Unique backend instance ID (UUID). Auto-generated and persisted to `.env` on first run. Used to isolate sessions per backend when multiple backends share one database. |
+| `RCFLOW_BACKEND_ID`     | no       | auto-generated  | Unique backend instance ID (UUID). Auto-generated and persisted to `settings.json` on first run. Used to isolate sessions per backend when multiple backends share one database. |
 | `SSL_CERTFILE`          | no       |                 | Path to TLS certificate (enables WSS when both cert+key set) |
 | `SSL_KEYFILE`           | no       |                 | Path to TLS private key (enables WSS when both cert+key set) |
 | `DATABASE_URL`          | no       | `sqlite+aiosqlite:///./data/rcflow.db` | Database connection string (SQLite or PostgreSQL) |
-| `LLM_PROVIDER`          | no       | `anthropic`     | LLM provider: `anthropic` or `bedrock` |
+| `LLM_PROVIDER`          | no       | `anthropic`     | LLM provider: `anthropic`, `bedrock`, or `openai` |
 | `ANTHROPIC_API_KEY`     | cond.    |                 | Anthropic API key (required when `LLM_PROVIDER=anthropic`) |
-| `ANTHROPIC_MODEL`       | no       | `claude-sonnet-4-20250514`| Model to use (use Bedrock model IDs when `LLM_PROVIDER=bedrock`) |
+| `ANTHROPIC_MODEL`       | no       | `claude-sonnet-4-20250514`| Anthropic model ID (use Bedrock model IDs when `LLM_PROVIDER=bedrock`) |
 | `AWS_REGION`            | no       | `us-east-1`     | AWS region (used when `LLM_PROVIDER=bedrock`) |
 | `AWS_ACCESS_KEY_ID`     | no       |                 | AWS access key ID (optional if using IAM roles/instance profiles) |
 | `AWS_SECRET_ACCESS_KEY` | no       |                 | AWS secret access key (optional if using IAM roles/instance profiles) |
+| `OPENAI_API_KEY`        | cond.    |                 | OpenAI API key (required when `LLM_PROVIDER=openai`) |
+| `OPENAI_MODEL`          | no       | `gpt-4o`        | OpenAI model ID (e.g. gpt-4o, gpt-4.1, o3) |
 | `STT_PROVIDER`          | no       | `wispr_flow`    | STT provider name                    |
 | `STT_API_KEY`           | yes      |                 | STT provider API key (Wispr Flow)    |
 | `TTS_PROVIDER`          | no       | `none`          | TTS provider name                    |
@@ -1372,7 +1407,7 @@ All configuration is via environment variables, loaded from a `.env` file in dev
 
 ### Remote Configuration (Client-Side Editing)
 
-The server exposes `GET /api/config` and `PATCH /api/config` endpoints that allow connected clients to view and edit a subset of server settings remotely. This enables users to configure API keys, provider selection, model IDs, and other options from the Flutter client without manual `.env` file editing.
+The server exposes `GET /api/config` and `PATCH /api/config` endpoints that allow connected clients to view and edit a subset of server settings remotely. This enables users to configure API keys, provider selection, model IDs, and other options from the Flutter client without manual `settings.json` file editing.
 
 **Config option metadata schema** (returned by `GET /api/config`):
 
@@ -1392,7 +1427,7 @@ The server exposes `GET /api/config` and `PATCH /api/config` endpoints that allo
 
 **Excluded from remote config** (for security): `RCFLOW_API_KEY`, `RCFLOW_HOST`, `RCFLOW_PORT`, `SSL_CERTFILE`, `SSL_KEYFILE`, `DATABASE_URL`.
 
-**Hot-reload**: When config is updated via `PATCH /api/config`, the server persists changes to the `.env` file and recreates the LLM client, STT provider, and TTS provider with the new settings. The old LLM client is gracefully closed.
+**Hot-reload**: When config is updated via `PATCH /api/config`, the server persists changes to `settings.json` and recreates the LLM client, STT provider, and TTS provider with the new settings. The old LLM client is gracefully closed.
 
 **Client UI**: The Flutter client shows a "Settings" button on each connected worker card. Tapping it opens a dialog (desktop) or bottom sheet (mobile) that renders a dynamic form based on the server's config schema. Fields are grouped by section and rendered as text fields, dropdowns, switches, or password fields depending on type.
 
@@ -1405,7 +1440,7 @@ RCFlow/
 ├── CLAUDE.md                    # Claude Code instructions
 ├── Design.md                    # This file — project design document
 ├── pyproject.toml               # Project metadata and dependencies (uv)
-├── .env.example                 # Example environment variables
+├── settings.json                 # Server configuration (JSON, auto-created on first run)
 ├── .python-version              # Python version pin
 ├── ruff.toml                    # Ruff linter/formatter config
 │
@@ -1431,7 +1466,7 @@ RCFlow/
 │   │   ├── __init__.py
 │   │   ├── session.py           # Session manager and session state
 │   │   ├── prompt_router.py     # Routes text to LLM pipeline
-│   │   ├── llm.py               # Anthropic Messages API client
+│   │   ├── llm.py               # LLM client (Anthropic, Bedrock, OpenAI)
 │   │   └── buffer.py            # Output buffer for session history
 │   │
 │   ├── executors/
@@ -1460,9 +1495,9 @@ RCFlow/
 │   │
 │   ├── prompts/
 │   │   ├── __init__.py          # Exports PromptBuilder
-│   │   ├── builder.py           # PromptBuilder class (wraps poml SDK)
+│   │   ├── builder.py           # PromptBuilder class (uses Jinja2)
 │   │   └── templates/
-│   │       └── system_prompt.poml  # System prompt in POML format
+│   │       └── system_prompt.j2    # System prompt in Jinja2 format
 │   │
 │   ├── models/
 │   │   ├── __init__.py
@@ -1535,6 +1570,8 @@ RCFlow supports **Linux (x64, arm64)** and **Windows (x64)**.
 | Codex archive format | `.tar.gz` | `.zip` |
 | Process isolation | `start_new_session=True` | `CREATE_NEW_PROCESS_GROUP` |
 | Process tree kill | `os.killpg(SIGKILL)` | `taskkill /T /F /PID` |
+| Background mode | systemd service | GUI window (`rcflow gui`) or system tray (`rcflow tray`) |
+| Auto-start | systemd enable | Registry `HKCU\...\Run` key |
 
 ### Database
 
@@ -1561,6 +1598,33 @@ Both `ClaudeCodeExecutor` and `CodexExecutor` use these helpers.
 uv run rcflow                    # or: uv run rcflow run — starts the server
 ```
 
+### Production (Windows — GUI + System Tray)
+
+`rcflow gui` (or `rcflow tray`, which delegates to it) launches a combined tkinter window and system tray application (`src/gui.py`). This is the default mode for frozen Windows builds. The server runs as a subprocess — closing the window minimizes to the system tray; double-clicking the tray icon restores the window. "Quit" from the tray stops the server and exits.
+
+**Features:**
+- **Server settings** — IP address and port text fields, pre-populated from `settings.json` configuration.
+- **Start/Stop button** — Starts the server as a child subprocess (`rcflow run` with `CREATE_NO_WINDOW`). Settings fields are disabled while the server is running.
+- **Status indicator** — Shows "Running" (green), "Stopped" (gray), "Starting..."/"Stopping..." (yellow), or error messages (red).
+- **Instance details panel** — Displays bound address, uptime (HH:MM:SS), active session count, and backend ID. Session count and backend ID are fetched from the `/api/info` endpoint every 5 seconds.
+- **Log output** — Scrollable dark-themed text area with real-time display of the server subprocess stdout. ERROR/CRITICAL lines are highlighted red, WARNING lines orange. Auto-scrolls when at the bottom; capped at 5,000 lines.
+- **System tray icon** — Shows server status. Right-click menu: status line, "Open" (restores window), "Start with Windows" toggle (Windows registry autostart), "Quit".
+
+**Architecture:**
+- The GUI process spawns `rcflow run` as a child subprocess with stdout/stderr piped. A reader thread consumes subprocess output and feeds it into a `queue.Queue` that the tkinter main loop drains into the text widget.
+- `pystray` runs in a background daemon thread; tkinter runs in the main thread.
+- Closing the window (X button) calls `root.withdraw()` to hide the window — the tray icon remains and the server keeps running.
+- Double-clicking the tray icon calls `root.deiconify()` to restore the window.
+- "Quit" from the tray menu terminates the server subprocess (graceful with 10s timeout, then kill), stops the tray icon, and destroys the tkinter window.
+- If `pystray`/`Pillow` are not installed, the GUI still works but without a tray icon — closing the window exits the application.
+- Port availability is checked before starting (same socket-bind check as `rcflow run`).
+- Environment variables `RCFLOW_HOST` and `RCFLOW_PORT` are set in the subprocess environment so the server picks up the GUI-configured values.
+- The server auto-starts on application launch.
+
+**Autostart:** Registry key `HKCU\Software\Microsoft\Windows\CurrentVersion\Run\RCFlow` stores `"<exe>" gui`. The `rcflow tray` command is kept for backwards compatibility but delegates to `run_gui()`.
+
+**Icon:** `assets/tray_icon.ico` (generated by `scripts/generate_icon.py`, same design as the client app icon). Copied into the bundle root as `tray_icon.ico`. The frozen build loads it from `{install_dir}/tray_icon.ico`; dev builds look in `{project_root}/assets/tray_icon.ico`. Fallback: generates a blue rounded square with "RC" text.
+
 ### Production (systemd — Linux)
 
 ```ini
@@ -1573,7 +1637,7 @@ After=network.target
 Type=simple
 User=rcflow
 WorkingDirectory=/opt/rcflow
-EnvironmentFile=/opt/rcflow/.env
+# Settings loaded from /opt/rcflow/settings.json by the application
 ExecStart=/opt/rcflow/.venv/bin/python -m rcflow
 Restart=on-failure
 RestartSec=5
@@ -1598,23 +1662,33 @@ RCFlow is distributed as a self-contained package built with PyInstaller. End us
 
 | Target | Command | Output |
 |--------|---------|--------|
-| Current platform | `make bundle` | `dist/rcflow-{version}-{platform}-{arch}.tar.gz` (or `.zip`) |
-| Linux x64/arm64 | `make bundle-linux` | `dist/rcflow-{version}-linux-{arch}.tar.gz` |
-| Windows x64 | `make bundle-windows` | `dist/rcflow-{version}-windows-x64.zip` |
+| Current platform (backend) | `just bundle` | `dist/rcflow-{version}-{platform}-{arch}.tar.gz` (or `.zip`) |
+| Linux backend (.deb) | `just bundle-linux-backend` | `dist/rcflow_{version}_{deb_arch}.deb` |
+| Linux client | `just bundle-linux-client` | `dist/rcflowclient-linux-{arch}.tar.gz` |
+| Windows client | `just bundle-windows-client` | `dist/rcflowclient-windows-x64.zip` |
+| Windows backend (installer) | `just bundle-windows-backend` | `dist/rcflow-{version}-x64-setup.exe` |
 
-Build script: `scripts/bundle.py`. Requires PyInstaller (`uv add --dev pyinstaller`). Cross-compilation is not supported — build on the target platform.
+Backend build script: `scripts/bundle.py`. Requires PyInstaller (`uv add --dev pyinstaller`). Cross-compilation is not supported — build on the target platform. Client targets build the Flutter desktop app (`rcflowclient`) for the respective platform.
+
+The `bundle-linux-backend` target builds a `.deb` package that installs RCFlow to `/opt/rcflow` with a systemd service. Requires `dpkg-deb` (standard on Debian/Ubuntu). Install with `sudo dpkg -i dist/rcflow_*.deb`.
+
+The `bundle-windows-backend` target builds a windowed (no console) executable with GUI + system tray support and compiles a `setup.exe` installer using Inno Setup 6. Requires Inno Setup 6 installed on the build machine (`iscc.exe` on PATH or in default location).
 
 ### Bundle Contents
 
-The archive contains: the PyInstaller executable + runtime (`_internal/`), tool JSON definitions (`tools/`), alembic migrations (`migrations/`), prompt templates (`templates/`), install/uninstall scripts, systemd service template (Linux), `.env.example`, and a `VERSION` file.
+The archive contains: the PyInstaller executable + runtime (`_internal/`), tool JSON definitions (`tools/`), alembic migrations (`migrations/`), prompt templates (`templates/`), install/uninstall scripts, systemd service template (Linux), tray icon (Windows), and a `VERSION` file.
 
 ### Installation
 
-**Linux:** `sudo ./install.sh` — installs to `/opt/rcflow/`, creates `rcflow` system user, sets up systemd service, generates `.env` with random API key, runs migrations.
+**Linux (.deb):** `sudo dpkg -i rcflow_*.deb` — installs to `/opt/rcflow/`, creates `rcflow` system user, sets up systemd service, generates `settings.json` on first server start. Remove with `sudo apt remove rcflow` (or `--purge` to also delete data).
 
-**Windows:** `.\install.ps1` (as Administrator) — installs to `C:\RCFlow\`, downloads NSSM, registers Windows Service, generates `.env` with random API key, runs migrations, creates firewall rule.
+**Linux (tar.gz/manual):** `sudo ./install.sh` — installs to `/opt/rcflow/`, creates `rcflow` system user, sets up systemd service, generates `settings.json` with random API key, runs migrations.
 
-Both scripts are idempotent — safe to run again for upgrades. Existing `.env` and `data/` are preserved.
+**Windows (zip/manual):** `.\install.ps1` (as Administrator) — installs to `C:\RCFlow\`, downloads NSSM, registers Windows Service, generates `settings.json` with random API key, runs migrations, creates firewall rule.
+
+**Windows (setup.exe):** Run the Inno Setup installer — installs to `%PROGRAMFILES%\RCFlow\` (user-level, no admin required), runs migrations, optionally registers "Start with Windows" autostart, and optionally launches the GUI. `settings.json` is generated automatically on first server start. The GUI runs the server as a background subprocess and provides a window with server controls, live logs, and a system tray icon.
+
+Both scripts are idempotent — safe to run again for upgrades. Existing `settings.json` and `data/` are preserved.
 
 ### Path Resolution
 
@@ -1631,9 +1705,16 @@ The `src/paths.py` module provides functions that resolve paths correctly in bot
 
 The `rcflow` entry point supports subcommands relevant to bundled operation:
 
-- `rcflow` / `rcflow run` — Start the server
+- `rcflow` / `rcflow run` — Start the server (headless)
+- `rcflow gui` — Run with GUI window + system tray (default on frozen Windows builds)
+- `rcflow tray` — Alias for `rcflow gui` (backwards compatibility)
 - `rcflow migrate [revision]` — Run database migrations (default: `head`)
 - `rcflow version` — Print version
+- `rcflow info` — Print server configuration (bind address, port, WSS status)
+- `rcflow api-key` — Print the current API key
+- `rcflow set-api-key <value>` — Save a new API key
+
+On frozen Windows builds, the default command (no subcommand) launches `gui` mode.
 
 ---
 

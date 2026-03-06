@@ -228,7 +228,7 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
         : 310.0;
 
     return Dialog(
-      backgroundColor: kBgSurface,
+      backgroundColor: context.appColors.bgSurface,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: SizedBox(
         width: _hasWorker ? 600 : 500,
@@ -237,27 +237,27 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
           children: [
             // Title
             Padding(
-              padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
+              padding: EdgeInsets.fromLTRB(24, 24, 24, 0),
               child: Align(
                 alignment: Alignment.centerLeft,
                 child: Text(
                   _isEdit ? 'Edit Worker' : 'Add Worker',
-                  style: const TextStyle(
-                    color: kTextPrimary,
+                  style: TextStyle(
+                    color: context.appColors.textPrimary,
                     fontSize: 18,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
               ),
             ),
-            const SizedBox(height: 16),
+            SizedBox(height: 16),
             // Tab bar
             TabBar(
               controller: _tabController,
-              indicatorColor: kAccent,
-              labelColor: kTextPrimary,
-              unselectedLabelColor: kTextMuted,
-              dividerColor: kDivider,
+              indicatorColor: context.appColors.accent,
+              labelColor: context.appColors.textPrimary,
+              unselectedLabelColor: context.appColors.textMuted,
+              dividerColor: context.appColors.divider,
               tabs: [
                 const Tab(text: 'Main'),
                 const Tab(text: 'Other'),
@@ -279,21 +279,21 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
             ),),
             // Test connection area
             _buildTestArea(),
-            const Divider(height: 1, color: kDivider),
+            Divider(height: 1, color: context.appColors.divider),
             // Action buttons
             Padding(
-              padding: const EdgeInsets.fromLTRB(24, 12, 24, 16),
+              padding: EdgeInsets.fromLTRB(24, 12, 24, 16),
               child: Row(
                 children: [
-                  const Spacer(),
+                  Spacer(),
                   TextButton(
                     onPressed: () => Navigator.of(context).pop(),
-                    child: const Text('Cancel',
-                        style: TextStyle(color: kTextSecondary)),
+                    child: Text('Cancel',
+                        style: TextStyle(color: context.appColors.textSecondary)),
                   ),
-                  const SizedBox(width: 8),
+                  SizedBox(width: 8),
                   FilledButton(
-                    style: FilledButton.styleFrom(backgroundColor: kAccent),
+                    style: FilledButton.styleFrom(backgroundColor: context.appColors.accent),
                     onPressed: _save,
                     child: Text(_isEdit ? 'Save' : 'Add',
                         style: const TextStyle(color: Colors.white)),
@@ -309,21 +309,21 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
 
   Widget _buildMainTab() {
     return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(24, 20, 24, 8),
+      padding: EdgeInsets.fromLTRB(24, 20, 24, 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _buildLabel('Name', required: true),
-          const SizedBox(height: 6),
+          SizedBox(height: 6),
           TextField(
             controller: _nameCtrl,
             autofocus: true,
-            style: const TextStyle(color: kTextPrimary, fontSize: 15),
+            style: TextStyle(color: context.appColors.textPrimary, fontSize: 15),
             decoration: InputDecoration(
               hintText: 'Home Server',
-              prefixIcon: const Icon(Icons.label_outlined,
-                  color: kTextMuted, size: 20),
-              fillColor: kBgElevated,
+              prefixIcon: Icon(Icons.label_outlined,
+                  color: context.appColors.textMuted, size: 20),
+              fillColor: context.appColors.bgElevated,
               border: OutlineInputBorder(
                 borderSide: BorderSide.none,
                 borderRadius: BorderRadius.circular(14),
@@ -334,17 +334,17 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
               if (_submitted) setState(() {});
             },
           ),
-          const SizedBox(height: 16),
+          SizedBox(height: 16),
           _buildLabel('Host', required: true),
-          const SizedBox(height: 6),
+          SizedBox(height: 6),
           TextField(
             controller: _hostCtrl,
-            style: const TextStyle(color: kTextPrimary, fontSize: 15),
+            style: TextStyle(color: context.appColors.textPrimary, fontSize: 15),
             decoration: InputDecoration(
               hintText: '192.168.1.100:8765',
-              prefixIcon: const Icon(Icons.dns_outlined,
-                  color: kTextMuted, size: 20),
-              fillColor: kBgElevated,
+              prefixIcon: Icon(Icons.dns_outlined,
+                  color: context.appColors.textMuted, size: 20),
+              fillColor: context.appColors.bgElevated,
               border: OutlineInputBorder(
                 borderSide: BorderSide.none,
                 borderRadius: BorderRadius.circular(14),
@@ -355,29 +355,29 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
               if (_submitted) setState(() {});
             },
           ),
-          const SizedBox(height: 16),
+          SizedBox(height: 16),
           _buildLabel('API Key', required: true),
-          const SizedBox(height: 6),
+          SizedBox(height: 6),
           TextField(
             controller: _apiKeyCtrl,
             obscureText: _obscureKey,
-            style: const TextStyle(color: kTextPrimary, fontSize: 15),
+            style: TextStyle(color: context.appColors.textPrimary, fontSize: 15),
             decoration: InputDecoration(
               hintText: 'Enter API key',
-              prefixIcon: const Icon(Icons.key_outlined,
-                  color: kTextMuted, size: 20),
+              prefixIcon: Icon(Icons.key_outlined,
+                  color: context.appColors.textMuted, size: 20),
               suffixIcon: IconButton(
                 icon: Icon(
                   _obscureKey
                       ? Icons.visibility_off_outlined
                       : Icons.visibility_outlined,
-                  color: kTextMuted,
+                  color: context.appColors.textMuted,
                   size: 20,
                 ),
                 onPressed: () =>
                     setState(() => _obscureKey = !_obscureKey),
               ),
-              fillColor: kBgElevated,
+              fillColor: context.appColors.bgElevated,
               border: OutlineInputBorder(
                 borderSide: BorderSide.none,
                 borderRadius: BorderRadius.circular(14),
@@ -395,36 +395,36 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
 
   Widget _buildOtherTab() {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 20, 24, 8),
+      padding: EdgeInsets.fromLTRB(24, 20, 24, 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           SwitchListTile(
-            title: const Text('Use SSL (wss://)',
-                style: TextStyle(color: kTextPrimary, fontSize: 14)),
+            title: Text('Use SSL (wss://)',
+                style: TextStyle(color: context.appColors.textPrimary, fontSize: 14)),
             value: _useSSL,
-            activeTrackColor: kAccent,
+            activeTrackColor: context.appColors.accent,
             contentPadding: EdgeInsets.zero,
             onChanged: (v) => setState(() => _useSSL = v),
           ),
           SwitchListTile(
-            title: const Text('Allow self-signed certificate',
-                style: TextStyle(color: kTextPrimary, fontSize: 14)),
-            subtitle: const Text(
+            title: Text('Allow self-signed certificate',
+                style: TextStyle(color: context.appColors.textPrimary, fontSize: 14)),
+            subtitle: Text(
                 'Trust servers with self-signed TLS certificates',
-                style: TextStyle(color: kTextMuted, fontSize: 12)),
+                style: TextStyle(color: context.appColors.textMuted, fontSize: 12)),
             value: _allowSelfSigned,
-            activeTrackColor: kAccent,
+            activeTrackColor: context.appColors.accent,
             contentPadding: EdgeInsets.zero,
             onChanged: (v) => setState(() => _allowSelfSigned = v),
           ),
           SwitchListTile(
-            title: const Text('Auto-connect',
-                style: TextStyle(color: kTextPrimary, fontSize: 14)),
-            subtitle: const Text('Connect automatically on app start',
-                style: TextStyle(color: kTextMuted, fontSize: 12)),
+            title: Text('Auto-connect',
+                style: TextStyle(color: context.appColors.textPrimary, fontSize: 14)),
+            subtitle: Text('Connect automatically on app start',
+                style: TextStyle(color: context.appColors.textMuted, fontSize: 12)),
             value: _autoConnect,
-            activeTrackColor: kAccent,
+            activeTrackColor: context.appColors.accent,
             contentPadding: EdgeInsets.zero,
             onChanged: (v) => setState(() => _autoConnect = v),
           ),
@@ -447,16 +447,16 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(Icons.link_off_rounded, color: kTextMuted, size: 40),
-          const SizedBox(height: 16),
-          const Text(
+          Icon(Icons.link_off_rounded, color: context.appColors.textMuted, size: 40),
+          SizedBox(height: 16),
+          Text(
             'Not connected to server',
-            style: TextStyle(color: kTextSecondary, fontSize: 15),
+            style: TextStyle(color: context.appColors.textSecondary, fontSize: 15),
           ),
-          const SizedBox(height: 4),
-          const Text(
+          SizedBox(height: 4),
+          Text(
             'Connect to view and manage server settings',
-            style: TextStyle(color: kTextMuted, fontSize: 13),
+            style: TextStyle(color: context.appColors.textMuted, fontSize: 13),
           ),
           const SizedBox(height: 20),
           FilledButton.icon(
@@ -464,18 +464,18 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
                 ? null
                 : () => worker.connect(),
             icon: isConnecting
-                ? const SizedBox(
+                ? SizedBox(
                     width: 16,
                     height: 16,
                     child: CircularProgressIndicator(
                         strokeWidth: 2, color: Colors.white),
                   )
-                : const Icon(Icons.link_rounded, size: 18),
+                : Icon(Icons.link_rounded, size: 18),
             label: Text(isConnecting ? 'Connecting...' : 'Connect'),
             style: FilledButton.styleFrom(
-              backgroundColor: kAccent,
+              backgroundColor: context.appColors.accent,
               foregroundColor: Colors.white,
-              disabledBackgroundColor: kAccentDim,
+              disabledBackgroundColor: context.appColors.accentDim,
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(10)),
               padding:
@@ -489,52 +489,52 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
 
   Widget _buildTestArea() {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 8, 24, 12),
+      padding: EdgeInsets.fromLTRB(24, 8, 24, 12),
       child: Row(
         children: [
           OutlinedButton.icon(
             onPressed:
                 _testStatus == _TestStatus.testing ? null : _testConnection,
-            icon: const Icon(Icons.wifi_tethering_rounded, size: 18),
-            label: const Text('Test Connection'),
+            icon: Icon(Icons.wifi_tethering_rounded, size: 18),
+            label: Text('Test Connection'),
             style: OutlinedButton.styleFrom(
-              foregroundColor: kTextSecondary,
-              side: const BorderSide(color: kDivider),
+              foregroundColor: context.appColors.textSecondary,
+              side: BorderSide(color: context.appColors.divider),
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(10)),
               padding:
-                  const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             ),
           ),
-          const SizedBox(width: 12),
+          SizedBox(width: 12),
           if (_testStatus == _TestStatus.testing)
-            const SizedBox(
+            SizedBox(
               width: 18,
               height: 18,
               child: CircularProgressIndicator(
-                  strokeWidth: 2, color: kAccentLight),
+                  strokeWidth: 2, color: context.appColors.accentLight),
             ),
           if (_testStatus == _TestStatus.success) ...[
-            const Icon(Icons.check_circle_rounded,
-                color: kSuccessText, size: 18),
-            const SizedBox(width: 6),
+            Icon(Icons.check_circle_rounded,
+                color: context.appColors.successText, size: 18),
+            SizedBox(width: 6),
             Flexible(
               child: Text(
                 _testMessage,
-                style: const TextStyle(color: kSuccessText, fontSize: 13),
+                style: TextStyle(color: context.appColors.successText, fontSize: 13),
                 overflow: TextOverflow.ellipsis,
               ),
             ),
           ],
           if (_testStatus == _TestStatus.failure) ...[
-            const Icon(Icons.cancel_rounded, color: kErrorText, size: 18),
-            const SizedBox(width: 6),
+            Icon(Icons.cancel_rounded, color: context.appColors.errorText, size: 18),
+            SizedBox(width: 6),
             Flexible(
               child: Tooltip(
                 message: _testMessage,
                 child: Text(
                   _testMessage,
-                  style: const TextStyle(color: kErrorText, fontSize: 13),
+                  style: TextStyle(color: context.appColors.errorText, fontSize: 13),
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -550,12 +550,12 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
     return RichText(
       text: TextSpan(
         text: text,
-        style: const TextStyle(color: kTextSecondary, fontSize: 13),
+        style: TextStyle(color: context.appColors.textSecondary, fontSize: 13),
         children: [
           if (required)
-            const TextSpan(
+            TextSpan(
               text: ' *',
-              style: TextStyle(color: kAccentLight, fontSize: 13),
+              style: TextStyle(color: context.appColors.accentLight, fontSize: 13),
             ),
         ],
       ),

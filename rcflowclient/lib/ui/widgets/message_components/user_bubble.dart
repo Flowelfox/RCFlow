@@ -11,13 +11,13 @@ class UserBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(top: 12, bottom: 4, left: 48),
+      padding: EdgeInsets.only(top: 12, bottom: 4, left: 48),
       child: Align(
         alignment: Alignment.centerRight,
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          decoration: const BoxDecoration(
-            color: kUserBubble,
+          padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            color: context.appColors.userBubble,
             borderRadius: BorderRadius.only(
               topLeft: Radius.circular(18),
               topRight: Radius.circular(18),
@@ -29,13 +29,13 @@ class UserBubble extends StatelessWidget {
             data: message.content,
             shrinkWrap: true,
             styleSheet: MarkdownStyleSheet(
-              p: const TextStyle(
-                color: kTextPrimary,
+              p: TextStyle(
+                color: context.appColors.textPrimary,
                 fontSize: 15,
                 height: 1.4,
               ),
               code: TextStyle(
-                color: kTextPrimary,
+                color: context.appColors.textPrimary,
                 backgroundColor: Colors.black.withValues(alpha: 0.2),
                 fontSize: 13.5,
                 fontFamily: 'monospace',
@@ -44,22 +44,22 @@ class UserBubble extends StatelessWidget {
                 color: Colors.black.withValues(alpha: 0.25),
                 borderRadius: BorderRadius.circular(8),
               ),
-              codeblockPadding: const EdgeInsets.all(12),
-              a: const TextStyle(color: kAccentLight),
-              listBullet: const TextStyle(color: kTextPrimary, fontSize: 15),
-              h1: const TextStyle(color: kTextPrimary, fontSize: 20, fontWeight: FontWeight.bold),
-              h2: const TextStyle(color: kTextPrimary, fontSize: 18, fontWeight: FontWeight.bold),
-              h3: const TextStyle(color: kTextPrimary, fontSize: 16, fontWeight: FontWeight.bold),
+              codeblockPadding: EdgeInsets.all(12),
+              a: TextStyle(color: context.appColors.accentLight),
+              listBullet: TextStyle(color: context.appColors.textPrimary, fontSize: 15),
+              h1: TextStyle(color: context.appColors.textPrimary, fontSize: 20, fontWeight: FontWeight.bold),
+              h2: TextStyle(color: context.appColors.textPrimary, fontSize: 18, fontWeight: FontWeight.bold),
+              h3: TextStyle(color: context.appColors.textPrimary, fontSize: 16, fontWeight: FontWeight.bold),
               blockquoteDecoration: BoxDecoration(
-                border: const Border(left: BorderSide(color: kAccentLight, width: 3)),
+                border: Border(left: BorderSide(color: context.appColors.accentLight, width: 3)),
                 color: Colors.black.withValues(alpha: 0.15),
               ),
-              blockquotePadding: const EdgeInsets.only(left: 12, top: 4, bottom: 4),
-              tableBorder: TableBorder.all(color: kDivider),
-              tableHead: const TextStyle(color: kTextPrimary, fontWeight: FontWeight.bold),
-              tableBody: const TextStyle(color: kTextPrimary),
-              horizontalRuleDecoration: const BoxDecoration(
-                border: Border(top: BorderSide(color: kDivider)),
+              blockquotePadding: EdgeInsets.only(left: 12, top: 4, bottom: 4),
+              tableBorder: TableBorder.all(color: context.appColors.divider),
+              tableHead: TextStyle(color: context.appColors.textPrimary, fontWeight: FontWeight.bold),
+              tableBody: TextStyle(color: context.appColors.textPrimary),
+              horizontalRuleDecoration: BoxDecoration(
+                border: Border(top: BorderSide(color: context.appColors.divider)),
               ),
             ),
           ),

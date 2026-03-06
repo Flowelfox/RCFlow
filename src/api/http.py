@@ -17,7 +17,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 
 from src.api.deps import verify_http_api_key
-from src.config import CONFIGURABLE_KEYS, Settings, get_config_schema, update_env_file
+from src.config import CONFIGURABLE_KEYS, Settings, get_config_schema, update_settings_file
 from src.core.llm import LLMClient
 from src.models.db import Session as SessionModel
 from src.models.db import SessionMessage as SessionMessageModel
@@ -52,13 +52,18 @@ async def health() -> dict[str, str]:
     description="Returns server metadata including operating system and platform details.",
     dependencies=[Depends(verify_http_api_key)],
 )
-async def server_info() -> dict[str, Any]:
+async def server_info(request: Request) -> dict[str, Any]:
     """Return server metadata so clients can display OS and platform info."""
+    settings: Settings = request.app.state.settings
+    session_manager: SessionManager = request.app.state.session_manager
+
     return {
         "os": platform.system(),
         "os_version": platform.version(),
         "architecture": platform.machine(),
         "hostname": platform.node(),
+        "backend_id": settings.RCFLOW_BACKEND_ID,
+        "active_sessions": len(session_manager.list_active_sessions()),
     }
 
 
@@ -1056,7 +1061,7 @@ class UpdateConfigRequest(BaseModel):
     summary="Update server configuration",
     description=(
         "Accepts partial config updates. Validates keys against the configurable "
-        "set, persists changes to the .env file, reloads settings, and hot-reloads "
+        "set, persists changes to settings.json, reloads settings, and hot-reloads "
         "affected components (LLM client, STT/TTS providers). Returns the updated "
         "config schema."
     ),
@@ -1078,7 +1083,7 @@ async def update_config(body: UpdateConfigRequest, request: Request) -> dict[str
         else:
             env_updates[key] = str(value)
 
-    update_env_file(env_updates)
+    update_settings_file(env_updates)
 
     new_settings = Settings()  # type: ignore[call-arg]
     request.app.state.settings = new_settings

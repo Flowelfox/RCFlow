@@ -40,7 +40,7 @@ CHANGELOG text
 # ========================
 # Config / CI
 # ========================
-Makefile text eol=lf
+justfile text eol=lf
 Dockerfile text eol=lf
 *.dockerfile text eol=lf
 .gitignore text

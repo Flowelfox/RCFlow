@@ -58,12 +58,12 @@ class ToolBlock extends StatelessWidget {
     final hasExpandableContent = output.isNotEmpty || !finished;
 
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+      padding: EdgeInsets.symmetric(vertical: 4),
       child: Container(
         decoration: BoxDecoration(
-          color: kToolBg,
+          color: context.appColors.toolBg,
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: kDivider),
+          border: Border.all(color: context.appColors.divider),
         ),
         clipBehavior: Clip.antiAlias,
         child: Column(
@@ -79,7 +79,7 @@ class ToolBlock extends StatelessWidget {
               child: Container(
                 color: Colors.transparent,
                 padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 child: Row(
                   children: [
                     if (hasExpandableContent)
@@ -87,28 +87,28 @@ class ToolBlock extends StatelessWidget {
                         expanded
                             ? Icons.expand_less_rounded
                             : Icons.expand_more_rounded,
-                        color: kToolAccent,
+                        color: context.appColors.toolAccent,
                         size: 18,
                       )
                     else
-                      const SizedBox(width: 18),
-                    const SizedBox(width: 8),
+                      SizedBox(width: 18),
+                    SizedBox(width: 8),
                     Icon(
                       finished
                           ? Icons.check_circle_outline_rounded
                           : Icons.sync_rounded,
-                      color: finished ? kSuccessText : kToolAccent,
+                      color: finished ? context.appColors.successText : context.appColors.toolAccent,
                       size: 14,
                     ),
-                    const SizedBox(width: 6),
+                    SizedBox(width: 6),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
                             name,
-                            style: const TextStyle(
-                              color: kToolAccent,
+                            style: TextStyle(
+                              color: context.appColors.toolAccent,
                               fontSize: 13,
                               fontFamily: 'monospace',
                               fontWeight: FontWeight.w600,
@@ -118,8 +118,8 @@ class ToolBlock extends StatelessWidget {
                           if (summary != null)
                             Text(
                               summary,
-                              style: const TextStyle(
-                                color: kToolOutputText,
+                              style: TextStyle(
+                                color: context.appColors.toolOutputText,
                                 fontSize: 11,
                                 fontFamily: 'monospace',
                               ),
@@ -136,11 +136,11 @@ class ToolBlock extends StatelessWidget {
             if (expanded && output.isNotEmpty)
               Container(
                 width: double.infinity,
-                padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+                padding: EdgeInsets.fromLTRB(12, 0, 12, 10),
                 child: Text(
                   output,
-                  style: const TextStyle(
-                    color: kToolOutputText,
+                  style: TextStyle(
+                    color: context.appColors.toolOutputText,
                     fontSize: 11,
                     fontFamily: 'monospace',
                     height: 1.3,

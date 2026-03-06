@@ -34,3 +34,17 @@ class ToolRegistry:
             }
             for tool in self._tools.values()
         ]
+
+    def to_openai_tools(self) -> list[dict[str, Any]]:
+        """Convert all registered tools to OpenAI function calling format."""
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": tool.name,
+                    "description": tool.description,
+                    "parameters": tool.parameters,
+                },
+            }
+            for tool in self._tools.values()
+        ]

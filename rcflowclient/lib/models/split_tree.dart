@@ -4,6 +4,9 @@
 /// (two children divided along an axis). The tree always has at least one leaf.
 library;
 
+/// Type of content a pane displays.
+enum PaneType { chat, terminal }
+
 enum SplitAxis { horizontal, vertical }
 
 /// Drop zone for drag-and-drop split targeting.

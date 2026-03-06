@@ -19,7 +19,7 @@ class SplitView extends StatelessWidget {
         final appState = context.read<AppState>();
         final pane = appState.panes[leaf.paneId];
         if (pane == null) return const SizedBox.shrink();
-        return SessionPane(pane: pane);
+        return SessionPane(key: ValueKey(leaf.paneId), pane: pane);
       case SplitBranch branch:
         return _SplitBranchView(branch: branch);
     }

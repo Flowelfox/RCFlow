@@ -2,13 +2,16 @@
 """RCFlow bundle builder — creates distributable packages using PyInstaller.
 
 Usage:
-    python scripts/bundle.py              # Build for current platform
-    python scripts/bundle.py --platform linux    # Explicit platform
-    python scripts/bundle.py --platform windows  # Explicit platform
+    python scripts/bundle.py                              # Build for current platform
+    python scripts/bundle.py --platform linux              # Explicit platform
+    python scripts/bundle.py --platform linux --installer  # Build .deb package
+    python scripts/bundle.py --platform windows --installer # Build setup.exe
 
 Outputs:
-    dist/rcflow-{version}-{platform}-{arch}.tar.gz   (Linux)
-    dist/rcflow-{version}-{platform}-{arch}.zip       (Windows)
+    dist/rcflow-{version}-{platform}-{arch}.tar.gz   (Linux archive)
+    dist/rcflow_{version}_{deb_arch}.deb              (Linux .deb package)
+    dist/rcflow-{version}-{platform}-{arch}.zip       (Windows archive)
+    dist/rcflow-{version}-{arch}-setup.exe            (Windows installer)
 """
 
 from __future__ import annotations
@@ -44,6 +47,18 @@ def get_arch() -> str:
         return "x64"
     if machine in ("aarch64", "arm64"):
         return "arm64"
+    return machine
+
+
+def get_deb_arch() -> str:
+    """Map machine architecture to Debian architecture name."""
+    machine = platform.machine().lower()
+    if machine in ("x86_64", "amd64"):
+        return "amd64"
+    if machine in ("aarch64", "arm64"):
+        return "arm64"
+    if machine in ("armv7l", "armhf"):
+        return "armhf"
     return machine
 
 
@@ -120,8 +135,14 @@ datefmt = %H:%M:%S
     return output
 
 
-def run_pyinstaller(target_platform: str) -> Path:
-    """Run PyInstaller and return the path to the output directory."""
+def run_pyinstaller(target_platform: str, *, windowed: bool = False) -> Path:
+    """Run PyInstaller and return the path to the output directory.
+
+    Args:
+        target_platform: Target OS ("linux", "windows", "macos").
+        windowed: If True, use --windowed (no console window). Used for the
+                  Windows tray build so the app runs as a background GUI process.
+    """
     build_dir = PROJECT_ROOT / "build" / "pyinstaller"
     dist_dir = PROJECT_ROOT / "build" / "pyinstaller_dist"
     build_dir.mkdir(parents=True, exist_ok=True)
@@ -183,13 +204,25 @@ def run_pyinstaller(target_platform: str) -> Path:
         "src.tools",
         "src.tools.loader",
         "src.tools.registry",
-        "poml",
+        "jinja2",
         "pydantic",
         "pydantic_settings",
         "httpx",
         "anthropic",
         "aiohttp",
     ]
+
+    # Windows tray build needs pystray + PIL, terminal needs pywinpty
+    if target_platform == "windows":
+        hidden_imports.extend([
+            "src.tray",
+            "pystray",
+            "pystray._win32",
+            "PIL",
+            "PIL.Image",
+            "PIL.ImageDraw",
+            "winpty",
+        ])
 
     # Data files to include inside the PyInstaller bundle (_MEIPASS)
     # Templates need to be in _MEIPASS so Path(__file__)-based resolution works
@@ -213,10 +246,21 @@ def run_pyinstaller(target_platform: str) -> Path:
     for src_path, dest_path in datas:
         cmd.extend(["--add-data", f"{src_path}{os.pathsep}{dest_path}"])
 
+    # Windows: --windowed hides the console, --icon sets the exe icon
+    if target_platform == "windows":
+        if windowed:
+            cmd.append("--windowed")
+        icon_path = PROJECT_ROOT / "assets" / "tray_icon.ico"
+        if icon_path.exists():
+            cmd.extend(["--icon", str(icon_path)])
+
     # Collect all submodules of src
     cmd.extend(["--collect-submodules", "src"])
     cmd.extend(["--collect-submodules", "uvicorn"])
-    cmd.extend(["--collect-submodules", "poml"])
+
+    # pywinpty ships native .pyd/.dll files that PyInstaller must bundle
+    if target_platform == "windows":
+        cmd.extend(["--collect-all", "winpty"])
 
     # Entry point
     cmd.append(str(PROJECT_ROOT / "src" / "__main__.py"))
@@ -271,10 +315,7 @@ def assemble_bundle(pyinstaller_dir: Path, target_platform: str, version: str, a
     shutil.copy2(bundled_ini, bundle_dir / "alembic.ini")
     print("Created bundled alembic.ini")
 
-    # 5. Copy .env.example
-    env_example = PROJECT_ROOT / ".env.example"
-    if env_example.exists():
-        shutil.copy2(env_example, bundle_dir / ".env.example")
+    # 5. (Removed — settings.json is generated at runtime, no .env.example needed)
 
     # 6. Copy systemd service template (Linux only)
     if target_platform == "linux":
@@ -303,6 +344,13 @@ def assemble_bundle(pyinstaller_dir: Path, target_platform: str, version: str, a
     license_file = PROJECT_ROOT / "LICENSE"
     if license_file.exists():
         shutil.copy2(license_file, bundle_dir / "LICENSE")
+
+    # 10. Copy tray icon (Windows)
+    if target_platform == "windows":
+        tray_icon_src = PROJECT_ROOT / "assets" / "tray_icon.ico"
+        if tray_icon_src.exists():
+            shutil.copy2(tray_icon_src, bundle_dir / "tray_icon.ico")
+            print("Copied tray_icon.ico")
 
     # Make the main executable executable on Linux
     if target_platform == "linux":
@@ -339,6 +387,320 @@ def create_archive(bundle_dir: Path, target_platform: str, version: str, arch: s
     return archive_path
 
 
+def build_windows_installer(bundle_dir: Path, version: str, arch: str) -> Path | None:
+    """Compile the Inno Setup script to produce setup.exe.
+
+    Requires Inno Setup 6 to be installed (iscc.exe on PATH or at the
+    default install location).
+    """
+    iss_path = PROJECT_ROOT / "scripts" / "inno_setup.iss"
+    if not iss_path.exists():
+        print(f"ERROR: Inno Setup script not found at {iss_path}", file=sys.stderr)
+        return None
+
+    # Find iscc.exe
+    iscc = shutil.which("iscc")
+    if not iscc:
+        # Check default Inno Setup install locations
+        for candidate in [
+            r"C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
+            r"C:\Program Files\Inno Setup 6\ISCC.exe",
+        ]:
+            if os.path.isfile(candidate):
+                iscc = candidate
+                break
+
+    if not iscc:
+        print(
+            "ERROR: Inno Setup compiler (iscc.exe) not found.\n"
+            "  Install Inno Setup 6 from https://jrsoftware.org/isinfo.php\n"
+            "  or add its directory to PATH.",
+            file=sys.stderr,
+        )
+        return None
+
+    dist_dir = PROJECT_ROOT / "dist"
+    dist_dir.mkdir(parents=True, exist_ok=True)
+    output_filename = f"rcflow-{version}-{arch}-setup"
+
+    cmd = [
+        iscc,
+        str(iss_path),
+        f"/DBundleDir={bundle_dir}",
+        f"/DAppVersion={version}",
+        f"/DArch={arch}",
+        f"/DOutputDir={dist_dir}",
+        f"/DOutputFilename={output_filename}",
+    ]
+
+    print(f"Running Inno Setup compiler: {os.path.basename(iscc)}")
+    subprocess.check_call(cmd)
+
+    output_path = dist_dir / f"{output_filename}.exe"
+    if output_path.exists():
+        size_mb = output_path.stat().st_size / (1024 * 1024)
+        print(f"Installer created: {output_path} ({size_mb:.1f} MB)")
+        return output_path
+    else:
+        print(f"WARNING: Expected installer at {output_path} but it was not found.", file=sys.stderr)
+        return None
+
+
+def build_deb(bundle_dir: Path, version: str, arch: str) -> Path | None:
+    """Build a .deb package from the assembled bundle directory.
+
+    Requires dpkg-deb to be available (standard on Debian/Ubuntu).
+    Installs to /opt/rcflow with a systemd service.
+    """
+    if not shutil.which("dpkg-deb"):
+        print(
+            "ERROR: dpkg-deb not found. Install dpkg:\n"
+            "  sudo apt-get install dpkg",
+            file=sys.stderr,
+        )
+        return None
+
+    deb_arch = get_deb_arch()
+    pkg_name = f"rcflow_{version}_{deb_arch}"
+    pkg_root = PROJECT_ROOT / "build" / "deb" / pkg_name
+    install_dir = pkg_root / "opt" / "rcflow"
+
+    # Clean previous build
+    if pkg_root.exists():
+        shutil.rmtree(pkg_root)
+
+    # Copy bundle contents to /opt/rcflow
+    shutil.copytree(bundle_dir, install_dir)
+
+    # Remove install/uninstall scripts (handled by dpkg)
+    for script in ("install.sh", "uninstall.sh"):
+        s = install_dir / script
+        if s.exists():
+            s.unlink()
+
+    # Create /usr/bin/rcflow symlink so the CLI is on PATH
+    usr_bin = pkg_root / "usr" / "bin"
+    usr_bin.mkdir(parents=True)
+    (usr_bin / "rcflow").symlink_to("/opt/rcflow/rcflow")
+
+    # Create systemd service unit
+    systemd_dir = pkg_root / "lib" / "systemd" / "system"
+    systemd_dir.mkdir(parents=True)
+    (systemd_dir / "rcflow.service").write_text(
+        f"""\
+[Unit]
+Description=RCFlow Action Server
+After=network.target
+
+[Service]
+Type=simple
+User=rcflow
+WorkingDirectory=/opt/rcflow
+# Settings loaded from /opt/rcflow/settings.json by the application
+ExecStart=/opt/rcflow/rcflow
+Restart=on-failure
+RestartSec=5
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/opt/rcflow/data /opt/rcflow/logs /opt/rcflow/certs
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+"""
+    )
+
+    # Create DEBIAN control files
+    debian_dir = pkg_root / "DEBIAN"
+    debian_dir.mkdir(parents=True)
+
+    (debian_dir / "control").write_text(
+        f"""\
+Package: rcflow
+Version: {version}
+Architecture: {deb_arch}
+Maintainer: RCFlow <rcflow@localhost>
+Description: RCFlow Action Server
+ Self-contained RCFlow backend server with all dependencies bundled.
+Section: net
+Priority: optional
+Installed-Size: {sum(f.stat().st_size for f in install_dir.rglob('*') if f.is_file()) // 1024}
+"""
+    )
+
+    # Note: settings.json is created by postinst, not shipped in the package,
+    # so it must NOT be listed in conffiles. dpkg conffiles only covers files
+    # that are part of the archive itself.
+
+    (debian_dir / "postinst").write_text(
+        """\
+#!/bin/bash
+set -e
+
+# Create service user if it doesn't exist
+if ! id rcflow &>/dev/null; then
+    useradd --system --no-create-home --shell /usr/sbin/nologin rcflow
+fi
+
+# Create data directories
+mkdir -p /opt/rcflow/data /opt/rcflow/logs /opt/rcflow/certs
+
+# settings.json is created automatically on first server start
+
+# Fix ownership
+chown -R rcflow:rcflow /opt/rcflow
+
+# Run database migrations
+echo "Running database migrations..."
+if su -s /bin/bash rcflow -c "cd /opt/rcflow && ./rcflow migrate"; then
+    echo "Database migrations complete."
+else
+    echo "WARNING: Migration failed. Check your DATABASE_URL in /opt/rcflow/settings.json" >&2
+    echo "You can retry with: cd /opt/rcflow && sudo -u rcflow ./rcflow migrate" >&2
+fi
+
+# Enable and start service
+if pidof systemd &>/dev/null; then
+    systemctl daemon-reload
+    systemctl enable rcflow
+    systemctl start rcflow || true
+else
+    # Fallback for non-systemd environments (e.g. WSL)
+    # Install an init.d script so "sudo service rcflow start" works
+    cat > /etc/init.d/rcflow <<'INITEOF'
+#!/bin/bash
+### BEGIN INIT INFO
+# Provides:          rcflow
+# Required-Start:    $network $local_fs
+# Required-Stop:     $network $local_fs
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: RCFlow Action Server
+### END INIT INFO
+
+NAME=rcflow
+DAEMON=/opt/rcflow/rcflow
+PIDFILE=/var/run/rcflow.pid
+LOGFILE=/opt/rcflow/logs/rcflow.log
+USER=rcflow
+WORKDIR=/opt/rcflow
+
+case "$1" in
+    start)
+        echo "Starting $NAME..."
+        start-stop-daemon --start --background --make-pidfile \\
+            --pidfile "$PIDFILE" --chuid "$USER" --chdir "$WORKDIR" \\
+            --startas /bin/bash -- -c "exec $DAEMON >> $LOGFILE 2>&1"
+        # Brief pause to check if the process survived startup
+        sleep 1
+        if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+            echo "$NAME started (PID $(cat "$PIDFILE"))"
+        else
+            echo "$NAME failed to start. Check $LOGFILE for details." >&2
+            exit 1
+        fi
+        ;;
+    stop)
+        echo "Stopping $NAME..."
+        start-stop-daemon --stop --pidfile "$PIDFILE" --retry 10
+        rm -f "$PIDFILE"
+        ;;
+    restart)
+        $0 stop
+        $0 start
+        ;;
+    status)
+        if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+            echo "$NAME is running (PID $(cat "$PIDFILE"))"
+        else
+            echo "$NAME is not running"
+            if [ -f "$LOGFILE" ]; then
+                echo "Last log lines:"
+                tail -5 "$LOGFILE"
+            fi
+            exit 1
+        fi
+        ;;
+    *)
+        echo "Usage: $0 {start|stop|restart|status}"
+        exit 1
+        ;;
+esac
+INITEOF
+    chmod 755 /etc/init.d/rcflow
+    update-rc.d rcflow defaults 2>/dev/null || true
+    service rcflow start || true
+fi
+
+echo ""
+echo "============================================"
+echo "  RCFlow installed successfully!"
+echo "  Run 'rcflow info' to view server details."
+echo "  Run 'rcflow api-key' to view your API key."
+echo "============================================"
+echo ""
+"""
+    )
+    os.chmod(debian_dir / "postinst", 0o755)
+
+    (debian_dir / "prerm").write_text(
+        """\
+#!/bin/bash
+set -e
+
+if pidof systemd &>/dev/null; then
+    if systemctl is-active --quiet rcflow 2>/dev/null; then
+        systemctl stop rcflow
+    fi
+elif [ -x /etc/init.d/rcflow ]; then
+    service rcflow stop 2>/dev/null || true
+fi
+"""
+    )
+    os.chmod(debian_dir / "prerm", 0o755)
+
+    (debian_dir / "postrm").write_text(
+        """\
+#!/bin/bash
+set -e
+
+if [ "$1" = "purge" ]; then
+    # Remove data, config, and user on purge
+    rm -rf /opt/rcflow
+    userdel rcflow 2>/dev/null || true
+    rm -f /etc/init.d/rcflow
+    update-rc.d rcflow remove 2>/dev/null || true
+fi
+
+if pidof systemd &>/dev/null; then
+    systemctl daemon-reload
+fi
+"""
+    )
+    os.chmod(debian_dir / "postrm", 0o755)
+
+    # Ensure correct permissions
+    os.chmod(install_dir / "rcflow", 0o755)
+
+    # Build the .deb
+    dist_dir = PROJECT_ROOT / "dist"
+    dist_dir.mkdir(parents=True, exist_ok=True)
+    deb_path = dist_dir / f"{pkg_name}.deb"
+
+    print(f"Building {deb_path.name}...")
+    subprocess.check_call(["dpkg-deb", "--build", "--root-owner-group", str(pkg_root), str(deb_path)])
+
+    if deb_path.exists():
+        size_mb = deb_path.stat().st_size / (1024 * 1024)
+        print(f"Package created: {deb_path} ({size_mb:.1f} MB)")
+        return deb_path
+    else:
+        print(f"WARNING: Expected .deb at {deb_path} but it was not found.", file=sys.stderr)
+        return None
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build RCFlow distributable package")
     parser.add_argument(
@@ -351,6 +713,11 @@ def main() -> None:
         "--skip-pyinstaller",
         action="store_true",
         help="Skip PyInstaller step (use existing build)",
+    )
+    parser.add_argument(
+        "--installer",
+        action="store_true",
+        help="Build a platform installer (.deb on Linux, setup.exe on Windows)",
     )
     args = parser.parse_args()
 
@@ -377,6 +744,7 @@ def main() -> None:
     ensure_pyinstaller()
 
     # Step 2: Run PyInstaller
+    use_windowed = target_platform == "windows" and args.installer
     if args.skip_pyinstaller:
         pyinstaller_dir = PROJECT_ROOT / "build" / "pyinstaller_dist" / "rcflow"
         if not pyinstaller_dir.exists():
@@ -385,7 +753,7 @@ def main() -> None:
         print("Skipping PyInstaller (using existing build)")
     else:
         print("=== Step 1: Running PyInstaller ===")
-        pyinstaller_dir = run_pyinstaller(target_platform)
+        pyinstaller_dir = run_pyinstaller(target_platform, windowed=use_windowed)
     print()
 
     # Step 3: Assemble bundle
@@ -398,14 +766,34 @@ def main() -> None:
     archive_path = create_archive(bundle_dir, target_platform, version, arch)
     print()
 
+    # Step 5: Build platform installer (optional)
+    installer_path = None
+    if args.installer:
+        if target_platform == "windows":
+            print("=== Step 4: Building Windows installer ===")
+            installer_path = build_windows_installer(bundle_dir, version, arch)
+            print()
+        elif target_platform == "linux":
+            print("=== Step 4: Building .deb package ===")
+            installer_path = build_deb(bundle_dir, version, arch)
+            print()
+        else:
+            print(f"WARNING: --installer is not supported on {target_platform}. Skipping.", file=sys.stderr)
+
     print("=== Build complete ===")
     print(f"  Archive: {archive_path}")
     print(f"  Bundle:  {bundle_dir}")
+    if installer_path:
+        print(f"  Installer: {installer_path}")
     print()
     print("To test locally:")
-    if target_platform == "linux":
+    if installer_path and target_platform == "linux":
+        print(f"  sudo dpkg -i {installer_path}")
+    elif target_platform == "linux":
         print(f"  cd {bundle_dir}")
         print("  sudo ./install.sh")
+    elif installer_path and target_platform == "windows":
+        print(f"  Run: {installer_path}")
     else:
         print(f"  cd {bundle_dir}")
         print("  .\\install.ps1")

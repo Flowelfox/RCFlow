@@ -34,19 +34,19 @@ class PaneHeader extends StatelessWidget {
     return Container(
       height: 32,
       decoration: BoxDecoration(
-        color: isActive ? kAccent.withAlpha(20) : kBgSurface,
-        border: Border(bottom: BorderSide(color: kDivider)),
+        color: isActive ? context.appColors.accent.withAlpha(20) : context.appColors.bgSurface,
+        border: Border(bottom: BorderSide(color: context.appColors.divider)),
       ),
-      padding: const EdgeInsets.symmetric(horizontal: 8),
+      padding: EdgeInsets.symmetric(horizontal: 8),
       child: Row(
         children: [
           if (isActive)
             Container(
               width: 6,
               height: 6,
-              margin: const EdgeInsets.only(right: 6),
-              decoration: const BoxDecoration(
-                color: kAccent,
+              margin: EdgeInsets.only(right: 6),
+              decoration: BoxDecoration(
+                color: context.appColors.accent,
                 shape: BoxShape.circle,
               ),
             ),
@@ -54,7 +54,7 @@ class PaneHeader extends StatelessWidget {
             child: Text(
               title,
               style: TextStyle(
-                color: isActive ? kTextPrimary : kTextSecondary,
+                color: isActive ? context.appColors.textPrimary : context.appColors.textSecondary,
                 fontSize: 12,
                 fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
               ),
@@ -68,9 +68,9 @@ class PaneHeader extends StatelessWidget {
             child: IconButton(
               padding: EdgeInsets.zero,
               iconSize: 14,
-              icon: const Icon(
+              icon: Icon(
                 Icons.view_column_outlined,
-                color: kTextMuted,
+                color: context.appColors.textMuted,
               ),
               tooltip: 'Split pane',
               onPressed: () => _showSplitMenu(context, pane, appState),
@@ -82,7 +82,7 @@ class PaneHeader extends StatelessWidget {
             child: IconButton(
               padding: EdgeInsets.zero,
               iconSize: 14,
-              icon: const Icon(Icons.close_rounded, color: kTextMuted),
+              icon: Icon(Icons.close_rounded, color: context.appColors.textMuted),
               tooltip: 'Close pane',
               onPressed: () => appState.closePane(pane.paneId),
             ),
@@ -117,31 +117,31 @@ class PaneHeader extends StatelessWidget {
     showMenu<SplitAxis>(
       context: context,
       position: position,
-      color: kBgSurface,
+      color: context.appColors.bgSurface,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       items: [
-        const PopupMenuItem(
+        PopupMenuItem(
           value: SplitAxis.horizontal,
           child: Row(
             children: [
-              Icon(Icons.view_column_outlined, color: kTextSecondary, size: 18),
+              Icon(Icons.view_column_outlined, color: context.appColors.textSecondary, size: 18),
               SizedBox(width: 10),
               Text(
                 'Split Right',
-                style: TextStyle(color: kTextPrimary, fontSize: 14),
+                style: TextStyle(color: context.appColors.textPrimary, fontSize: 14),
               ),
             ],
           ),
         ),
-        const PopupMenuItem(
+        PopupMenuItem(
           value: SplitAxis.vertical,
           child: Row(
             children: [
-              Icon(Icons.view_agenda_outlined, color: kTextSecondary, size: 18),
+              Icon(Icons.view_agenda_outlined, color: context.appColors.textSecondary, size: 18),
               SizedBox(width: 10),
               Text(
                 'Split Down',
-                style: TextStyle(color: kTextPrimary, fontSize: 14),
+                style: TextStyle(color: context.appColors.textPrimary, fontSize: 14),
               ),
             ],
           ),

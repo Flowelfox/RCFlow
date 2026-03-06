@@ -1,51 +1,47 @@
-"""Tests for the POML-based PromptBuilder."""
+"""Tests for the Jinja2-based PromptBuilder."""
 
 from pathlib import Path
 
 import pytest
+from jinja2 import UndefinedError
 
 from src.prompts.builder import PromptBuilder
 
 
 @pytest.fixture
-def tmp_poml(tmp_path: Path) -> Path:
-    """Create a minimal POML template for testing."""
-    tpl = tmp_path / "test.poml"
-    tpl.write_text(
-        "<poml>\n"
-        "  <role captionStyle=\"hidden\">Hello, {{ name }}!</role>\n"
-        "  <p>Work in {{ directory }}. Be concise.</p>\n"
-        "</poml>\n"
-    )
+def tmp_template(tmp_path: Path) -> Path:
+    """Create a minimal Jinja2 template for testing."""
+    tpl = tmp_path / "test.j2"
+    tpl.write_text("Hello, {{ name }}!\nWork in {{ directory }}. Be concise.\n")
     return tpl
 
 
 class TestPromptBuilder:
-    def test_basic_rendering(self, tmp_poml: Path) -> None:
-        builder = PromptBuilder(template=tmp_poml)
+    def test_basic_rendering(self, tmp_template: Path) -> None:
+        builder = PromptBuilder(template=tmp_template)
         result = builder.build(name="Alice", directory="/tmp")
         assert "Hello, Alice!" in result
         assert "Work in /tmp." in result
 
-    def test_variable_substitution(self, tmp_poml: Path) -> None:
-        builder = PromptBuilder(template=tmp_poml)
+    def test_variable_substitution(self, tmp_template: Path) -> None:
+        builder = PromptBuilder(template=tmp_template)
         result = builder.build(name="Bob", directory="/home/bob")
         assert "Hello, Bob!" in result
         assert "Work in /home/bob." in result
 
-    def test_missing_variables_raises(self, tmp_poml: Path) -> None:
-        """POML raises RuntimeError when referenced variables are not provided."""
-        builder = PromptBuilder(template=tmp_poml)
-        with pytest.raises(RuntimeError):
+    def test_missing_variables_raises(self, tmp_template: Path) -> None:
+        """Jinja2 StrictUndefined raises UndefinedError when variables are missing."""
+        builder = PromptBuilder(template=tmp_template)
+        with pytest.raises(UndefinedError):
             builder.build(name="Alice")
 
     def test_missing_template_file(self, tmp_path: Path) -> None:
-        missing = tmp_path / "nonexistent.poml"
-        with pytest.raises(FileNotFoundError, match="nonexistent.poml"):
+        missing = tmp_path / "nonexistent.j2"
+        with pytest.raises(FileNotFoundError, match="nonexistent.j2"):
             PromptBuilder(template=missing)
 
     def test_real_template_renders(self) -> None:
-        """Integration test: the shipped system_prompt.poml renders correctly."""
+        """Integration test: the shipped system_prompt.j2 renders correctly."""
         builder = PromptBuilder()
         result = builder.build(projects_dir="/home/user/Projects", os_name="Linux")
         assert "RCFlow" in result

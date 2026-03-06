@@ -84,9 +84,18 @@ class RCFlowApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final appState = context.watch<AppState>();
+    final themeMode = switch (appState.settings.themeMode) {
+      'light' => ThemeMode.light,
+      'dark' => ThemeMode.dark,
+      _ => ThemeMode.system,
+    };
+
     return MaterialApp(
       title: 'RCFlow',
-      theme: buildAppTheme(),
+      theme: buildLightTheme(),
+      darkTheme: buildDarkTheme(),
+      themeMode: themeMode,
       home: const HomeScreen(),
       debugShowCheckedModeBanner: false,
     );

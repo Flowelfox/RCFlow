@@ -66,9 +66,9 @@ class _PermissionRequestCardState extends State<PermissionRequestCard> {
         width: double.infinity,
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: _riskBgColor(riskLevel).withAlpha(60),
+          color: _riskBgColor(context, riskLevel).withAlpha(60),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: _riskBorderColor(riskLevel).withAlpha(80)),
+          border: Border.all(color: _riskBorderColor(context, riskLevel).withAlpha(80)),
         ),
         child: widget.message.accepted == null
             ? _buildPending(context, metadata, riskLevel)
@@ -95,13 +95,13 @@ class _PermissionRequestCardState extends State<PermissionRequestCard> {
         Row(
           children: [
             Icon(Icons.shield_outlined,
-                color: _riskIconColor(riskLevel), size: 18),
+                color: _riskIconColor(context, riskLevel), size: 18),
             const SizedBox(width: 8),
             Expanded(
               child: Text(
                 'Permission Request',
                 style: TextStyle(
-                  color: _riskIconColor(riskLevel),
+                  color: _riskIconColor(context, riskLevel),
                   fontSize: 14,
                   fontWeight: FontWeight.w600,
                 ),
@@ -111,13 +111,13 @@ class _PermissionRequestCardState extends State<PermissionRequestCard> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
               decoration: BoxDecoration(
-                color: _riskBgColor(riskLevel).withAlpha(120),
+                color: _riskBgColor(context, riskLevel).withAlpha(120),
                 borderRadius: BorderRadius.circular(6),
               ),
               child: Text(
                 riskLevel.toUpperCase(),
                 style: TextStyle(
-                  color: _riskIconColor(riskLevel),
+                  color: _riskIconColor(context, riskLevel),
                   fontSize: 10,
                   fontWeight: FontWeight.w700,
                 ),
@@ -125,14 +125,14 @@ class _PermissionRequestCardState extends State<PermissionRequestCard> {
             ),
           ],
         ),
-        const SizedBox(height: 10),
+        SizedBox(height: 10),
 
         // Description
         Container(
           width: double.infinity,
-          padding: const EdgeInsets.all(10),
+          padding: EdgeInsets.all(10),
           decoration: BoxDecoration(
-            color: kBgElevated,
+            color: context.appColors.bgElevated,
             borderRadius: BorderRadius.circular(8),
           ),
           child: Column(
@@ -140,37 +140,37 @@ class _PermissionRequestCardState extends State<PermissionRequestCard> {
             children: [
               Text(
                 description,
-                style: const TextStyle(
-                  color: kTextPrimary,
+                style: TextStyle(
+                  color: context.appColors.textPrimary,
                   fontSize: 13,
                   fontFamily: 'monospace',
                 ),
                 maxLines: 4,
                 overflow: TextOverflow.ellipsis,
               ),
-              const SizedBox(height: 6),
+              SizedBox(height: 6),
               Text(
                 'Tool: $toolName',
-                style: const TextStyle(color: kTextSecondary, fontSize: 11),
+                style: TextStyle(color: context.appColors.textSecondary, fontSize: 11),
               ),
             ],
           ),
         ),
-        const SizedBox(height: 10),
+        SizedBox(height: 10),
 
         // Scope selector
         Row(
           children: [
-            const Text('Scope: ',
-                style: TextStyle(color: kTextSecondary, fontSize: 12)),
-            const SizedBox(width: 4),
+            Text('Scope: ',
+                style: TextStyle(color: context.appColors.textSecondary, fontSize: 12)),
+            SizedBox(width: 4),
             Expanded(
               child: DropdownButton<String>(
                 value: _selectedScope,
                 isExpanded: true,
-                dropdownColor: kBgElevated,
-                style: const TextStyle(color: kTextPrimary, fontSize: 12),
-                underline: Container(height: 1, color: kDivider),
+                dropdownColor: context.appColors.bgElevated,
+                style: TextStyle(color: context.appColors.textPrimary, fontSize: 12),
+                underline: Container(height: 1, color: context.appColors.divider),
                 items: scopeOptions
                     .map((s) => DropdownMenuItem(
                           value: s,
@@ -184,7 +184,7 @@ class _PermissionRequestCardState extends State<PermissionRequestCard> {
             ),
           ],
         ),
-        const SizedBox(height: 12),
+        SizedBox(height: 12),
 
         // Buttons
         Row(
@@ -193,8 +193,8 @@ class _PermissionRequestCardState extends State<PermissionRequestCard> {
               child: OutlinedButton(
                 onPressed: () => _respond(context, false),
                 style: OutlinedButton.styleFrom(
-                  foregroundColor: kErrorText,
-                  side: const BorderSide(color: kErrorText),
+                  foregroundColor: context.appColors.errorText,
+                  side: BorderSide(color: context.appColors.errorText),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(10),
                   ),
@@ -205,12 +205,12 @@ class _PermissionRequestCardState extends State<PermissionRequestCard> {
                         TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
               ),
             ),
-            const SizedBox(width: 10),
+            SizedBox(width: 10),
             Expanded(
               child: FilledButton(
                 onPressed: () => _respond(context, true),
                 style: FilledButton.styleFrom(
-                  backgroundColor: kAccent,
+                  backgroundColor: context.appColors.accent,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(10),
                   ),
@@ -225,10 +225,10 @@ class _PermissionRequestCardState extends State<PermissionRequestCard> {
         ),
 
         // Timeout indicator
-        const SizedBox(height: 8),
+        SizedBox(height: 8),
         Text(
           'Auto-deny in ${_secondsRemaining ~/ 60}:${(_secondsRemaining % 60).toString().padLeft(2, '0')}',
-          style: const TextStyle(color: kTextMuted, fontSize: 11),
+          style: TextStyle(color: context.appColors.textMuted, fontSize: 11),
         ),
       ],
     );
@@ -242,15 +242,15 @@ class _PermissionRequestCardState extends State<PermissionRequestCard> {
       children: [
         Icon(
           allowed ? Icons.check_circle_outline : Icons.block_rounded,
-          color: allowed ? kSuccessText : kErrorText,
+          color: allowed ? context.appColors.successText : context.appColors.errorText,
           size: 18,
         ),
-        const SizedBox(width: 8),
+        SizedBox(width: 8),
         Expanded(
           child: Text(
             '${allowed ? "Allowed" : "Denied"}: $description',
             style: TextStyle(
-              color: allowed ? kTextPrimary : kTextSecondary,
+              color: allowed ? context.appColors.textPrimary : context.appColors.textSecondary,
               fontSize: 13,
             ),
             maxLines: 2,
@@ -296,48 +296,48 @@ class _PermissionRequestCardState extends State<PermissionRequestCard> {
     }
   }
 
-  static Color _riskIconColor(String riskLevel) {
+  static Color _riskIconColor(BuildContext context, String riskLevel) {
     switch (riskLevel) {
       case 'low':
-        return kSuccessText;
+        return context.appColors.successText;
       case 'medium':
-        return kToolAccent;
+        return context.appColors.toolAccent;
       case 'high':
-        return kErrorText;
+        return context.appColors.errorText;
       case 'critical':
-        return const Color(0xFFDC2626);
+        return Color(0xFFDC2626);
       default:
-        return kTextSecondary;
+        return context.appColors.textSecondary;
     }
   }
 
-  static Color _riskBgColor(String riskLevel) {
+  static Color _riskBgColor(BuildContext context, String riskLevel) {
     switch (riskLevel) {
       case 'low':
-        return kSuccessBg;
+        return context.appColors.successBg;
       case 'medium':
-        return const Color(0xFF2A2000);
+        return Color(0xFF2A2000);
       case 'high':
-        return kErrorBg;
+        return context.appColors.errorBg;
       case 'critical':
-        return const Color(0xFF450A0A);
+        return Color(0xFF450A0A);
       default:
-        return kBgElevated;
+        return context.appColors.bgElevated;
     }
   }
 
-  static Color _riskBorderColor(String riskLevel) {
+  static Color _riskBorderColor(BuildContext context, String riskLevel) {
     switch (riskLevel) {
       case 'low':
-        return kSuccessText;
+        return context.appColors.successText;
       case 'medium':
-        return kToolAccent;
+        return context.appColors.toolAccent;
       case 'high':
-        return kErrorText;
+        return context.appColors.errorText;
       case 'critical':
-        return const Color(0xFFDC2626);
+        return Color(0xFFDC2626);
       default:
-        return kDivider;
+        return context.appColors.divider;
     }
   }
 }

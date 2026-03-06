@@ -14,7 +14,7 @@
     Preserve the data\ directory (database)
 
 .PARAMETER KeepConfig
-    Preserve the .env configuration file
+    Preserve the settings.json configuration file
 
 .PARAMETER Yes
     Skip confirmation prompt
@@ -55,7 +55,7 @@ if (-not $KeepData) {
     Write-Host "  Including: database, data files" -ForegroundColor Yellow
 }
 if (-not $KeepConfig) {
-    Write-Host "  Including: .env configuration" -ForegroundColor Yellow
+    Write-Host "  Including: settings.json configuration" -ForegroundColor Yellow
 }
 Write-Host ""
 
@@ -104,11 +104,11 @@ if ($KeepData) {
 }
 
 if ($KeepConfig) {
-    $envFile = Join-Path $InstallDir ".env"
-    if (Test-Path $envFile) {
-        $backupConfig = Join-Path $env:TEMP "rcflow-env-backup-$(Get-Date -Format 'yyyyMMddHHmmss').env"
+    $cfgFile = Join-Path $InstallDir "settings.json"
+    if (Test-Path $cfgFile) {
+        $backupConfig = Join-Path $env:TEMP "rcflow-cfg-backup-$(Get-Date -Format 'yyyyMMddHHmmss').json"
         Write-Info "Backing up config to $backupConfig..."
-        Copy-Item $envFile -Destination $backupConfig
+        Copy-Item $cfgFile -Destination $backupConfig
         Write-Ok "Config backed up"
     }
 }

@@ -402,6 +402,11 @@ def main():
     for sz in [16, 32, 64, 128, 256, 512, 1024]:
         save_png(master, str(macos / f"app_icon_{sz}.png"), sz)
 
+    # Backend tray icon (used by system tray on Windows)
+    print("\nBackend tray icon:")
+    save_ico(master, str(project_root / "assets" / "tray_icon.ico"),
+             [16, 32, 48, 64, 128, 256])
+
     print("\nDone!")
 
 

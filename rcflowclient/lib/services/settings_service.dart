@@ -27,6 +27,11 @@ class SettingsService {
   static const _notificationSoundKey = 'rcflow_notification_sound';
   static const _customSoundPathKey = 'rcflow_custom_sound_path';
   static const _hideTerminalSessionsKey = 'rcflow_hide_terminal_sessions';
+  static const _terminalScrollbackKey = 'rcflow_terminal_scrollback';
+  static const _terminalColorSchemeKey = 'rcflow_terminal_color_scheme';
+  static const _terminalCursorStyleKey = 'rcflow_terminal_cursor_style';
+  static const _terminalFontSizeKey = 'rcflow_terminal_font_size';
+  static const _terminalFontFamilyKey = 'rcflow_terminal_font_family';
   static const _defaultHost = '192.168.1.100:8765';
 
   late final SharedPreferences _prefs;
@@ -169,4 +174,29 @@ class SettingsService {
       _prefs.getBool(_hideTerminalSessionsKey) ?? false;
   set hideTerminalSessions(bool value) =>
       _prefs.setBool(_hideTerminalSessionsKey, value);
+
+  int get terminalScrollback =>
+      _prefs.getInt(_terminalScrollbackKey) ?? 1000;
+  set terminalScrollback(int value) =>
+      _prefs.setInt(_terminalScrollbackKey, value);
+
+  String get terminalColorScheme =>
+      _prefs.getString(_terminalColorSchemeKey) ?? 'default';
+  set terminalColorScheme(String value) =>
+      _prefs.setString(_terminalColorSchemeKey, value);
+
+  String get terminalCursorStyle =>
+      _prefs.getString(_terminalCursorStyleKey) ?? 'block';
+  set terminalCursorStyle(String value) =>
+      _prefs.setString(_terminalCursorStyleKey, value);
+
+  double get terminalFontSize =>
+      _prefs.getDouble(_terminalFontSizeKey) ?? 14.0;
+  set terminalFontSize(double value) =>
+      _prefs.setDouble(_terminalFontSizeKey, value);
+
+  String get terminalFontFamily =>
+      _prefs.getString(_terminalFontFamilyKey) ?? 'monospace';
+  set terminalFontFamily(String value) =>
+      _prefs.setString(_terminalFontFamilyKey, value);
 }
