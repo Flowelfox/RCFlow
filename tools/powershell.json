@@ -1,0 +1,40 @@
+{
+  "name": "powershell",
+  "display_name": "PowerShell",
+  "description": "Execute a PowerShell command on the host machine and return its output. Use this for running system commands, scripts, file operations, and any PowerShell cmdlets available on the system.",
+  "version": "1.0.0",
+  "os": ["windows"],
+  "session_type": "one-shot",
+  "llm_context": "stateless",
+  "executor": "shell",
+
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "command": {
+        "type": "string",
+        "description": "The PowerShell command to execute"
+      },
+      "working_directory": {
+        "type": "string",
+        "description": "Working directory for the command. Defaults to the server's working directory.",
+        "default": "."
+      },
+      "timeout": {
+        "type": "integer",
+        "description": "Timeout in seconds. The command will be killed if it exceeds this.",
+        "default": 30
+      }
+    },
+    "required": ["command"]
+  },
+
+  "executor_config": {
+    "shell": {
+      "command_template": "{command}",
+      "shell": "powershell.exe",
+      "capture_stderr": true,
+      "stream_output": true
+    }
+  }
+}

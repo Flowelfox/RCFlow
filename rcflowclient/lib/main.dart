@@ -21,10 +21,24 @@ void _migrateToWorkers(SettingsService settings) {
   final apiKey = settings.apiKey;
   if (apiKey.isEmpty) return;
 
+  // Legacy host may contain port (e.g. "192.168.1.100:8765")
+  final legacyHost = settings.host;
+  String host;
+  int port;
+  if (legacyHost.contains(':')) {
+    final parts = legacyHost.split(':');
+    host = parts[0];
+    port = int.tryParse(parts[1]) ?? 53890;
+  } else {
+    host = legacyHost;
+    port = 53890;
+  }
+
   final worker = WorkerConfig(
     id: WorkerConfig.generateId(),
     name: 'My Server',
-    host: settings.host,
+    host: host,
+    port: port,
     apiKey: apiKey,
     useSSL: settings.useSSL,
     autoConnect: true,

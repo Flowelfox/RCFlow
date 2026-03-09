@@ -116,7 +116,8 @@ class TestPlatformDetection:
 
     @patch("src.services.tool_manager.platform.machine", return_value="x86_64")
     @patch("src.services.tool_manager._is_musl", return_value=False)
-    def test_codex_target_x64_gnu(self, _musl, _machine):
+    @patch("src.services.tool_manager._glibc_too_old", return_value=False)
+    def test_codex_target_x64_gnu(self, _glibc, _musl, _machine):
         assert _detect_codex_target() == "x86_64-unknown-linux-gnu"
 
     @patch("src.services.tool_manager.platform.machine", return_value="aarch64")

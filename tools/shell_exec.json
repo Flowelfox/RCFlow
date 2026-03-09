@@ -1,7 +1,9 @@
 {
   "name": "shell_exec",
+  "display_name": "Bash",
   "description": "Execute a shell command on the host machine and return its output. Use this for running system commands, scripts, file operations, and any CLI tools available on the system.",
   "version": "1.0.0",
+  "os": ["linux", "darwin"],
   "session_type": "one-shot",
   "llm_context": "stateless",
   "executor": "shell",

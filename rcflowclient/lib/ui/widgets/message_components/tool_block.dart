@@ -50,11 +50,13 @@ class ToolBlock extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final name = message.toolName ?? 'tool';
+    final toolName = message.toolName ?? 'tool';
+    final name = message.displayName ?? toolName;
     final output = message.content;
     final finished = message.finished;
     final expanded = message.expanded;
-    final summary = _toolSummary(name, message.toolInput);
+    final isError = message.isError;
+    final summary = _toolSummary(toolName, message.toolInput);
     final hasExpandableContent = output.isNotEmpty || !finished;
 
     return Padding(
@@ -82,22 +84,27 @@ class ToolBlock extends StatelessWidget {
                     EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 child: Row(
                   children: [
-                    if (hasExpandableContent)
+                    if (hasExpandableContent) ...[
                       Icon(
                         expanded
                             ? Icons.expand_less_rounded
                             : Icons.expand_more_rounded,
                         color: context.appColors.toolAccent,
                         size: 18,
-                      )
-                    else
-                      SizedBox(width: 18),
-                    SizedBox(width: 8),
+                      ),
+                      SizedBox(width: 8),
+                    ],
                     Icon(
                       finished
-                          ? Icons.check_circle_outline_rounded
+                          ? (isError
+                              ? Icons.error_outline_rounded
+                              : Icons.check_circle_outline_rounded)
                           : Icons.sync_rounded,
-                      color: finished ? context.appColors.successText : context.appColors.toolAccent,
+                      color: finished
+                          ? (isError
+                              ? context.appColors.errorText
+                              : context.appColors.successText)
+                          : context.appColors.toolAccent,
                       size: 14,
                     ),
                     SizedBox(width: 6),
@@ -140,7 +147,9 @@ class ToolBlock extends StatelessWidget {
                 child: Text(
                   output,
                   style: TextStyle(
-                    color: context.appColors.toolOutputText,
+                    color: isError
+                        ? context.appColors.errorText
+                        : context.appColors.toolOutputText,
                     fontSize: 11,
                     fontFamily: 'monospace',
                     height: 1.3,

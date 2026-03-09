@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from src.config import Settings
@@ -28,13 +29,45 @@ from src.executors.claude_code import ClaudeCodeExecutor
 from src.executors.codex import CodexExecutor
 from src.executors.http import HttpExecutor
 from src.executors.shell import ShellExecutor
+from src.models.db import Artifact as ArtifactModel
 from src.models.db import LLMCall
+from src.models.db import Session as SessionModel
+from src.models.db import Task as TaskModel
+from src.models.db import TaskSession as TaskSessionModel
+from src.services.artifact_scanner import ArtifactScanner
 from src.services.tool_manager import ToolManager
 from src.services.tool_settings import ToolSettingsManager
 from src.tools.loader import ToolDefinition
 from src.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
+
+_MAX_TOOL_OUTPUT_CHARS = 100_000
+
+# Text file extensions that support content inclusion in $file references
+_TEXT_EXTENSIONS: frozenset[str] = frozenset({
+    ".md", ".txt", ".log", ".json", ".yaml", ".yml", ".toml", ".cfg", ".ini",
+    ".csv", ".xml", ".html", ".css", ".js", ".ts", ".py", ".sh", ".bash", ".sql",
+    ".rs", ".go", ".java", ".c", ".cpp", ".h", ".hpp", ".cs", ".rb", ".php",
+    ".jsx", ".tsx", ".vue", ".dart", ".swift", ".kt", ".r", ".m", ".mm",
+})
+
+
+def _format_file_size(size_bytes: int) -> str:
+    """Format a byte count to a human-readable string."""
+    if size_bytes < 1024:
+        return f"{size_bytes} B"
+    elif size_bytes < 1024 * 1024:
+        return f"{size_bytes / 1024:.1f} KB"
+    else:
+        return f"{size_bytes / (1024 * 1024):.1f} MB"
+
+
+def _truncate_tool_output(content: str) -> str:
+    """Truncate tool output that exceeds the size limit for client delivery."""
+    if len(content) > _MAX_TOOL_OUTPUT_CHARS:
+        return content[:_MAX_TOOL_OUTPUT_CHARS] + f"\n\n... (truncated, {len(content):,} total chars)"
+    return content
 
 
 class PromptRouter:
@@ -49,6 +82,7 @@ class PromptRouter:
         settings: Settings | None = None,
         tool_settings: ToolSettingsManager | None = None,
         tool_manager: ToolManager | None = None,
+        artifact_scanner: ArtifactScanner | None = None,
     ) -> None:
         self._llm = llm_client
         self._session_manager = session_manager
@@ -58,10 +92,37 @@ class PromptRouter:
         self._settings = settings
         self._tool_settings = tool_settings
         self._tool_manager = tool_manager
+        self._artifact_scanner = artifact_scanner
         self._pending_log_tasks: set[asyncio.Task[None]] = set()
         self._pending_summary_tasks: set[asyncio.Task[None]] = set()
         self._pending_title_tasks: set[asyncio.Task[None]] = set()
         self._pending_archive_tasks: set[asyncio.Task[None]] = set()
+        self._pending_task_creation_tasks: set[asyncio.Task[None]] = set()
+        self._pending_task_update_tasks: set[asyncio.Task[None]] = set()
+
+    async def cancel_pending_tasks(self) -> None:
+        """Cancel and await all pending background tasks.
+
+        Should be called during shutdown before the DB engine is disposed.
+        """
+        all_pending: set[asyncio.Task[None]] = set()
+        for task_set in (
+            self._pending_log_tasks,
+            self._pending_summary_tasks,
+            self._pending_title_tasks,
+            self._pending_archive_tasks,
+            self._pending_task_creation_tasks,
+            self._pending_task_update_tasks,
+        ):
+            all_pending.update(task_set)
+
+        if not all_pending:
+            return
+
+        logger.info("Cancelling %d pending background tasks", len(all_pending))
+        for task in all_pending:
+            task.cancel()
+        await asyncio.gather(*all_pending, return_exceptions=True)
 
     def ensure_session(self, session_id: str | None = None) -> str:
         """Get an existing session or create a new one. Returns the session ID."""
@@ -136,6 +197,9 @@ class PromptRouter:
             },
         )
 
+        # Update attached task statuses if not already triggered by a tool result
+        self._fire_task_update_on_session_end(session)
+
         session.cancel()
         self._fire_archive_task(session_id)
         logger.info("Cancelled session %s", session_id)
@@ -205,6 +269,9 @@ class PromptRouter:
             session.status = SessionStatus.ACTIVE
             session.paused_at = None
 
+        # Update attached task statuses if not already triggered by a tool result
+        self._fire_task_update_on_session_end(session)
+
         session.complete()
         self._fire_archive_task(session_id)
         logger.info("Ended session %s (user confirmed)", session_id)
@@ -253,6 +320,33 @@ class PromptRouter:
         )
         if not resolved:
             raise RuntimeError(f"Unknown or already-resolved permission request: {request_id}")
+
+    async def send_interactive_response(self, session_id: str, text: str) -> None:
+        """Send an interactive response directly to Claude Code's stdin.
+
+        Used for answering AskUserQuestion prompts, plan mode approval, and
+        other mid-turn interactions.  Unlike :meth:`handle_prompt`, this does
+        **not** open a new agent group or create a new reading task — the
+        original streaming task picks up the follow-on events.
+
+        Falls back to :meth:`handle_prompt` when there is no active Claude
+        Code process (e.g. the process exited while the user was answering).
+
+        Raises:
+            ValueError: If the session does not exist.
+        """
+        session = self._session_manager.get_session(session_id)
+        if session is None:
+            raise ValueError(f"Session not found: {session_id}")
+
+        executor = session.claude_code_executor
+        if executor is not None and executor.is_running:
+            # Mid-turn: just send to stdin; the original relay task handles the rest
+            await executor.send_input(text)
+            return
+
+        # Fallback: process is gone — treat as a regular follow-up prompt
+        await self.handle_prompt(text, session_id)
 
     async def pause_session(self, session_id: str) -> ActiveSession:
         """Pause an active session.
@@ -437,6 +531,24 @@ class PromptRouter:
                 session.codex_executor = codex_executor
                 session.session_type = SessionType.LONG_RUNNING
 
+        # Repopulate attached task IDs from task_sessions table
+        if self._db_session_factory is not None:
+            try:
+                async with self._db_session_factory() as db:
+                    stmt = select(TaskSessionModel.task_id).where(
+                        TaskSessionModel.session_id == uuid.UUID(session_id)
+                    )
+                    result = await db.execute(stmt)
+                    task_ids = [str(row[0]) for row in result.all()]
+                    if task_ids:
+                        session.metadata["attached_task_ids"] = task_ids
+                        logger.info(
+                            "Restored %d attached task IDs for session %s",
+                            len(task_ids), session_id,
+                        )
+            except Exception:
+                logger.exception("Failed to restore task IDs for session %s", session_id)
+
         session.buffer.push_text(
             MessageType.SESSION_RESTORED,
             {"session_id": session.id},
@@ -454,6 +566,45 @@ class PromptRouter:
             if msg.message_type == MessageType.SESSION_END_ASK and "accepted" not in msg.data:
                 msg.data["accepted"] = accepted
                 return
+
+    def _check_token_limit_exceeded(self, session: ActiveSession) -> bool:
+        """Check if the session has exceeded its token limits.
+
+        If exceeded, pushes an error message to the buffer and returns True.
+        """
+        if self._settings is None:
+            return False
+
+        total_in = session.input_tokens + session.tool_input_tokens
+        total_out = session.output_tokens + session.tool_output_tokens
+        input_limit = self._settings.SESSION_INPUT_TOKEN_LIMIT
+        output_limit = self._settings.SESSION_OUTPUT_TOKEN_LIMIT
+
+        if input_limit > 0 and total_in >= input_limit:
+            session.buffer.push_text(
+                MessageType.ERROR,
+                {
+                    "session_id": session.id,
+                    "content": f"Session input token limit reached ({total_in:,}/{input_limit:,}). "
+                    "End this session and start a new one, or ask your admin to increase the limit.",
+                    "code": "TOKEN_LIMIT_REACHED",
+                },
+            )
+            return True
+
+        if output_limit > 0 and total_out >= output_limit:
+            session.buffer.push_text(
+                MessageType.ERROR,
+                {
+                    "session_id": session.id,
+                    "content": f"Session output token limit reached ({total_out:,}/{output_limit:,}). "
+                    "End this session and start a new one, or ask your admin to increase the limit.",
+                    "code": "TOKEN_LIMIT_REACHED",
+                },
+            )
+            return True
+
+        return False
 
     @staticmethod
     def _contains_session_end_ask(assistant_message: dict[str, Any]) -> bool:
@@ -625,6 +776,7 @@ class PromptRouter:
 
     _MENTION_RE = re.compile(r"(?:^|(?<=\s))@(\S+)")
     _TOOL_MENTION_RE = re.compile(r"(?:^|(?<=\s))#(\S+)")
+    _FILE_REF_RE = re.compile(r"(?:^|(?<=\s))\$(\S+)")
 
     def _extract_project_mentions(self, text: str) -> list[str]:
         """Extract @ProjectName mentions from user text."""
@@ -634,6 +786,10 @@ class PromptRouter:
         """Extract #ToolName mentions from user text."""
         return self._TOOL_MENTION_RE.findall(text)
 
+    def _extract_file_references(self, text: str) -> list[str]:
+        """Extract $filename references from user text."""
+        return self._FILE_REF_RE.findall(text)
+
     def _build_project_context(self, mentions: list[str]) -> str | None:
         """Resolve mentions to project directories and build a context string.
 
@@ -642,12 +798,13 @@ class PromptRouter:
         if not self._settings:
             return None
 
-        projects_dir = self._settings.PROJECTS_DIR.expanduser().resolve()
         resolved: list[tuple[str, Path]] = []
         for name in mentions:
-            project_path = projects_dir / name
-            if project_path.is_dir():
-                resolved.append((name, project_path))
+            for projects_dir in self._settings.projects_dirs:
+                project_path = projects_dir / name
+                if project_path.is_dir():
+                    resolved.append((name, project_path))
+                    break
 
         if not resolved:
             return None
@@ -675,12 +832,6 @@ class PromptRouter:
         seen: set[str] = set()
         for name in mentions:
             tool = self._tool_registry.get(name)
-            if tool is None:
-                # Try case-insensitive lookup
-                for t in self._tool_registry.list_tools():
-                    if t.name.lower() == name.lower():
-                        tool = t
-                        break
             if tool is not None and tool.name not in seen:
                 seen.add(tool.name)
                 resolved.append((tool.name, tool.description))
@@ -696,6 +847,96 @@ class PromptRouter:
             f"the mentioned tools, use them rather than alternatives.]"
         )
 
+    _MAX_FILE_CONTEXT_SIZE = 100_000  # ~100KB max file content to include in context
+
+    async def _build_file_context(self, references: list[str]) -> str | None:
+        """Resolve $filename references against the artifact database and build file context.
+
+        For text files: includes the file content in a fenced code block.
+        For non-text files: includes file metadata.
+
+        Returns None if no references resolve to valid artifacts.
+        """
+        if not self._db_session_factory or not self._settings:
+            return None
+
+        context_parts: list[str] = []
+        seen: set[str] = set()
+
+        async with self._db_session_factory() as db:
+            for ref_name in references:
+                lower_ref = ref_name.lower()
+                if lower_ref in seen:
+                    continue
+
+                # Look up artifact by file_name (case-insensitive)
+                stmt = (
+                    select(ArtifactModel)
+                    .where(ArtifactModel.backend_id == self._settings.RCFLOW_BACKEND_ID)
+                    .where(func.lower(ArtifactModel.file_name) == lower_ref)
+                    .order_by(ArtifactModel.discovered_at.desc())
+                    .limit(1)
+                )
+                result = await db.execute(stmt)
+                artifact = result.scalar_one_or_none()
+
+                if artifact is None:
+                    continue
+
+                seen.add(lower_ref)
+                file_path = Path(artifact.file_path)
+
+                if not file_path.exists():
+                    context_parts.append(
+                        f"[File: {artifact.file_name} -- File not found on disk at {artifact.file_path}]"
+                    )
+                    continue
+
+                if artifact.file_extension.lower() in _TEXT_EXTENSIONS:
+                    # Text file: include content
+                    try:
+                        content = file_path.read_text(encoding="utf-8")
+                    except UnicodeDecodeError:
+                        try:
+                            content = file_path.read_text(encoding="latin-1")
+                        except Exception as e:
+                            context_parts.append(f"[File: {artifact.file_name} -- Error reading: {e}]")
+                            continue
+                    except OSError as e:
+                        context_parts.append(f"[File: {artifact.file_name} -- Error reading: {e}]")
+                        continue
+
+                    lang_hint = artifact.file_extension.lstrip(".")
+                    if len(content) > self._MAX_FILE_CONTEXT_SIZE:
+                        content = content[: self._MAX_FILE_CONTEXT_SIZE]
+                        context_parts.append(
+                            f"[File: {artifact.file_name} ({artifact.file_path}) -- "
+                            f"truncated to {self._MAX_FILE_CONTEXT_SIZE // 1024}KB]\n"
+                            f"```{lang_hint}\n{content}\n```"
+                        )
+                    else:
+                        context_parts.append(
+                            f"[File: {artifact.file_name} ({artifact.file_path})]\n"
+                            f"```{lang_hint}\n{content}\n```"
+                        )
+                else:
+                    # Non-text file: include metadata only
+                    size_str = _format_file_size(artifact.file_size)
+                    modified = artifact.modified_at.isoformat() if artifact.modified_at else "unknown"
+                    context_parts.append(
+                        f"[File: {artifact.file_name} ({artifact.file_path})\n"
+                        f"  Type: {artifact.mime_type or 'unknown'}\n"
+                        f"  Extension: {artifact.file_extension}\n"
+                        f"  Size: {size_str}\n"
+                        f"  Modified: {modified}\n"
+                        f"  Note: Binary/non-text file -- content not included]"
+                    )
+
+        if not context_parts:
+            return None
+
+        return "\n\n".join(context_parts)
+
     async def handle_prompt(self, text: str, session_id: str | None = None) -> str:
         """Handle a user prompt. Creates a new session or resumes an existing one.
 
@@ -710,6 +951,10 @@ class PromptRouter:
         # Auto-resume paused sessions when a new prompt arrives
         if session.status == SessionStatus.PAUSED:
             await self.resume_session(resolved_id)
+
+        # Check session token limits before processing
+        if self._check_token_limit_exceeded(session):
+            return session.id
 
         # If session has an active Claude Code executor, forward message directly
         if session.claude_code_executor is not None:
@@ -736,12 +981,15 @@ class PromptRouter:
             session.set_activity(ActivityState.PROCESSING_LLM)
             self._resolve_session_end_ask(session, accepted=False)
 
-            # Detect @ProjectName and #ToolName mentions, build LLM context
+            # Detect @ProjectName, #ToolName, and $filename mentions, build LLM context
             mentions = self._extract_project_mentions(text)
             project_context = self._build_project_context(mentions) if mentions else None
 
             tool_mentions = self._extract_tool_mentions(text)
             tool_context = self._build_tool_context(tool_mentions) if tool_mentions else None
+
+            file_refs = self._extract_file_references(text)
+            file_context = await self._build_file_context(file_refs) if file_refs else None
 
             context_blocks: list[dict[str, Any]] = []
             if project_context:
@@ -751,6 +999,10 @@ class PromptRouter:
             if tool_context:
                 context_blocks.append(
                     {"type": "text", "text": tool_context, "cache_control": {"type": "ephemeral"}},
+                )
+            if file_context:
+                context_blocks.append(
+                    {"type": "text", "text": file_context, "cache_control": {"type": "ephemeral"}},
                 )
 
             if context_blocks:
@@ -821,6 +1073,13 @@ class PromptRouter:
                                 request_messages=turn_messages_snapshot,
                                 response_text=turn_text or None,
                             )
+                            # Accumulate token usage on session
+                            session.input_tokens += usage.input_tokens
+                            session.output_tokens += usage.output_tokens
+                            session.cache_creation_input_tokens += usage.cache_creation_input_tokens
+                            session.cache_read_input_tokens += usage.cache_read_input_tokens
+                            if session._on_update:
+                                session._on_update()
                             # Reset per-turn accumulators for the next turn
                             turn_text = ""
                             turn_has_tool_calls = False
@@ -860,6 +1119,11 @@ class PromptRouter:
                         )
                     # Fall back to user prompt alone if assistant had no text (e.g. only tool_use)
                     self._fire_title_task(session, text, assistant_text or "")
+                    self._fire_task_creation_task(session, text, assistant_text or "")
+
+                # Real-time artifact extraction from the updated conversation history
+                if self._artifact_scanner and self._settings and self._settings.ARTIFACT_AUTO_SCAN:
+                    self._fire_realtime_artifact_scan(session)
 
                 # Session stays ACTIVE — only end_session() or cancel_session() will complete it
                 if session.claude_code_executor is None and session.codex_executor is None:
@@ -884,14 +1148,26 @@ class PromptRouter:
         """Execute a tool call and stream output to the session buffer."""
         tool_def = self._tool_registry.get(tool_call.tool_name)
 
-        # For agent tools, push AGENT_GROUP_START instead of TOOL_START
-        # so the frontend can group all sub-messages under one collapsible block.
+        # For agent tools, push AGENT_SESSION_START (visible banner) then
+        # AGENT_GROUP_START (collapsible sub-message group) so the frontend
+        # shows "Claude Code started" with the prompt before tool output.
         if tool_def is not None and tool_def.executor in ("claude_code", "codex"):
+            session.buffer.push_text(
+                MessageType.AGENT_SESSION_START,
+                {
+                    "session_id": session.id,
+                    "agent_type": tool_call.tool_name,
+                    "display_name": tool_def.display_name or tool_def.name,
+                    "prompt": tool_call.tool_input.get("prompt", ""),
+                    "working_directory": tool_call.tool_input.get("working_directory", ""),
+                },
+            )
             session.buffer.push_text(
                 MessageType.AGENT_GROUP_START,
                 {
                     "session_id": session.id,
                     "tool_name": tool_call.tool_name,
+                    "display_name": tool_def.display_name or tool_def.name,
                     "tool_input": tool_call.tool_input,
                 },
             )
@@ -901,6 +1177,7 @@ class PromptRouter:
                 {
                     "session_id": session.id,
                     "tool_name": tool_call.tool_name,
+                    "display_name": tool_def.display_name or tool_def.name if tool_def else tool_call.tool_name,
                     "tool_input": tool_call.tool_input,
                 },
             )
@@ -974,6 +1251,15 @@ class PromptRouter:
 
         session.set_active()
         session.set_activity(ActivityState.PROCESSING_LLM)
+
+        # Real-time artifact scan for tool output and input values
+        if self._artifact_scanner and self._settings and self._settings.ARTIFACT_AUTO_SCAN:
+            scan_texts = [result_text]
+            for v in tool_call.tool_input.values():
+                if isinstance(v, str):
+                    scan_texts.append(v)
+            self._fire_text_artifact_scan(session, scan_texts)
+
         return result_text
 
     def _resolve_working_directory(self, working_dir: str) -> Path:
@@ -984,15 +1270,16 @@ class PromptRouter:
         prefix in case the LLM still uses it.
         """
         if self._settings is not None:
-            projects_dir = self._settings.PROJECTS_DIR.expanduser().resolve()
-            projects_dir_str = str(projects_dir)
-            # Handle absolute path that already matches configured PROJECTS_DIR
-            if working_dir.startswith(projects_dir_str):
-                return Path(working_dir)
-            # Handle ~/Projects prefix (legacy or fallback)
-            if working_dir.startswith("~/Projects"):
+            for projects_dir in self._settings.projects_dirs:
+                projects_dir_str = str(projects_dir)
+                # Handle absolute path that already matches a configured projects dir
+                if working_dir.startswith(projects_dir_str):
+                    return Path(working_dir)
+            # Handle ~/Projects prefix (legacy or fallback) — resolve against first dir
+            if working_dir.startswith("~/Projects") and self._settings.projects_dirs:
+                first_dir = self._settings.projects_dirs[0]
                 suffix = working_dir[len("~/Projects") :]
-                return projects_dir / suffix.lstrip("/")
+                return first_dir / suffix.lstrip("/")
         return Path(working_dir).expanduser()
 
     async def _start_claude_code(
@@ -1162,17 +1449,20 @@ class PromptRouter:
 
             if event_type == "assistant":
                 message = event.get("message", {})
+                scan_texts: list[str] = []
                 for block in message.get("content", []):
                     block_type = block.get("type")
                     if block_type == "text":
+                        text_val = block["text"]
                         session.buffer.push_text(
                             MessageType.TEXT_CHUNK,
                             {
                                 "session_id": session.id,
-                                "content": block["text"],
+                                "content": text_val,
                                 "finished": False,
                             },
                         )
+                        scan_texts.append(text_val)
                     elif block_type == "tool_use":
                         tool_name = block.get("name", "unknown")
                         tool_input = block.get("input", {})
@@ -1194,7 +1484,17 @@ class PromptRouter:
                                 )
                                 continue
 
-                        if tool_name == "EnterPlanMode":
+                        if tool_name == "TodoWrite":
+                            todos = tool_input.get("todos", [])
+                            session.update_todos(todos)
+                            session.buffer.push_text(
+                                MessageType.TODO_UPDATE,
+                                {
+                                    "session_id": session.id,
+                                    "todos": todos,
+                                },
+                            )
+                        elif tool_name == "EnterPlanMode":
                             session.buffer.push_text(
                                 MessageType.PLAN_MODE_ASK,
                                 {"session_id": session.id},
@@ -1213,23 +1513,86 @@ class PromptRouter:
                                     "tool_input": tool_input,
                                 },
                             )
+                        # Collect tool input values for scanning
+                        for v in tool_input.values():
+                            if isinstance(v, str):
+                                scan_texts.append(v)
+                # Fire artifact scan for this assistant message
+                if scan_texts:
+                    self._fire_text_artifact_scan(session, scan_texts)
+
+            elif event_type == "tool_result":
+                raw_content = event.get("content", "")
+                if isinstance(raw_content, list):
+                    # Content blocks format — extract text parts only
+                    parts = []
+                    for block in raw_content:
+                        if isinstance(block, dict) and block.get("type") == "text":
+                            parts.append(block.get("text", ""))
+                    content = "\n".join(parts)
+                else:
+                    content = str(raw_content)
+
+                content = _truncate_tool_output(content)
+                if content:
+                    is_error = event.get("is_error", False)
+                    session.buffer.push_text(
+                        MessageType.TOOL_OUTPUT,
+                        {
+                            "session_id": session.id,
+                            "content": content,
+                            "is_error": is_error,
+                        },
+                    )
+                    # Fire artifact scan for this tool result
+                    self._fire_text_artifact_scan(session, [content])
+
             elif event_type == "result":
                 session.set_activity(ActivityState.IDLE)
                 result_text = event.get("result", "")
                 result_subtype = event.get("subtype", "")
+                # Extract cost and token data from Claude Code result
+                cost_usd = event.get("cost_usd") or 0.0
+                if cost_usd:
+                    session.tool_cost_usd += float(cost_usd)
+                cc_usage = event.get("usage") or {}
+                cc_in = cc_usage.get("input_tokens") or 0
+                cc_out = cc_usage.get("output_tokens") or 0
+                if cc_in or cc_out:
+                    session.tool_input_tokens += cc_in
+                    session.tool_output_tokens += cc_out
+                if cost_usd or cc_in or cc_out:
+                    if session._on_update:
+                        session._on_update()
 
                 if result_subtype == "max_turns":
                     # Claude Code hit --max-turns limit; always notify the user
                     summary_text = result_text or "Claude Code reached the maximum number of turns for this invocation."
                     self._fire_summary_task(session, summary_text, push_session_end_ask=True)
+                    self._fire_task_update_task(session, summary_text)
                 elif result_text:
                     self._fire_summary_task(session, result_text, push_session_end_ask=True)
+                    self._fire_task_update_task(session, result_text)
                 else:
                     # Result event with no text and no subtype — still notify the user
                     session.buffer.push_text(
                         MessageType.SESSION_END_ASK,
                         {"session_id": session.id},
                     )
+
+            elif event_type == "system":
+                # Claude Code may emit system events with usage data
+                subtype = event.get("subtype", "")
+                if subtype == "usage":
+                    sys_usage = event.get("usage") or {}
+                    sys_in = sys_usage.get("input_tokens") or 0
+                    sys_out = sys_usage.get("output_tokens") or 0
+                    if sys_in or sys_out:
+                        session.tool_input_tokens += sys_in
+                        session.tool_output_tokens += sys_out
+                        if session._on_update:
+                            session._on_update()
+
             else:
                 logger.debug("Skipping unknown Claude Code event type: %s", event_type)
 
@@ -1501,8 +1864,12 @@ class PromptRouter:
                             },
                         )
                     last_agent_text.pop(item_id, None)
+                    # Scan the complete agent message text for artifacts
+                    if full_text:
+                        self._fire_text_artifact_scan(session, [full_text])
                 elif item_type == "command_execution":
-                    output = item.get("aggregated_output", "")
+                    output = _truncate_tool_output(item.get("aggregated_output", ""))
+                    exit_code = item.get("exit_code")
                     if output:
                         session.buffer.push_text(
                             MessageType.TOOL_OUTPUT,
@@ -1511,13 +1878,56 @@ class PromptRouter:
                                 "tool_name": "command_execution",
                                 "content": output,
                                 "stream": "stdout",
+                                "is_error": exit_code is not None and exit_code != 0,
                             },
                         )
+                        self._fire_text_artifact_scan(session, [output])
+                elif item_type == "file_change":
+                    diff = item.get("diff", "")
+                    file_path = item.get("file_path", item.get("file", ""))
+                    content = _truncate_tool_output(diff) if diff else (f"File changed: {file_path}" if file_path else "")
+                    if content:
+                        session.buffer.push_text(
+                            MessageType.TOOL_OUTPUT,
+                            {
+                                "session_id": session.id,
+                                "tool_name": "file_change",
+                                "content": content,
+                                "stream": "stdout",
+                            },
+                        )
+                        self._fire_text_artifact_scan(session, [content])
+                elif item_type == "mcp_tool_call":
+                    output = item.get("output", item.get("result", ""))
+                    if isinstance(output, dict):
+                        output = json.dumps(output, indent=2)
+                    output = _truncate_tool_output(str(output)) if output else ""
+                    if output:
+                        session.buffer.push_text(
+                            MessageType.TOOL_OUTPUT,
+                            {
+                                "session_id": session.id,
+                                "tool_name": f"mcp:{item.get('server', '')}:{item.get('tool', '')}",
+                                "content": output,
+                                "stream": "stdout",
+                            },
+                        )
+                        self._fire_text_artifact_scan(session, [output])
 
             elif event_type == "turn.completed":
                 session.set_activity(ActivityState.IDLE)
+                # Extract token usage from Codex turn
+                codex_usage = event.get("usage") or {}
+                codex_in = codex_usage.get("input_tokens") or 0
+                codex_out = codex_usage.get("output_tokens") or 0
+                if codex_in or codex_out:
+                    session.tool_input_tokens += codex_in
+                    session.tool_output_tokens += codex_out
+                    if session._on_update:
+                        session._on_update()
                 summary_text = "".join(post_tool_text_chunks).strip() or "Codex task completed"
                 self._fire_summary_task(session, summary_text, push_session_end_ask=True)
+                self._fire_task_update_task(session, summary_text)
 
             elif event_type == "turn.failed":
                 error = event.get("error", {})
@@ -1621,11 +2031,13 @@ class PromptRouter:
         session.set_activity(ActivityState.RUNNING_SUBPROCESS)
 
         # Open a new agent group for this follow-up turn
+        codex_def = self._tool_registry.get("codex")
         session.buffer.push_text(
             MessageType.AGENT_GROUP_START,
             {
                 "session_id": session.id,
                 "tool_name": "codex",
+                "display_name": codex_def.display_name if codex_def and codex_def.display_name else "Codex",
             },
         )
 
@@ -1680,6 +2092,292 @@ class PromptRouter:
         except Exception:
             logger.exception("Failed to generate title for session %s", session.id)
 
+    # --- Task creation/update agents ---
+
+    def _fire_task_creation_task(self, session: ActiveSession, user_text: str, assistant_text: str) -> None:
+        """Schedule a background task to extract or match tasks from the session."""
+        task = asyncio.create_task(self._create_tasks_from_session(session, user_text, assistant_text))
+        self._pending_task_creation_tasks.add(task)
+        task.add_done_callback(self._pending_task_creation_tasks.discard)
+
+    async def _create_tasks_from_session(
+        self, session: ActiveSession, user_text: str, assistant_text: str,
+    ) -> None:
+        """Extract or match tasks for this session. Never raises."""
+        try:
+            if self._db_session_factory is None or self._settings is None:
+                return
+
+            backend_id = self._settings.RCFLOW_BACKEND_ID
+
+            # Fetch existing non-done tasks for matching
+            async with self._db_session_factory() as db:
+                stmt = (
+                    select(TaskModel)
+                    .where(
+                        TaskModel.backend_id == backend_id,
+                        TaskModel.status.in_(["todo", "in_progress", "review"]),
+                    )
+                )
+                result = await db.execute(stmt)
+                existing = [
+                    {
+                        "task_id": str(t.id),
+                        "title": t.title,
+                        "description": t.description or "",
+                        "status": t.status,
+                    }
+                    for t in result.scalars().all()
+                ]
+
+            # Ask LLM to extract/match
+            llm_result = await self._llm.extract_or_match_tasks(user_text, assistant_text, existing)
+            new_tasks = llm_result.get("new_tasks") or []
+            attach_ids = llm_result.get("attach_task_ids") or []
+
+            attached_task_ids: list[str] = []
+            from datetime import UTC, datetime as dt
+
+            async with self._db_session_factory() as db:
+                # Ensure session row exists in DB (it may not be archived yet)
+                session_uuid = uuid.UUID(session.id)
+                existing_session = await db.get(SessionModel, session_uuid)
+                if existing_session is None:
+                    db.add(SessionModel(
+                        id=session_uuid,
+                        backend_id=backend_id,
+                        created_at=session.created_at,
+                        ended_at=session.ended_at,
+                        session_type=session.session_type.value,
+                        status=session.status.value,
+                        title=session.title,
+                        metadata_={},
+                    ))
+                    await db.flush()
+
+                # Attach existing tasks
+                for tid in attach_ids:
+                    try:
+                        task_uuid = uuid.UUID(tid)
+                    except ValueError:
+                        continue
+                    task = await db.get(TaskModel, task_uuid)
+                    if task is None:
+                        continue
+                    # Create link if not exists
+                    existing_link = await db.execute(
+                        select(TaskSessionModel).where(
+                            TaskSessionModel.task_id == task_uuid,
+                            TaskSessionModel.session_id == session_uuid,
+                        )
+                    )
+                    if existing_link.scalar_one_or_none() is None:
+                        link = TaskSessionModel(
+                            task_id=task_uuid,
+                            session_id=session_uuid,
+                        )
+                        db.add(link)
+                    # Auto-promote to in_progress if not already
+                    if task.status in ("todo", "review"):
+                        task.status = "in_progress"
+                        task.updated_at = dt.now(UTC)
+                    attached_task_ids.append(tid)
+
+                # Create new tasks
+                for new_t in new_tasks:
+                    title = (new_t.get("title") or "")[:300]
+                    if not title:
+                        continue
+                    description = new_t.get("description")
+                    now = dt.now(UTC)
+                    task = TaskModel(
+                        backend_id=backend_id,
+                        title=title,
+                        description=description,
+                        status="in_progress",
+                        source="ai",
+                        created_at=now,
+                        updated_at=now,
+                    )
+                    db.add(task)
+                    await db.flush()  # get task.id
+                    link = TaskSessionModel(
+                        task_id=task.id,
+                        session_id=session_uuid,
+                    )
+                    db.add(link)
+                    attached_task_ids.append(str(task.id))
+
+                await db.commit()
+
+                # Broadcast task updates
+                for tid in attached_task_ids:
+                    try:
+                        task_uuid = uuid.UUID(tid)
+                        task = await db.get(TaskModel, task_uuid)
+                        if task is not None:
+                            # Build task dict with session refs
+                            sess_stmt = (
+                                select(TaskSessionModel, SessionModel)
+                                .join(SessionModel, TaskSessionModel.session_id == SessionModel.id)
+                                .where(TaskSessionModel.task_id == task.id)
+                            )
+                            sess_result = await db.execute(sess_stmt)
+                            sessions_data = []
+                            for ts_row, sess_row in sess_result.all():
+                                sessions_data.append({
+                                    "session_id": str(sess_row.id),
+                                    "title": sess_row.title,
+                                    "status": sess_row.status,
+                                    "attached_at": ts_row.attached_at.isoformat() if ts_row.attached_at else "",
+                                })
+                            task_data = {
+                                "task_id": str(task.id),
+                                "title": task.title,
+                                "description": task.description,
+                                "status": task.status,
+                                "source": task.source,
+                                "created_at": task.created_at.isoformat() if task.created_at else "",
+                                "updated_at": task.updated_at.isoformat() if task.updated_at else "",
+                                "sessions": sessions_data,
+                            }
+                            self._session_manager.broadcast_task_update(task_data)
+                    except Exception:
+                        logger.exception("Failed to broadcast task update for %s", tid)
+
+            # Store on session for the update agent
+            session.metadata["attached_task_ids"] = attached_task_ids
+            logger.info(
+                "Task creation for session %s: %d attached, %d new",
+                session.id, len(attach_ids), len(new_tasks),
+            )
+
+        except Exception:
+            logger.exception("Failed to create/match tasks for session %s", session.id)
+
+    def _fire_task_update_task(self, session: ActiveSession, session_result_text: str) -> None:
+        """Schedule a background task to update tasks based on session results."""
+        task_ids = session.metadata.get("attached_task_ids", [])
+        if not task_ids:
+            return
+        session.metadata["_task_update_fired"] = True
+        task = asyncio.create_task(self._update_tasks_from_session(session, session_result_text, task_ids))
+        self._pending_task_update_tasks.add(task)
+        task.add_done_callback(self._pending_task_update_tasks.discard)
+
+    def _fire_task_update_on_session_end(self, session: ActiveSession) -> None:
+        """Fire task update when a session ends, if not already fired by a tool result."""
+        if session.metadata.get("_task_update_fired"):
+            return
+        result_text = self._extract_session_context(session)
+        if result_text:
+            self._fire_task_update_task(session, result_text)
+
+    @staticmethod
+    def _extract_session_context(session: ActiveSession) -> str:
+        """Extract a context summary from the session's conversation history for task evaluation."""
+        parts: list[str] = []
+        for msg in session.conversation_history:
+            role = msg.get("role", "")
+            content = msg.get("content")
+            if role not in ("user", "assistant"):
+                continue
+            if isinstance(content, str):
+                text = content
+            elif isinstance(content, list):
+                text = " ".join(
+                    b.get("text", "") for b in content
+                    if isinstance(b, dict) and b.get("type") == "text"
+                )
+            else:
+                continue
+            if text.strip():
+                parts.append(f"{role}: {text.strip()}")
+        # Limit to last ~4000 chars to avoid huge LLM calls
+        combined = "\n".join(parts)
+        if len(combined) > 4000:
+            combined = combined[-4000:]
+        return combined
+
+    async def _update_tasks_from_session(
+        self, session: ActiveSession, session_result_text: str, task_ids: list[str],
+    ) -> None:
+        """Update tasks based on session results. Never raises."""
+        from sqlite3 import OperationalError as SQLiteOperationalError
+        try:
+            if self._db_session_factory is None:
+                return
+
+            from datetime import UTC, datetime as dt
+
+            async with self._db_session_factory() as db:
+                for tid in task_ids:
+                    try:
+                        task_uuid = uuid.UUID(tid)
+                    except ValueError:
+                        continue
+
+                    task = await db.get(TaskModel, task_uuid)
+                    if task is None:
+                        continue
+
+                    # Ask LLM to evaluate
+                    result = await self._llm.evaluate_task_status(
+                        task.title, task.description, task.status, session_result_text,
+                    )
+                    new_status = result.get("status", task.status)
+                    new_description = result.get("description", task.description)
+
+                    changed = False
+                    # Validate transition and enforce AI can't set done
+                    if new_status != task.status and new_status != "done":
+                        from src.api.http import VALID_TASK_TRANSITIONS
+                        allowed = VALID_TASK_TRANSITIONS.get(task.status, set())
+                        if new_status in allowed:
+                            task.status = new_status
+                            changed = True
+                    if new_description and new_description != task.description:
+                        task.description = new_description
+                        changed = True
+
+                    if changed:
+                        task.updated_at = dt.now(UTC)
+                        await db.commit()
+
+                        # Build and broadcast
+                        sess_stmt = (
+                            select(TaskSessionModel, SessionModel)
+                            .join(SessionModel, TaskSessionModel.session_id == SessionModel.id)
+                            .where(TaskSessionModel.task_id == task.id)
+                        )
+                        sess_result = await db.execute(sess_stmt)
+                        sessions_data = []
+                        for ts_row, sess_row in sess_result.all():
+                            sessions_data.append({
+                                "session_id": str(sess_row.id),
+                                "title": sess_row.title,
+                                "status": sess_row.status,
+                                "attached_at": ts_row.attached_at.isoformat() if ts_row.attached_at else "",
+                            })
+                        task_data = {
+                            "task_id": str(task.id),
+                            "title": task.title,
+                            "description": task.description,
+                            "status": task.status,
+                            "source": task.source,
+                            "created_at": task.created_at.isoformat() if task.created_at else "",
+                            "updated_at": task.updated_at.isoformat() if task.updated_at else "",
+                            "sessions": sessions_data,
+                        }
+                        self._session_manager.broadcast_task_update(task_data)
+
+            logger.info("Task update for session %s: checked %d tasks", session.id, len(task_ids))
+
+        except (asyncio.CancelledError, SQLiteOperationalError):
+            logger.debug("Task update for session %s aborted (shutdown)", session.id)
+        except Exception:
+            logger.exception("Failed to update tasks for session %s", session.id)
+
     def _fire_summary_task(self, session: ActiveSession, text: str, *, push_session_end_ask: bool = False) -> None:
         """Schedule a background task to summarize Claude Code result text."""
         task = asyncio.create_task(self._summarize_and_push(session, text, push_session_end_ask=push_session_end_ask))
@@ -1725,11 +2423,13 @@ class PromptRouter:
         session.set_activity(ActivityState.RUNNING_SUBPROCESS)
 
         # Open a new agent group for this follow-up turn
+        cc_def = self._tool_registry.get("claude_code")
         session.buffer.push_text(
             MessageType.AGENT_GROUP_START,
             {
                 "session_id": session.id,
                 "tool_name": "claude_code",
+                "display_name": cc_def.display_name if cc_def and cc_def.display_name else "Claude Code",
             },
         )
 
@@ -1948,14 +2648,87 @@ class PromptRouter:
         self._pending_archive_tasks.add(task)
         task.add_done_callback(self._pending_archive_tasks.discard)
 
+    def _fire_realtime_artifact_scan(self, session: "ActiveSession") -> None:
+        """Schedule a fire-and-forget background task to scan conversation history for artifacts."""
+        if self._artifact_scanner is None:
+            return
+        history = list(session.conversation_history)
+        task = asyncio.create_task(self._realtime_artifact_scan(session.id, history))
+        self._pending_archive_tasks.add(task)
+        task.add_done_callback(self._pending_archive_tasks.discard)
+
+    async def _realtime_artifact_scan(self, session_id: str, conversation_history: list[dict]) -> None:
+        """Extract artifacts from in-memory conversation history. Never raises."""
+        assert self._artifact_scanner is not None
+        try:
+            new_count, updated_count = await self._artifact_scanner.scan_from_history(session_id, conversation_history)
+            if new_count > 0 or updated_count > 0:
+                await self._broadcast_artifact_list()
+        except Exception:
+            logger.exception("Real-time artifact scan failed for session %s", session_id)
+
+    def _fire_text_artifact_scan(self, session: "ActiveSession", texts: list[str]) -> None:
+        """Schedule a fire-and-forget background task to scan text strings for artifacts."""
+        if self._artifact_scanner is None or not self._settings or not self._settings.ARTIFACT_AUTO_SCAN:
+            return
+        task = asyncio.create_task(self._text_artifact_scan(session.id, texts))
+        self._pending_archive_tasks.add(task)
+        task.add_done_callback(self._pending_archive_tasks.discard)
+
+    async def _text_artifact_scan(self, session_id: str, texts: list[str]) -> None:
+        """Extract artifacts from raw text strings. Never raises."""
+        assert self._artifact_scanner is not None
+        try:
+            new_count, updated_count = await self._artifact_scanner.scan_texts(session_id, texts)
+            if new_count > 0 or updated_count > 0:
+                await self._broadcast_artifact_list()
+        except Exception:
+            logger.exception("Real-time text artifact scan failed for session %s", session_id)
+
     async def _archive_session(self, session_id: str) -> None:
-        """Archive a completed session to the database. Never raises."""
+        """Archive a completed session to the database and optionally extract artifacts. Never raises."""
         assert self._db_session_factory is not None
         try:
             async with self._db_session_factory() as db:
                 await self._session_manager.archive_session(session_id, db)
+
+            # Extract artifacts from session messages if auto-scan is enabled
+            if self._artifact_scanner and self._settings and self._settings.ARTIFACT_AUTO_SCAN:
+                try:
+                    new_count = await self._artifact_scanner.scan(session_id)
+                    if new_count > 0:
+                        await self._broadcast_artifact_list()
+                except Exception:
+                    logger.exception("Failed to extract artifacts from session %s", session_id)
         except Exception:
             logger.exception("Failed to archive session %s", session_id)
+
+    async def _broadcast_artifact_list(self) -> None:
+        """Fetch all artifacts for this backend and broadcast to connected clients."""
+        if self._db_session_factory is None or self._settings is None:
+            return
+        async with self._db_session_factory() as db:
+            stmt = (
+                select(ArtifactModel)
+                .where(ArtifactModel.backend_id == self._settings.RCFLOW_BACKEND_ID)
+                .order_by(ArtifactModel.discovered_at.desc())
+            )
+            result = await db.execute(stmt)
+            artifacts = [
+                {
+                    "artifact_id": str(a.id),
+                    "file_path": a.file_path,
+                    "file_name": a.file_name,
+                    "file_extension": a.file_extension,
+                    "file_size": a.file_size,
+                    "mime_type": a.mime_type,
+                    "discovered_at": a.discovered_at.isoformat() if a.discovered_at else "",
+                    "modified_at": a.modified_at.isoformat() if a.modified_at else "",
+                    "session_id": str(a.session_id) if a.session_id else None,
+                }
+                for a in result.scalars()
+            ]
+        self._session_manager.broadcast_artifact_list(artifacts)
 
     # --- Inactivity reaper ---
 

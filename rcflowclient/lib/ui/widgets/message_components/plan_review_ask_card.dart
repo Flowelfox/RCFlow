@@ -108,10 +108,9 @@ class _PlanReviewAskCardState extends State<PlanReviewAskCard> {
                   onPressed: _controller.text.trim().isEmpty
                       ? null
                       : () {
-                          widget.message.accepted = false;
                           context
                               .read<PaneState>()
-                              .sendPrompt(_controller.text.trim());
+                              .sendInteractiveResponse(widget.message, _controller.text.trim(), accepted: false);
                         },
                   style: FilledButton.styleFrom(
                     backgroundColor: context.appColors.accent,
@@ -151,10 +150,9 @@ class _PlanReviewAskCardState extends State<PlanReviewAskCard> {
               Expanded(
                 child: FilledButton(
                   onPressed: () {
-                    widget.message.accepted = true;
                     context
                         .read<PaneState>()
-                        .sendPrompt('Looks good, proceed with the plan.');
+                        .sendInteractiveResponse(widget.message, 'Looks good, proceed with the plan.');
                   },
                   style: FilledButton.styleFrom(
                     backgroundColor: context.appColors.accent,

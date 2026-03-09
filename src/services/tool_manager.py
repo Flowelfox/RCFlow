@@ -18,6 +18,8 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
+from src.paths import get_managed_tools_dir
+
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
@@ -176,12 +178,7 @@ class ToolManager:
     @staticmethod
     def _default_base_dir() -> Path:
         """Return the platform-appropriate base directory for managed tools."""
-        if sys.platform == "win32":
-            local_app_data = os.environ.get("LOCALAPPDATA")
-            if local_app_data:
-                return Path(local_app_data) / "rcflow" / "tools"
-            return Path.home() / "AppData" / "Local" / "rcflow" / "tools"
-        return Path.home() / ".local" / "share" / "rcflow" / "tools"
+        return get_managed_tools_dir()
 
     @property
     def tool_names(self) -> set[str]:

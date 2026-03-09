@@ -43,21 +43,21 @@ class TestPromptBuilder:
     def test_real_template_renders(self) -> None:
         """Integration test: the shipped system_prompt.j2 renders correctly."""
         builder = PromptBuilder()
-        result = builder.build(projects_dir="/home/user/Projects", os_name="Linux")
+        result = builder.build(projects_dirs="/home/user/Projects", os_name="Linux")
         assert "RCFlow" in result
         assert "/home/user/Projects" in result
 
     def test_real_template_substitution(self) -> None:
-        """All {{ projects_dir }} placeholders are replaced in the real template."""
+        """All {{ projects_dirs }} placeholders are replaced in the real template."""
         builder = PromptBuilder()
-        result = builder.build(projects_dir="/test/dir", os_name="Linux")
-        assert "{{ projects_dir }}" not in result
+        result = builder.build(projects_dirs="/test/dir", os_name="Linux")
+        assert "{{ projects_dirs }}" not in result
         assert "/test/dir" in result
 
     def test_real_template_has_key_sections(self) -> None:
         """The rendered prompt contains expected content sections."""
         builder = PromptBuilder()
-        result = builder.build(projects_dir="/home/user/Projects", os_name="Linux")
+        result = builder.build(projects_dirs="/home/user/Projects", os_name="Linux")
         assert "text-to-speech" in result
         assert "claude_code" in result
         assert "Project conventions" in result
@@ -65,6 +65,6 @@ class TestPromptBuilder:
     def test_real_template_os_name_substitution(self) -> None:
         """The os_name variable is substituted into the role description."""
         builder = PromptBuilder()
-        result = builder.build(projects_dir="/home/user/Projects", os_name="Windows")
+        result = builder.build(projects_dirs="/home/user/Projects", os_name="Windows")
         assert "Windows machine" in result
         assert "{{ os_name }}" not in result

@@ -1,10 +1,8 @@
-import asyncio
 from logging.config import fileConfig
 from pathlib import Path
 
 from alembic import context
-from sqlalchemy import pool
-from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy import create_engine, pool
 
 from src.config import get_settings
 from src.models.db import Base
@@ -26,8 +24,21 @@ def get_url() -> str:
     return url
 
 
-def run_migrations_offline() -> None:
+def _get_sync_url() -> str:
+    """Convert async database URLs to synchronous equivalents for migrations.
+
+    Alembic migrations run synchronously, so we use the standard (non-async)
+    SQLAlchemy driver. This avoids asyncio event loop issues — particularly
+    on Windows where ProactorEventLoop.close() can hang indefinitely.
+    """
     url = get_url()
+    if "+aiosqlite" in url:
+        url = url.replace("+aiosqlite", "")
+    return url
+
+
+def run_migrations_offline() -> None:
+    url = _get_sync_url()
     context.configure(
         url=url,
         target_metadata=target_metadata,
@@ -38,21 +49,13 @@ def run_migrations_offline() -> None:
         context.run_migrations()
 
 
-def do_run_migrations(connection) -> None:
-    context.configure(connection=connection, target_metadata=target_metadata)
-    with context.begin_transaction():
-        context.run_migrations()
-
-
-async def run_async_migrations() -> None:
-    engine = create_async_engine(get_url(), poolclass=pool.NullPool)
-    async with engine.connect() as connection:
-        await connection.run_sync(do_run_migrations)
-    await engine.dispose()
-
-
 def run_migrations_online() -> None:
-    asyncio.run(run_async_migrations())
+    engine = create_engine(_get_sync_url(), poolclass=pool.NullPool)
+    with engine.connect() as connection:
+        context.configure(connection=connection, target_metadata=target_metadata)
+        with context.begin_transaction():
+            context.run_migrations()
+    engine.dispose()
 
 
 if context.is_offline_mode():

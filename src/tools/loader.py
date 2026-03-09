@@ -11,8 +11,17 @@ logger = logging.getLogger(__name__)
 VALID_EXECUTORS = {"shell", "http", "claude_code", "codex"}
 VALID_SESSION_TYPES = {"one-shot", "long-running"}
 VALID_LLM_CONTEXTS = {"stateless", "session-scoped"}
+VALID_OS = {"windows", "linux", "darwin"}
 
 _DEFAULT_SHELL = "powershell.exe" if sys.platform == "win32" else "/bin/bash"
+
+# Map sys.platform values to the canonical os names used in tool definitions.
+_PLATFORM_TO_OS: dict[str, str] = {
+    "win32": "windows",
+    "linux": "linux",
+    "darwin": "darwin",
+}
+CURRENT_OS = _PLATFORM_TO_OS.get(sys.platform, sys.platform)
 
 
 class ShellExecutorConfig(BaseModel):
@@ -49,13 +58,26 @@ class CodexExecutorConfig(BaseModel):
 
 class ToolDefinition(BaseModel):
     name: str
+    display_name: str = ""
     description: str
     version: str = "1.0.0"
+    os: list[str] = Field(default_factory=list)
     session_type: str
     llm_context: str
     executor: str
     parameters: dict[str, Any]
     executor_config: dict[str, Any]
+
+    @property
+    def mention_name(self) -> str:
+        """Human-readable mention name (PascalCase, no spaces).
+
+        Derived from display_name by removing spaces. Falls back to name
+        if display_name is empty. E.g. "Claude Code" -> "ClaudeCode".
+        """
+        if self.display_name:
+            return self.display_name.replace(" ", "")
+        return self.name
 
     def get_shell_config(self) -> ShellExecutorConfig:
         return ShellExecutorConfig(**self.executor_config["shell"])
@@ -88,6 +110,9 @@ def load_tool_file(path: Path) -> ToolDefinition:
         )
     if tool.executor not in tool.executor_config:
         raise ValueError(f"Tool '{tool.name}': executor_config must contain a key matching executor '{tool.executor}'")
+    for os_val in tool.os:
+        if os_val not in VALID_OS:
+            raise ValueError(f"Tool '{tool.name}': invalid os value '{os_val}'. Must be one of {VALID_OS}")
 
     return tool
 
@@ -102,6 +127,9 @@ def load_tools_from_directory(tools_dir: Path) -> list[ToolDefinition]:
     for path in sorted(tools_dir.glob("*.json")):
         try:
             tool = load_tool_file(path)
+            if tool.os and CURRENT_OS not in tool.os:
+                logger.info("Skipping tool '%s' from %s (requires os=%s, current=%s)", tool.name, path.name, tool.os, CURRENT_OS)
+                continue
             tools.append(tool)
             logger.info("Loaded tool '%s' from %s", tool.name, path.name)
         except Exception:

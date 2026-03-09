@@ -11,6 +11,7 @@
 ///    in [messageRenderers] (see `message_bubble.dart`).
 library;
 
+import '../models/todo_item.dart';
 import '../models/ws_messages.dart';
 import 'pane_state.dart';
 
@@ -48,11 +49,15 @@ void handleToolStart(Map<String, dynamic> msg, PaneState pane) {
   pane.startToolBlock(
     msg['tool_name'] as String? ?? 'unknown',
     msg['tool_input'] as Map<String, dynamic>?,
+    displayName: msg['display_name'] as String?,
   );
 }
 
 void handleToolOutput(Map<String, dynamic> msg, PaneState pane) {
-  pane.appendToolOutput(msg['content'] as String? ?? '');
+  pane.appendToolOutput(
+    msg['content'] as String? ?? '',
+    isError: msg['is_error'] as bool? ?? false,
+  );
 }
 
 void handleError(Map<String, dynamic> msg, PaneState pane) {
@@ -124,10 +129,46 @@ void handlePermissionRequest(Map<String, dynamic> msg, PaneState pane) {
   ));
 }
 
+void handleTodoUpdate(Map<String, dynamic> msg, PaneState pane) {
+  final rawTodos = msg['todos'] as List<dynamic>? ?? [];
+  final todos = rawTodos
+      .whereType<Map<String, dynamic>>()
+      .map((t) => TodoItem.fromJson(t))
+      .toList();
+  pane.updateTodos(todos);
+
+  // Also add an inline display message in the output stream
+  final completed = todos.where((t) => t.status == TodoStatus.completed).length;
+  pane.addDisplayMessageInStream(DisplayMessage(
+    type: DisplayMessageType.todoUpdate,
+    sessionId: msg['session_id'] as String?,
+    content: '$completed/${todos.length}',
+    toolInput: msg,
+    finished: true,
+  ));
+}
+
+void handleAgentSessionStart(Map<String, dynamic> msg, PaneState pane) {
+  pane.finalizeStream();
+  pane.addDisplayMessage(DisplayMessage(
+    type: DisplayMessageType.agentSessionStart,
+    sessionId: msg['session_id'] as String?,
+    toolName: msg['agent_type'] as String?,
+    displayName: msg['display_name'] as String?,
+    content: msg['prompt'] as String? ?? '',
+    toolInput: {
+      'working_directory': msg['working_directory'],
+      'prompt': msg['prompt'],
+    },
+    finished: true,
+  ));
+}
+
 void handleAgentGroupStart(Map<String, dynamic> msg, PaneState pane) {
   pane.startAgentGroup(
     msg['tool_name'] as String? ?? 'claude_code',
     msg['tool_input'] as Map<String, dynamic>?,
+    displayName: msg['display_name'] as String?,
   );
 }
 
@@ -179,6 +220,8 @@ final Map<String, OutputHandler> outputHandlerRegistry = {
   'session_paused': handleSessionPaused,
   'session_resumed': handleSessionResumed,
   'session_restored': handleSessionRestored,
+  'todo_update': handleTodoUpdate,
+  'agent_session_start': handleAgentSessionStart,
   'agent_group_start': handleAgentGroupStart,
   'agent_group_end': handleAgentGroupEnd,
   'plan_mode_ask': handlePlanModeAsk,
@@ -233,6 +276,7 @@ void buildToolStartHistory(Map<String, dynamic> msg, String sessionId,
     type: DisplayMessageType.toolBlock,
     sessionId: sessionId,
     toolName: metadata['tool_name'] as String? ?? 'unknown',
+    displayName: metadata['display_name'] as String?,
     toolInput: metadata['tool_input'] as Map<String, dynamic>?,
     finished: false,
   ));
@@ -375,6 +419,41 @@ void buildPermissionRequestHistory(Map<String, dynamic> msg, String sessionId,
   ));
 }
 
+void buildTodoUpdateHistory(Map<String, dynamic> msg, String sessionId,
+    List<DisplayMessage> messages) {
+  final metadata = msg['metadata'] as Map<String, dynamic>? ?? {};
+  final rawTodos = metadata['todos'] as List<dynamic>? ?? [];
+  final total = rawTodos.length;
+  final completed = rawTodos
+      .whereType<Map<String, dynamic>>()
+      .where((t) => t['status'] == 'completed')
+      .length;
+  messages.add(DisplayMessage(
+    type: DisplayMessageType.todoUpdate,
+    sessionId: sessionId,
+    content: '$completed/$total',
+    toolInput: metadata,
+    finished: true,
+  ));
+}
+
+void buildAgentSessionStartHistory(Map<String, dynamic> msg, String sessionId,
+    List<DisplayMessage> messages) {
+  final metadata = msg['metadata'] as Map<String, dynamic>? ?? {};
+  messages.add(DisplayMessage(
+    type: DisplayMessageType.agentSessionStart,
+    sessionId: sessionId,
+    toolName: metadata['agent_type'] as String?,
+    displayName: metadata['display_name'] as String?,
+    content: metadata['prompt'] as String? ?? '',
+    toolInput: {
+      'working_directory': metadata['working_directory'],
+      'prompt': metadata['prompt'],
+    },
+    finished: true,
+  ));
+}
+
 /// Maps archived message type strings to history builder functions.
 final Map<String, HistoryBuilder> historyBuilderRegistry = {
   'text_chunk': buildTextChunkHistory,
@@ -389,4 +468,6 @@ final Map<String, HistoryBuilder> historyBuilderRegistry = {
   'plan_mode_ask': buildPlanModeAskHistory,
   'plan_review_ask': buildPlanReviewAskHistory,
   'permission_request': buildPermissionRequestHistory,
+  'todo_update': buildTodoUpdateHistory,
+  'agent_session_start': buildAgentSessionStartHistory,
 };

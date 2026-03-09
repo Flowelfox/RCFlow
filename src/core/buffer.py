@@ -13,6 +13,7 @@ class MessageType(StrEnum):
     SESSION_END_ASK = "session_end_ask"
     SUMMARY = "summary"
     NOTIFICATION = "notification"
+    AGENT_SESSION_START = "agent_session_start"
     AGENT_GROUP_START = "agent_group_start"
     AGENT_GROUP_END = "agent_group_end"
     SESSION_PAUSED = "session_paused"
@@ -21,6 +22,7 @@ class MessageType(StrEnum):
     PLAN_REVIEW_ASK = "plan_review_ask"
     PERMISSION_REQUEST = "permission_request"
     SESSION_RESTORED = "session_restored"
+    TODO_UPDATE = "todo_update"
     SESSION_UPDATE = "session_update"  # For broadcasting session metadata updates
 
 

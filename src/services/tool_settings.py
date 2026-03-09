@@ -13,6 +13,8 @@ import os
 from pathlib import Path
 from typing import Any
 
+from src.paths import get_managed_tools_dir
+
 logger = logging.getLogger(__name__)
 
 # Keys related to provider configuration (used for env sync detection).
@@ -323,7 +325,7 @@ class ToolSettingsManager:
     """
 
     def __init__(self, base_dir: Path | None = None) -> None:
-        self._base_dir = base_dir or (Path.home() / ".local" / "share" / "rcflow" / "tools")
+        self._base_dir = base_dir or get_managed_tools_dir()
 
     def get_config_dir(self, tool_name: str) -> Path:
         """Return the config directory for a tool (for env var injection)."""

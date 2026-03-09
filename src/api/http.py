@@ -12,25 +12,37 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import PlainTextResponse, StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import func, select
-
 from src.api.deps import verify_http_api_key
 from src.config import CONFIGURABLE_KEYS, Settings, get_config_schema, update_settings_file
 from src.core.llm import LLMClient
+from src.models.db import Artifact as ArtifactModel
 from src.models.db import Session as SessionModel
 from src.models.db import SessionMessage as SessionMessageModel
+from src.models.db import Task as TaskModel
+from src.models.db import TaskSession as TaskSessionModel
 from src.speech.stt import create_stt_provider
 from src.speech.tts import create_tts_provider
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
+    from sqlalchemy.ext.asyncio import AsyncSession
+
     from src.core.prompt_router import PromptRouter
     from src.core.session import SessionManager
     from src.services.tool_manager import ManagedTool, ToolManager
     from src.services.tool_settings import ToolSettingsManager
+
+# Text file extensions that support content viewing/inclusion
+TEXT_EXTENSIONS: frozenset[str] = frozenset({
+    ".md", ".txt", ".log", ".json", ".yaml", ".yml", ".toml", ".cfg", ".ini",
+    ".csv", ".xml", ".html", ".css", ".js", ".ts", ".py", ".sh", ".bash", ".sql",
+    ".rs", ".go", ".java", ".c", ".cpp", ".h", ".hpp", ".cs", ".rb", ".php",
+    ".jsx", ".tsx", ".vue", ".dart", ".swift", ".kt", ".r", ".m", ".mm",
+})
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +104,13 @@ async def list_sessions(
                 "session_type": s["session_type"],
                 "created_at": s["created_at"].isoformat(),
                 "title": s.get("title"),
+                "input_tokens": s.get("input_tokens", 0),
+                "output_tokens": s.get("output_tokens", 0),
+                "cache_creation_input_tokens": s.get("cache_creation_input_tokens", 0),
+                "cache_read_input_tokens": s.get("cache_read_input_tokens", 0),
+                "tool_input_tokens": s.get("tool_input_tokens", 0),
+                "tool_output_tokens": s.get("tool_output_tokens", 0),
+                "tool_cost_usd": s.get("tool_cost_usd", 0.0),
             }
             for s in all_sessions
         ]
@@ -104,6 +123,13 @@ async def list_sessions(
                 "session_type": s.session_type.value,
                 "created_at": s.created_at.isoformat(),
                 "title": s.title,
+                "input_tokens": s.input_tokens,
+                "output_tokens": s.output_tokens,
+                "cache_creation_input_tokens": s.cache_creation_input_tokens,
+                "cache_read_input_tokens": s.cache_read_input_tokens,
+                "tool_input_tokens": s.tool_input_tokens,
+                "tool_output_tokens": s.tool_output_tokens,
+                "tool_cost_usd": s.tool_cost_usd,
             }
             for s in session_manager.list_all_sessions()
         ]
@@ -260,11 +286,18 @@ async def list_tools(
 
     if q:
         q_lower = q.lower()
-        all_tools = [t for t in all_tools if q_lower in t.name.lower()]
+        all_tools = [
+            t for t in all_tools
+            if q_lower in t.name.lower()
+            or q_lower in t.mention_name.lower()
+            or q_lower in (t.display_name or "").lower()
+        ]
 
     tools = [
         {
             "name": t.name,
+            "mention_name": t.mention_name,
+            "display_name": t.display_name or t.name,
             "description": t.description,
             "version": t.version,
             "session_type": t.session_type,
@@ -1003,10 +1036,27 @@ async def rename_session(
 
 
 @router.get(
+    "/sessions/{session_id}/todos",
+    summary="Get current todo items for a session",
+    description=(
+        "Returns the current TodoWrite task list for an in-memory session. "
+        "Returns an empty list if the session has no todos or is archived."
+    ),
+    dependencies=[Depends(verify_http_api_key)],
+)
+async def get_session_todos(session_id: str, request: Request) -> dict[str, Any]:
+    session_manager: SessionManager = request.app.state.session_manager
+    session = session_manager.get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return {"session_id": session_id, "todos": session.todos}
+
+
+@router.get(
     "/projects",
     summary="List project directories",
     description=(
-        "Returns directory names directly under the configured PROJECTS_DIR. "
+        "Returns directory names from all configured project directories. "
         "Optionally filters by a case-insensitive substring match on the name."
     ),
     dependencies=[Depends(verify_http_api_key)],
@@ -1015,13 +1065,17 @@ async def list_projects(
     request: Request,
     q: str | None = Query(None, description="Case-insensitive substring filter for project names"),
 ) -> dict[str, list[str]]:
-    settings = request.app.state.settings
-    projects_dir = Path(settings.PROJECTS_DIR).expanduser()
+    settings: Settings = request.app.state.settings
+    all_names: set[str] = set()
 
-    if not projects_dir.is_dir():
-        return {"projects": []}
+    for projects_dir in settings.projects_dirs:
+        if not projects_dir.is_dir():
+            continue
+        for entry in projects_dir.iterdir():
+            if entry.is_dir() and not entry.name.startswith("."):
+                all_names.add(entry.name)
 
-    names = sorted(entry.name for entry in projects_dir.iterdir() if entry.is_dir() and not entry.name.startswith("."))
+    names = sorted(all_names)
 
     if q:
         q_lower = q.lower()
@@ -1078,7 +1132,9 @@ async def update_config(body: UpdateConfigRequest, request: Request) -> dict[str
 
     env_updates: dict[str, str] = {}
     for key, value in body.updates.items():
-        if isinstance(value, bool):
+        if isinstance(value, list):
+            env_updates[key] = ", ".join(str(v) for v in value)
+        elif isinstance(value, bool):
             env_updates[key] = "true" if value else "false"
         else:
             env_updates[key] = str(value)
@@ -1114,3 +1170,738 @@ def _reload_components(request: Request, settings: Settings) -> None:
     request.app.state.tts_provider = create_tts_provider(settings.TTS_PROVIDER, settings.TTS_API_KEY)
 
     asyncio.get_event_loop().create_task(old_llm.close())
+
+
+# ---------------------------------------------------------------------------
+# Task CRUD
+# ---------------------------------------------------------------------------
+
+VALID_TASK_TRANSITIONS: dict[str, set[str]] = {
+    "todo": {"in_progress", "done"},
+    "in_progress": {"todo", "review", "done"},
+    "review": {"in_progress", "done"},
+    "done": {"todo", "in_progress"},
+}
+
+AI_FORBIDDEN_STATUSES = {"done"}
+
+
+def validate_status_transition(current: str, new: str, *, source: str | None = None) -> None:
+    """Raise HTTPException if the transition is invalid."""
+    if current == new:
+        return
+    allowed = VALID_TASK_TRANSITIONS.get(current)
+    if allowed is None or new not in allowed:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Invalid status transition: {current!r} -> {new!r}",
+        )
+    if source == "ai" and new in AI_FORBIDDEN_STATUSES:
+        raise HTTPException(
+            status_code=409,
+            detail=f"AI agents cannot set task status to {new!r}",
+        )
+
+
+def _task_to_dict(task: TaskModel) -> dict[str, Any]:
+    """Serialise a Task ORM instance (with loaded sessions) to a JSON-friendly dict."""
+    sessions: list[dict[str, Any]] = []
+    for ts in getattr(task, "sessions", []):
+        sessions.append({
+            "session_id": str(ts.id),
+            "title": ts.title,
+            "status": ts.status,
+            "attached_at": "",  # filled below if we have the link row
+        })
+    return {
+        "task_id": str(task.id),
+        "title": task.title,
+        "description": task.description,
+        "status": task.status,
+        "source": task.source,
+        "created_at": task.created_at.isoformat() if task.created_at else "",
+        "updated_at": task.updated_at.isoformat() if task.updated_at else "",
+        "sessions": sessions,
+    }
+
+
+async def _task_to_dict_full(task: TaskModel, db: AsyncSession) -> dict[str, Any]:
+    """Serialise a Task with its session refs (including attached_at)."""
+    stmt = (
+        select(TaskSessionModel, SessionModel)
+        .join(SessionModel, TaskSessionModel.session_id == SessionModel.id)
+        .where(TaskSessionModel.task_id == task.id)
+        .order_by(TaskSessionModel.attached_at.desc())
+    )
+    result = await db.execute(stmt)
+    sessions: list[dict[str, Any]] = []
+    for ts_row, sess_row in result.all():
+        sessions.append({
+            "session_id": str(sess_row.id),
+            "title": sess_row.title,
+            "status": sess_row.status,
+            "attached_at": ts_row.attached_at.isoformat() if ts_row.attached_at else "",
+        })
+    return {
+        "task_id": str(task.id),
+        "title": task.title,
+        "description": task.description,
+        "status": task.status,
+        "source": task.source,
+        "created_at": task.created_at.isoformat() if task.created_at else "",
+        "updated_at": task.updated_at.isoformat() if task.updated_at else "",
+        "sessions": sessions,
+    }
+
+
+class CreateTaskRequest(BaseModel):
+    """Body for POST /api/tasks."""
+    title: str
+    description: str | None = None
+    source: str = "user"
+    session_id: str | None = None
+
+
+class UpdateTaskRequest(BaseModel):
+    """Body for PATCH /api/tasks/{task_id}."""
+    title: str | None = None
+    description: str | None = None
+    status: str | None = None
+
+
+class AttachSessionRequest(BaseModel):
+    """Body for POST /api/tasks/{task_id}/sessions."""
+    session_id: str
+
+
+@router.get(
+    "/tasks",
+    summary="List tasks",
+    description=(
+        "Returns all tasks for the current backend. "
+        "Supports optional ?status= and ?source= filters. Sorted by updated_at descending."
+    ),
+    tags=["Tasks"],
+    dependencies=[Depends(verify_http_api_key)],
+)
+async def list_tasks(
+    request: Request,
+    status: str | None = Query(None, description="Filter by task status (todo, in_progress, review, done)"),
+    source: str | None = Query(None, description="Filter by task source (ai, user)"),
+) -> dict[str, Any]:
+    """List all tasks for the current backend."""
+    settings: Settings = request.app.state.settings
+    db_session_factory = request.app.state.db_session_factory
+    if db_session_factory is None:
+        return {"tasks": []}
+
+    async with db_session_factory() as db:
+        stmt = (
+            select(TaskModel)
+            .where(TaskModel.backend_id == settings.RCFLOW_BACKEND_ID)
+            .order_by(TaskModel.updated_at.desc())
+        )
+        if status:
+            stmt = stmt.where(TaskModel.status == status)
+        if source:
+            stmt = stmt.where(TaskModel.source == source)
+        result = await db.execute(stmt)
+        tasks = result.scalars().all()
+        return {"tasks": [await _task_to_dict_full(t, db) for t in tasks]}
+
+
+@router.get(
+    "/tasks/{task_id}",
+    summary="Get a single task",
+    description="Returns a task with its attached sessions.",
+    tags=["Tasks"],
+    dependencies=[Depends(verify_http_api_key)],
+)
+async def get_task(task_id: str, request: Request) -> dict[str, Any]:
+    """Get a single task by ID."""
+    db_session_factory = request.app.state.db_session_factory
+    if db_session_factory is None:
+        raise HTTPException(status_code=404, detail="Database not configured")
+
+    try:
+        task_uuid = uuid.UUID(task_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid task ID: {task_id}") from None
+
+    async with db_session_factory() as db:
+        task = await db.get(TaskModel, task_uuid)
+        if task is None:
+            raise HTTPException(status_code=404, detail=f"Task not found: {task_id}")
+        return await _task_to_dict_full(task, db)
+
+
+@router.post(
+    "/tasks",
+    summary="Create a task",
+    description=(
+        "Creates a new task. Optionally attaches it to a session on creation. "
+        "Used by LLM agents (source: 'ai') or for manual user creation (source: 'user')."
+    ),
+    tags=["Tasks"],
+    dependencies=[Depends(verify_http_api_key)],
+    status_code=201,
+)
+async def create_task(body: CreateTaskRequest, request: Request) -> dict[str, Any]:
+    """Create a new task."""
+    settings: Settings = request.app.state.settings
+    db_session_factory = request.app.state.db_session_factory
+    if db_session_factory is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
+
+    now = datetime.now(UTC)
+    task = TaskModel(
+        backend_id=settings.RCFLOW_BACKEND_ID,
+        title=body.title,
+        description=body.description,
+        status="todo",
+        source=body.source,
+        created_at=now,
+        updated_at=now,
+    )
+
+    async with db_session_factory() as db:
+        db.add(task)
+        await db.flush()
+
+        if body.session_id:
+            try:
+                session_uuid = uuid.UUID(body.session_id)
+            except ValueError:
+                raise HTTPException(status_code=400, detail=f"Invalid session ID: {body.session_id}") from None
+            # Ensure session row exists in DB (may still be in-memory only)
+            existing_session = await db.get(SessionModel, session_uuid)
+            if existing_session is None:
+                sm: SessionManager = request.app.state.session_manager
+                active = sm.get_session(str(session_uuid))
+                if active is None:
+                    raise HTTPException(status_code=404, detail=f"Session not found: {body.session_id}")
+                db.add(SessionModel(
+                    id=session_uuid,
+                    backend_id=settings.RCFLOW_BACKEND_ID,
+                    created_at=active.created_at,
+                    ended_at=active.ended_at,
+                    session_type=active.session_type.value,
+                    status=active.status.value,
+                    title=active.title,
+                    metadata_={},
+                ))
+                await db.flush()
+            link = TaskSessionModel(task_id=task.id, session_id=session_uuid)
+            db.add(link)
+
+        await db.commit()
+        result = await _task_to_dict_full(task, db)
+
+    # Broadcast task update
+    session_manager: SessionManager = request.app.state.session_manager
+    session_manager.broadcast_task_update(result)
+
+    return result
+
+
+@router.patch(
+    "/tasks/{task_id}",
+    summary="Update a task",
+    description=(
+        "Update task fields (title, description, status). "
+        "Status transitions are validated. Returns 409 for invalid transitions."
+    ),
+    tags=["Tasks"],
+    dependencies=[Depends(verify_http_api_key)],
+)
+async def update_task(task_id: str, body: UpdateTaskRequest, request: Request) -> dict[str, Any]:
+    """Update a task's fields."""
+    db_session_factory = request.app.state.db_session_factory
+    if db_session_factory is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
+
+    try:
+        task_uuid = uuid.UUID(task_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid task ID: {task_id}") from None
+
+    async with db_session_factory() as db:
+        task = await db.get(TaskModel, task_uuid)
+        if task is None:
+            raise HTTPException(status_code=404, detail=f"Task not found: {task_id}")
+
+        changed = False
+        if body.title is not None and body.title != task.title:
+            task.title = body.title
+            changed = True
+        if body.description is not None and body.description != task.description:
+            task.description = body.description
+            changed = True
+        if body.status is not None and body.status != task.status:
+            validate_status_transition(task.status, body.status)
+            task.status = body.status
+            changed = True
+
+        if changed:
+            task.updated_at = datetime.now(UTC)
+            await db.commit()
+
+        result = await _task_to_dict_full(task, db)
+
+    # Broadcast
+    session_manager: SessionManager = request.app.state.session_manager
+    session_manager.broadcast_task_update(result)
+
+    return result
+
+
+@router.delete(
+    "/tasks/{task_id}",
+    summary="Delete a task",
+    description="Deletes a task and all its session associations.",
+    tags=["Tasks"],
+    dependencies=[Depends(verify_http_api_key)],
+)
+async def delete_task(task_id: str, request: Request) -> dict[str, str]:
+    """Delete a task."""
+    db_session_factory = request.app.state.db_session_factory
+    if db_session_factory is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
+
+    try:
+        task_uuid = uuid.UUID(task_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid task ID: {task_id}") from None
+
+    async with db_session_factory() as db:
+        task = await db.get(TaskModel, task_uuid)
+        if task is None:
+            raise HTTPException(status_code=404, detail=f"Task not found: {task_id}")
+        await db.delete(task)
+        await db.commit()
+
+    # Broadcast deletion
+    session_manager: SessionManager = request.app.state.session_manager
+    session_manager.broadcast_task_deleted(task_id)
+
+    return {"task_id": task_id, "deleted": "ok"}
+
+
+@router.post(
+    "/tasks/{task_id}/sessions",
+    summary="Attach a session to a task",
+    description="Creates a link between a task and a session.",
+    tags=["Tasks"],
+    dependencies=[Depends(verify_http_api_key)],
+    status_code=201,
+)
+async def attach_session_to_task(
+    task_id: str, body: AttachSessionRequest, request: Request,
+) -> dict[str, Any]:
+    """Attach a session to a task."""
+    db_session_factory = request.app.state.db_session_factory
+    if db_session_factory is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
+
+    try:
+        task_uuid = uuid.UUID(task_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid task ID: {task_id}") from None
+
+    try:
+        session_uuid = uuid.UUID(body.session_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid session ID: {body.session_id}") from None
+
+    async with db_session_factory() as db:
+        task = await db.get(TaskModel, task_uuid)
+        if task is None:
+            raise HTTPException(status_code=404, detail=f"Task not found: {task_id}")
+
+        # Check for existing link
+        existing = await db.execute(
+            select(TaskSessionModel).where(
+                TaskSessionModel.task_id == task_uuid,
+                TaskSessionModel.session_id == session_uuid,
+            )
+        )
+        if existing.scalar_one_or_none() is not None:
+            raise HTTPException(status_code=409, detail="Session already attached to this task")
+
+        # Ensure the session row exists in the DB before creating the FK reference.
+        # Sessions live in-memory and are only persisted on archive/shutdown,
+        # so we create a minimal placeholder row if it doesn't exist yet.
+        existing_session = await db.get(SessionModel, session_uuid)
+        if existing_session is None:
+            session_manager: SessionManager = request.app.state.session_manager
+            active = session_manager.get_session(str(session_uuid))
+            if active is None:
+                raise HTTPException(status_code=404, detail=f"Session not found: {body.session_id}")
+            db.add(SessionModel(
+                id=session_uuid,
+                backend_id=request.app.state.settings.RCFLOW_BACKEND_ID,
+                created_at=active.created_at,
+                ended_at=active.ended_at,
+                session_type=active.session_type.value,
+                status=active.status.value,
+                title=active.title,
+                metadata_={},
+            ))
+            await db.flush()
+
+        link = TaskSessionModel(task_id=task_uuid, session_id=session_uuid)
+        db.add(link)
+        task.updated_at = datetime.now(UTC)
+        await db.commit()
+
+        result = await _task_to_dict_full(task, db)
+
+    session_manager: SessionManager = request.app.state.session_manager
+    session_manager.broadcast_task_update(result)
+
+    return result
+
+
+@router.delete(
+    "/tasks/{task_id}/sessions/{session_id}",
+    summary="Detach a session from a task",
+    description="Removes the link between a task and a session.",
+    tags=["Tasks"],
+    dependencies=[Depends(verify_http_api_key)],
+)
+async def detach_session_from_task(
+    task_id: str, session_id: str, request: Request,
+) -> dict[str, Any]:
+    """Detach a session from a task."""
+    db_session_factory = request.app.state.db_session_factory
+    if db_session_factory is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
+
+    try:
+        task_uuid = uuid.UUID(task_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid task ID: {task_id}") from None
+
+    try:
+        session_uuid = uuid.UUID(session_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid session ID: {session_id}") from None
+
+    async with db_session_factory() as db:
+        link = await db.execute(
+            select(TaskSessionModel).where(
+                TaskSessionModel.task_id == task_uuid,
+                TaskSessionModel.session_id == session_uuid,
+            )
+        )
+        link_row = link.scalar_one_or_none()
+        if link_row is None:
+            raise HTTPException(status_code=404, detail="Session is not attached to this task")
+
+        await db.delete(link_row)
+
+        task = await db.get(TaskModel, task_uuid)
+        if task is not None:
+            task.updated_at = datetime.now(UTC)
+        await db.commit()
+
+        if task is not None:
+            result = await _task_to_dict_full(task, db)
+        else:
+            result = {"task_id": task_id}
+
+    session_manager: SessionManager = request.app.state.session_manager
+    session_manager.broadcast_task_update(result)
+
+    return result
+
+
+# Artifact CRUD
+
+
+def _artifact_to_dict(artifact: ArtifactModel) -> dict[str, Any]:
+    """Serialize an Artifact ORM instance to a JSON-friendly dict."""
+    return {
+        "artifact_id": str(artifact.id),
+        "backend_id": artifact.backend_id,
+        "file_path": artifact.file_path,
+        "file_name": artifact.file_name,
+        "file_extension": artifact.file_extension,
+        "file_size": artifact.file_size,
+        "mime_type": artifact.mime_type,
+        "discovered_at": artifact.discovered_at.isoformat() if artifact.discovered_at else None,
+        "modified_at": artifact.modified_at.isoformat() if artifact.modified_at else None,
+        "session_id": str(artifact.session_id) if artifact.session_id else None,
+    }
+
+
+@router.get(
+    "/artifacts",
+    summary="List artifacts",
+    description=(
+        "Returns all artifacts for the current backend. "
+        "Supports optional ?search= filter for file name/path. Sorted by discovered_at descending."
+    ),
+    tags=["Artifacts"],
+    dependencies=[Depends(verify_http_api_key)],
+)
+async def list_artifacts(
+    request: Request,
+    search: str | None = Query(None, description="Search in file names and paths"),
+    limit: int = Query(100, description="Maximum number of results"),
+    offset: int = Query(0, description="Offset for pagination"),
+) -> dict[str, Any]:
+    """List all artifacts, optionally filtered by search query."""
+    settings: Settings = request.app.state.settings
+    db_session_factory = request.app.state.db_session_factory
+    if db_session_factory is None:
+        return {"artifacts": []}
+
+    async with db_session_factory() as db:
+        stmt = (
+            select(ArtifactModel)
+            .where(ArtifactModel.backend_id == settings.RCFLOW_BACKEND_ID)
+            .order_by(ArtifactModel.discovered_at.desc())
+        )
+        if search:
+            search_pattern = f"%{search}%"
+            stmt = stmt.where(
+                (ArtifactModel.file_name.ilike(search_pattern)) |
+                (ArtifactModel.file_path.ilike(search_pattern))
+            )
+        stmt = stmt.limit(limit).offset(offset)
+        result = await db.execute(stmt)
+        artifacts = result.scalars().all()
+        return {"artifacts": [_artifact_to_dict(a) for a in artifacts]}
+
+
+@router.get(
+    "/artifacts/search",
+    summary="Search artifacts for autocomplete",
+    description=(
+        "Returns artifact file names and paths matching a query. "
+        "Optimized for the $ mention autocomplete dropdown. "
+        "Filters by the current backend_id."
+    ),
+    tags=["Artifacts"],
+    dependencies=[Depends(verify_http_api_key)],
+)
+async def search_artifacts(
+    request: Request,
+    q: str | None = Query(None, description="Case-insensitive substring filter for file name/path"),
+) -> dict[str, list[dict[str, Any]]]:
+    """Search artifacts for autocomplete suggestions."""
+    settings: Settings = request.app.state.settings
+    db_session_factory = request.app.state.db_session_factory
+    if db_session_factory is None:
+        return {"artifacts": []}
+
+    async with db_session_factory() as db:
+        stmt = (
+            select(ArtifactModel)
+            .where(ArtifactModel.backend_id == settings.RCFLOW_BACKEND_ID)
+            .order_by(ArtifactModel.discovered_at.desc())
+        )
+        if q:
+            search_pattern = f"%{q}%"
+            stmt = stmt.where(
+                (ArtifactModel.file_name.ilike(search_pattern))
+                | (ArtifactModel.file_path.ilike(search_pattern))
+            )
+        stmt = stmt.limit(10)
+
+        result = await db.execute(stmt)
+        artifacts = result.scalars().all()
+        return {
+            "artifacts": [
+                {
+                    "artifact_id": str(a.id),
+                    "file_name": a.file_name,
+                    "file_path": a.file_path,
+                    "file_extension": a.file_extension,
+                    "file_size": a.file_size,
+                    "mime_type": a.mime_type or "",
+                    "is_text": a.file_extension.lower() in TEXT_EXTENSIONS,
+                }
+                for a in artifacts
+            ],
+        }
+
+
+@router.get(
+    "/artifacts/{artifact_id}",
+    summary="Get a single artifact",
+    description="Returns a single artifact by ID.",
+    tags=["Artifacts"],
+    dependencies=[Depends(verify_http_api_key)],
+)
+async def get_artifact(artifact_id: str, request: Request) -> dict[str, Any]:
+    """Get a single artifact by ID."""
+    db_session_factory = request.app.state.db_session_factory
+    if db_session_factory is None:
+        raise HTTPException(status_code=404, detail="Database not configured")
+
+    try:
+        artifact_uuid = uuid.UUID(artifact_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid artifact ID: {artifact_id}") from None
+
+    async with db_session_factory() as db:
+        artifact = await db.get(ArtifactModel, artifact_uuid)
+        if artifact is None:
+            raise HTTPException(status_code=404, detail=f"Artifact not found: {artifact_id}")
+        return _artifact_to_dict(artifact)
+
+
+@router.get(
+    "/artifacts/{artifact_id}/content",
+    summary="Get artifact file content",
+    description=(
+        "Reads and returns the raw text content of an artifact file. "
+        "Supports text files up to 5MB. Returns 415 for unsupported file types."
+    ),
+    tags=["Artifacts"],
+    dependencies=[Depends(verify_http_api_key)],
+    response_class=PlainTextResponse,
+)
+async def get_artifact_content(artifact_id: str, request: Request) -> PlainTextResponse:
+    """Read and return the raw file content of an artifact."""
+    settings: Settings = request.app.state.settings
+    db_session_factory = request.app.state.db_session_factory
+    if db_session_factory is None:
+        raise HTTPException(status_code=404, detail="Database not configured")
+
+    try:
+        artifact_uuid = uuid.UUID(artifact_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid artifact ID: {artifact_id}") from None
+
+    async with db_session_factory() as db:
+        artifact = await db.get(ArtifactModel, artifact_uuid)
+        if artifact is None:
+            raise HTTPException(status_code=404, detail=f"Artifact not found: {artifact_id}")
+
+        # Check if file exists
+        file_path = Path(artifact.file_path)
+        if not file_path.exists():
+            raise HTTPException(status_code=404, detail="File not found on disk")
+
+        # Check file size limit
+        if artifact.file_size > settings.ARTIFACT_MAX_FILE_SIZE:
+            raise HTTPException(status_code=413, detail="File too large to view")
+
+        if artifact.file_extension.lower() not in TEXT_EXTENSIONS:
+            raise HTTPException(
+                status_code=415,
+                detail=f"File type not supported for viewing: {artifact.file_extension}"
+            )
+
+        # Read file content
+        try:
+            content = file_path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            # Try with latin-1 encoding as fallback
+            try:
+                content = file_path.read_text(encoding="latin-1")
+            except Exception:
+                raise HTTPException(status_code=500, detail="Could not decode file content") from None
+        except Exception as e:
+            logger.error("Error reading artifact file %s: %s", artifact.file_path, e)
+            raise HTTPException(status_code=500, detail="Error reading file") from None
+
+        return PlainTextResponse(content=content, media_type=artifact.mime_type or "text/plain")
+
+
+@router.delete(
+    "/artifacts/{artifact_id}",
+    summary="Delete an artifact",
+    description="Removes artifact entry from database (does NOT delete the actual file).",
+    tags=["Artifacts"],
+    dependencies=[Depends(verify_http_api_key)],
+)
+async def delete_artifact(artifact_id: str, request: Request) -> dict[str, str]:
+    """Delete an artifact entry from the database."""
+    db_session_factory = request.app.state.db_session_factory
+    if db_session_factory is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
+
+    try:
+        artifact_uuid = uuid.UUID(artifact_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid artifact ID: {artifact_id}") from None
+
+    async with db_session_factory() as db:
+        artifact = await db.get(ArtifactModel, artifact_uuid)
+        if artifact is None:
+            raise HTTPException(status_code=404, detail=f"Artifact not found: {artifact_id}")
+
+        await db.delete(artifact)
+        await db.commit()
+
+    # Broadcast deletion
+    session_manager: SessionManager = request.app.state.session_manager
+    session_manager.broadcast_artifact_deleted(artifact_id)
+
+    return {"message": "Artifact deleted successfully"}
+
+
+@router.get(
+    "/artifacts/settings",
+    summary="Get artifact settings",
+    description="Returns current artifact extraction configuration.",
+    tags=["Artifacts"],
+    dependencies=[Depends(verify_http_api_key)],
+)
+async def get_artifact_settings(request: Request) -> dict[str, Any]:
+    """Get current artifact extraction settings."""
+    settings: Settings = request.app.state.settings
+    return {
+        "include_pattern": settings.ARTIFACT_INCLUDE_PATTERN,
+        "exclude_pattern": settings.ARTIFACT_EXCLUDE_PATTERN,
+        "auto_scan": settings.ARTIFACT_AUTO_SCAN,
+        "max_file_size": settings.ARTIFACT_MAX_FILE_SIZE,
+    }
+
+
+class UpdateArtifactSettingsRequest(BaseModel):
+    include_pattern: str | None = None
+    exclude_pattern: str | None = None
+    auto_scan: bool | None = None
+    max_file_size: int | None = None
+
+
+@router.patch(
+    "/artifacts/settings",
+    summary="Update artifact settings",
+    description="Update artifact extraction configuration.",
+    tags=["Artifacts"],
+    dependencies=[Depends(verify_http_api_key)],
+)
+async def update_artifact_settings(
+    body: UpdateArtifactSettingsRequest,
+    request: Request,
+) -> dict[str, Any]:
+    """Update artifact extraction settings."""
+    updates: dict[str, str] = {}
+
+    if body.include_pattern is not None:
+        updates["ARTIFACT_INCLUDE_PATTERN"] = body.include_pattern
+    if body.exclude_pattern is not None:
+        updates["ARTIFACT_EXCLUDE_PATTERN"] = body.exclude_pattern
+    if body.auto_scan is not None:
+        updates["ARTIFACT_AUTO_SCAN"] = str(body.auto_scan).lower()
+    if body.max_file_size is not None:
+        updates["ARTIFACT_MAX_FILE_SIZE"] = str(body.max_file_size)
+
+    if updates:
+        update_settings_file(updates)
+
+        # Recreate artifact scanner with new settings
+        settings = Settings()  # type: ignore[call-arg]
+        from src.services.artifact_scanner import ArtifactScanner
+        request.app.state.artifact_scanner = ArtifactScanner(
+            settings,
+            request.app.state.db_session_factory,
+        )
+
+    return await get_artifact_settings(request)

@@ -100,7 +100,9 @@ class RCFlowGUI:
         self._ip_entry.grid(row=0, column=1, sticky=tk.W, padx=(0, 16))
 
         ttk.Label(settings_frame, text="Port:").grid(row=0, column=2, sticky=tk.W, padx=(0, 6))
-        self._port_var = tk.StringVar(value="8765")
+        from src.config import _DEFAULT_PORT  # noqa: PLC0415
+
+        self._port_var = tk.StringVar(value=str(_DEFAULT_PORT))
         self._port_entry = ttk.Entry(settings_frame, textvariable=self._port_var, width=8)
         self._port_entry.grid(row=0, column=3, sticky=tk.W)
 
@@ -493,7 +495,7 @@ class RCFlowGUI:
 
         menu = pystray.Menu(
             pystray.MenuItem(
-                lambda item: "RCFlow: Running" if self._is_server_running() else "RCFlow: Stopped",
+                lambda item: "RCFlow Worker: Running" if self._is_server_running() else "RCFlow Worker: Stopped",
                 None,
                 enabled=False,
             ),
@@ -509,7 +511,7 @@ class RCFlowGUI:
             pystray.MenuItem("Quit", self._on_tray_quit),
         )
 
-        icon = pystray.Icon("rcflow", icon_image, "RCFlow", menu)
+        icon = pystray.Icon("rcflow", icon_image, "RCFlow Worker", menu)
         self._tray_icon = icon
 
         # Run pystray in a background thread

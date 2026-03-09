@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, Uuid, func
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, Uuid, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -32,11 +32,22 @@ class Session(Base):
     title: Mapped[str | None] = mapped_column(String(200))
     metadata_: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
     conversation_history: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # Token usage totals
+    input_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    output_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    cache_creation_input_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    cache_read_input_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    tool_input_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    tool_output_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    tool_cost_usd: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
 
     messages: Mapped[list["SessionMessage"]] = relationship(
         back_populates="session", order_by="SessionMessage.sequence"
     )
     tool_executions: Mapped[list["ToolExecution"]] = relationship(back_populates="session")
+    tasks: Mapped[list["Task"]] = relationship(
+        secondary="task_sessions", back_populates="sessions"
+    )
 
 
 class SessionMessage(Base):
@@ -95,3 +106,60 @@ class LLMCall(Base):
     response_text: Mapped[str | None] = mapped_column(Text)
     service_tier: Mapped[str | None] = mapped_column(String(50))
     inference_geo: Mapped[str | None] = mapped_column(String(100))
+
+
+class Task(Base):
+    __tablename__ = "tasks"
+    __table_args__ = (
+        Index("ix_tasks_backend_id", "backend_id"),
+        Index("ix_tasks_status", "status"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    backend_id: Mapped[str] = mapped_column(String(36), nullable=False, default="")
+    title: Mapped[str] = mapped_column(String(300), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="todo")
+    source: Mapped[str] = mapped_column(String(10), nullable=False)  # "ai" or "user"
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    # Relationship to sessions via association table
+    sessions: Mapped[list["Session"]] = relationship(
+        secondary="task_sessions", back_populates="tasks"
+    )
+
+
+class TaskSession(Base):
+    __tablename__ = "task_sessions"
+    __table_args__ = (
+        UniqueConstraint("task_id", "session_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    task_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False)
+    session_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("sessions.id", ondelete="CASCADE"), nullable=False)
+    attached_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class Artifact(Base):
+    __tablename__ = "artifacts"
+    __table_args__ = (
+        UniqueConstraint("backend_id", "file_path"),
+        Index("ix_artifacts_backend_id", "backend_id"),
+        Index("ix_artifacts_session_id", "session_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    backend_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    file_path: Mapped[str] = mapped_column(Text, nullable=False)
+    file_name: Mapped[str] = mapped_column(String(500), nullable=False)
+    file_extension: Mapped[str] = mapped_column(String(50), nullable=False)
+    file_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    mime_type: Mapped[str | None] = mapped_column(String(100))
+    discovered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    modified_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    session_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, ForeignKey("sessions.id"))
+
+    # Relationship to session
+    session: Mapped[Session | None] = relationship("Session")

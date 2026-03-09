@@ -10,16 +10,20 @@ enum DisplayMessageType {
   planReviewAsk,
   permissionRequest,
   agentGroup,
+  agentSessionStart,
+  todoUpdate,
 }
 
 class DisplayMessage {
   final DisplayMessageType type;
   final String? sessionId;
   final String? toolName;
+  final String? displayName;
   final Map<String, dynamic>? toolInput;
   String content;
   bool finished;
   bool expanded;
+  bool isError;
 
   /// For sessionEndAsk: null = pending, true = user ended, false = user continued.
   bool? accepted;
@@ -40,9 +44,11 @@ class DisplayMessage {
     this.content = '',
     this.sessionId,
     this.toolName,
+    this.displayName,
     this.toolInput,
     this.finished = false,
     this.expanded = false,
+    this.isError = false,
     this.accepted,
     this.children,
     this.pendingLocalEcho = false,

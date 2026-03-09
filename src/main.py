@@ -20,6 +20,7 @@ from src.core.session import SessionManager
 from src.db.engine import check_connection, dispose_engine, get_session_factory, init_engine
 from src.logs import setup_logging
 from src.models.db import Session as SessionModel
+from src.services.artifact_scanner import ArtifactScanner
 from src.services.tool_manager import ToolManager
 from src.services.tool_settings import ToolSettingsManager
 from src.speech.stt import create_stt_provider
@@ -81,6 +82,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     tool_settings = ToolSettingsManager()
     app.state.tool_settings = tool_settings
 
+    # Artifact scanner
+    db_session_factory = get_session_factory()
+    artifact_scanner = ArtifactScanner(settings, db_session_factory)
+    app.state.artifact_scanner = artifact_scanner
+    app.state.db_session_factory = db_session_factory
+
     # Tool registry
     tool_registry = ToolRegistry()
     tool_registry.load_from_directory(settings.TOOLS_DIR)
@@ -100,8 +107,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     app.state.llm_client = llm_client
 
     # Prompt router
-    db_session_factory = get_session_factory()
-    app.state.db_session_factory = db_session_factory
     prompt_router = PromptRouter(
         llm_client,
         session_manager,
@@ -110,6 +115,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         settings,
         tool_settings,
         tool_manager,
+        artifact_scanner,
     )
     app.state.prompt_router = prompt_router
 
@@ -141,6 +147,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     reaper_task.cancel()
     logger.info("Shutting down RCFlow server")
     await terminal_manager.close_all()
+    await prompt_router.cancel_pending_tasks()
     await llm_client.close()
 
     async with db_session_factory() as db:

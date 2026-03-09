@@ -178,6 +178,16 @@ class WebSocketService {
     _inputChannel!.sink.add(jsonEncode(msg));
   }
 
+  void sendInteractiveResponse(String sessionId, String text) {
+    if (_inputChannel == null) return;
+    final msg = {
+      'type': 'interactive_response',
+      'session_id': sessionId,
+      'text': text,
+    };
+    _inputChannel!.sink.add(jsonEncode(msg));
+  }
+
   void dismissSessionEndAsk(String sessionId) {
     if (_inputChannel == null) return;
     final msg = {
@@ -190,6 +200,11 @@ class WebSocketService {
   void listSessions() {
     if (_outputChannel == null) return;
     _outputChannel!.sink.add(jsonEncode({'type': 'list_sessions'}));
+  }
+
+  void listTasks() {
+    if (_outputChannel == null) return;
+    _outputChannel!.sink.add(jsonEncode({'type': 'list_tasks'}));
   }
 
   Future<Map<String, dynamic>> fetchSessionMessages(
@@ -404,12 +419,50 @@ class WebSocketService {
       return tools
           .map((t) {
             final m = t as Map<String, dynamic>;
+            final mentionName = (m['mention_name'] as String?) ?? m['name'] as String;
             return {
               'name': m['name'] as String,
+              'mention_name': mentionName,
+              'display_name': (m['display_name'] as String?) ?? m['name'] as String,
               'description': m['description'] as String,
             };
           })
           .toList();
+    } finally {
+      client.close();
+    }
+  }
+
+  Future<List<Map<String, String>>> fetchArtifactSuggestions({String? query}) async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final queryParams = <String, String>{};
+    if (query != null && query.isNotEmpty) queryParams['q'] = query;
+    final url = _serverUrl!.http(
+      '/api/artifacts/search',
+      queryParams.isNotEmpty ? queryParams : null,
+    );
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.getUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      final response = await request.close();
+      final body =
+          await response.transform(const io.SystemEncoding().decoder).join();
+      if (response.statusCode != 200) {
+        throw Exception('Server returned ${response.statusCode}: $body');
+      }
+      final data = jsonDecode(body) as Map<String, dynamic>;
+      final artifacts = data['artifacts'] as List<dynamic>;
+      return artifacts.map((a) {
+        final m = a as Map<String, dynamic>;
+        return {
+          'artifact_id': m['artifact_id'] as String,
+          'file_name': m['file_name'] as String,
+          'file_path': m['file_path'] as String,
+          'file_extension': m['file_extension'] as String,
+          'is_text': (m['is_text'] as bool? ?? false).toString(),
+        };
+      }).toList();
     } finally {
       client.close();
     }
@@ -736,6 +789,277 @@ class WebSocketService {
     } finally {
       client.close();
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Task CRUD
+  // ---------------------------------------------------------------------------
+
+  Future<Map<String, dynamic>> createTask({
+    required String title,
+    String? description,
+    String source = 'user',
+    String? sessionId,
+  }) async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url = _serverUrl!.http('/api/tasks');
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.postUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      request.headers.contentType = io.ContentType.json;
+      request.add(utf8.encode(jsonEncode({
+        'title': title,
+        if (description != null) 'description': description,
+        'source': source,
+        if (sessionId != null) 'session_id': sessionId,
+      })));
+      final response = await request.close();
+      final body =
+          await response.transform(const io.SystemEncoding().decoder).join();
+      if (response.statusCode != 201) {
+        throw Exception('Server returned ${response.statusCode}: $body');
+      }
+      return jsonDecode(body) as Map<String, dynamic>;
+    } finally {
+      client.close();
+    }
+  }
+
+  Future<Map<String, dynamic>> updateTask(
+    String taskId, {
+    String? title,
+    String? description,
+    String? status,
+  }) async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url = _serverUrl!.http('/api/tasks/$taskId');
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.openUrl('PATCH', url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      request.headers.contentType = io.ContentType.json;
+      request.add(utf8.encode(jsonEncode({
+        if (title != null) 'title': title,
+        if (description != null) 'description': description,
+        if (status != null) 'status': status,
+      })));
+      final response = await request.close();
+      final body =
+          await response.transform(const io.SystemEncoding().decoder).join();
+      if (response.statusCode != 200) {
+        throw Exception('Server returned ${response.statusCode}: $body');
+      }
+      return jsonDecode(body) as Map<String, dynamic>;
+    } finally {
+      client.close();
+    }
+  }
+
+  Future<void> deleteTask(String taskId) async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url = _serverUrl!.http('/api/tasks/$taskId');
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.deleteUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      final response = await request.close();
+      final body =
+          await response.transform(const io.SystemEncoding().decoder).join();
+      if (response.statusCode != 200) {
+        throw Exception('Server returned ${response.statusCode}: $body');
+      }
+    } finally {
+      client.close();
+    }
+  }
+
+  Future<Map<String, dynamic>> attachSessionToTask(
+    String taskId,
+    String sessionId,
+  ) async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url = _serverUrl!.http('/api/tasks/$taskId/sessions');
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.postUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      request.headers.contentType = io.ContentType.json;
+      request.add(utf8.encode(jsonEncode({'session_id': sessionId})));
+      final response = await request.close();
+      final body =
+          await response.transform(const io.SystemEncoding().decoder).join();
+      if (response.statusCode != 201) {
+        throw Exception('Server returned ${response.statusCode}: $body');
+      }
+      return jsonDecode(body) as Map<String, dynamic>;
+    } finally {
+      client.close();
+    }
+  }
+
+  Future<Map<String, dynamic>> detachSessionFromTask(
+    String taskId,
+    String sessionId,
+  ) async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url = _serverUrl!.http('/api/tasks/$taskId/sessions/$sessionId');
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.deleteUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      final response = await request.close();
+      final body =
+          await response.transform(const io.SystemEncoding().decoder).join();
+      if (response.statusCode != 200) {
+        throw Exception('Server returned ${response.statusCode}: $body');
+      }
+      return jsonDecode(body) as Map<String, dynamic>;
+    } finally {
+      client.close();
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Artifact CRUD
+  // ---------------------------------------------------------------------------
+
+  Future<Map<String, dynamic>> getArtifacts({
+    String? search,
+    int limit = 100,
+    int offset = 0,
+  }) async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final queryParams = <String, String>{};
+    if (search != null && search.isNotEmpty) {
+      queryParams['search'] = search;
+    }
+    queryParams['limit'] = limit.toString();
+    queryParams['offset'] = offset.toString();
+
+    final url = _serverUrl!.http('/api/artifacts').replace(queryParameters: queryParams);
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.getUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      final response = await request.close();
+      final body =
+          await response.transform(const io.SystemEncoding().decoder).join();
+      if (response.statusCode != 200) {
+        throw Exception('Server returned ${response.statusCode}: $body');
+      }
+      return jsonDecode(body) as Map<String, dynamic>;
+    } finally {
+      client.close();
+    }
+  }
+
+  Future<Map<String, dynamic>> getArtifact(String artifactId) async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url = _serverUrl!.http('/api/artifacts/$artifactId');
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.getUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      final response = await request.close();
+      final body =
+          await response.transform(const io.SystemEncoding().decoder).join();
+      if (response.statusCode != 200) {
+        throw Exception('Server returned ${response.statusCode}: $body');
+      }
+      return jsonDecode(body) as Map<String, dynamic>;
+    } finally {
+      client.close();
+    }
+  }
+
+  Future<String> getArtifactContent(String artifactId) async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url = _serverUrl!.http('/api/artifacts/$artifactId/content');
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.getUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      final response = await request.close();
+      if (response.statusCode != 200) {
+        final body =
+            await response.transform(const io.SystemEncoding().decoder).join();
+        throw Exception('Server returned ${response.statusCode}: $body');
+      }
+      // Return raw content
+      return await response.transform(utf8.decoder).join();
+    } finally {
+      client.close();
+    }
+  }
+
+  Future<void> deleteArtifact(String artifactId) async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url = _serverUrl!.http('/api/artifacts/$artifactId');
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.deleteUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      final response = await request.close();
+      final body =
+          await response.transform(const io.SystemEncoding().decoder).join();
+      if (response.statusCode != 200) {
+        throw Exception('Server returned ${response.statusCode}: $body');
+      }
+    } finally {
+      client.close();
+    }
+  }
+
+  Future<Map<String, dynamic>> getArtifactSettings() async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url = _serverUrl!.http('/api/artifacts/settings');
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.getUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      final response = await request.close();
+      final body =
+          await response.transform(const io.SystemEncoding().decoder).join();
+      if (response.statusCode != 200) {
+        throw Exception('Server returned ${response.statusCode}: $body');
+      }
+      return jsonDecode(body) as Map<String, dynamic>;
+    } finally {
+      client.close();
+    }
+  }
+
+  Future<Map<String, dynamic>> updateArtifactSettings({
+    String? includePattern,
+    String? excludePattern,
+  }) async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url = _serverUrl!.http('/api/artifacts/settings');
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.openUrl('PUT', url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      request.headers.contentType = io.ContentType.json;
+      final body = <String, dynamic>{};
+      if (includePattern != null) body['include_pattern'] = includePattern;
+      if (excludePattern != null) body['exclude_pattern'] = excludePattern;
+      request.write(jsonEncode(body));
+      final response = await request.close();
+      final responseBody =
+          await response.transform(const io.SystemEncoding().decoder).join();
+      if (response.statusCode != 200) {
+        throw Exception('Server returned ${response.statusCode}: $responseBody');
+      }
+      return jsonDecode(responseBody) as Map<String, dynamic>;
+    } finally {
+      client.close();
+    }
+  }
+
+  /// Send a WebSocket message to request artifacts list
+  void requestArtifacts() {
+    _outputChannel!.sink.add(jsonEncode({'type': 'list_artifacts'}));
   }
 
   void disconnect() {

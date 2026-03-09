@@ -26,12 +26,27 @@ class SettingsService {
   static const _soundOnCompleteEnabledKey = 'rcflow_sound_on_complete';
   static const _notificationSoundKey = 'rcflow_notification_sound';
   static const _customSoundPathKey = 'rcflow_custom_sound_path';
-  static const _hideTerminalSessionsKey = 'rcflow_hide_terminal_sessions';
+
   static const _terminalScrollbackKey = 'rcflow_terminal_scrollback';
   static const _terminalColorSchemeKey = 'rcflow_terminal_color_scheme';
   static const _terminalCursorStyleKey = 'rcflow_terminal_cursor_style';
   static const _terminalFontSizeKey = 'rcflow_terminal_font_size';
   static const _terminalFontFamilyKey = 'rcflow_terminal_font_family';
+  static const _hotkeyBindingsKey = 'rcflow_hotkey_bindings';
+  static const _toastEnabledKey = 'rcflow_toast_enabled';
+  static const _toastBackgroundSessionsKey = 'rcflow_toast_background_sessions';
+  static const _toastTasksKey = 'rcflow_toast_tasks';
+  static const _toastConnectionsKey = 'rcflow_toast_connections';
+  static const _showCompletedTasksKey = 'rcflow_show_completed_tasks';
+
+  // Filter persistence keys
+  static const _workersFilterSearchKey = 'rcflow_workers_filter_search';
+  static const _workersFilterStatusKey = 'rcflow_workers_filter_status';
+  static const _tasksFilterSearchKey = 'rcflow_tasks_filter_search';
+  static const _tasksFilterStatusKey = 'rcflow_tasks_filter_status';
+  static const _tasksFilterSourceKey = 'rcflow_tasks_filter_source';
+  static const _artifactsFilterSearchKey = 'rcflow_artifacts_filter_search';
+
   static const _defaultHost = '192.168.1.100:8765';
 
   late final SharedPreferences _prefs;
@@ -170,10 +185,6 @@ class SettingsService {
   set customSoundPath(String value) =>
       _prefs.setString(_customSoundPathKey, value);
 
-  bool get hideTerminalSessions =>
-      _prefs.getBool(_hideTerminalSessionsKey) ?? false;
-  set hideTerminalSessions(bool value) =>
-      _prefs.setBool(_hideTerminalSessionsKey, value);
 
   int get terminalScrollback =>
       _prefs.getInt(_terminalScrollbackKey) ?? 1000;
@@ -199,4 +210,84 @@ class SettingsService {
       _prefs.getString(_terminalFontFamilyKey) ?? 'monospace';
   set terminalFontFamily(String value) =>
       _prefs.setString(_terminalFontFamilyKey, value);
+
+  String? get hotkeyBindings => _prefs.getString(_hotkeyBindingsKey);
+  set hotkeyBindings(String? value) {
+    if (value == null) {
+      _prefs.remove(_hotkeyBindingsKey);
+    } else {
+      _prefs.setString(_hotkeyBindingsKey, value);
+    }
+  }
+
+  // --- Toast notifications ---
+
+  bool get toastEnabled => _prefs.getBool(_toastEnabledKey) ?? true;
+  set toastEnabled(bool value) => _prefs.setBool(_toastEnabledKey, value);
+
+  bool get toastBackgroundSessions =>
+      _prefs.getBool(_toastBackgroundSessionsKey) ?? true;
+  set toastBackgroundSessions(bool value) =>
+      _prefs.setBool(_toastBackgroundSessionsKey, value);
+
+  bool get toastTasks => _prefs.getBool(_toastTasksKey) ?? true;
+  set toastTasks(bool value) => _prefs.setBool(_toastTasksKey, value);
+
+  bool get toastConnections => _prefs.getBool(_toastConnectionsKey) ?? true;
+  set toastConnections(bool value) =>
+      _prefs.setBool(_toastConnectionsKey, value);
+
+  bool get showCompletedTasks =>
+      _prefs.getBool(_showCompletedTasksKey) ?? false;
+  set showCompletedTasks(bool value) =>
+      _prefs.setBool(_showCompletedTasksKey, value);
+
+  // --- Helpers for list persistence (avoids setStringList/getStringList
+  //     which can lose type info on Windows after JSON round-trip) ---
+
+  List<String> _getJsonStringList(String key) {
+    final raw = _prefs.getString(key);
+    if (raw == null || raw.isEmpty) return [];
+    try {
+      return (jsonDecode(raw) as List<dynamic>).cast<String>();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  void _setJsonStringList(String key, List<String> value) {
+    _prefs.setString(key, jsonEncode(value));
+  }
+
+  // --- Filter persistence ---
+
+  String get workersFilterSearch =>
+      _prefs.getString(_workersFilterSearchKey) ?? '';
+  set workersFilterSearch(String value) =>
+      _prefs.setString(_workersFilterSearchKey, value);
+
+  List<String> get workersFilterStatus =>
+      _getJsonStringList(_workersFilterStatusKey);
+  set workersFilterStatus(List<String> value) =>
+      _setJsonStringList(_workersFilterStatusKey, value);
+
+  String get tasksFilterSearch =>
+      _prefs.getString(_tasksFilterSearchKey) ?? '';
+  set tasksFilterSearch(String value) =>
+      _prefs.setString(_tasksFilterSearchKey, value);
+
+  List<String> get tasksFilterStatus =>
+      _getJsonStringList(_tasksFilterStatusKey);
+  set tasksFilterStatus(List<String> value) =>
+      _setJsonStringList(_tasksFilterStatusKey, value);
+
+  List<String> get tasksFilterSource =>
+      _getJsonStringList(_tasksFilterSourceKey);
+  set tasksFilterSource(List<String> value) =>
+      _setJsonStringList(_tasksFilterSourceKey, value);
+
+  String get artifactsFilterSearch =>
+      _prefs.getString(_artifactsFilterSearchKey) ?? '';
+  set artifactsFilterSearch(String value) =>
+      _prefs.setString(_artifactsFilterSearchKey, value);
 }

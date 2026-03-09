@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../models/session_info.dart';
 import '../../models/split_tree.dart';
+import '../../models/todo_item.dart';
 import '../../state/app_state.dart';
 import '../../state/pane_state.dart';
 import '../../theme.dart';
@@ -40,6 +42,18 @@ class PaneHeader extends StatelessWidget {
       padding: EdgeInsets.symmetric(horizontal: 8),
       child: Row(
         children: [
+          if (pane.canGoBack)
+            SizedBox(
+              width: 24,
+              height: 24,
+              child: IconButton(
+                padding: EdgeInsets.zero,
+                iconSize: 14,
+                icon: Icon(Icons.arrow_back_rounded, color: context.appColors.textMuted),
+                tooltip: 'Back',
+                onPressed: () => appState.goBack(pane.paneId),
+              ),
+            ),
           if (isActive)
             Container(
               width: 6,
@@ -62,6 +76,8 @@ class PaneHeader extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
             ),
           ),
+          if (pane.todos.isNotEmpty) _buildTodoBadge(context, pane),
+          if (sessionId != null) _buildTokenBadge(context, appState, sessionId),
           SizedBox(
             width: 24,
             height: 24,
@@ -94,6 +110,142 @@ class PaneHeader extends StatelessWidget {
 
   static String _shortId(String id) =>
       id.length >= 8 ? '${id.substring(0, 8)}...' : id;
+
+  Widget _buildTodoBadge(BuildContext context, PaneState pane) {
+    final todos = pane.todos;
+    final completed =
+        todos.where((t) => t.status == TodoStatus.completed).length;
+    final total = todos.length;
+
+    return Padding(
+      padding: const EdgeInsets.only(right: 4),
+      child: InkWell(
+        onTap: pane.toggleTodoPanel,
+        borderRadius: BorderRadius.circular(4),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.checklist_rounded,
+                size: 12,
+                color: pane.todoPanelVisible
+                    ? context.appColors.accent
+                    : context.appColors.textMuted,
+              ),
+              const SizedBox(width: 3),
+              Text(
+                '$completed/$total',
+                style: TextStyle(
+                  color: context.appColors.textMuted,
+                  fontSize: 10,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTokenBadge(BuildContext context, AppState appState, String sessionId) {
+    final session = appState.sessions.cast<SessionInfo?>().firstWhere(
+          (s) => s?.sessionId == sessionId,
+          orElse: () => null,
+        );
+    if (session == null) return const SizedBox.shrink();
+
+    final totalIn = session.totalInputTokens;
+    final totalOut = session.totalOutputTokens;
+    if (totalIn == 0 && totalOut == 0) return const SizedBox.shrink();
+
+    final worker = appState.workerForSession(sessionId);
+    final inLimit = worker?.inputTokenLimit ?? 0;
+    final outLimit = worker?.outputTokenLimit ?? 0;
+
+    final inStr = inLimit > 0
+        ? '${_formatTokens(totalIn)}/${_formatTokens(inLimit)}'
+        : _formatTokens(totalIn);
+    final outStr = outLimit > 0
+        ? '${_formatTokens(totalOut)}/${_formatTokens(outLimit)}'
+        : _formatTokens(totalOut);
+
+    // Determine usage color based on highest ratio
+    final usageRatio = _maxUsageRatio(totalIn, inLimit, totalOut, outLimit);
+    final usageColor = _usageColor(context, usageRatio);
+
+    // Build detailed tooltip
+    final tooltipLines = <String>[
+      'Input: ${_formatTokensLong(totalIn)}${inLimit > 0 ? ' / ${_formatTokensLong(inLimit)}' : ''}',
+      'Output: ${_formatTokensLong(totalOut)}${outLimit > 0 ? ' / ${_formatTokensLong(outLimit)}' : ''}',
+    ];
+    if (session.cacheReadInputTokens > 0 || session.cacheCreationInputTokens > 0) {
+      tooltipLines.add('Cache read: ${_formatTokensLong(session.cacheReadInputTokens)}');
+      tooltipLines.add('Cache write: ${_formatTokensLong(session.cacheCreationInputTokens)}');
+    }
+
+    return Tooltip(
+      message: tooltipLines.join('\n'),
+      preferBelow: false,
+      child: Container(
+        margin: const EdgeInsets.only(right: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        decoration: BoxDecoration(
+          color: usageColor.withAlpha(25),
+          borderRadius: BorderRadius.circular(4),
+          border: Border.all(color: usageColor.withAlpha(60), width: 0.5),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.token_outlined, size: 11, color: usageColor),
+            const SizedBox(width: 3),
+            Text(
+              '$inStr in \u00B7 $outStr out',
+              style: TextStyle(
+                color: usageColor,
+                fontSize: 10,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  static double _maxUsageRatio(int totalIn, int inLimit, int totalOut, int outLimit) {
+    double ratio = 0;
+    if (inLimit > 0) ratio = totalIn / inLimit;
+    if (outLimit > 0) {
+      final outRatio = totalOut / outLimit;
+      if (outRatio > ratio) ratio = outRatio;
+    }
+    return ratio;
+  }
+
+  static Color _usageColor(BuildContext context, double ratio) {
+    if (ratio >= 0.9) return context.appColors.errorText;
+    if (ratio >= 0.7) return context.appColors.toolAccent;
+    return context.appColors.textSecondary;
+  }
+
+  static String _formatTokensLong(int tokens) {
+    if (tokens >= 1000000) {
+      return '${(tokens / 1000000).toStringAsFixed(2)}M';
+    }
+    if (tokens >= 1000) {
+      return '${(tokens / 1000).toStringAsFixed(1)}K';
+    }
+    return tokens.toString();
+  }
+
+  static String _formatTokens(int tokens) {
+    if (tokens >= 1000000) return '${(tokens / 1000000).toStringAsFixed(1)}M';
+    if (tokens >= 1000) return '${(tokens / 1000).toStringAsFixed(1)}K';
+    return tokens.toString();
+  }
 
   void _showSplitMenu(
     BuildContext context,

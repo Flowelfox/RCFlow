@@ -26,6 +26,10 @@ class WorkerConnection extends ChangeNotifier {
   /// Operating system reported by the server (e.g. "Windows", "Linux").
   String? serverOs;
 
+  /// Token limits from server config (0 = unlimited).
+  int inputTokenLimit = 0;
+  int outputTokenLimit = 0;
+
   List<SessionInfo> sessions = [];
   final Set<String> subscribedSessions = {};
 
@@ -37,7 +41,7 @@ class WorkerConnection extends ChangeNotifier {
   }
 
   // Reconnection state
-  static const _maxRetries = 3;
+  static const maxRetries = 3;
   static const _retryDelay = Duration(seconds: 10);
   int _retryCount = 0;
   Timer? _retryTimer;
@@ -97,7 +101,7 @@ class WorkerConnection extends ChangeNotifier {
       _inputSub = ws.inputMessages.listen(_handleInputMessage);
       _outputSub = ws.outputMessages.listen(_handleOutputMessage);
 
-      await ws.connect(config.host, config.apiKey,
+      await ws.connect(config.hostWithPort, config.apiKey,
           secure: config.useSSL,
           allowSelfSigned: config.allowSelfSigned);
 
@@ -105,7 +109,10 @@ class WorkerConnection extends ChangeNotifier {
       notifyListeners();
 
       ws.listSessions();
+      ws.listTasks();
+      ws.requestArtifacts();
       _fetchServerInfo();
+      _fetchTokenLimits();
 
       final lastId = _settings.getLastSessionId(config.id);
       if (lastId != null) {
@@ -126,7 +133,7 @@ class WorkerConnection extends ChangeNotifier {
   Future<void> ensureTerminalConnected() async {
     if (terminalService.isConnected) return;
     await terminalService.connect(
-      config.host,
+      config.hostWithPort,
       config.apiKey,
       secure: config.useSSL,
       allowSelfSigned: config.allowSelfSigned,
@@ -187,6 +194,12 @@ class WorkerConnection extends ChangeNotifier {
       return;
     }
 
+    // task_list / task_update / task_deleted: forward to AppState with worker info
+    if (type == 'task_list' || type == 'task_update' || type == 'task_deleted') {
+      onOutputMessage?.call(msg, config.id);
+      return;
+    }
+
     // Forward everything else to AppState
     onOutputMessage?.call(msg, config.id);
   }
@@ -216,6 +229,17 @@ class WorkerConnection extends ChangeNotifier {
     final titleProvided = msg.containsKey('title');
     final title = msg['title'] as String?;
 
+    // Parse token usage fields
+    final inputTokens = (msg['input_tokens'] as num?)?.toInt();
+    final outputTokens = (msg['output_tokens'] as num?)?.toInt();
+    final cacheCreationInputTokens =
+        (msg['cache_creation_input_tokens'] as num?)?.toInt();
+    final cacheReadInputTokens =
+        (msg['cache_read_input_tokens'] as num?)?.toInt();
+    final toolInputTokens = (msg['tool_input_tokens'] as num?)?.toInt();
+    final toolOutputTokens = (msg['tool_output_tokens'] as num?)?.toInt();
+    final toolCostUsd = (msg['tool_cost_usd'] as num?)?.toDouble();
+
     final index = sessions.indexWhere((s) => s.sessionId == sessionId);
     if (index >= 0) {
       final existing = sessions[index];
@@ -229,6 +253,15 @@ class WorkerConnection extends ChangeNotifier {
             : existing.createdAt,
         title: titleProvided ? title : existing.title,
         workerId: config.id,
+        inputTokens: inputTokens ?? existing.inputTokens,
+        outputTokens: outputTokens ?? existing.outputTokens,
+        cacheCreationInputTokens:
+            cacheCreationInputTokens ?? existing.cacheCreationInputTokens,
+        cacheReadInputTokens:
+            cacheReadInputTokens ?? existing.cacheReadInputTokens,
+        toolInputTokens: toolInputTokens ?? existing.toolInputTokens,
+        toolOutputTokens: toolOutputTokens ?? existing.toolOutputTokens,
+        toolCostUsd: toolCostUsd ?? existing.toolCostUsd,
       );
     } else {
       sessions.insert(
@@ -243,6 +276,13 @@ class WorkerConnection extends ChangeNotifier {
               : DateTime.now(),
           title: title,
           workerId: config.id,
+          inputTokens: inputTokens ?? 0,
+          outputTokens: outputTokens ?? 0,
+          cacheCreationInputTokens: cacheCreationInputTokens ?? 0,
+          cacheReadInputTokens: cacheReadInputTokens ?? 0,
+          toolInputTokens: toolInputTokens ?? 0,
+          toolOutputTokens: toolOutputTokens ?? 0,
+          toolCostUsd: toolCostUsd ?? 0.0,
         ),
       );
     }
@@ -276,6 +316,21 @@ class WorkerConnection extends ChangeNotifier {
     }).catchError((_) {});
   }
 
+  void _fetchTokenLimits() {
+    ws.fetchConfig().then((configOptions) {
+      for (final opt in configOptions) {
+        final key = opt['key'] as String?;
+        final value = opt['value'];
+        if (key == 'SESSION_INPUT_TOKEN_LIMIT') {
+          inputTokenLimit = (value is num) ? value.toInt() : int.tryParse('$value') ?? 0;
+        } else if (key == 'SESSION_OUTPUT_TOKEN_LIMIT') {
+          outputTokenLimit = (value is num) ? value.toInt() : int.tryParse('$value') ?? 0;
+        }
+      }
+      notifyListeners();
+    }).catchError((_) {});
+  }
+
   // --- Reconnection ---
 
   void _scheduleReconnect() {
@@ -293,7 +348,7 @@ class WorkerConnection extends ChangeNotifier {
       }
       return;
     }
-    if (_retryCount >= _maxRetries) {
+    if (_retryCount >= maxRetries) {
       _status = WorkerConnectionStatus.disconnected;
       notifyListeners();
       return;
@@ -315,7 +370,7 @@ class WorkerConnection extends ChangeNotifier {
         _inputSub = ws.inputMessages.listen(_handleInputMessage);
         _outputSub = ws.outputMessages.listen(_handleOutputMessage);
 
-        await ws.connect(config.host, config.apiKey,
+        await ws.connect(config.hostWithPort, config.apiKey,
           secure: config.useSSL,
           allowSelfSigned: config.allowSelfSigned);
         _status = WorkerConnectionStatus.connected;
@@ -323,7 +378,9 @@ class WorkerConnection extends ChangeNotifier {
         notifyListeners();
 
         ws.listSessions();
+        ws.listTasks();
         _fetchServerInfo();
+        _fetchTokenLimits();
 
         final lastId = _settings.getLastSessionId(config.id);
         if (lastId != null) {

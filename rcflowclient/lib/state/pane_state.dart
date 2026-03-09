@@ -10,10 +10,28 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 
+import '../models/app_notification.dart';
 import '../models/session_info.dart';
+import '../models/split_tree.dart';
+import '../models/todo_item.dart';
 import '../models/ws_messages.dart';
 import '../services/websocket_service.dart';
 import 'output_handlers.dart';
+
+/// Snapshot of a pane's view state, used for back-navigation history.
+class PaneNavEntry {
+  final PaneType paneType;
+  final String? sessionId;
+  final String? taskId;
+  final String? artifactId;
+
+  const PaneNavEntry({
+    required this.paneType,
+    this.sessionId,
+    this.taskId,
+    this.artifactId,
+  });
+}
 
 /// Interface exposing shared state that PaneState needs from AppState.
 abstract class PaneHost {
@@ -28,6 +46,11 @@ abstract class PaneHost {
   void muteSessionSound(String sessionId);
   void markSubscribed(String sessionId, {required String workerId});
   void requestUnsubscribe(String sessionId, String workerId);
+  void showNotification({
+    required NotificationLevel level,
+    required String title,
+    String? body,
+  });
 }
 
 class PaneState extends ChangeNotifier {
@@ -37,6 +60,34 @@ class PaneState extends ChangeNotifier {
   // Worker this pane is currently targeting
   String? _workerId;
   String? get workerId => _workerId;
+
+  // Task pane state (when pane shows a task detail view)
+  String? _taskId;
+  String? get taskId => _taskId;
+
+  void setTaskId(String? taskId) {
+    _taskId = taskId;
+    notifyListeners();
+  }
+
+  void clearTaskId() {
+    _taskId = null;
+    notifyListeners();
+  }
+
+  // Artifact pane state (when pane shows an artifact detail view)
+  String? _artifactId;
+  String? get artifactId => _artifactId;
+
+  void setArtifactId(String? artifactId) {
+    _artifactId = artifactId;
+    notifyListeners();
+  }
+
+  void clearArtifactId() {
+    _artifactId = null;
+    notifyListeners();
+  }
 
   // Session state
   String? _sessionId;
@@ -48,6 +99,13 @@ class PaneState extends ChangeNotifier {
   bool _sessionPaused = false;
   bool get sessionPaused => _sessionPaused;
   bool pendingAck = false;
+
+  // Callback invoked once when a new session is created (ack received).
+  void Function(String sessionId)? _onNewSessionAck;
+
+  void setNewSessionCallback(void Function(String sessionId)? callback) {
+    _onNewSessionAck = callback;
+  }
 
   // Message display
   final List<DisplayMessage> _messages = [];
@@ -65,14 +123,62 @@ class PaneState extends ChangeNotifier {
   // Prevents duplicate display when the server replays user messages.
   int _pendingLocalUserMessages = 0;
 
+  // Todo list state (from TodoWrite tool calls)
+  List<TodoItem> _todos = [];
+  List<TodoItem> get todos => _todos;
+  bool _todoPanelVisible = false;
+  bool get todoPanelVisible => _todoPanelVisible;
+  double _todoPanelWidth = 260;
+  double get todoPanelWidth => _todoPanelWidth;
+  static const double todoPanelMinWidth = 180;
+  static const double todoPanelMaxWidth = 500;
+
+  // --- Back-navigation history ---
+  static const int _maxNavHistory = 30;
+  final List<PaneNavEntry> _navHistory = [];
+  bool get canGoBack => _navHistory.isNotEmpty;
+
+  /// Push the current view state onto the nav history stack.
+  /// Called by AppState before switching pane content.
+  void pushNavHistory(PaneNavEntry entry) {
+    _navHistory.add(entry);
+    if (_navHistory.length > _maxNavHistory) {
+      _navHistory.removeAt(0);
+    }
+    notifyListeners();
+  }
+
+  /// Pop and return the most recent nav history entry, or null if empty.
+  PaneNavEntry? popNavHistory() {
+    if (_navHistory.isEmpty) return null;
+    final entry = _navHistory.removeLast();
+    notifyListeners();
+    return entry;
+  }
+
   // Agent group tracking (Claude Code / Codex collapsible blocks)
   // True between agent_group_start and agent_group_end.
   bool _inAgentMode = false;
   // The tool name for the current agent group (e.g. 'claude_code', 'codex').
   String _agentToolName = 'claude_code';
+  // Human-readable display name for the current agent group.
+  String? _agentDisplayName;
   // Index in _messages of the current tool sub-group being built.
   // Null when no tool group is open (e.g. between text and next tool batch).
   int? _agentToolGroupIndex;
+
+  /// Monotonically increasing revision counter, bumped on every notify.
+  /// Used by OutputDisplay to detect changes that aren't visible from
+  /// top-level message count or last-message content alone (e.g. tool
+  /// output streaming inside an agentGroup's children).
+  int _revision = 0;
+  int get revision => _revision;
+
+  @override
+  void notifyListeners() {
+    _revision++;
+    super.notifyListeners();
+  }
 
   // Dynamic streaming
   final List<String> _charQueue = [];
@@ -145,8 +251,16 @@ class PaneState extends ChangeNotifier {
     _ws?.sendPrompt(text, _sessionId);
   }
 
-  void switchSession(String sessionId) {
+  void switchSession(String sessionId, {bool recordHistory = true}) {
     if (sessionId == _sessionId) return;
+
+    // Push current session to nav history for back-navigation
+    if (recordHistory && _sessionId != null) {
+      pushNavHistory(PaneNavEntry(
+        paneType: PaneType.chat,
+        sessionId: _sessionId,
+      ));
+    }
 
     final oldSessionId = _sessionId;
     final oldWorkerId = _workerId;
@@ -155,6 +269,8 @@ class PaneState extends ChangeNotifier {
     _inAgentMode = false;
     _agentToolGroupIndex = null;
     _messages.clear();
+    _todos = [];
+    _todoPanelVisible = false;
     _resetPagination();
     _pendingLocalUserMessages = 0;
     _sessionEnded = false;
@@ -213,6 +329,8 @@ class PaneState extends ChangeNotifier {
     _sessionPaused = false;
     _pendingLocalUserMessages = 0;
     _messages.clear();
+    _todos = [];
+    _todoPanelVisible = false;
     _resetPagination();
 
     if (oldSessionId != null && oldWorkerId != null) {
@@ -235,6 +353,8 @@ class PaneState extends ChangeNotifier {
     _sessionPaused = false;
     _pendingLocalUserMessages = 0;
     _messages.clear();
+    _todos = [];
+    _todoPanelVisible = false;
     _resetPagination();
 
     if (oldSessionId != null && oldWorkerId != null) {
@@ -257,6 +377,13 @@ class PaneState extends ChangeNotifier {
     _sessionId = sessionId;
     if (workerId != null) _workerId = workerId;
     _readyForNewChat = false;
+
+    // Fire the new-session callback (e.g. to attach task after creation).
+    if (_onNewSessionAck != null) {
+      _onNewSessionAck!(sessionId);
+      _onNewSessionAck = null;
+    }
+
     _host.refreshSessions();
     notifyListeners();
   }
@@ -278,7 +405,10 @@ class PaneState extends ChangeNotifier {
           _host.requestUnsubscribe(sessionId, oldWorkerId);
         }
       }
-      _addSystemMessage('Session cancelled');
+      _host.showNotification(
+        level: NotificationLevel.info,
+        title: 'Session Ended',
+      );
       _host.refreshSessions();
     } catch (e) {
       _addSystemMessage('Failed to cancel session: $e', isError: true);
@@ -382,6 +512,19 @@ class PaneState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Send a mid-turn interactive response to Claude Code (plan mode, etc.)
+  /// without opening a new agent group or adding a user message.
+  void sendInteractiveResponse(DisplayMessage msg, String text,
+      {bool accepted = true}) {
+    if (!_host.connected) return;
+    msg.accepted = accepted;
+    final sid = msg.sessionId ?? _sessionId;
+    if (sid != null) {
+      _ws?.sendInteractiveResponse(sid, text);
+    }
+    notifyListeners();
+  }
+
   void sendPermissionResponse({
     required String sessionId,
     required String requestId,
@@ -449,10 +592,11 @@ class PaneState extends ChangeNotifier {
   }
 
   /// Enter agent mode — subsequent tool calls will be auto-grouped.
-  void startAgentGroup(String name, Map<String, dynamic>? input) {
+  void startAgentGroup(String name, Map<String, dynamic>? input, {String? displayName}) {
     finalizeStream();
     _inAgentMode = true;
     _agentToolName = name;
+    _agentDisplayName = displayName;
     // Don't create a message yet — wait for the first tool_start.
     notifyListeners();
   }
@@ -465,6 +609,45 @@ class PaneState extends ChangeNotifier {
     notifyListeners();
   }
 
+  // -- Todo list management --
+
+  void updateTodos(List<TodoItem> todos) {
+    _todos = todos;
+    if (todos.isNotEmpty && !_todoPanelVisible) {
+      _todoPanelVisible = true;
+    }
+    notifyListeners();
+  }
+
+  void clearTodos() {
+    if (_todos.isEmpty) return;
+    _todos = [];
+    _todoPanelVisible = false;
+    notifyListeners();
+  }
+
+  void toggleTodoPanel() {
+    _todoPanelVisible = !_todoPanelVisible;
+    notifyListeners();
+  }
+
+  void setTodoPanelWidth(double width) {
+    _todoPanelWidth = width.clamp(todoPanelMinWidth, todoPanelMaxWidth);
+    notifyListeners();
+  }
+
+  /// Reconstruct todo state from a history message's metadata.
+  void _reconstructTodosFromHistory(Map<String, dynamic> msg) {
+    final metadata = msg['metadata'] as Map<String, dynamic>? ?? {};
+    final rawTodos = metadata['todos'] as List<dynamic>? ?? [];
+    if (rawTodos.isNotEmpty) {
+      _todos = rawTodos
+          .whereType<Map<String, dynamic>>()
+          .map((t) => TodoItem.fromJson(t))
+          .toList();
+    }
+  }
+
   /// Ensure a tool sub-group exists (create one if needed).
   void _ensureAgentToolGroup() {
     if (_agentToolGroupIndex != null) return;
@@ -472,6 +655,7 @@ class PaneState extends ChangeNotifier {
       type: DisplayMessageType.agentGroup,
       sessionId: _sessionId,
       toolName: _agentToolName,
+      displayName: _agentDisplayName,
       children: [],
       expanded: true,
     ));
@@ -518,7 +702,8 @@ class PaneState extends ChangeNotifier {
     _enqueueText(text);
   }
 
-  void startToolBlock(String name, Map<String, dynamic>? input) {
+  void startToolBlock(String name, Map<String, dynamic>? input,
+      {String? displayName}) {
     finalizeStream();
     _activeToolName = name;
     if (_inAgentMode) {
@@ -528,12 +713,13 @@ class PaneState extends ChangeNotifier {
       type: DisplayMessageType.toolBlock,
       sessionId: _sessionId,
       toolName: name,
+      displayName: displayName,
       toolInput: input,
     ));
     notifyListeners();
   }
 
-  void appendToolOutput(String text) {
+  void appendToolOutput(String text, {bool isError = false}) {
     final target = _streamTargetList;
     if (target.isEmpty ||
         target.last.type != DisplayMessageType.toolBlock) {
@@ -543,6 +729,9 @@ class PaneState extends ChangeNotifier {
         toolName: 'output',
       ));
       notifyListeners();
+    }
+    if (isError && target.isNotEmpty) {
+      target.last.isError = true;
     }
     _enqueueText(text);
   }
@@ -656,6 +845,15 @@ class PaneState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Add a display message respecting agent group nesting.
+  void addDisplayMessageInStream(DisplayMessage msg) {
+    if (_inAgentMode) {
+      _ensureAgentToolGroup();
+    }
+    _streamTargetList.add(msg);
+    notifyListeners();
+  }
+
   void addSystemMessage(String text, {bool isError = false}) {
     _addSystemMessage(text, isError: isError);
   }
@@ -749,6 +947,7 @@ class PaneState extends ChangeNotifier {
   ) {
     bool inAgent = false;
     int? toolGroupIdx;
+    String? agentDisplayName;
 
     void closeToolGroup() {
       if (toolGroupIdx != null && toolGroupIdx! < target.length) {
@@ -770,6 +969,7 @@ class PaneState extends ChangeNotifier {
         type: DisplayMessageType.agentGroup,
         sessionId: sessionId,
         toolName: 'claude_code',
+        displayName: agentDisplayName,
         children: [],
         finished: false,
       ));
@@ -781,6 +981,7 @@ class PaneState extends ChangeNotifier {
 
       if (type == 'agent_group_start') {
         inAgent = true;
+        agentDisplayName = (msg['metadata'] as Map<String, dynamic>?)?['display_name'] as String?;
         continue;
       }
 
@@ -791,7 +992,15 @@ class PaneState extends ChangeNotifier {
       }
 
       if (inAgent) {
-        if (type == 'tool_start' || type == 'tool_output') {
+        if (type == 'todo_update') {
+          // Todo updates go into the agent group but also update pane state
+          ensureToolGroup();
+          final builder = historyBuilderRegistry[type];
+          if (builder != null) {
+            builder(msg, sessionId, target[toolGroupIdx!].children!);
+          }
+          _reconstructTodosFromHistory(msg);
+        } else if (type == 'tool_start' || type == 'tool_output') {
           ensureToolGroup();
           final builder = historyBuilderRegistry[type];
           if (builder != null) {
@@ -817,6 +1026,9 @@ class PaneState extends ChangeNotifier {
       } else {
         final builder = historyBuilderRegistry[type];
         if (builder != null) builder(msg, sessionId, target);
+        if (type == 'todo_update') {
+          _reconstructTodosFromHistory(msg);
+        }
       }
     }
 

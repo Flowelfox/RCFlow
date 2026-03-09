@@ -5,12 +5,14 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.buffer import BufferedMessage, MessageType, SessionBuffer
+from src.models.db import Artifact as ArtifactModel
 from src.models.db import Session as SessionModel
 from src.models.db import SessionMessage as SessionMessageModel
+from src.models.db import TaskSession as TaskSessionModel
 from src.models.db import ToolExecution as ToolExecutionModel
 
 if TYPE_CHECKING:
@@ -73,6 +75,24 @@ class ActiveSession:
         self._prompt_lock: asyncio.Lock = asyncio.Lock()
         # Interactive permission approval manager (None = bypass/auto mode)
         self.permission_manager: PermissionManager | None = None
+        # Token usage accumulators (running totals across all turns)
+        self.input_tokens: int = 0
+        self.output_tokens: int = 0
+        self.cache_creation_input_tokens: int = 0
+        self.cache_read_input_tokens: int = 0
+        # Tool agent token usage (Claude Code / Codex)
+        self.tool_input_tokens: int = 0
+        self.tool_output_tokens: int = 0
+        self.tool_cost_usd: float = 0.0
+        # In-memory todo state — updated on each TodoWrite tool_use
+        self._todos: list[dict[str, str]] = []
+
+    @property
+    def todos(self) -> list[dict[str, str]]:
+        return list(self._todos)
+
+    def update_todos(self, todos: list[dict[str, str]]) -> None:
+        self._todos = todos
 
     def touch(self) -> None:
         """Update last activity timestamp."""
@@ -226,9 +246,46 @@ class SessionManager:
             "title": session.title,
             "session_type": session.session_type.value,
             "created_at": session.created_at.isoformat(),
+            "input_tokens": session.input_tokens,
+            "output_tokens": session.output_tokens,
+            "cache_creation_input_tokens": session.cache_creation_input_tokens,
+            "cache_read_input_tokens": session.cache_read_input_tokens,
+            "tool_input_tokens": session.tool_input_tokens,
+            "tool_output_tokens": session.tool_output_tokens,
+            "tool_cost_usd": session.tool_cost_usd,
         }
         for queue in self._update_subscribers.values():
             queue.put_nowait(update)
+
+    def broadcast_task_update(self, task_data: dict[str, Any]) -> None:
+        """Broadcast a task update to all connected output clients."""
+        msg = {"type": "task_update", **task_data}
+        for queue in self._update_subscribers.values():
+            queue.put_nowait(msg)
+
+    def broadcast_task_deleted(self, task_id: str) -> None:
+        """Broadcast a task deletion to all connected output clients."""
+        msg = {"type": "task_deleted", "task_id": task_id}
+        for queue in self._update_subscribers.values():
+            queue.put_nowait(msg)
+
+    def broadcast_artifact_update(self, artifact_data: dict[str, Any]) -> None:
+        """Broadcast an artifact update to all connected output clients."""
+        msg = {"type": "artifact_update", **artifact_data}
+        for queue in self._update_subscribers.values():
+            queue.put_nowait(msg)
+
+    def broadcast_artifact_deleted(self, artifact_id: str) -> None:
+        """Broadcast an artifact deletion to all connected output clients."""
+        msg = {"type": "artifact_deleted", "artifact_id": artifact_id}
+        for queue in self._update_subscribers.values():
+            queue.put_nowait(msg)
+
+    def broadcast_artifact_list(self, artifacts: list[dict[str, Any]]) -> None:
+        """Broadcast an artifact list to all connected output clients."""
+        msg = {"type": "artifact_list", "artifacts": artifacts}
+        for queue in self._update_subscribers.values():
+            queue.put_nowait(msg)
 
     def get_session(self, session_id: str) -> ActiveSession | None:
         return self._sessions.get(session_id)
@@ -251,23 +308,52 @@ class SessionManager:
             logger.warning("Cannot archive session %s: still %s", session_id, session.status)
             return
 
-        db_session = SessionModel(
-            id=uuid.UUID(session.id),
-            backend_id=self._backend_id,
-            created_at=session.created_at,
-            ended_at=session.ended_at,
-            session_type=session.session_type.value,
-            status=session.status.value,
-            title=session.title,
-            metadata_=session.metadata,
-            conversation_history=session.conversation_history or None,
-        )
-        db.add(db_session)
+        session_uuid = uuid.UUID(session.id)
+
+        # Ensure the session row exists before inserting child message rows.
+        # The row may already exist if created early by task-linking
+        # (e.g. _create_tasks_from_session), so check first.
+        existing = await db.get(SessionModel, session_uuid)
+        if existing is None:
+            db.add(SessionModel(
+                id=session_uuid,
+                backend_id=self._backend_id,
+                created_at=session.created_at,
+                ended_at=session.ended_at,
+                session_type=session.session_type.value,
+                status=session.status.value,
+                title=session.title,
+                metadata_=session.metadata,
+                conversation_history=session.conversation_history or None,
+                input_tokens=session.input_tokens,
+                output_tokens=session.output_tokens,
+                cache_creation_input_tokens=session.cache_creation_input_tokens,
+                cache_read_input_tokens=session.cache_read_input_tokens,
+                tool_input_tokens=session.tool_input_tokens,
+                tool_output_tokens=session.tool_output_tokens,
+                tool_cost_usd=session.tool_cost_usd,
+            ))
+        else:
+            existing.backend_id = self._backend_id
+            existing.created_at = session.created_at
+            existing.ended_at = session.ended_at
+            existing.session_type = session.session_type.value
+            existing.status = session.status.value
+            existing.title = session.title
+            existing.metadata_ = session.metadata
+            existing.conversation_history = session.conversation_history or None
+            existing.input_tokens = session.input_tokens
+            existing.output_tokens = session.output_tokens
+            existing.cache_creation_input_tokens = session.cache_creation_input_tokens
+            existing.cache_read_input_tokens = session.cache_read_input_tokens
+            existing.tool_input_tokens = session.tool_input_tokens
+            existing.tool_output_tokens = session.tool_output_tokens
+            existing.tool_cost_usd = session.tool_cost_usd
         await db.flush()
 
         for msg in session.buffer.text_history:
             db_msg = SessionMessageModel(
-                session_id=uuid.UUID(session.id),
+                session_id=session_uuid,
                 sequence=msg.sequence,
                 message_type=msg.message_type.value,
                 content=msg.data.get("content", ""),
@@ -275,7 +361,15 @@ class SessionManager:
             )
             db.add(db_msg)
 
-        await db.commit()
+        try:
+            await db.commit()
+        except asyncio.CancelledError:
+            # With aiosqlite + StaticPool, the COMMIT may complete on the
+            # background thread even though the asyncio task was cancelled.
+            # Always remove the session from memory to prevent
+            # save_all_sessions from encountering duplicate messages.
+            self._sessions.pop(session_id, None)
+            raise
         del self._sessions[session_id]
         logger.info("Archived session %s to database", session_id)
 
@@ -316,6 +410,14 @@ class SessionManager:
         session._title = row.title
         session.metadata = dict(row.metadata_) if row.metadata_ else {}
         session.last_activity_at = datetime.now(UTC)
+        # Restore token usage
+        session.input_tokens = row.input_tokens or 0
+        session.output_tokens = row.output_tokens or 0
+        session.cache_creation_input_tokens = row.cache_creation_input_tokens or 0
+        session.cache_read_input_tokens = row.cache_read_input_tokens or 0
+        session.tool_input_tokens = row.tool_input_tokens or 0
+        session.tool_output_tokens = row.tool_output_tokens or 0
+        session.tool_cost_usd = row.tool_cost_usd or 0.0
 
         if row.conversation_history:
             session.conversation_history = list(row.conversation_history)
@@ -347,7 +449,11 @@ class SessionManager:
 
         # Remove from DB using bulk deletes to avoid ORM cascade
         # (db.delete(row) would trigger the messages relationship and set session_id=NULL)
+        # Delete all child records that reference this session before deleting the session itself
         await db.execute(delete(SessionMessageModel).where(SessionMessageModel.session_id == session_uuid))
+        await db.execute(delete(ToolExecutionModel).where(ToolExecutionModel.session_id == session_uuid))
+        await db.execute(delete(TaskSessionModel).where(TaskSessionModel.session_id == session_uuid))
+        await db.execute(delete(ArtifactModel).where(ArtifactModel.session_id == session_uuid))
         await db.execute(delete(SessionModel).where(SessionModel.id == session_uuid))
         await db.commit()
 
@@ -372,6 +478,13 @@ class SessionManager:
                     "session_type": s.session_type.value,
                     "created_at": s.created_at,
                     "title": s.title,
+                    "input_tokens": s.input_tokens,
+                    "output_tokens": s.output_tokens,
+                    "cache_creation_input_tokens": s.cache_creation_input_tokens,
+                    "cache_read_input_tokens": s.cache_read_input_tokens,
+                    "tool_input_tokens": s.tool_input_tokens,
+                    "tool_output_tokens": s.tool_output_tokens,
+                    "tool_cost_usd": s.tool_cost_usd,
                 }
             )
 
@@ -393,6 +506,13 @@ class SessionManager:
                         "session_type": row.session_type,
                         "created_at": row.created_at,
                         "title": row.title,
+                        "input_tokens": row.input_tokens or 0,
+                        "output_tokens": row.output_tokens or 0,
+                        "cache_creation_input_tokens": row.cache_creation_input_tokens or 0,
+                        "cache_read_input_tokens": row.cache_read_input_tokens or 0,
+                        "tool_input_tokens": row.tool_input_tokens or 0,
+                        "tool_output_tokens": row.tool_output_tokens or 0,
+                        "tool_cost_usd": row.tool_cost_usd or 0.0,
                     }
                 )
 
@@ -418,6 +538,10 @@ class SessionManager:
         Unlike archive_session, this saves sessions regardless of their status,
         preserving the current status so they can appear in the archived sessions list.
         Does not remove sessions from memory since the server is shutting down.
+
+        Each session is committed independently so that a failure in one
+        (e.g. duplicate messages from an interrupted archive) does not cause
+        all other sessions to lose their data.
         """
         sessions = list(self._sessions.values())
         if not sessions:
@@ -427,22 +551,62 @@ class SessionManager:
         saved = 0
         for session in sessions:
             try:
-                db_session = SessionModel(
-                    id=uuid.UUID(session.id),
-                    backend_id=self._backend_id,
-                    created_at=session.created_at,
-                    ended_at=session.ended_at or datetime.now(UTC),
-                    session_type=session.session_type.value,
-                    status=session.status.value,
-                    title=session.title,
-                    metadata_=session.metadata,
-                    conversation_history=session.conversation_history or None,
+                session_uuid = uuid.UUID(session.id)
+
+                # Delete any existing messages for this session to avoid
+                # UniqueConstraint violations if the session was partially
+                # archived (commit completed but session not removed from memory).
+                existing_msg_count = await db.scalar(
+                    select(func.count())
+                    .select_from(SessionMessageModel)
+                    .where(SessionMessageModel.session_id == session_uuid)
                 )
-                db.add(db_session)
+                if existing_msg_count and existing_msg_count > 0:
+                    await db.execute(
+                        delete(SessionMessageModel)
+                        .where(SessionMessageModel.session_id == session_uuid)
+                    )
+
+                existing = await db.get(SessionModel, session_uuid)
+                if existing is None:
+                    db.add(SessionModel(
+                        id=session_uuid,
+                        backend_id=self._backend_id,
+                        created_at=session.created_at,
+                        ended_at=session.ended_at or datetime.now(UTC),
+                        session_type=session.session_type.value,
+                        status=session.status.value,
+                        title=session.title,
+                        metadata_=session.metadata,
+                        input_tokens=session.input_tokens,
+                        output_tokens=session.output_tokens,
+                        cache_creation_input_tokens=session.cache_creation_input_tokens,
+                        cache_read_input_tokens=session.cache_read_input_tokens,
+                        tool_input_tokens=session.tool_input_tokens,
+                        tool_output_tokens=session.tool_output_tokens,
+                        tool_cost_usd=session.tool_cost_usd,
+                        conversation_history=session.conversation_history or None,
+                    ))
+                else:
+                    existing.backend_id = self._backend_id
+                    existing.created_at = session.created_at
+                    existing.ended_at = session.ended_at or datetime.now(UTC)
+                    existing.session_type = session.session_type.value
+                    existing.status = session.status.value
+                    existing.title = session.title
+                    existing.metadata_ = session.metadata
+                    existing.input_tokens = session.input_tokens
+                    existing.output_tokens = session.output_tokens
+                    existing.cache_creation_input_tokens = session.cache_creation_input_tokens
+                    existing.cache_read_input_tokens = session.cache_read_input_tokens
+                    existing.tool_input_tokens = session.tool_input_tokens
+                    existing.tool_output_tokens = session.tool_output_tokens
+                    existing.tool_cost_usd = session.tool_cost_usd
+                    existing.conversation_history = session.conversation_history or None
 
                 for msg in session.buffer.text_history:
                     db_msg = SessionMessageModel(
-                        session_id=uuid.UUID(session.id),
+                        session_id=session_uuid,
                         sequence=msg.sequence,
                         message_type=msg.message_type.value,
                         content=msg.data.get("content", ""),
@@ -450,13 +614,13 @@ class SessionManager:
                     )
                     db.add(db_msg)
 
+                await db.commit()
                 saved += 1
             except Exception:
                 logger.exception("Failed to save session %s on shutdown", session.id)
+                try:
+                    await db.rollback()
+                except Exception:
+                    logger.debug("Rollback after failed session save also failed", exc_info=True)
 
-        try:
-            await db.commit()
-            logger.info("Saved %d/%d in-memory sessions to database on shutdown", saved, len(sessions))
-        except Exception:
-            logger.exception("Failed to commit sessions to database on shutdown")
-            await db.rollback()
+        logger.info("Saved %d/%d in-memory sessions to database on shutdown", saved, len(sessions))
