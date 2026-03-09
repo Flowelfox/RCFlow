@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../models/split_tree.dart';
+import '../../models/todo_item.dart';
 import '../../state/app_state.dart';
 import '../../state/pane_state.dart';
 import '../../theme.dart';
@@ -9,7 +10,11 @@ import 'input_area.dart';
 import 'output_display.dart';
 import 'pane_header.dart';
 import 'session_panel.dart' show TerminalDragData;
+import 'session_panel/task_drag_data.dart';
+import 'artifact_pane.dart';
+import 'task_pane.dart';
 import 'terminal_pane.dart';
+import 'todo_panel.dart';
 
 /// Data carried during a session drag from the sidebar.
 class SessionDragData {
@@ -66,7 +71,9 @@ class _SessionPaneState extends State<SessionPane> {
       value: widget.pane,
       child: DragTarget<Object>(
         onWillAcceptWithDetails: (details) =>
-            details.data is SessionDragData || details.data is TerminalDragData,
+            details.data is SessionDragData ||
+            details.data is TerminalDragData ||
+            details.data is TaskDragData,
         onMove: (details) {
           final box = context.findRenderObject() as RenderBox?;
           if (box == null || !box.hasSize) return;
@@ -97,21 +104,25 @@ class _SessionPaneState extends State<SessionPane> {
               zone,
               data.terminalId,
             );
+          } else if (data is TaskDragData) {
+            appState.splitPaneWithTask(
+              widget.pane.paneId,
+              zone,
+              data.taskId,
+            );
           }
         },
         builder: (context, candidateData, rejectedData) {
           final paneType = appState.getPaneType(widget.pane.paneId);
           final isTerminalPane = paneType == PaneType.terminal;
+          final isTaskPane = paneType == PaneType.task;
+          final isArtifactPane = paneType == PaneType.artifact;
           final terminalInfo = isTerminalPane
               ? appState.getTerminalPaneInfo(widget.pane.paneId)
               : null;
 
           return Listener(
             onPointerDown: (_) {
-              // Defer to a microtask so the rebuild from notifyListeners()
-              // doesn't happen synchronously during pointer event dispatch.
-              // This prevents disrupting gesture recognizers and focus
-              // handling in child widgets (e.g. TerminalView).
               if (appState.activePaneId != widget.pane.paneId) {
                 Future.microtask(
                     () => appState.setActivePane(widget.pane.paneId));
@@ -148,19 +159,167 @@ class _SessionPaneState extends State<SessionPane> {
                             ),
                           ],
                         )
-                      : Column(
-                          children: [
-                            const PaneHeader(),
-                            const Expanded(child: OutputDisplay()),
-                            const InputArea(),
-                          ],
-                        ),
+                      : isTaskPane
+                          ? TaskPane(
+                              paneId: widget.pane.paneId,
+                              pane: widget.pane,
+                            )
+                          : isArtifactPane
+                              ? ArtifactPane(
+                                  paneId: widget.pane.paneId,
+                                  pane: widget.pane,
+                                )
+                              : Column(
+                              children: [
+                                const PaneHeader(),
+                                Expanded(
+                                  child: _OutputWithTodoPanel(pane: widget.pane),
+                                ),
+                                const InputArea(),
+                              ],
+                            ),
                 ),
                 if (_hoverZone != null) _DropZoneOverlay(zone: _hoverZone!),
               ],
             ),
           );
         },
+      ),
+    );
+  }
+}
+
+/// Wraps [OutputDisplay] with an optional resizable [TodoPanel] on the right.
+/// When the panel is hidden but todos exist, shows a small tab to reopen it.
+class _OutputWithTodoPanel extends StatefulWidget {
+  final PaneState pane;
+  const _OutputWithTodoPanel({required this.pane});
+
+  @override
+  State<_OutputWithTodoPanel> createState() => _OutputWithTodoPanelState();
+}
+
+class _OutputWithTodoPanelState extends State<_OutputWithTodoPanel> {
+  bool _dragging = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final pane = context.watch<PaneState>();
+    final hasTodos = pane.todos.isNotEmpty;
+    final showPanel = pane.todoPanelVisible && hasTodos;
+
+    if (!hasTodos) return const OutputDisplay();
+
+    if (!showPanel) {
+      // Collapsed: show output with a small vertical tab on the right edge
+      return Stack(
+        children: [
+          const OutputDisplay(),
+          Positioned(
+            right: 0,
+            top: 0,
+            bottom: 0,
+            child: Center(
+              child: _CollapsedTodoTab(onTap: pane.toggleTodoPanel),
+            ),
+          ),
+        ],
+      );
+    }
+
+    // Expanded: resizable panel with drag handle
+    final panelWidth = pane.todoPanelWidth;
+    return Row(
+      children: [
+        const Expanded(child: OutputDisplay()),
+        // Drag handle / divider
+        MouseRegion(
+          cursor: SystemMouseCursors.resizeColumn,
+          child: GestureDetector(
+            onHorizontalDragStart: (_) => setState(() => _dragging = true),
+            onHorizontalDragUpdate: (details) {
+              final box = context.findRenderObject() as RenderBox?;
+              if (box == null) return;
+              final newWidth = panelWidth - details.delta.dx;
+              pane.setTodoPanelWidth(newWidth);
+            },
+            onHorizontalDragEnd: (_) => setState(() => _dragging = false),
+            child: Container(
+              width: 5,
+              color: _dragging
+                  ? context.appColors.accent.withAlpha(80)
+                  : Colors.transparent,
+              child: Center(
+                child: Container(
+                  width: 1,
+                  height: double.infinity,
+                  color: context.appColors.divider,
+                ),
+              ),
+            ),
+          ),
+        ),
+        SizedBox(
+          width: panelWidth,
+          child: const TodoPanel(),
+        ),
+      ],
+    );
+  }
+}
+
+/// Small vertical tab shown on the right edge when the todo panel is collapsed.
+class _CollapsedTodoTab extends StatelessWidget {
+  final VoidCallback onTap;
+  const _CollapsedTodoTab({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final pane = context.watch<PaneState>();
+    final completed =
+        pane.todos.where((t) => t.status == TodoStatus.completed).length;
+    final total = pane.todos.length;
+
+    return Tooltip(
+      message: 'Show todo ($completed/$total)',
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: const BorderRadius.horizontal(left: Radius.circular(6)),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 12),
+          decoration: BoxDecoration(
+            color: context.appColors.bgSurface,
+            border: Border(
+              left: BorderSide(color: context.appColors.divider),
+              top: BorderSide(color: context.appColors.divider),
+              bottom: BorderSide(color: context.appColors.divider),
+            ),
+            borderRadius:
+                const BorderRadius.horizontal(left: Radius.circular(6)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.checklist_rounded,
+                size: 14,
+                color: context.appColors.toolAccent,
+              ),
+              const SizedBox(height: 4),
+              RotatedBox(
+                quarterTurns: 1,
+                child: Text(
+                  'Todo $completed/$total',
+                  style: TextStyle(
+                    color: context.appColors.textMuted,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

@@ -20,8 +20,8 @@ class OutputDisplay extends StatefulWidget {
 class _OutputDisplayState extends State<OutputDisplay> {
   final ScrollController _scrollController = ScrollController();
   String _tip = getRandomTip();
+  int _lastRevision = 0;
   int _lastMessageCount = 0;
-  String _lastContent = '';
   Timer? _loadMoreDebounce;
 
   /// True when auto-scroll is active (user is at/near the bottom).
@@ -141,15 +141,14 @@ class _OutputDisplayState extends State<OutputDisplay> {
           builder: (context, pane, _) {
             final msgs = pane.messages;
 
-            final currentContent = msgs.isNotEmpty ? msgs.last.content : '';
-            final contentChanged = msgs.length != _lastMessageCount ||
-                currentContent != _lastContent;
+            final rev = pane.revision;
+            final contentChanged = rev != _lastRevision;
             if (contentChanged) {
               if (msgs.isEmpty && _lastMessageCount > 0) {
                 _tip = getRandomTip();
               }
+              _lastRevision = rev;
               _lastMessageCount = msgs.length;
-              _lastContent = currentContent;
               if (_isStuck) {
                 WidgetsBinding.instance
                     .addPostFrameCallback((_) => _scrollToBottom());

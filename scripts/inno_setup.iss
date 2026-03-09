@@ -95,7 +95,7 @@ Name: "startwithwindows"; Description: "Start RCFlow when Windows starts"; Group
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "RCFlow"; ValueData: """{app}\rcflow.exe"" tray"; Flags: uninsdeletevalue; Tasks: startwithwindows
 
 [Run]
-; Run database migrations after install
+; Run database migrations after install (timeout handled in [Code])
 Filename: "{app}\rcflow.exe"; Parameters: "migrate"; StatusMsg: "Running database migrations..."; Flags: runhidden waituntilterminated
 ; Optionally launch the tray app after install
 Filename: "{app}\rcflow.exe"; Parameters: "tray"; Description: "Launch RCFlow"; Flags: nowait postinstall skipifsilent unchecked
@@ -109,4 +109,23 @@ Type: filesandordirs; Name: "{app}\logs"
 Type: filesandordirs; Name: "{app}\_internal"
 
 [Code]
-// settings.json is created automatically by the application on first run
+// Kill any orphan rcflow.exe processes during uninstall or rollback to
+// prevent file locks from blocking file removal.
+procedure KillRCFlowProcesses;
+var
+  ResultCode: Integer;
+begin
+  Exec('taskkill', '/F /IM rcflow.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
+procedure DeinitializeSetup;
+begin
+  // Called when setup exits (including after cancel/rollback).
+  // Kill any rcflow.exe that might still be running from the migration step.
+  KillRCFlowProcesses;
+end;
+
+procedure DeinitializeUninstall;
+begin
+  KillRCFlowProcesses;
+end;

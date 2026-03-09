@@ -22,10 +22,7 @@ class CustomTitleBar extends StatelessWidget {
     final connecting = context.select<AppState, bool>((s) => s.connecting);
     final allConnected =
         context.select<AppState, bool>((s) => s.allConnected);
-    final connCount =
-        context.select<AppState, int>((s) => s.connectedWorkerCount);
-    final totalCount =
-        context.select<AppState, int>((s) => s.totalWorkerCount);
+
 
     return Container(
       height: 40,
@@ -58,11 +55,7 @@ class CustomTitleBar extends StatelessWidget {
                       ),
                       const SizedBox(width: 10),
                       Text(
-                        connecting
-                            ? 'Connecting...'
-                            : totalCount > 1
-                                ? 'RCFlow ($connCount/$totalCount)'
-                                : 'RCFlow',
+                        'RCFlow',
                         style: TextStyle(
                           fontSize: 15,
                           fontWeight: FontWeight.w600,
@@ -305,7 +298,7 @@ class _WindowButtonState extends State<_WindowButton> {
 }
 
 class _MinimizeIcon extends StatelessWidget {
-  _MinimizeIcon();
+  const _MinimizeIcon();
 
   @override
   Widget build(BuildContext context) {

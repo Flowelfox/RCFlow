@@ -4,10 +4,15 @@ import 'package:flutter/widgets.dart';
 
 import 'dart:math';
 
+import '../models/artifact_info.dart';
 import '../models/session_info.dart';
 import '../models/split_tree.dart';
+import '../models/task_info.dart';
 import '../models/worker_config.dart';
+import '../models/app_notification.dart';
 import '../services/foreground_service.dart';
+import '../services/hotkey_service.dart';
+import '../services/notification_service.dart';
 import '../services/notification_sound_service.dart';
 import '../services/settings_service.dart';
 import '../services/websocket_service.dart';
@@ -19,6 +24,27 @@ import 'pane_state.dart';
 class AppState extends ChangeNotifier implements PaneHost {
   final SettingsService _settings;
   late final NotificationSoundService _soundService;
+  late final NotificationService _notificationService;
+  late final HotkeyService _hotkeyService;
+
+  // Previous worker statuses for detecting transitions
+  final Map<String, WorkerConnectionStatus> _prevWorkerStatuses = {};
+
+  // Sidebar visibility (toggled via hotkey)
+  bool _sidebarVisible = true;
+  bool get sidebarVisible => _sidebarVisible;
+
+  void toggleSidebar() {
+    _sidebarVisible = !_sidebarVisible;
+    notifyListeners();
+  }
+
+  // Input focus request notifier (incremented to signal focus request)
+  final ValueNotifier<int> inputFocusRequest = ValueNotifier(0);
+
+  void requestInputFocus() {
+    inputFocusRequest.value++;
+  }
 
   // --- Workers ---
   final Map<String, WorkerConnection> _workers = {};
@@ -76,15 +102,6 @@ class AppState extends ChangeNotifier implements PaneHost {
     return all;
   }
 
-  // --- Hide terminal sessions ---
-
-  bool get hideTerminalSessions => _settings.hideTerminalSessions;
-
-  void toggleHideTerminalSessions() {
-    _settings.hideTerminalSessions = !_settings.hideTerminalSessions;
-    notifyListeners();
-  }
-
   // --- Appearance settings (need notifyListeners for reactive rebuild) ---
 
   void updateAppearance({String? themeMode, String? fontSize, bool? compactMode}) {
@@ -94,25 +111,101 @@ class AppState extends ChangeNotifier implements PaneHost {
     notifyListeners();
   }
 
-  static const _terminalStatuses = {'completed', 'failed', 'cancelled'};
-
   /// Sessions grouped by workerId.
   Map<String, List<SessionInfo>> get sessionsByWorker {
-    final hide = hideTerminalSessions;
     final map = <String, List<SessionInfo>>{};
     for (final config in _workerConfigs) {
       final worker = _workers[config.id];
-      var sessions = worker?.sessions ?? <SessionInfo>[];
-      if (hide) {
-        sessions = sessions.where((s) {
-          if (!_terminalStatuses.contains(s.status)) return true;
-          return isSessionViewed(s.sessionId);
-        }).toList();
-      }
-      map[config.id] = sessions;
+      map[config.id] = worker?.sessions ?? <SessionInfo>[];
     }
     return map;
   }
+
+  // --- Session actions (routed by session's own workerId) ---
+
+  /// Get the [WebSocketService] for a session's owning worker.
+  WebSocketService? _wsForSession(String workerId) {
+    final worker = _workers[workerId];
+    if (worker == null || !worker.isConnected) return null;
+    return worker.ws;
+  }
+
+  Future<void> pauseSessionDirect(String sessionId, String workerId) async {
+    try {
+      await _wsForSession(workerId)?.pauseSession(sessionId);
+      refreshSessions();
+    } catch (e) {
+      addSystemMessage('Failed to pause session: $e', isError: true);
+    }
+  }
+
+  Future<void> resumeSessionDirect(String sessionId, String workerId) async {
+    try {
+      await _wsForSession(workerId)?.resumeSession(sessionId);
+      refreshSessions();
+    } catch (e) {
+      addSystemMessage('Failed to resume session: $e', isError: true);
+    }
+  }
+
+  // Track session IDs ended by the user to suppress duplicate notifications.
+  final Set<String> _userEndedSessionIds = {};
+
+  Future<void> cancelSessionDirect(String sessionId, String workerId) async {
+    try {
+      _userEndedSessionIds.add(sessionId);
+      await _wsForSession(workerId)?.cancelSession(sessionId);
+      // If any pane is viewing this session, clean it up
+      for (final pane in _panes.values) {
+        if (pane.sessionId == sessionId) {
+          pane.finalizeStream();
+          pane.goHome();
+        }
+      }
+      _notificationService.show(
+        level: NotificationLevel.info,
+        title: 'Session Ended',
+      );
+      refreshSessions();
+    } catch (e) {
+      addSystemMessage('Failed to cancel session: $e', isError: true);
+    }
+  }
+
+  Future<void> restoreSessionDirect(String sessionId, String workerId) async {
+    try {
+      await _wsForSession(workerId)?.restoreSession(sessionId);
+      // Update any panes currently viewing this session
+      final viewingPanes = _findPanesForSession(sessionId);
+      if (viewingPanes.isNotEmpty) {
+        for (final pane in viewingPanes) {
+          pane.handleSessionRestored(sessionId);
+        }
+        // Resubscribe to session output (once, not per-pane)
+        _wsForSession(workerId)?.subscribe(sessionId);
+        markSubscribed(sessionId, workerId: workerId);
+      }
+      refreshSessions();
+    } catch (e) {
+      addSystemMessage('Failed to restore session: $e', isError: true);
+    }
+  }
+
+  Future<void> renameSessionDirect(
+      String sessionId, String workerId, String newTitle) async {
+    final title = newTitle.trim().isEmpty ? null : newTitle.trim();
+    try {
+      await _wsForSession(workerId)?.renameSession(sessionId, title);
+      refreshSessions();
+    } catch (e) {
+      addSystemMessage('Failed to rename session: $e', isError: true);
+    }
+  }
+
+  // --- Closed pane history (for reopen-last-closed) ---
+  static const _maxClosedPaneHistory = 30;
+  final List<_ClosedPaneRecord> _closedPaneHistory = [];
+  bool get hasClosedPaneHistory => _closedPaneHistory.isNotEmpty;
 
   // --- Split pane state ---
   final Map<String, PaneState> _panes = {};
@@ -160,6 +253,319 @@ class AppState extends ChangeNotifier implements PaneHost {
     return map;
   }
 
+  // --- Task tracking ---
+  final Map<String, TaskInfo> _tasks = {};
+
+  /// All tasks sorted by updatedAt descending.
+  List<TaskInfo> get tasks {
+    final all = _tasks.values.toList();
+    all.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+    return all;
+  }
+
+  /// Tasks grouped by workerId (for sidebar display).
+  Map<String, List<TaskInfo>> get tasksByWorker {
+    final map = <String, List<TaskInfo>>{};
+    for (final config in _workerConfigs) {
+      map[config.id] = [];
+    }
+    for (final t in _tasks.values) {
+      map.putIfAbsent(t.workerId, () => []).add(t);
+    }
+    for (final list in map.values) {
+      list.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+    }
+    return map;
+  }
+
+  TaskInfo? getTask(String taskId) => _tasks[taskId];
+
+  /// Check if a session is attached to any task (for sidebar indicator).
+  bool isSessionAttachedToTask(String sessionId) {
+    return _tasks.values.any(
+      (t) => t.sessions.any((s) => s.sessionId == sessionId),
+    );
+  }
+
+  /// Get all tasks that a session is attached to.
+  List<TaskInfo> tasksForSession(String sessionId) {
+    return _tasks.values
+        .where((t) => t.sessions.any((s) => s.sessionId == sessionId))
+        .toList();
+  }
+
+  void _handleTaskList(List<dynamic> list, String workerId) {
+    // Remove existing tasks from this worker
+    _tasks.removeWhere((_, t) => t.workerId == workerId);
+    final workerName = _workerConfigs
+        .firstWhere((w) => w.id == workerId, orElse: () => _workerConfigs.first)
+        .name;
+    for (final raw in list) {
+      final t = TaskInfo.fromJson(
+        raw as Map<String, dynamic>,
+        workerId: workerId,
+        workerName: workerName,
+      );
+      _tasks[t.taskId] = t;
+    }
+    notifyListeners();
+  }
+
+  void _handleTaskUpdate(Map<String, dynamic> msg, String workerId) {
+    final taskId = msg['task_id'] as String?;
+    if (taskId == null) return;
+    final workerName = _workerConfigs
+        .firstWhere((w) => w.id == workerId, orElse: () => _workerConfigs.first)
+        .name;
+    final existing = _tasks[taskId];
+    final updated = TaskInfo.fromJson(msg, workerId: workerId, workerName: workerName);
+    _tasks[taskId] = updated;
+
+    // N3: Task created (new task ID)
+    if (existing == null) {
+      _showToast(
+        level: NotificationLevel.info,
+        title: 'Task Created',
+        body: updated.title,
+        category: _ToastCategory.task,
+        onAction: () => openTaskInPane(taskId),
+      );
+    }
+    // N2: Task status changed
+    else if (existing.status != updated.status) {
+      _showToast(
+        level: NotificationLevel.warning,
+        title: 'Task Status Changed',
+        body: '${updated.title}: ${existing.status} \u2192 ${updated.status}',
+        category: _ToastCategory.task,
+        onAction: () => openTaskInPane(taskId),
+      );
+    }
+
+    notifyListeners();
+  }
+
+  void _handleTaskDeleted(Map<String, dynamic> msg) {
+    final taskId = msg['task_id'] as String?;
+    if (taskId == null) return;
+    _tasks.remove(taskId);
+
+    // Close any pane currently viewing this task
+    for (final entry in _panes.entries.toList()) {
+      if (_paneTypes[entry.key] == PaneType.task &&
+          entry.value.taskId == taskId) {
+        closeTaskView(entry.key);
+      }
+    }
+
+    notifyListeners();
+  }
+
+  // --- Artifact tracking ---
+  final Map<String, ArtifactInfo> _artifacts = {};
+
+  /// All artifacts sorted by discoveredAt descending.
+  List<ArtifactInfo> get artifacts {
+    final all = _artifacts.values.toList();
+    all.sort((a, b) {
+      final aTime = a.discoveredAt ?? DateTime(1970);
+      final bTime = b.discoveredAt ?? DateTime(1970);
+      return bTime.compareTo(aTime);
+    });
+    return all;
+  }
+
+  /// Get a single artifact by ID.
+  ArtifactInfo? getArtifact(String artifactId) => _artifacts[artifactId];
+
+  /// Load artifacts from all connected workers.
+  void loadArtifacts() {
+    for (final worker in _workers.values) {
+      if (worker.isConnected) {
+        worker.ws.requestArtifacts();
+      }
+    }
+  }
+
+  void _handleArtifactList(List<dynamic> list, String workerId) {
+    // Remove existing artifacts from this worker
+    _artifacts.removeWhere((_, a) => a.workerId == workerId);
+    final workerName = _workerConfigs
+        .firstWhere((w) => w.id == workerId, orElse: () => _workerConfigs.first)
+        .name;
+    for (final raw in list) {
+      final a = ArtifactInfo.fromJson(
+        raw as Map<String, dynamic>,
+        workerId: workerId,
+        workerName: workerName,
+      );
+      _artifacts[a.artifactId] = a;
+    }
+    notifyListeners();
+  }
+
+  void _handleArtifactUpdate(Map<String, dynamic> msg, String workerId) {
+    final artifactId = msg['artifact_id'] as String?;
+    if (artifactId == null) return;
+    final workerName = _workerConfigs
+        .firstWhere((w) => w.id == workerId, orElse: () => _workerConfigs.first)
+        .name;
+    final updated = ArtifactInfo.fromJson(msg, workerId: workerId, workerName: workerName);
+    _artifacts[artifactId] = updated;
+    notifyListeners();
+  }
+
+  void _handleArtifactDeleted(Map<String, dynamic> msg) {
+    final artifactId = msg['artifact_id'] as String?;
+    if (artifactId == null) return;
+    _artifacts.remove(artifactId);
+
+    // Close any pane currently viewing this artifact
+    for (final entry in _panes.entries.toList()) {
+      if (_paneTypes[entry.key] == PaneType.artifact &&
+          entry.value.artifactId == artifactId) {
+        closeArtifactView(entry.key);
+      }
+    }
+
+    notifyListeners();
+  }
+
+  /// Show an artifact in the active pane (converting it in-place).
+  void openArtifactInPane(String artifactId) {
+    if (_splitRoot != null && _panes.containsKey(_activePaneId)) {
+      // Push current view to nav history
+      activePane.pushNavHistory(_currentNavEntry(_activePaneId));
+
+      // Detach any existing terminal from this pane
+      if (_paneTypes[_activePaneId] == PaneType.terminal) {
+        for (final info in _terminalSessions.values) {
+          if (info.paneId == _activePaneId) {
+            info.paneId = null;
+            break;
+          }
+        }
+      }
+      _paneTypes[_activePaneId] = PaneType.artifact;
+      activePane.setArtifactId(artifactId);
+      notifyListeners();
+      return;
+    }
+
+    // No panes — create one
+    final newId = 'pane_${_nextPaneId++}';
+    final newPane = PaneState(paneId: newId, host: this)
+      ..addListener(_onPaneChanged);
+    _panes[newId] = newPane;
+    _paneTypes[newId] = PaneType.artifact;
+    _splitRoot = PaneLeaf(newId);
+    _activePaneId = newId;
+    newPane.setArtifactId(artifactId);
+    notifyListeners();
+  }
+
+  /// Close artifact view for a pane (convert to session).
+  void closeArtifactView(String paneId) {
+    if (_paneTypes[paneId] != PaneType.artifact) return;
+    _paneTypes.remove(paneId);
+    _panes[paneId]?.clearArtifactId();
+    notifyListeners();
+  }
+
+  /// Show a task in the active pane (converting it in-place).
+  void openTaskInPane(String taskId) {
+    if (_splitRoot != null && _panes.containsKey(_activePaneId)) {
+      // Push current view to nav history
+      activePane.pushNavHistory(_currentNavEntry(_activePaneId));
+
+      // Detach any existing terminal from this pane
+      if (_paneTypes[_activePaneId] == PaneType.terminal) {
+        for (final info in _terminalSessions.values) {
+          if (info.paneId == _activePaneId) {
+            info.paneId = null;
+            break;
+          }
+        }
+      }
+      _paneTypes[_activePaneId] = PaneType.task;
+      activePane.setTaskId(taskId);
+      notifyListeners();
+      return;
+    }
+
+    // No panes — create one
+    final newId = 'pane_${_nextPaneId++}';
+    final newPane = PaneState(paneId: newId, host: this)
+      ..addListener(_onPaneChanged);
+    _panes[newId] = newPane;
+    _paneTypes[newId] = PaneType.task;
+    newPane.setTaskId(taskId);
+    _splitRoot = PaneLeaf(newId);
+    _activePaneId = newId;
+    notifyListeners();
+  }
+
+  /// Split a pane with a task via drag-and-drop.
+  void splitPaneWithTask(String paneId, DropZone zone, String taskId) {
+    if (_splitRoot == null || !_panes.containsKey(paneId)) return;
+
+    final newId = 'pane_${_nextPaneId++}';
+    final newPane = PaneState(paneId: newId, host: this)
+      ..addListener(_onPaneChanged);
+    _panes[newId] = newPane;
+    _paneTypes[newId] = PaneType.task;
+    newPane.setTaskId(taskId);
+
+    _splitRoot = treeSplitPaneAtPosition(
+      _splitRoot!,
+      paneId,
+      newId,
+      dropZoneAxis(zone),
+      insertFirst: dropZoneIsFirst(zone),
+    );
+    _activePaneId = newId;
+    notifyListeners();
+  }
+
+  /// Convert a task pane back to a chat pane.
+  void closeTaskView(String paneId) {
+    _paneTypes.remove(paneId);
+    final pane = _panes[paneId];
+    pane?.setTaskId(null);
+    notifyListeners();
+  }
+
+  /// Start a new session from a task, sending the task context as the initial
+  /// prompt and auto-attaching the session to the task.
+  void startSessionFromTask(String paneId, TaskInfo task) {
+    final pane = _panes[paneId];
+    if (pane == null) return;
+
+    // Switch pane from task view to chat view
+    closeTaskView(paneId);
+
+    // Reset to fresh chat state
+    pane.startNewChat();
+    pane.setTargetWorker(task.workerId);
+
+    // After the new session is created (ack), attach it to the task.
+    pane.setNewSessionCallback((sessionId) {
+      final worker = _workers[task.workerId];
+      if (worker != null && worker.isConnected) {
+        worker.ws.attachSessionToTask(task.taskId, sessionId);
+      }
+    });
+
+    // Build context prompt from task
+    final buffer = StringBuffer('Task: ${task.title}');
+    if (task.description != null && task.description!.isNotEmpty) {
+      buffer.write('\n\n${task.description}');
+    }
+
+    // Send prompt — creates a new session since sessionId is null
+    pane.sendPrompt(buffer.toString());
+  }
+
   PaneState get activePane {
     assert(_panes.isNotEmpty, 'No panes available');
     return _panes[_activePaneId]!;
@@ -167,6 +573,8 @@ class AppState extends ChangeNotifier implements PaneHost {
 
   SettingsService get settings => _settings;
   NotificationSoundService get soundService => _soundService;
+  NotificationService get notificationService => _notificationService;
+  HotkeyService get hotkeyService => _hotkeyService;
 
   // Backward-compat getters delegating to active pane
   String? get currentSessionId => hasNoPanes ? null : activePane.sessionId;
@@ -183,6 +591,8 @@ class AppState extends ChangeNotifier implements PaneHost {
         _splitRoot = const PaneLeaf('pane_0'),
         _activePaneId = 'pane_0' {
     _soundService = NotificationSoundService(settings: _settings);
+    _notificationService = NotificationService();
+    _hotkeyService = HotkeyService(settings: _settings);
     _panes['pane_0'] = PaneState(paneId: 'pane_0', host: this)
       ..addListener(_onPaneChanged);
 
@@ -224,7 +634,106 @@ class AppState extends ChangeNotifier implements PaneHost {
     } else if (!connecting) {
       ForegroundServiceHelper.stop();
     }
+
+    // Detect worker connection transitions for toast notifications
+    if (_settings.toastEnabled && _settings.toastConnections) {
+      for (final worker in _workers.values) {
+        final prev = _prevWorkerStatuses[worker.config.id];
+        final curr = worker.status;
+        if (prev != null && prev != curr) {
+          _fireWorkerConnectionNotification(worker, prev, curr);
+        }
+        _prevWorkerStatuses[worker.config.id] = curr;
+      }
+    } else {
+      // Still track statuses even when disabled so we don't fire stale events
+      for (final worker in _workers.values) {
+        _prevWorkerStatuses[worker.config.id] = worker.status;
+      }
+    }
+
     notifyListeners();
+  }
+
+  void _fireWorkerConnectionNotification(
+    WorkerConnection worker,
+    WorkerConnectionStatus prev,
+    WorkerConnectionStatus curr,
+  ) {
+    final name = worker.config.name;
+
+    // N5: Lost connection (was connected, now disconnected or reconnecting)
+    if (prev == WorkerConnectionStatus.connected &&
+        (curr == WorkerConnectionStatus.disconnected ||
+         curr == WorkerConnectionStatus.reconnecting)) {
+      _notificationService.show(
+        level: NotificationLevel.error,
+        title: 'Lost Connection',
+        body: 'Disconnected from $name',
+      );
+      return;
+    }
+
+    // N6: Reconnected (was reconnecting, now connected)
+    if (prev == WorkerConnectionStatus.reconnecting &&
+        curr == WorkerConnectionStatus.connected) {
+      _notificationService.show(
+        level: NotificationLevel.info,
+        title: 'Reconnected',
+        body: 'Connection to $name restored',
+      );
+      return;
+    }
+
+    // N7: Reconnection failed (was reconnecting, now disconnected = retries exhausted)
+    if (prev == WorkerConnectionStatus.reconnecting &&
+        curr == WorkerConnectionStatus.disconnected) {
+      _notificationService.show(
+        level: NotificationLevel.error,
+        title: 'Reconnection Failed',
+        body: 'Could not reconnect to $name after ${WorkerConnection.maxRetries} attempts',
+      );
+      return;
+    }
+  }
+
+  // --- Toast notification helpers ---
+
+  void _showToast({
+    required NotificationLevel level,
+    required String title,
+    String? body,
+    required _ToastCategory category,
+    String? actionLabel,
+    VoidCallback? onAction,
+  }) {
+    if (!_settings.toastEnabled) return;
+    switch (category) {
+      case _ToastCategory.connection:
+        if (!_settings.toastConnections) return;
+      case _ToastCategory.task:
+        if (!_settings.toastTasks) return;
+      case _ToastCategory.session:
+        if (!_settings.toastBackgroundSessions) return;
+    }
+    _notificationService.show(
+      level: level,
+      title: title,
+      body: body,
+      actionLabel: actionLabel,
+      onAction: onAction,
+    );
+  }
+
+  String _sessionLabel(String sessionId) {
+    for (final w in _workers.values) {
+      for (final s in w.sessions) {
+        if (s.sessionId == sessionId) {
+          return s.title ?? sessionId.substring(0, 8);
+        }
+      }
+    }
+    return sessionId.substring(0, 8);
   }
 
   void _onWorkerSessionsChanged() {
@@ -236,7 +745,7 @@ class AppState extends ChangeNotifier implements PaneHost {
           worker.clearPendingAutoLoad();
           final exists = worker.sessions.any((s) => s.sessionId == pendingId);
           if (exists) {
-            Future.microtask(() => activePane.switchSession(pendingId));
+            Future.microtask(() => activePane.switchSession(pendingId, recordHistory: false));
           }
         }
       }
@@ -260,6 +769,12 @@ class AppState extends ChangeNotifier implements PaneHost {
                   'Failed to connect to ${config.name}: $e',
                   isError: true);
             }
+            _showToast(
+              level: NotificationLevel.error,
+              title: 'Connection Failed',
+              body: 'Could not connect to ${config.name}',
+              category: _ToastCategory.connection,
+            );
           }
         }
       }
@@ -281,7 +796,7 @@ class AppState extends ChangeNotifier implements PaneHost {
 
     final old = _workerConfigs[idx];
     final needsReconnect =
-        old.host != config.host || old.apiKey != config.apiKey || old.useSSL != config.useSSL;
+        old.host != config.host || old.port != config.port || old.apiKey != config.apiKey || old.useSSL != config.useSSL;
 
     _workerConfigs[idx] = config;
     _settings.workers = _workerConfigs;
@@ -330,6 +845,12 @@ class AppState extends ChangeNotifier implements PaneHost {
             'Failed to connect to ${worker.config.name}: $e',
             isError: true);
       }
+      _showToast(
+        level: NotificationLevel.error,
+        title: 'Connection Failed',
+        body: 'Could not connect to ${worker.config.name}',
+        category: _ToastCategory.connection,
+      );
     }
   }
 
@@ -363,6 +884,16 @@ class AppState extends ChangeNotifier implements PaneHost {
     return null;
   }
 
+  /// Get the [WorkerConnection] that owns the given session, if any.
+  WorkerConnection? workerForSession(String sessionId) {
+    for (final worker in _workers.values) {
+      if (worker.sessions.any((s) => s.sessionId == sessionId)) {
+        return worker;
+      }
+    }
+    return null;
+  }
+
   @override
   void refreshSessions() {
     for (final worker in _workers.values) {
@@ -383,6 +914,15 @@ class AppState extends ChangeNotifier implements PaneHost {
     if (!stillViewed) {
       _workers[workerId]?.unsubscribe(sessionId);
     }
+  }
+
+  @override
+  void showNotification({
+    required NotificationLevel level,
+    required String title,
+    String? body,
+  }) {
+    _notificationService.show(level: level, title: title, body: body);
   }
 
   @override
@@ -446,15 +986,51 @@ class AppState extends ChangeNotifier implements PaneHost {
     notifyListeners();
   }
 
-  void closePane(String paneId) {
+  void closePane(String paneId, {bool recordHistory = true}) {
     if (_splitRoot == null || !_panes.containsKey(paneId)) return;
 
+    // Record closed pane state before destroying it
+    String? closedTerminalId;
+    String? closedTaskId;
+    String? closedArtifactId;
+    final paneType = _paneTypes[paneId] ?? PaneType.chat;
+
     // For terminal panes: detach but keep the session alive
-    if (_paneTypes[paneId] == PaneType.terminal) {
+    if (paneType == PaneType.terminal) {
       for (final info in _terminalSessions.values) {
         if (info.paneId == paneId) {
+          closedTerminalId = info.terminalId;
           info.paneId = null; // Detach from pane, PTY stays alive
           break;
+        }
+      }
+    }
+
+    // For task panes: record the task ID for reopen
+    if (paneType == PaneType.task) {
+      closedTaskId = _panes[paneId]?.taskId;
+    }
+
+    // For artifact panes: record the artifact ID for reopen
+    if (paneType == PaneType.artifact) {
+      closedArtifactId = _panes[paneId]?.artifactId;
+    }
+
+    final pane = _panes[paneId];
+    if (recordHistory && pane != null) {
+      final record = _ClosedPaneRecord(
+        sessionId: pane.sessionId,
+        workerId: pane.workerId,
+        paneType: paneType,
+        terminalId: closedTerminalId,
+        taskId: closedTaskId,
+        artifactId: closedArtifactId,
+      );
+      // Only record if the pane had meaningful state
+      if (record.sessionId != null || record.terminalId != null || record.taskId != null || record.artifactId != null) {
+        _closedPaneHistory.add(record);
+        if (_closedPaneHistory.length > _maxClosedPaneHistory) {
+          _closedPaneHistory.removeAt(0);
         }
       }
     }
@@ -464,7 +1040,7 @@ class AppState extends ChangeNotifier implements PaneHost {
 
     final newRoot = treeClosePane(_splitRoot!, paneId);
 
-    final pane = _panes.remove(paneId);
+    _panes.remove(paneId);
     final closedSessionId = pane?.sessionId;
     final closedWorkerId = pane?.workerId;
     pane?.removeListener(_onPaneChanged);
@@ -481,6 +1057,72 @@ class AppState extends ChangeNotifier implements PaneHost {
     }
 
     notifyListeners();
+  }
+
+  /// Reopen the most recently closed pane by popping from the history stack.
+  void reopenLastClosedPane() {
+    if (_closedPaneHistory.isEmpty) return;
+
+    final record = _closedPaneHistory.removeLast();
+
+    if (record.paneType == PaneType.terminal && record.terminalId != null) {
+      // Reopen terminal pane if the terminal session still exists
+      if (_terminalSessions.containsKey(record.terminalId)) {
+        if (hasNoPanes) {
+          showTerminalInPane(record.terminalId!);
+        } else {
+          splitPane(_activePaneId, SplitAxis.horizontal);
+          // The new pane is now active; convert it to show the terminal
+          showTerminalInPane(record.terminalId!);
+        }
+        return;
+      }
+      // Terminal no longer exists — skip this record, try next
+      reopenLastClosedPane();
+      return;
+    }
+
+    // Task pane: reopen if the task still exists
+    if (record.paneType == PaneType.task && record.taskId != null) {
+      if (_tasks.containsKey(record.taskId)) {
+        if (hasNoPanes) {
+          openTaskInPane(record.taskId!);
+        } else {
+          splitPane(_activePaneId, SplitAxis.horizontal);
+          openTaskInPane(record.taskId!);
+        }
+        return;
+      }
+      reopenLastClosedPane();
+      return;
+    }
+
+    // Artifact pane: reopen if the artifact still exists
+    if (record.paneType == PaneType.artifact && record.artifactId != null) {
+      if (_artifacts.containsKey(record.artifactId)) {
+        if (hasNoPanes) {
+          openArtifactInPane(record.artifactId!);
+        } else {
+          splitPane(_activePaneId, SplitAxis.horizontal);
+          openArtifactInPane(record.artifactId!);
+        }
+        return;
+      }
+      reopenLastClosedPane();
+      return;
+    }
+
+    // Chat pane: reopen with the session if it still exists
+    if (record.sessionId != null) {
+      if (hasNoPanes) {
+        final pane = createNewPane();
+        pane.switchSession(record.sessionId!);
+      } else {
+        splitPane(_activePaneId, SplitAxis.horizontal);
+        activePane.switchSession(record.sessionId!);
+      }
+      return;
+    }
   }
 
   void setActivePane(String paneId) {
@@ -503,28 +1145,46 @@ class AppState extends ChangeNotifier implements PaneHost {
 
   int get paneCount => _splitRoot != null ? treePaneCount(_splitRoot!) : 0;
 
-  /// Returns a non-terminal [PaneState], creating one via split if necessary.
-  /// Use this when an action (e.g. "New Session", session tap) should target a
-  /// chat pane but the active pane is a terminal.
+  /// Returns a non-terminal, non-task [PaneState], creating one via split if
+  /// necessary. Use this when an action (e.g. "New Session", session tap)
+  /// should target a chat pane but the active pane is a terminal or task view.
   PaneState ensureChatPane() {
     // No panes at all — create a fresh one (welcome screen → first pane).
     if (hasNoPanes) return createNewPane();
 
+    final paneType = _paneTypes[_activePaneId];
+
     // If the active pane is already a chat pane, return it.
-    if (_paneTypes[_activePaneId] != PaneType.terminal) {
+    if (paneType == null || paneType == PaneType.chat) {
       return activePane;
     }
 
+    // Push current view to nav history before converting
+    activePane.pushNavHistory(_currentNavEntry(_activePaneId));
+
     // Active pane is a terminal — convert it to a chat pane in-place.
     // Detach the terminal session (PTY stays alive server-side).
-    for (final info in _terminalSessions.values) {
-      if (info.paneId == _activePaneId) {
-        info.paneId = null;
-        break;
+    if (paneType == PaneType.terminal) {
+      for (final info in _terminalSessions.values) {
+        if (info.paneId == _activePaneId) {
+          info.paneId = null;
+          break;
+        }
       }
+      _terminalPaneKeys.remove(_activePaneId);
     }
+
+    // Active pane is a task view — convert it to a chat pane in-place.
+    if (paneType == PaneType.task) {
+      activePane.setTaskId(null);
+    }
+
+    // Active pane is an artifact view — convert it to a chat pane in-place.
+    if (paneType == PaneType.artifact) {
+      activePane.clearArtifactId();
+    }
+
     _paneTypes.remove(_activePaneId);
-    _terminalPaneKeys.remove(_activePaneId);
     notifyListeners();
     return activePane;
   }
@@ -781,9 +1441,48 @@ class AppState extends ChangeNotifier implements PaneHost {
     'plan_review_ask',
   };
 
+  // Message types that indicate a session is waiting for user input
+  static const _awaitingInputTypes = {
+    'summary',
+    'session_end_ask',
+    'plan_mode_ask',
+    'plan_review_ask',
+    'permission_request',
+  };
+
   void _handleOutputMessage(Map<String, dynamic> msg, String workerId) {
     final type = msg['type'] as String?;
     if (type == null) return;
+
+    // Task messages — handled here, not forwarded to panes
+    if (type == 'task_list') {
+      final list = msg['tasks'] as List<dynamic>? ?? [];
+      _handleTaskList(list, workerId);
+      return;
+    }
+    if (type == 'task_update') {
+      _handleTaskUpdate(msg, workerId);
+      return;
+    }
+    if (type == 'task_deleted') {
+      _handleTaskDeleted(msg);
+      return;
+    }
+
+    // Artifact messages — handled here, not forwarded to panes
+    if (type == 'artifact_list') {
+      final list = msg['artifacts'] as List<dynamic>? ?? [];
+      _handleArtifactList(list, workerId);
+      return;
+    }
+    if (type == 'artifact_update') {
+      _handleArtifactUpdate(msg, workerId);
+      return;
+    }
+    if (type == 'artifact_deleted') {
+      _handleArtifactDeleted(msg);
+      return;
+    }
 
     final sessionId = msg['session_id'] as String?;
     final muted = sessionId != null && _soundMutedSessions.contains(sessionId);
@@ -794,6 +1493,95 @@ class AppState extends ChangeNotifier implements PaneHost {
           _settings.soundEnabled && _messageSoundTypes.contains(type);
       if (playForComplete || playForMessage) {
         _soundService.playNotificationSound();
+      }
+    }
+
+    // Toast notifications for background sessions
+    if (sessionId != null) {
+      final sessionVisible = _findPanesForSession(sessionId).isNotEmpty;
+
+      if (!sessionVisible) {
+        // N4: Session awaiting input (not visible in any pane)
+        if (_awaitingInputTypes.contains(type)) {
+          final label = _sessionLabel(sessionId);
+          _showToast(
+            level: NotificationLevel.warning,
+            title: 'Waiting for Input',
+            body: label,
+            category: _ToastCategory.session,
+            onAction: () => _navigateToSession(sessionId),
+          );
+        }
+
+        // N11: Error in background session
+        if (type == 'error') {
+          final label = _sessionLabel(sessionId);
+          final content = msg['content'] as String? ?? 'Unknown error';
+          _showToast(
+            level: NotificationLevel.error,
+            title: 'Session Error',
+            body: '$label: $content',
+            category: _ToastCategory.session,
+            onAction: () => _navigateToSession(sessionId),
+          );
+        }
+
+        // N12: Session completed (background)
+        if (type == 'session_end') {
+          final label = _sessionLabel(sessionId);
+          _showToast(
+            level: NotificationLevel.info,
+            title: 'Session Completed',
+            body: label,
+            category: _ToastCategory.session,
+            onAction: () => _navigateToSession(sessionId),
+          );
+        }
+      }
+
+      // N10: Token limit reached (always show, even if visible)
+      if (type == 'error') {
+        final code = msg['code'] as String?;
+        if (code == 'TOKEN_LIMIT_REACHED') {
+          final label = _sessionLabel(sessionId);
+          _showToast(
+            level: NotificationLevel.warning,
+            title: 'Token Limit Reached',
+            body: label,
+            category: _ToastCategory.session,
+            onAction: () => _navigateToSession(sessionId),
+          );
+        }
+      }
+    }
+
+    // Session status change notifications (N8, N9)
+    if (type == 'session_update' && sessionId != null) {
+      final sessionVisible = _findPanesForSession(sessionId).isNotEmpty;
+      if (!sessionVisible) {
+        final status = msg['status'] as String?;
+        if (status == 'failed') {
+          final label = _sessionLabel(sessionId);
+          _showToast(
+            level: NotificationLevel.error,
+            title: 'Session Failed',
+            body: label,
+            category: _ToastCategory.session,
+            onAction: () => _navigateToSession(sessionId),
+          );
+        } else if (status == 'cancelled') {
+          // Skip if the user just ended this session (already notified).
+          if (!_userEndedSessionIds.remove(sessionId)) {
+            final label = _sessionLabel(sessionId);
+            _showToast(
+              level: NotificationLevel.error,
+              title: 'Session Cancelled',
+              body: label,
+              category: _ToastCategory.session,
+              onAction: () => _navigateToSession(sessionId),
+            );
+          }
+        }
       }
     }
 
@@ -814,6 +1602,163 @@ class AppState extends ChangeNotifier implements PaneHost {
     if (!hasNoPanes) handler(msg, activePane);
   }
 
+  void _navigateToSession(String sessionId) {
+    if (hasNoPanes) {
+      final pane = createNewPane();
+      pane.switchSession(sessionId);
+    } else {
+      // If a pane is already viewing it, just focus it
+      for (final entry in _panes.entries) {
+        if (entry.value.sessionId == sessionId) {
+          setActivePane(entry.key);
+          return;
+        }
+      }
+      // Otherwise switch the active pane to it
+      ensureChatPane().switchSession(sessionId);
+    }
+  }
+
+  /// Navigate a pane back to its previous view by popping the nav history.
+  void goBack(String paneId) {
+    final pane = _panes[paneId];
+    if (pane == null || !pane.canGoBack) return;
+
+    final entry = pane.popNavHistory();
+    if (entry == null) return;
+
+    // Detach terminal if current pane is a terminal
+    if (_paneTypes[paneId] == PaneType.terminal) {
+      for (final info in _terminalSessions.values) {
+        if (info.paneId == paneId) {
+          info.paneId = null;
+          break;
+        }
+      }
+      _terminalPaneKeys.remove(paneId);
+    }
+
+    switch (entry.paneType) {
+      case PaneType.chat:
+        _paneTypes.remove(paneId);
+        pane.clearTaskId();
+        pane.clearArtifactId();
+        if (entry.sessionId != null) {
+          pane.switchSession(entry.sessionId!, recordHistory: false);
+        } else {
+          pane.goHome();
+        }
+      case PaneType.task:
+        _paneTypes[paneId] = PaneType.task;
+        pane.clearArtifactId();
+        pane.setTaskId(entry.taskId);
+      case PaneType.artifact:
+        _paneTypes[paneId] = PaneType.artifact;
+        pane.clearTaskId();
+        pane.setArtifactId(entry.artifactId);
+      case PaneType.terminal:
+        // Terminal back-navigation is not supported (terminals are detached)
+        _paneTypes.remove(paneId);
+        pane.goHome();
+    }
+
+    notifyListeners();
+  }
+
+  /// Capture the current view state of a pane as a [PaneNavEntry].
+  PaneNavEntry _currentNavEntry(String paneId) {
+    final paneType = _paneTypes[paneId] ?? PaneType.chat;
+    final pane = _panes[paneId];
+    return PaneNavEntry(
+      paneType: paneType,
+      sessionId: pane?.sessionId,
+      taskId: pane?.taskId,
+      artifactId: pane?.artifactId,
+    );
+  }
+
+  // --- Pane navigation ---
+
+  /// Focus the nearest pane in the given direction relative to the active pane.
+  void focusAdjacentPane(AxisDirection direction) {
+    if (_splitRoot == null || _panes.length <= 1) return;
+
+    final rects = <String, Rect>{};
+    _computePaneRects(_splitRoot!, const Rect.fromLTWH(0, 0, 1, 1), rects);
+
+    final activeRect = rects[_activePaneId];
+    if (activeRect == null) return;
+
+    final activeCenter = activeRect.center;
+    String? bestPaneId;
+    double bestDistance = double.infinity;
+
+    for (final entry in rects.entries) {
+      if (entry.key == _activePaneId) continue;
+      final candidateCenter = entry.value.center;
+
+      final isInDirection = switch (direction) {
+        AxisDirection.left => candidateCenter.dx < activeCenter.dx,
+        AxisDirection.right => candidateCenter.dx > activeCenter.dx,
+        AxisDirection.up => candidateCenter.dy < activeCenter.dy,
+        AxisDirection.down => candidateCenter.dy > activeCenter.dy,
+      };
+
+      if (!isInDirection) continue;
+
+      final distance = (candidateCenter - activeCenter).distance;
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        bestPaneId = entry.key;
+      }
+    }
+
+    if (bestPaneId != null) {
+      setActivePane(bestPaneId);
+    }
+  }
+
+  void _computePaneRects(SplitNode node, Rect bounds, Map<String, Rect> out) {
+    switch (node) {
+      case PaneLeaf leaf:
+        out[leaf.paneId] = bounds;
+      case SplitBranch branch:
+        if (branch.axis == SplitAxis.horizontal) {
+          final splitX = bounds.left + bounds.width * branch.ratio;
+          _computePaneRects(
+              branch.first,
+              Rect.fromLTRB(bounds.left, bounds.top, splitX, bounds.bottom),
+              out);
+          _computePaneRects(
+              branch.second,
+              Rect.fromLTRB(splitX, bounds.top, bounds.right, bounds.bottom),
+              out);
+        } else {
+          final splitY = bounds.top + bounds.height * branch.ratio;
+          _computePaneRects(
+              branch.first,
+              Rect.fromLTRB(bounds.left, bounds.top, bounds.right, splitY),
+              out);
+          _computePaneRects(
+              branch.second,
+              Rect.fromLTRB(bounds.left, splitY, bounds.right, bounds.bottom),
+              out);
+        }
+    }
+  }
+
+  /// Cycle through panes in tree order.
+  void cyclePaneFocus({required bool forward}) {
+    if (_splitRoot == null || _panes.length <= 1) return;
+    final ids = allPaneIds(_splitRoot!);
+    final currentIdx = ids.indexOf(_activePaneId);
+    if (currentIdx < 0) return;
+    final nextIdx = forward
+        ? (currentIdx + 1) % ids.length
+        : (currentIdx - 1 + ids.length) % ids.length;
+    setActivePane(ids[nextIdx]);
+  }
+
   @override
   void dispose() {
     for (final worker in _workers.values) {
@@ -827,6 +1772,8 @@ class AppState extends ChangeNotifier implements PaneHost {
     }
     _panes.clear();
     _soundService.dispose();
+    _notificationService.dispose();
+    inputFocusRequest.dispose();
     ForegroundServiceHelper.stop();
     super.dispose();
   }
@@ -846,3 +1793,24 @@ SplitNode treeSplitPaneAtPosition(SplitNode node, String targetId,
         String newPaneId, SplitAxis axis, {required bool insertFirst}) =>
     splitPaneAtPosition(node, targetId, newPaneId, axis,
         insertFirst: insertFirst);
+
+enum _ToastCategory { connection, task, session }
+
+/// Snapshot of a closed pane's essential state for the reopen stack.
+class _ClosedPaneRecord {
+  final String? sessionId;
+  final String? workerId;
+  final PaneType paneType;
+  final String? terminalId;
+  final String? taskId;
+  final String? artifactId;
+
+  const _ClosedPaneRecord({
+    this.sessionId,
+    this.workerId,
+    this.paneType = PaneType.chat,
+    this.terminalId,
+    this.taskId,
+    this.artifactId,
+  });
+}

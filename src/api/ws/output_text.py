@@ -4,8 +4,13 @@ import logging
 import uuid
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
+from sqlalchemy import select
 
 from src.api.deps import verify_ws_api_key
+from src.models.db import Artifact as ArtifactModel
+from src.models.db import Task as TaskModel
+from src.models.db import TaskSession as TaskSessionModel
+from src.models.db import Session as SessionModel
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -156,6 +161,13 @@ async def ws_output_text(
                             "session_type": s["session_type"],
                             "created_at": s["created_at"].isoformat(),
                             "title": s.get("title"),
+                            "input_tokens": s.get("input_tokens", 0),
+                            "output_tokens": s.get("output_tokens", 0),
+                            "cache_creation_input_tokens": s.get("cache_creation_input_tokens", 0),
+                            "cache_read_input_tokens": s.get("cache_read_input_tokens", 0),
+                            "tool_input_tokens": s.get("tool_input_tokens", 0),
+                            "tool_output_tokens": s.get("tool_output_tokens", 0),
+                            "tool_cost_usd": s.get("tool_cost_usd", 0.0),
                         }
                         for s in all_sessions
                     ]
@@ -168,10 +180,89 @@ async def ws_output_text(
                             "session_type": s.session_type.value,
                             "created_at": s.created_at.isoformat(),
                             "title": s.title,
+                            "input_tokens": s.input_tokens,
+                            "output_tokens": s.output_tokens,
+                            "cache_creation_input_tokens": s.cache_creation_input_tokens,
+                            "cache_read_input_tokens": s.cache_read_input_tokens,
+                            "tool_input_tokens": s.tool_input_tokens,
+                            "tool_output_tokens": s.tool_output_tokens,
+                            "tool_cost_usd": s.tool_cost_usd,
                         }
                         for s in session_manager.list_all_sessions()
                     ]
                 await websocket.send_json({"type": "session_list", "sessions": sessions})
+
+            elif msg_type == "list_tasks":
+                settings = websocket.app.state.settings
+                db_session_factory = websocket.app.state.db_session_factory
+                if db_session_factory is not None:
+                    async with db_session_factory() as db:
+                        stmt = (
+                            select(TaskModel)
+                            .where(TaskModel.backend_id == settings.RCFLOW_BACKEND_ID)
+                            .order_by(TaskModel.updated_at.desc())
+                        )
+                        result = await db.execute(stmt)
+                        task_rows = result.scalars().all()
+                        tasks_out = []
+                        for t in task_rows:
+                            sess_stmt = (
+                                select(TaskSessionModel, SessionModel)
+                                .join(SessionModel, TaskSessionModel.session_id == SessionModel.id)
+                                .where(TaskSessionModel.task_id == t.id)
+                                .order_by(TaskSessionModel.attached_at.desc())
+                            )
+                            sess_result = await db.execute(sess_stmt)
+                            sess_refs = []
+                            for ts_row, sess_row in sess_result.all():
+                                sess_refs.append({
+                                    "session_id": str(sess_row.id),
+                                    "title": sess_row.title,
+                                    "status": sess_row.status,
+                                    "attached_at": ts_row.attached_at.isoformat() if ts_row.attached_at else "",
+                                })
+                            tasks_out.append({
+                                "task_id": str(t.id),
+                                "title": t.title,
+                                "description": t.description,
+                                "status": t.status,
+                                "source": t.source,
+                                "created_at": t.created_at.isoformat() if t.created_at else "",
+                                "updated_at": t.updated_at.isoformat() if t.updated_at else "",
+                                "sessions": sess_refs,
+                            })
+                    await websocket.send_json({"type": "task_list", "tasks": tasks_out})
+                else:
+                    await websocket.send_json({"type": "task_list", "tasks": []})
+
+            elif msg_type == "list_artifacts":
+                settings = websocket.app.state.settings
+                db_session_factory = websocket.app.state.db_session_factory
+                if db_session_factory is not None:
+                    async with db_session_factory() as db:
+                        stmt = (
+                            select(ArtifactModel)
+                            .where(ArtifactModel.backend_id == settings.RCFLOW_BACKEND_ID)
+                            .order_by(ArtifactModel.discovered_at.desc())
+                        )
+                        result = await db.execute(stmt)
+                        artifact_rows = result.scalars().all()
+                        artifacts_out = []
+                        for a in artifact_rows:
+                            artifacts_out.append({
+                                "artifact_id": str(a.id),
+                                "file_path": a.file_path,
+                                "file_name": a.file_name,
+                                "file_extension": a.file_extension,
+                                "file_size": a.file_size,
+                                "mime_type": a.mime_type,
+                                "discovered_at": a.discovered_at.isoformat() if a.discovered_at else "",
+                                "modified_at": a.modified_at.isoformat() if a.modified_at else "",
+                                "session_id": str(a.session_id) if a.session_id else None,
+                            })
+                    await websocket.send_json({"type": "artifact_list", "artifacts": artifacts_out})
+                else:
+                    await websocket.send_json({"type": "artifact_list", "artifacts": []})
 
             else:
                 await websocket.send_json(

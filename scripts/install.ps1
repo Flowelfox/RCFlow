@@ -282,13 +282,23 @@ else {
 Write-Info "Running database migrations..."
 try {
     $exe = Join-Path $InstallDir "rcflow.exe"
-    Push-Location $InstallDir
-    & $exe migrate
-    Pop-Location
-    Write-Ok "Database migrations complete"
+    $migrationTimeout = 120  # seconds
+    $proc = Start-Process -FilePath $exe -ArgumentList "migrate" -WorkingDirectory $InstallDir -NoNewWindow -PassThru -Wait:$false
+    if ($proc.WaitForExit($migrationTimeout * 1000)) {
+        if ($proc.ExitCode -eq 0) {
+            Write-Ok "Database migrations complete"
+        } else {
+            Write-Warn "Migration exited with code $($proc.ExitCode)"
+            Write-Warn "You can retry with: cd $InstallDir && .\rcflow.exe migrate"
+        }
+    } else {
+        Write-Warn "Migration timed out after ${migrationTimeout}s — killing process"
+        $proc.Kill()
+        $proc.WaitForExit(5000) | Out-Null
+        Write-Warn "You can retry with: cd $InstallDir && .\rcflow.exe migrate"
+    }
 }
 catch {
-    Pop-Location
     Write-Warn "Migration failed: $_"
     Write-Warn "You can retry with: cd $InstallDir && .\rcflow.exe migrate"
 }

@@ -236,7 +236,7 @@ The client can connect to multiple RCFlow servers simultaneously. Each server co
 | GET    | `/api/sessions`                         | Yes  | List all sessions (in-memory + archived) sorted by `created_at` descending. Includes `title`. |
 | GET    | `/api/sessions/{session_id}/messages`   | Yes  | Get message history for a session (in-memory buffer or archived DB messages). Supports cursor-based pagination via `?limit=N` and `?before=SEQ` query params. Response includes `pagination: {total_count, has_more, next_cursor}`. When `limit` is omitted, returns all messages (backward compatible). |
 | GET    | `/api/tools`                            | Yes  | List registered tool names and descriptions. Optional `?q=` for case-insensitive substring filter. Returns `{"tools": [{"name": "...", "description": "..."}]}`. |
-| GET    | `/api/projects`                         | Yes  | List directory names under `PROJECTS_DIR`. Optional `?q=` for case-insensitive substring filter. Returns `{"projects": [...]}`. |
+| GET    | `/api/projects`                         | Yes  | List directory names from all configured project directories (`PROJECTS_DIR`, comma-separated). Optional `?q=` for case-insensitive substring filter. Returns `{"projects": [...]}`. |
 | POST   | `/api/sessions/{session_id}/cancel`     | Yes  | Cancel a running session (kills subprocess)      |
 | POST   | `/api/sessions/{session_id}/end`        | Yes  | Gracefully end a session (user-confirmed completion) |
 | POST   | `/api/sessions/{session_id}/pause`      | Yes  | Pause an active session. Kills any running Claude Code subprocess. New prompts rejected until resumed. |
@@ -251,6 +251,13 @@ The client can connect to multiple RCFlow servers simultaneously. Each server co
 | PATCH  | `/api/tools/{tool_name}/settings`       | Yes  | Update per-tool settings. Body: `{"updates": {"key": value, ...}}`. Returns updated schema+values. |
 | POST   | `/api/tools/codex/login`                | Yes  | Start Codex ChatGPT login. Optional `?device_code=true` for device-code flow. Streams NDJSON events: `auth_url` or `device_code`, `waiting`, `complete`, `error`. Times out after 5 min. |
 | GET    | `/api/tools/codex/login/status`         | Yes  | Check Codex ChatGPT login status. Returns `{"logged_in": bool, "method": "ChatGPT"|null}`. |
+| GET    | `/api/tasks`                            | Yes  | List all tasks for the current backend. Optional `?status=` and `?source=` filters. Sorted by `updated_at` desc. |
+| GET    | `/api/tasks/{task_id}`                  | Yes  | Get a single task with attached sessions. |
+| POST   | `/api/tasks`                            | Yes  | Create a task. Body: `{"title", "description?", "source?", "session_id?"}`. Returns 201. |
+| PATCH  | `/api/tasks/{task_id}`                  | Yes  | Update task fields (title, description, status). Status transitions are validated (409 on invalid). |
+| DELETE | `/api/tasks/{task_id}`                  | Yes  | Delete a task and all session associations. |
+| POST   | `/api/tasks/{task_id}/sessions`         | Yes  | Attach a session to a task. Body: `{"session_id": "..."}`. Returns 201. |
+| DELETE | `/api/tasks/{task_id}/sessions/{sid}`   | Yes  | Detach a session from a task. |
 
 Authentication for HTTP endpoints uses the `X-API-Key` header with the same key as `RCFLOW_API_KEY`.
 
@@ -344,6 +351,16 @@ Answer a question from Claude Code (AskUserQuestion):
 }
 ```
 
+Send a mid-turn interactive response (plan mode approval, question answers, etc.):
+
+```json
+{
+  "type": "interactive_response",
+  "session_id": "uuid",
+  "text": "yes"
+}
+```
+
 Respond to a permission request (allow/deny a tool use):
 
 ```json
@@ -403,9 +420,17 @@ Server sends JSON messages:
   "tool_name": "shell_exec",
   "content": "file1.txt\nfile2.txt\n",
   "stream": "stdout",
+  "is_error": false,
   "sequence": 43
 }
 ```
+
+Tool output is emitted for all agent executors:
+- **Claude Code**: Captured from `tool_result` events in the stream-json protocol. Content may be plain text or extracted from content blocks. `is_error` reflects the SDK's `is_error` flag.
+- **Codex**: Captured from `item.completed` events for `command_execution` (via `aggregated_output`), `file_change` (via `diff`), and `mcp_tool_call` items. `is_error` is true when `exit_code` is non-zero (commands only).
+- **LLM pipeline**: Captured from tool execution results during the agentic loop.
+
+Large tool outputs are truncated to 100,000 characters server-side before delivery.
 
 ```json
 {
@@ -438,6 +463,20 @@ Server sends JSON messages:
   "content": "A short TTS-friendly summary of the Claude Code result."
 }
 ```
+
+```json
+{
+  "type": "todo_update",
+  "session_id": "uuid",
+  "todos": [
+    {"content": "Fix the bug", "status": "in_progress", "activeForm": "Fixing the bug"},
+    {"content": "Run tests", "status": "pending", "activeForm": "Running tests"},
+    {"content": "Update docs", "status": "completed", "activeForm": "Updating docs"}
+  ]
+}
+```
+
+Emitted whenever Claude Code calls the `TodoWrite` tool. The `todos` array is the complete current task list (not a diff). The server also stores the latest todo state on the in-memory session object, queryable via `GET /api/sessions/{session_id}/todos`.
 
 ```json
 {
@@ -512,9 +551,22 @@ Server sends JSON messages:
   "activity_state": "processing_llm",
   "title": "Some title",
   "session_type": "conversational",
-  "created_at": "2025-01-15T10:30:00+00:00"
+  "created_at": "2025-01-15T10:30:00+00:00",
+  "input_tokens": 1234,
+  "output_tokens": 567,
+  "cache_creation_input_tokens": 100,
+  "cache_read_input_tokens": 200,
+  "tool_input_tokens": 5000,
+  "tool_output_tokens": 3000,
+  "tool_cost_usd": 0.05
 }
 ```
+
+Token usage fields are included in every `session_update` broadcast:
+- `input_tokens` / `output_tokens`: Tokens used by the global LLM pipeline (Anthropic/Bedrock/OpenAI).
+- `cache_creation_input_tokens` / `cache_read_input_tokens`: Anthropic prompt caching breakdown.
+- `tool_input_tokens` / `tool_output_tokens`: Tokens used by agent tool sessions (Claude Code, Codex).
+- `tool_cost_usd`: Cumulative cost reported by Claude Code (`cost_usd` from result events).
 
 ### Output Audio Protocol
 
@@ -552,7 +604,7 @@ Clients control which sessions they receive output for by sending subscribe/unsu
 
 When subscribing to an existing session, the server sends the **full buffered history** for that session, then continues with live streaming. This allows pause/resume and session switching without data loss.
 
-**Session metadata updates** (title, status, and activity state changes) are automatically streamed to all connected `/ws/output/text` clients without explicit subscription. When any session's title, status, or activity state changes, a `session_update` message is broadcast to all output clients. This enables real-time updates of the session list in the client UI without polling.
+**Session metadata updates** (title, status, activity state, and token usage) are automatically streamed to all connected `/ws/output/text` clients without explicit subscription. When any session's title, status, activity state, or token counts change, a `session_update` message is broadcast to all output clients. This enables real-time updates of the session list and token usage display in the client UI without polling.
 
 ### Session List
 
@@ -575,13 +627,167 @@ Server responds with:
       "status": "completed",
       "session_type": "one-shot",
       "created_at": "2025-01-15T10:30:00+00:00",
-      "title": "List files in directory"
+      "title": "List files in directory",
+      "input_tokens": 1234,
+      "output_tokens": 567,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "tool_input_tokens": 0,
+      "tool_output_tokens": 0,
+      "tool_cost_usd": 0.0
     }
   ]
 }
 ```
 
 Sessions are sorted by `created_at` descending (most recent first). The list includes both in-memory active sessions and archived sessions from the database. The `title` field is `null` until auto-generated after the first LLM response.
+
+### Task Messages
+
+Clients can request the full task list via:
+
+```json
+{
+  "type": "list_tasks"
+}
+```
+
+Server responds with:
+
+```json
+{
+  "type": "task_list",
+  "tasks": [
+    {
+      "task_id": "uuid",
+      "title": "Implement login feature",
+      "description": "Add OAuth2 login with Google provider",
+      "status": "in_progress",
+      "source": "ai",
+      "created_at": "2025-01-15T10:30:00+00:00",
+      "updated_at": "2025-01-15T11:00:00+00:00",
+      "sessions": [
+        {
+          "session_id": "uuid",
+          "title": "Session title",
+          "status": "active",
+          "attached_at": "2025-01-15T10:30:00+00:00"
+        }
+      ]
+    }
+  ]
+}
+```
+
+The server broadcasts `task_update` messages when tasks are created or modified:
+
+```json
+{
+  "type": "task_update",
+  "task_id": "uuid",
+  "title": "...",
+  "status": "...",
+  "sessions": [...]
+}
+```
+
+And `task_deleted` when a task is removed:
+
+```json
+{
+  "type": "task_deleted",
+  "task_id": "uuid"
+}
+```
+
+#### Task Status Transitions
+
+Valid transitions (enforced server-side):
+
+| From         | Allowed To                |
+|-------------|---------------------------|
+| `todo`       | `in_progress`, `done`     |
+| `in_progress`| `todo`, `review`, `done`  |
+| `review`     | `in_progress`, `done`     |
+| `done`       | `todo`, `in_progress`     |
+
+AI agents (source: `"ai"`) are forbidden from setting status to `done`. Only users can mark tasks as complete.
+
+#### Automatic Task Status Behavior
+
+- **AI-created tasks** start as `in_progress` (since they are created during an active session working on them).
+- **Matched existing tasks** in `todo` or `review` status are auto-promoted to `in_progress` when attached to a new session.
+- **On session end**, the LLM evaluates each attached task and may advance it to `review` if the work appears complete, or keep it at `in_progress` if more work is needed. The LLM cannot set `done`.
+- **Task matching** considers all non-done tasks (`todo`, `in_progress`, `review`) to prevent duplicate creation.
+
+### Artifact Messages
+
+Artifacts are files discovered by parsing session conversation messages for file paths. When `ARTIFACT_AUTO_SCAN` is enabled, the scanner runs in real time after each assistant message and tool result during session execution, as well as after session archival. It extracts file paths from message content, verifies they exist on disk, and tracks files matching the configured include/exclude patterns.
+
+Clients can request the full artifact list via:
+
+```json
+{
+  "type": "list_artifacts"
+}
+```
+
+Server responds with:
+
+```json
+{
+  "type": "artifact_list",
+  "artifacts": [
+    {
+      "artifact_id": "uuid",
+      "file_path": "/home/user/Projects/repo/README.md",
+      "file_name": "README.md",
+      "file_extension": ".md",
+      "file_size": 4096,
+      "mime_type": "text/markdown",
+      "discovered_at": "2025-01-15T10:30:00+00:00",
+      "modified_at": "2025-01-15T11:00:00+00:00",
+      "session_id": "uuid or null"
+    }
+  ]
+}
+```
+
+The server broadcasts `artifact_list` after each extraction that discovers new artifacts.
+
+When an artifact is deleted via the HTTP API, the server broadcasts:
+
+```json
+{
+  "type": "artifact_deleted",
+  "artifact_id": "uuid"
+}
+```
+
+#### HTTP Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/artifacts` | List artifacts. Query params: `search`, `limit`, `offset` |
+| GET | `/api/artifacts/search` | Search artifacts for autocomplete. Query param: `q` (substring filter). Returns max 10 results with `file_name`, `file_path`, `file_extension`, `file_size`, `mime_type`, `is_text` |
+| GET | `/api/artifacts/{id}` | Get artifact metadata |
+| GET | `/api/artifacts/{id}/content` | Get raw file content (text/plain) |
+| DELETE | `/api/artifacts/{id}` | Delete artifact record (not the file) |
+| GET | `/api/artifacts/settings` | Get extraction settings |
+| PATCH | `/api/artifacts/settings` | Update extraction settings |
+
+#### Artifact Scanner
+
+The `ArtifactScanner` service extracts file paths from session messages and tracks matching files as artifacts. It uses a regex to find file paths in message content and metadata, then verifies each path exists on disk. Pattern matching is case-insensitive (e.g. `*.md` matches `README.MD`). The scanner:
+
+- Scans the session's `conversation_history` JSON (complete messages, not fragmented streaming chunks) for file paths
+- Also reads archived `SessionMessage` rows for tool outputs and metadata
+- Extracts file paths using regex (absolute, `~/`, and relative `./`/`../` paths)
+- Filters paths against include/exclude patterns
+- Verifies files exist on disk before tracking them
+- Enforces a configurable max file size (default 5 MB)
+- Creates new artifact records or updates existing ones if file metadata changed
+- Associates artifacts with the session they were extracted from
 
 ---
 
@@ -686,10 +892,18 @@ The tool JSON definition specifies which type a tool uses (see Tool Definitions 
 
 - **Active sessions**: Held in memory with full output buffer (text + audio references).
 - **Paused sessions**: Remain in memory like active sessions. Any running Claude Code or Codex subprocess is killed on pause. Not reaped by inactivity timer. Archived only after being resumed and reaching a terminal state.
-- **Completed sessions**: Automatically archived to the database when a session reaches a terminal state (completed, failed, or cancelled). The prompt router fires a background task after each `session.complete()`, `session.fail()`, or `session.cancel()` call. Stores: session ID, timestamps, all prompts, all LLM responses, tool calls, tool outputs, metadata, and `conversation_history` (the raw LLM message list for restoration).
+- **Completed sessions**: Automatically archived to the database when a session reaches a terminal state (completed, failed, or cancelled). The prompt router fires a background task after each `session.complete()`, `session.fail()`, or `session.cancel()` call. Stores: session ID, timestamps, all prompts, all LLM responses, tool calls, tool outputs, metadata, `conversation_history` (the raw LLM message list for restoration), and token usage totals (`input_tokens`, `output_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens`, `tool_input_tokens`, `tool_output_tokens`, `tool_cost_usd`).
 - **Restored sessions**: Archived sessions can be restored back to active state via `POST /api/sessions/{id}/restore` or the `restore_session` WebSocket message. The session's conversation history, buffer messages, and metadata are loaded from the DB. For Claude Code sessions, the CC `session_id`, `working_directory`, tool name, and parameters are stored in `metadata_` during archiving and used to reconstruct the executor on restore. The first message sent to a restored CC session triggers a `restart_with_prompt` using the stored `--session-id`, allowing Claude Code to resume its internal conversation context.
 - **On server restart**: Active sessions are lost. Archived sessions remain queryable via `GET /api/sessions` and `GET /api/sessions/{session_id}/messages`, and can be restored.
 - **Session listing**: `GET /api/sessions` and the WebSocket `list_sessions` command both merge in-memory sessions with archived sessions from the database (excluding duplicates), sorted by `created_at` descending. Each session entry includes a `created_at` ISO 8601 timestamp and `title`. Archived sessions are filtered by `backend_id` so each backend instance only sees its own sessions.
+
+### Session Todos
+
+Each active session tracks an in-memory list of todo items, updated whenever Claude Code calls the `TodoWrite` tool. The todo list is the complete state (replaced wholesale on each update, not incremental). Todo state is:
+- Broadcast to subscribed clients via `todo_update` WebSocket messages.
+- Queryable via `GET /api/sessions/{session_id}/todos` (returns `{"session_id": "...", "todos": [...]}` or 404 for unknown sessions).
+- Included in buffer history, so clients reconstruct todo state on session subscribe replay and archived session history loading.
+- Not persisted to a separate database table — stored only in-memory and as buffer messages.
 
 ### Session Titles
 
@@ -702,6 +916,19 @@ Multiple sessions can run simultaneously. Each session is independent with its o
 - Tool execution subprocess(es)
 - Output buffer
 - Subscriber list
+
+### Token Usage Tracking
+
+Each session accumulates token usage counters in real time:
+
+- **`input_tokens` / `output_tokens`**: Tokens consumed by the global LLM pipeline (Anthropic, Bedrock, or OpenAI) during the agentic loop. Updated after each `StreamDone`.
+- **`cache_creation_input_tokens` / `cache_read_input_tokens`**: Anthropic prompt-caching breakdown (zero for non-Anthropic providers).
+- **`tool_input_tokens` / `tool_output_tokens`**: Tokens consumed by agent tool subprocesses (Claude Code via `result`/`system` events, Codex via `turn.completed` events).
+- **`tool_cost_usd`**: USD cost reported by Claude Code's `result` event.
+
+Token counters are broadcast to clients via `session_update` messages whenever they change, persisted to the database on session archive/shutdown, and restored when a session is loaded from the database.
+
+**Token limits**: When `SESSION_INPUT_TOKEN_LIMIT` or `SESSION_OUTPUT_TOKEN_LIMIT` is set to a non-zero value, the prompt router checks the session's total tokens (LLM + tool) before processing each new user message. If either limit is exceeded, the session receives an error message and the prompt is rejected. The check compares `input_tokens + tool_input_tokens` against the input limit and `output_tokens + tool_output_tokens` against the output limit.
 
 ---
 
@@ -762,7 +989,7 @@ Tools are classified by risk level to help the user make informed decisions:
 ### Limitations
 
 - Currently supported for Claude Code sessions only. Codex uses a one-shot process model where stdin is closed after writing the prompt, making interactive approval infeasible without a fundamental I/O change. Codex interactive permissions are planned for a future release.
-- The server uses `--permission-mode bypassPermissions` on the CLI side and handles permission logic server-side. This means the actual Claude Code process runs all tools — the server-side check happens *before* the tool_use event is processed, but the subprocess may proceed concurrently. For true pre-execution gating, a future enhancement could use Claude Code's native permission protocol or an MCP permission hook.
+- When `default_permission_mode` is set to `"interactive"` (or not set), the server does **not** pass `--permission-mode` to Claude Code, letting it use its default behavior. This allows Claude Code to emit interactive events (AskUserQuestion, EnterPlanMode, ExitPlanMode) via stream-json, which the server intercepts and forwards to the client. Mid-turn responses (question answers, plan approval) are sent directly to Claude Code's stdin via the `interactive_response` message type, without creating a new agent group or reading task. For other permission modes (e.g., `bypassPermissions`, `allowEdits`), the value is passed directly to `--permission-mode`.
 
 ---
 
@@ -790,16 +1017,20 @@ The template uses [Jinja2](https://jinja.palletsprojects.com/) with `{{ variable
 
 ```python
 PromptBuilder().build(
-    projects_dir=str(settings.PROJECTS_DIR.expanduser().resolve()),
+    projects_dirs=", ".join(str(d) for d in settings.projects_dirs),
     os_name=platform.system(),
 )
 ```
 
 The `os_name` variable is injected into the `<role>` tag so the LLM knows the host OS (e.g. "Linux" or "Windows") and can generate appropriate commands.
 
+### Global Prompt
+
+If `GLOBAL_PROMPT` is set (via server configuration), it is appended to the base system prompt for all LLM calls. The `LLMClient._system_prompt` property dynamically composes the full prompt by joining the base template output with the global prompt text separated by a blank line. This allows users to set persistent behavioral guidelines, language preferences, or domain expertise that apply to every session.
+
 ### @Mention Project Context Injection
 
-When a user message contains `@ProjectName` tokens (e.g. `@RCFlow`), `PromptRouter.handle_prompt()` detects the mentions and resolves them against `PROJECTS_DIR`. If a mentioned name matches an actual project directory, a context block is prepended to the user message content sent to the LLM:
+When a user message contains `@ProjectName` tokens (e.g. `@RCFlow`), `PromptRouter.handle_prompt()` detects the mentions and resolves them against all configured project directories (`PROJECTS_DIR`). If a mentioned name matches an actual project directory, a context block is prepended to the user message content sent to the LLM:
 
 ```
 [Context: This message references project "RCFlow" located at /home/user/Projects/RCFlow. All instructions in this message relate to this project.]
@@ -807,7 +1038,7 @@ When a user message contains `@ProjectName` tokens (e.g. `@RCFlow`), `PromptRout
 
 Key behavior:
 - The `@` must appear at the start of the text or after whitespace.
-- Only mentions that resolve to existing directories under `PROJECTS_DIR` produce context; unresolved mentions are silently ignored.
+- Only mentions that resolve to existing directories under any configured project directory produce context; unresolved mentions are silently ignored.
 - The original user text is preserved — the context is an additional content block, not a replacement.
 - The injected context block uses `cache_control: {"type": "ephemeral"}` to avoid polluting prompt caching.
 - The client-side buffer receives the original text only (no injected context).
@@ -832,7 +1063,41 @@ Key behavior:
 - The injected context block uses `cache_control: {"type": "ephemeral"}` to avoid polluting prompt caching.
 - Both `@` project and `#` tool mentions can appear in the same message; each produces a separate context block.
 
-The client provides autocomplete suggestions via `GET /api/tools?q=<query>`, triggered when the user types `#` in the input area. The autocomplete shows tool names with descriptions to help users identify the right tool.
+The client provides autocomplete suggestions via `GET /api/tools?q=<query>`, triggered when the user types `#` in the input area. The autocomplete shows tool `display_name` values with descriptions to help users identify the right tool. Each tool definition can include an optional `display_name` field for human-readable presentation (e.g. `claude_code` → "Claude Code"); when absent, the `name` field is used as-is.
+
+### $File Reference Context Injection
+
+When a user message contains `$filename` tokens (e.g. `$main.py`, `$config.yaml`), `PromptRouter.handle_prompt()` detects the references and resolves them against the artifact database for the current backend. If a referenced file name matches an artifact (case-insensitive), the file's content or metadata is included as a context block prepended to the user message content sent to the LLM.
+
+For **text files** (extensions in `TEXT_EXTENSIONS`), the full file content is included in a fenced code block:
+```
+[File: main.py (/home/user/project/main.py)]
+```py
+<file content>
+```
+```
+
+For **non-text files** (images, binaries, etc.), metadata is included instead:
+```
+[File: diagram.png (/home/user/project/diagram.png)
+  Type: image/png
+  Extension: .png
+  Size: 245.3 KB
+  Modified: 2026-03-09T14:30:00+00:00
+  Note: Binary/non-text file -- content not included]
+```
+
+Key behavior:
+- The `$` must appear at the start of the text or after whitespace.
+- Only references that resolve to existing artifacts produce context; unresolved references are silently ignored.
+- File content is capped at 100KB; larger files are truncated with a note.
+- Duplicate file references are deduplicated.
+- The original user text is preserved -- the file context is an additional content block, not a replacement.
+- The injected context block uses `cache_control: {"type": "ephemeral"}` to avoid polluting prompt caching.
+- `$` file references are NOT parsed in executor sessions (Claude Code, Codex) -- the text is sent as-is since those executors have their own file reading capabilities.
+- `@` project, `#` tool, and `$` file mentions can all appear in the same message; each produces a separate context block.
+
+The client provides autocomplete suggestions via `GET /api/artifacts/search?q=<query>`, triggered when the user types `$` in the input area. The suggestion dropdown shows the file name on the first line and the full file path on the second line, with type-specific icons. Non-text files display a small indicator to show that only metadata (not content) will be included.
 
 ---
 
@@ -844,14 +1109,16 @@ Tools are defined as individual JSON files in a `tools/` directory:
 
 ```
 tools/
-├── shell_exec.json
+├── cmd.json            (Windows only)
+├── powershell.json     (Windows only)
+├── shell_exec.json     (Linux/macOS only)
 ├── http_request.json
 ├── python_interactive.json
 ├── file_read.json
 └── system_info.json
 ```
 
-Each file defines one tool. Drop a `.json` file into `tools/` to register a new tool. The server loads all tool files on startup (and can optionally hot-reload).
+Each file defines one tool. Drop a `.json` file into `tools/` to register a new tool. The server loads all tool files on startup (and can optionally hot-reload). Tools with an `os` field are only loaded when the server runs on a matching platform; tools without an `os` field load on all platforms.
 
 ### Tool JSON Schema
 
@@ -996,7 +1263,7 @@ The `claude_code` executor manages a Claude Code CLI subprocess with bidirection
 ```json
 {
   "name": "claude_code",
-  "description": "Start a Claude Code coding agent session. Claude Code can read, write, and execute code autonomously. Use for complex tasks: implementing features, fixing bugs, refactoring, writing tests, etc. The working_directory must be an existing project directory. User projects live under ~/Projects/ so when the user mentions a project by name, use ~/Projects/<project_name> as the working_directory. Always verify the directory exists before calling this tool.",
+  "description": "Start a Claude Code coding agent session. Claude Code can read, write, and execute code autonomously. Use for complex tasks: implementing features, fixing bugs, refactoring, writing tests, etc. The working_directory must be an existing project directory. Search all configured project directories to find the correct path. Always verify the directory exists before calling this tool.",
   "version": "1.0.0",
   "session_type": "long-running",
   "llm_context": "session-scoped",
@@ -1014,7 +1281,7 @@ The `claude_code` executor manages a Claude Code CLI subprocess with bidirection
   "executor_config": {
     "claude_code": {
       "binary_path": "claude",
-      "default_permission_mode": "bypassPermissions",
+      "default_permission_mode": "interactive",
       "max_turns": 50,
       "timeout": 600
     }
@@ -1088,7 +1355,7 @@ RCFlow automatically manages the installation and updating of external CLI tools
 **How it works:**
 
 1. On server startup, `ToolManager.ensure_tools()` runs in the lifespan and **detects** tools (does not auto-install). Missing tools are reported; installation happens on-demand when the user requests it via the UI.
-2. Detection checks: RCFlow managed directory (`~/.local/share/rcflow/tools/` on Linux, `%LOCALAPPDATA%\rcflow\tools\` on Windows) → system `PATH` → report as not found.
+2. Detection checks: RCFlow managed directory → system `PATH` → report as not found. The managed directory is resolved by `get_managed_tools_dir()` in `src/paths.py`: `~/.local/share/rcflow/tools/` (Linux) or `%LOCALAPPDATA%\rcflow\tools\` (Windows), falling back to `<install_dir>/managed-tools/` when the home directory is absent or not writable (e.g. service accounts).
 3. Tools in the RCFlow managed directory are marked `managed=True`. Tools found on `PATH` are marked `managed=False` (external).
 4. A background `asyncio.Task` checks for updates every `TOOL_UPDATE_INTERVAL_HOURS` hours (default 6). Only RCFlow-managed tools are auto-updated.
 5. `PromptRouter` gets binary paths from `ToolManager.get_binary_path()` — no binary path settings needed.
@@ -1163,7 +1430,7 @@ Schema fields may include `"managed_only": true` — these are only exposed when
 | `aws_access_key_id`        | secret      | yes          | provider = bedrock     | AWS access key for Bedrock                         |
 | `aws_secret_access_key`    | secret      | yes          | provider = bedrock     | AWS secret access key for Bedrock                  |
 | `model`                    | string      | yes          | —                      | Default model override for sessions                |
-| `default_permission_mode`  | select      | yes          | —                      | CLI --permission-mode (bypassPermissions/allowEdits) |
+| `default_permission_mode`  | select      | yes          | —                      | CLI --permission-mode: interactive (default, enables interactive prompts), bypassPermissions, allowEdits, plan |
 | `max_turns`                | string      | yes          | —                      | Maximum agentic turns per session (default 200)    |
 | `timeout`                  | string      | yes          | —                      | Process timeout in seconds (default 1800)          |
 
@@ -1205,8 +1472,10 @@ Provider sync behavior:
 | Field             | Type   | Required | Description                                           |
 |-------------------|--------|----------|-------------------------------------------------------|
 | `name`            | string | yes      | Unique tool identifier, sent to LLM                   |
+| `display_name`    | string | no       | Human-readable name shown in UI (defaults to `name`)  |
 | `description`     | string | yes      | Human/LLM-readable description of what the tool does  |
 | `version`         | string | no       | Semantic version of the tool definition                |
+| `os`              | list   | no       | OS restriction: subset of `["windows","linux","darwin"]`. Empty = all platforms. Tools are skipped at load time if the current OS is not in the list. |
 | `session_type`    | enum   | yes      | `one-shot` or `long-running`                          |
 | `llm_context`     | enum   | yes      | `stateless` or `session-scoped`                       |
 | `executor`        | enum   | yes      | `shell`, `http`, `claude_code`, or `codex`            |
@@ -1370,6 +1639,48 @@ CREATE TABLE tool_executions (
     ended_at TIMESTAMPTZ,
     status VARCHAR(20) NOT NULL              -- 'running', 'completed', 'failed', 'timeout'
 );
+
+-- Tasks (persistent, cross-session work items)
+CREATE TABLE tasks (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    backend_id VARCHAR(36) NOT NULL DEFAULT '',
+    title VARCHAR(300) NOT NULL,
+    description TEXT,
+    status VARCHAR(20) NOT NULL DEFAULT 'todo',  -- 'todo', 'in_progress', 'review', 'done'
+    source VARCHAR(20) NOT NULL DEFAULT 'user',  -- 'user' or 'ai'
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX ix_tasks_backend_id ON tasks(backend_id);
+CREATE INDEX ix_tasks_status ON tasks(status);
+
+-- Many-to-many: tasks ↔ sessions
+CREATE TABLE task_sessions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    task_id UUID NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    session_id UUID NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    attached_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(task_id, session_id)
+);
+CREATE INDEX ix_task_sessions_task_id ON task_sessions(task_id);
+CREATE INDEX ix_task_sessions_session_id ON task_sessions(session_id);
+
+-- Discovered file artifacts (markdown, text files, etc.)
+CREATE TABLE artifacts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    backend_id VARCHAR(36) NOT NULL DEFAULT '',
+    file_path TEXT NOT NULL,
+    file_name VARCHAR(255) NOT NULL,
+    file_extension VARCHAR(20),
+    file_size BIGINT NOT NULL DEFAULT 0,
+    mime_type VARCHAR(100),
+    discovered_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    modified_at TIMESTAMPTZ NOT NULL,
+    session_id UUID REFERENCES sessions(id),
+    UNIQUE(backend_id, file_path)
+);
+CREATE INDEX ix_artifacts_backend_id ON artifacts(backend_id);
+CREATE INDEX ix_artifacts_session_id ON artifacts(session_id);
 ```
 
 ---
@@ -1381,7 +1692,7 @@ All configuration is via environment variables, loaded from a `settings.json` fi
 | Variable                | Required | Default         | Description                          |
 |-------------------------|----------|-----------------|--------------------------------------|
 | `RCFLOW_HOST`           | no       | `0.0.0.0`       | Server bind address                  |
-| `RCFLOW_PORT`           | no       | `8765`          | Server port                          |
+| `RCFLOW_PORT`           | no       | `53890` (Linux) / `53891` (Windows) | Server port                          |
 | `RCFLOW_API_KEY`        | yes      |                 | API key for WebSocket auth           |
 | `RCFLOW_BACKEND_ID`     | no       | auto-generated  | Unique backend instance ID (UUID). Auto-generated and persisted to `settings.json` on first run. Used to isolate sessions per backend when multiple backends share one database. |
 | `SSL_CERTFILE`          | no       |                 | Path to TLS certificate (enables WSS when both cert+key set) |
@@ -1399,10 +1710,17 @@ All configuration is via environment variables, loaded from a `settings.json` fi
 | `STT_API_KEY`           | yes      |                 | STT provider API key (Wispr Flow)    |
 | `TTS_PROVIDER`          | no       | `none`          | TTS provider name                    |
 | `TTS_API_KEY`           | no       |                 | TTS provider API key                 |
-| `PROJECTS_DIR`          | no       | `~/Projects`    | Absolute path to user projects directory (used in system prompt and path resolution) |
+| `PROJECTS_DIR`          | no       | `~/Projects`    | Comma-separated list of project directories (used in system prompt, path resolution, and `/api/projects` endpoint) |
 | `TOOLS_DIR`             | no       | `./tools`       | Path to tool definitions directory   |
 | `CODEX_API_KEY`         | no       |                 | OpenAI API key for Codex CLI         |
 | `SUMMARY_MODEL`         | no       | auto (per provider) | Fast model for summaries/titles. Defaults to `claude-haiku-4-5-20251001` (Anthropic) or `{region}.anthropic.claude-haiku-4-5-v1:0` (Bedrock, region prefix derived from `AWS_REGION`) |
+| `GLOBAL_PROMPT`         | no       |                 | Custom instructions appended to the system prompt for every session |
+| `SESSION_INPUT_TOKEN_LIMIT` | no   | `0` (unlimited) | Max total input tokens (LLM + tool) per session. `0` = no limit. |
+| `SESSION_OUTPUT_TOKEN_LIMIT`| no   | `0` (unlimited) | Max total output tokens (LLM + tool) per session. `0` = no limit. |
+| `ARTIFACT_INCLUDE_PATTERN` | no    | `*.md`          | Glob pattern for files to include in artifact extraction (case-insensitive) |
+| `ARTIFACT_EXCLUDE_PATTERN` | no    | `node_modules/**,...` | Comma-separated glob patterns to exclude from extraction |
+| `ARTIFACT_AUTO_SCAN`    | no       | `true`          | Auto-extract artifacts from messages in real time during session execution |
+| `ARTIFACT_MAX_FILE_SIZE`| no       | `5242880`       | Max file size in bytes for artifact content viewing (default 5 MB) |
 | `LOG_LEVEL`             | no       | `INFO`          | Logging level                        |
 
 ### Remote Configuration (Client-Side Editing)
@@ -1415,7 +1733,7 @@ The server exposes `GET /api/config` and `PATCH /api/config` endpoints that allo
 |--------------------|--------|----------------------------------------------------|
 | `key`              | string | Setting name (e.g. `LLM_PROVIDER`)                 |
 | `label`            | string | Human-readable label                               |
-| `type`             | string | `"string"`, `"select"`, `"boolean"`, or `"secret"` |
+| `type`             | string | `"string"`, `"textarea"`, `"select"`, `"boolean"`, or `"secret"` |
 | `value`            | any    | Current value (masked for secrets — last 4 chars)   |
 | `options`          | list   | Available choices (for `select` type only)          |
 | `group`            | string | Grouping category (LLM, STT, TTS, Executors, etc.) |
@@ -1423,13 +1741,13 @@ The server exposes `GET /api/config` and `PATCH /api/config` endpoints that allo
 | `required`         | bool   | Whether the field is required                      |
 | `restart_required` | bool   | Whether changing requires a server restart          |
 
-**Configurable groups**: LLM, STT, TTS, Claude Code, Codex, Paths, Logging. Groups are rendered as collapsible sections in the client UI.
+**Configurable groups**: LLM, Prompt, STT, TTS, Claude Code, Codex, Paths, Session Limits, Logging. Groups are rendered as collapsible sections in the client UI.
 
 **Excluded from remote config** (for security): `RCFLOW_API_KEY`, `RCFLOW_HOST`, `RCFLOW_PORT`, `SSL_CERTFILE`, `SSL_KEYFILE`, `DATABASE_URL`.
 
 **Hot-reload**: When config is updated via `PATCH /api/config`, the server persists changes to `settings.json` and recreates the LLM client, STT provider, and TTS provider with the new settings. The old LLM client is gracefully closed.
 
-**Client UI**: The Flutter client shows a "Settings" button on each connected worker card. Tapping it opens a dialog (desktop) or bottom sheet (mobile) that renders a dynamic form based on the server's config schema. Fields are grouped by section and rendered as text fields, dropdowns, switches, or password fields depending on type.
+**Client UI**: The Flutter client shows a "Settings" button on each connected worker card. Tapping it opens a dialog (desktop) or bottom sheet (mobile) that renders a dynamic form based on the server's config schema. Fields are grouped by section and rendered as text fields, multi-line text areas, dropdowns, switches, or password fields depending on type.
 
 ---
 

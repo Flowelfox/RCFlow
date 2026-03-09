@@ -176,9 +176,34 @@ async def ws_input_text(
                 if not answer_text:
                     await websocket.send_json({"type": "error", "content": "Empty answer", "code": "EMPTY_ANSWER"})
                     continue
-                task = asyncio.create_task(prompt_router.handle_prompt(answer_text, qa_session_id))
-                background_tasks.add(task)
-                task.add_done_callback(background_tasks.discard)
+                # Send directly to Claude Code stdin (mid-turn interactive response)
+                try:
+                    await prompt_router.send_interactive_response(qa_session_id, answer_text)
+                except (ValueError, RuntimeError) as e:
+                    await websocket.send_json(
+                        {"type": "error", "content": str(e), "code": "INTERACTIVE_RESPONSE_ERROR"}
+                    )
+                continue
+
+            if msg_type == "interactive_response":
+                ir_session_id = message.get("session_id")
+                if not ir_session_id:
+                    await websocket.send_json(
+                        {"type": "error", "content": "Missing session_id", "code": "MISSING_SESSION_ID"}
+                    )
+                    continue
+                ir_text = message.get("text", "").strip()
+                if not ir_text:
+                    await websocket.send_json(
+                        {"type": "error", "content": "Empty response", "code": "EMPTY_RESPONSE"}
+                    )
+                    continue
+                try:
+                    await prompt_router.send_interactive_response(ir_session_id, ir_text)
+                except (ValueError, RuntimeError) as e:
+                    await websocket.send_json(
+                        {"type": "error", "content": str(e), "code": "INTERACTIVE_RESPONSE_ERROR"}
+                    )
                 continue
 
             if msg_type != "prompt":

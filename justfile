@@ -72,12 +72,14 @@ bundle-linux-client:
     tar -czf dist/rcflowclient-linux-$(uname -m).tar.gz -C rcflowclient/build/linux/x64/release bundle
 
 # Build Windows Flutter client distributable (must be on Windows)
+[windows]
 bundle-windows-client:
-    cd rcflowclient && flutter build windows --release
-    mkdir -p dist
-    powershell -Command "Compress-Archive -Force -Path 'rcflowclient\build\windows\x64\runner\Release\*' -DestinationPath 'dist\rcflowclient-windows-x64.zip'"
+    Set-Location rcflowclient; flutter build windows --release
+    if (-not (Test-Path dist)) { New-Item -ItemType Directory -Path dist | Out-Null }
+    Compress-Archive -Force -Path 'rcflowclient\build\windows\x64\runner\Release\*' -DestinationPath 'dist\rcflowclient-windows-x64.zip'
 
 # Build Windows backend installer (setup.exe, must be on Windows)
+[windows]
 bundle-windows-backend:
     uv run --extra tray --extra bundle python scripts/bundle.py --platform windows --installer
 
@@ -111,10 +113,11 @@ flutter-release:
     cp rcflowclient/build/app/outputs/flutter-apk/app-*.apk build/artifacts/
 
 # Build Flutter Windows desktop app (release)
+[windows]
 flutter-windows:
-    cd rcflowclient && flutter build windows --release
-    @mkdir -p build/artifacts
-    cp -r rcflowclient/build/windows/x64/runner/Release build/artifacts/windows
+    Set-Location rcflowclient; flutter build windows --release
+    if (-not (Test-Path build/artifacts)) { New-Item -ItemType Directory -Path build/artifacts | Out-Null }
+    Copy-Item -Recurse -Force rcflowclient\build\windows\x64\runner\Release build\artifacts\windows
 
 # Clean build artifacts
 [unix]

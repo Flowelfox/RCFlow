@@ -58,6 +58,7 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
   late final TabController _tabController;
   late final TextEditingController _nameCtrl;
   late final TextEditingController _hostCtrl;
+  late final TextEditingController _portCtrl;
   late final TextEditingController _apiKeyCtrl;
   bool _obscureKey = true;
   late bool _useSSL;
@@ -71,6 +72,8 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
   _TestStatus _testStatus = _TestStatus.idle;
   String _testMessage = '';
 
+  final _serverConfigKey = GlobalKey<ServerConfigContentState>();
+
   bool get _hasWorker => widget.worker != null;
   int get _tabCount => _hasWorker ? 3 : 2;
 
@@ -80,6 +83,7 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
     _tabController = TabController(length: _tabCount, vsync: this);
     _nameCtrl = TextEditingController(text: widget.existing?.name ?? '');
     _hostCtrl = TextEditingController(text: widget.existing?.host ?? '');
+    _portCtrl = TextEditingController(text: widget.existing != null ? widget.existing!.port.toString() : '53890');
     _apiKeyCtrl = TextEditingController(text: widget.existing?.apiKey ?? '');
     _useSSL = widget.existing?.useSSL ?? false;
     _allowSelfSigned = widget.existing?.allowSelfSigned ?? true;
@@ -94,6 +98,7 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
     _tabController.dispose();
     _nameCtrl.dispose();
     _hostCtrl.dispose();
+    _portCtrl.dispose();
     _apiKeyCtrl.dispose();
     super.dispose();
   }
@@ -109,17 +114,29 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
     return ctrl.text.trim().isEmpty ? 'Required' : null;
   }
 
-  void _save() {
+  Future<void> _save() async {
     setState(() => _submitted = true);
     final name = _nameCtrl.text.trim();
     final host = _hostCtrl.text.trim();
+    final portStr = _portCtrl.text.trim();
     final apiKey = _apiKeyCtrl.text.trim();
-    if (name.isEmpty || host.isEmpty || apiKey.isEmpty) return;
+    if (name.isEmpty || host.isEmpty || portStr.isEmpty || apiKey.isEmpty) return;
+    final port = int.tryParse(portStr);
+    if (port == null || port < 1 || port > 65535) return;
+
+    // Save server config + tool settings if the Server tab is active
+    final serverState = _serverConfigKey.currentState;
+    if (serverState != null && serverState.hasUnsavedChanges) {
+      await serverState.saveAll();
+    }
+
+    if (!mounted) return;
 
     final config = WorkerConfig(
       id: widget.existing?.id ?? WorkerConfig.generateId(),
       name: name,
       host: host,
+      port: port,
       apiKey: apiKey,
       useSSL: _useSSL,
       allowSelfSigned: _allowSelfSigned,
@@ -129,13 +146,58 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
     Navigator.of(context).pop(config);
   }
 
+  Future<void> _confirmCancel() async {
+    final hasServerChanges =
+        _serverConfigKey.currentState?.hasUnsavedChanges ?? false;
+    // If there are no changes at all, just close immediately
+    if (!hasServerChanges) {
+      Navigator.of(context).pop();
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: context.appColors.bgSurface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        title: Text('Discard changes?',
+            style: TextStyle(color: context.appColors.textPrimary, fontSize: 16)),
+        content: Text('Your unsaved changes will be lost.',
+            style: TextStyle(color: context.appColors.textSecondary, fontSize: 14)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: Text('No',
+                style: TextStyle(color: context.appColors.textSecondary)),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: context.appColors.accent),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Yes', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true && mounted) {
+      Navigator.of(context).pop();
+    }
+  }
+
   Future<void> _testConnection() async {
     final host = _hostCtrl.text.trim();
+    final portStr = _portCtrl.text.trim();
     final apiKey = _apiKeyCtrl.text.trim();
-    if (host.isEmpty || apiKey.isEmpty) {
+    if (host.isEmpty || portStr.isEmpty || apiKey.isEmpty) {
       setState(() {
         _testStatus = _TestStatus.failure;
-        _testMessage = 'Host and API Key are required';
+        _testMessage = 'Host, Port, and API Key are required';
+      });
+      return;
+    }
+    final port = int.tryParse(portStr);
+    if (port == null || port < 1 || port > 65535) {
+      setState(() {
+        _testStatus = _TestStatus.failure;
+        _testMessage = 'Port must be between 1 and 65535';
       });
       return;
     }
@@ -145,7 +207,7 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
       _testMessage = '';
     });
 
-    final url = ServerUrl(rawHost: host, apiKey: apiKey, secure: _useSSL);
+    final url = ServerUrl(rawHost: '$host:$port', apiKey: apiKey, secure: _useSSL);
 
     try {
       // 1. HTTP health check
@@ -287,7 +349,7 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
                 children: [
                   Spacer(),
                   TextButton(
-                    onPressed: () => Navigator.of(context).pop(),
+                    onPressed: _confirmCancel,
                     child: Text('Cancel',
                         style: TextStyle(color: context.appColors.textSecondary)),
                   ),
@@ -335,25 +397,66 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
             },
           ),
           SizedBox(height: 16),
-          _buildLabel('Host', required: true),
-          SizedBox(height: 6),
-          TextField(
-            controller: _hostCtrl,
-            style: TextStyle(color: context.appColors.textPrimary, fontSize: 15),
-            decoration: InputDecoration(
-              hintText: '192.168.1.100:8765',
-              prefixIcon: Icon(Icons.dns_outlined,
-                  color: context.appColors.textMuted, size: 20),
-              fillColor: context.appColors.bgElevated,
-              border: OutlineInputBorder(
-                borderSide: BorderSide.none,
-                borderRadius: BorderRadius.circular(14),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                flex: 3,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _buildLabel('Host', required: true),
+                    SizedBox(height: 6),
+                    TextField(
+                      controller: _hostCtrl,
+                      style: TextStyle(color: context.appColors.textPrimary, fontSize: 15),
+                      decoration: InputDecoration(
+                        hintText: '127.0.0.1',
+                        prefixIcon: Icon(Icons.dns_outlined,
+                            color: context.appColors.textMuted, size: 20),
+                        fillColor: context.appColors.bgElevated,
+                        border: OutlineInputBorder(
+                          borderSide: BorderSide.none,
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        errorText: _fieldError(_hostCtrl),
+                      ),
+                      onChanged: (_) {
+                        if (_submitted) setState(() {});
+                      },
+                    ),
+                  ],
+                ),
               ),
-              errorText: _fieldError(_hostCtrl),
-            ),
-            onChanged: (_) {
-              if (_submitted) setState(() {});
-            },
+              SizedBox(width: 12),
+              Expanded(
+                flex: 1,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _buildLabel('Port', required: true),
+                    SizedBox(height: 6),
+                    TextField(
+                      controller: _portCtrl,
+                      keyboardType: TextInputType.number,
+                      style: TextStyle(color: context.appColors.textPrimary, fontSize: 15),
+                      decoration: InputDecoration(
+                        hintText: '53890',
+                        fillColor: context.appColors.bgElevated,
+                        border: OutlineInputBorder(
+                          borderSide: BorderSide.none,
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        errorText: _fieldError(_portCtrl),
+                      ),
+                      onChanged: (_) {
+                        if (_submitted) setState(() {});
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
           SizedBox(height: 16),
           _buildLabel('API Key', required: true),
@@ -437,8 +540,10 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
     final worker = widget.worker!;
     if (worker.isConnected) {
       return ServerConfigContent(
+        key: _serverConfigKey,
         ws: worker.ws,
         workerName: widget.existing?.name ?? '',
+        embedded: true,
       );
     }
 

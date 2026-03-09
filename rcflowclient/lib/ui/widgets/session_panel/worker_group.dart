@@ -1,0 +1,762 @@
+import 'package:flutter/material.dart';
+
+import '../../../models/session_info.dart';
+import '../../../models/split_tree.dart';
+import '../../../models/worker_config.dart';
+import '../../../services/worker_connection.dart';
+import '../../../state/app_state.dart';
+import '../../../theme.dart';
+import '../../dialogs/worker_edit_dialog.dart';
+import '../session_pane.dart';
+import '../terminal_pane.dart';
+import 'helpers.dart';
+import 'session_leading_icon.dart';
+import 'terminal_session_tile.dart';
+
+class WorkerGroup extends StatelessWidget {
+  final WorkerConfig config;
+  final WorkerConnection? worker;
+  final List<SessionInfo> sessions;
+  final List<TerminalSessionInfo> terminals;
+  final bool expanded;
+  final VoidCallback onToggleExpand;
+  final void Function(String sessionId) onSessionTap;
+  final AppState state;
+  final VoidCallback? onSessionSelected;
+
+  const WorkerGroup({
+    super.key,
+    required this.config,
+    required this.worker,
+    required this.sessions,
+    required this.terminals,
+    required this.expanded,
+    required this.onToggleExpand,
+    required this.onSessionTap,
+    required this.state,
+    required this.onSessionSelected,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final status = worker?.status ?? WorkerConnectionStatus.disconnected;
+    final isConnected = status == WorkerConnectionStatus.connected;
+    final statusColor = switch (status) {
+      WorkerConnectionStatus.connected => context.appColors.successText,
+      WorkerConnectionStatus.connecting => context.appColors.toolAccent,
+      WorkerConnectionStatus.reconnecting => context.appColors.toolAccent,
+      WorkerConnectionStatus.disconnected => context.appColors.errorText,
+    };
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Header
+        GestureDetector(
+          onSecondaryTapUp: (details) =>
+              _showWorkerContextMenu(context, details.globalPosition),
+          child: InkWell(
+            onTap: onToggleExpand,
+            child: Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+              child: Row(
+                children: [
+                  Icon(
+                    expanded
+                        ? Icons.expand_more_rounded
+                        : Icons.chevron_right_rounded,
+                    color: context.appColors.textSecondary,
+                    size: 18,
+                  ),
+                  SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      '${config.name} (${sessions.length + terminals.length})',
+                      style: TextStyle(
+                        color: context.appColors.textPrimary,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  if (isConnected) ...[
+                    SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: IconButton(
+                        padding: EdgeInsets.zero,
+                        icon: Icon(Icons.refresh_rounded,
+                            color: context.appColors.textSecondary, size: 14),
+                        onPressed: () => worker?.refreshSessions(),
+                        tooltip: 'Refresh sessions',
+                        constraints: const BoxConstraints(
+                            maxWidth: 24, maxHeight: 24),
+                      ),
+                    ),
+                    SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: IconButton(
+                        padding: EdgeInsets.zero,
+                        icon: Icon(Icons.terminal_rounded,
+                            color: context.appColors.textSecondary, size: 14),
+                        onPressed: () {
+                          state.openTerminal(config.id);
+                          onSessionSelected?.call();
+                        },
+                        tooltip: 'Open terminal',
+                        constraints: const BoxConstraints(
+                            maxWidth: 24, maxHeight: 24),
+                      ),
+                    ),
+                    SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: IconButton(
+                        padding: EdgeInsets.zero,
+                        icon: Icon(Icons.add_rounded,
+                            color: context.appColors.textSecondary, size: 14),
+                        onPressed: () {
+                          final pane = state.ensureChatPane();
+                          pane.setTargetWorker(config.id);
+                          pane.startNewChat();
+                          onSessionSelected?.call();
+                        },
+                        tooltip: 'New session',
+                        constraints: const BoxConstraints(
+                            maxWidth: 24, maxHeight: 24),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(width: 4),
+                  Container(
+                    width: 8,
+                    height: 8,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: statusColor,
+                      boxShadow: [
+                        BoxShadow(
+                          color: statusColor.withAlpha(80),
+                          blurRadius: 4,
+                          spreadRadius: 1,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        // Merged sessions and terminals, sorted by date
+        if (expanded)
+          ..._buildMergedSessionList(context, isConnected),
+        if (expanded && sessions.isEmpty && terminals.isEmpty)
+          Padding(
+            padding: EdgeInsets.only(left: 44, bottom: 4),
+            child: Text(
+              isConnected ? 'No sessions' : 'Disconnected',
+              style: TextStyle(color: context.appColors.textMuted, fontSize: 11),
+            ),
+          ),
+      ],
+    );
+  }
+
+  List<Widget> _buildMergedSessionList(BuildContext context, bool isConnected) {
+    final entries = <({DateTime time, bool isTerminal, dynamic data})>[];
+    for (final s in sessions) {
+      entries.add((
+        time: s.createdAt ?? DateTime(2000),
+        isTerminal: false,
+        data: s,
+      ));
+    }
+    for (final t in terminals) {
+      entries.add((
+        time: t.createdAt,
+        isTerminal: true,
+        data: t,
+      ));
+    }
+    entries.sort((a, b) => b.time.compareTo(a.time));
+
+    return entries.map((entry) {
+      if (entry.isTerminal) {
+        final t = entry.data as TerminalSessionInfo;
+        return TerminalSessionTile(
+          info: t,
+          state: state,
+          isConnected: isConnected,
+          onSessionSelected: onSessionSelected,
+        );
+      }
+      final s = entry.data as SessionInfo;
+      return _buildSessionTile(context, s, isConnected);
+    }).toList();
+  }
+
+  Widget _buildSessionTile(BuildContext context, SessionInfo s, bool isConnected) {
+    final isActiveSession =
+        !state.hasNoPanes && s.sessionId == state.activePane.sessionId;
+    final isViewedByAnyPane = state.isSessionViewed(s.sessionId);
+    final dimmed = !isConnected;
+    final dragData = SessionDragData(
+      sessionId: s.sessionId,
+      workerId: config.id,
+      label: s.title ?? s.shortId,
+    );
+    final tile = GestureDetector(
+      onSecondaryTapUp: (details) => _showContextMenu(
+          context, details.globalPosition, state, s),
+      child: Opacity(
+        opacity: dimmed ? 0.5 : 1.0,
+        child: Container(
+          decoration: BoxDecoration(
+            color: isActiveSession
+                ? context.appColors.accent.withAlpha(25)
+                : isViewedByAnyPane
+                    ? context.appColors.accent.withAlpha(12)
+                    : null,
+            border: isActiveSession
+                ? Border(
+                    left: BorderSide(color: context.appColors.accent, width: 3))
+                : isViewedByAnyPane
+                    ? Border(
+                        left: BorderSide(
+                            color: context.appColors.accent.withAlpha(80), width: 2))
+                    : null,
+          ),
+          child: ListTile(
+          leading: SessionLeadingIcon(session: s),
+          title: Text(
+            s.title ?? s.shortId,
+            style: TextStyle(
+              color: isActiveSession ? context.appColors.accentLight : context.appColors.textPrimary,
+              fontSize: 12,
+              fontWeight:
+                  isActiveSession ? FontWeight.w600 : FontWeight.w400,
+              fontFamily: s.title != null ? null : 'monospace',
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          subtitle: _buildSubtitle(context, s),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (state.isSessionAttachedToTask(s.sessionId))
+                Padding(
+                  padding: const EdgeInsets.only(right: 2),
+                  child: Icon(Icons.link_rounded,
+                      color: context.appColors.accent.withAlpha(120), size: 14),
+                ),
+              if (isTerminalStatus(s.status))
+                SizedBox(
+                  width: 26,
+                  height: 26,
+                  child: IconButton(
+                    padding: EdgeInsets.zero,
+                    icon: Icon(Icons.restore_rounded,
+                        color: context.appColors.accentLight, size: 16),
+                    tooltip: 'Restore session',
+                    onPressed: dimmed
+                        ? null
+                        : () => state.restoreSessionDirect(
+                            s.sessionId, s.workerId),
+                  ),
+                )
+              else ...[
+                if (s.status == 'paused')
+                  SizedBox(
+                    width: 26,
+                    height: 26,
+                    child: IconButton(
+                      padding: EdgeInsets.zero,
+                      icon: Icon(Icons.play_arrow_rounded,
+                          color: context.appColors.accentLight, size: 16),
+                      tooltip: 'Resume session',
+                      onPressed: dimmed
+                          ? null
+                          : () => state.resumeSessionDirect(
+                              s.sessionId, s.workerId),
+                    ),
+                  )
+                else
+                  SizedBox(
+                    width: 26,
+                    height: 26,
+                    child: IconButton(
+                      padding: EdgeInsets.zero,
+                      icon: Icon(Icons.pause_rounded,
+                          color: context.appColors.textSecondary, size: 16),
+                      tooltip: 'Pause session',
+                      onPressed: dimmed
+                          ? null
+                          : () => state.pauseSessionDirect(
+                              s.sessionId, s.workerId),
+                    ),
+                  ),
+                SizedBox(
+                  width: 26,
+                  height: 26,
+                  child: IconButton(
+                    padding: EdgeInsets.zero,
+                    icon: Icon(Icons.stop_circle_outlined,
+                        color: context.appColors.errorText, size: 16),
+                    tooltip: 'End session',
+                    onPressed: dimmed
+                        ? null
+                        : () => _confirmCancelSession(
+                            context, state, s),
+                  ),
+                ),
+              ],
+            ],
+          ),
+          dense: true,
+          visualDensity: const VisualDensity(vertical: -4),
+          contentPadding: const EdgeInsets.only(left: 36, right: 8),
+          onTap: () => onSessionTap(s.sessionId),
+          onLongPress: () =>
+              _showRenameDialog(context, state, s),
+        ),
+        ),
+      ),
+    );
+    return Draggable<SessionDragData>(
+      data: dragData,
+      feedback: Material(
+        color: Colors.transparent,
+        child: Container(
+          padding:
+              EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: context.appColors.bgElevated,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: context.appColors.accent.withAlpha(120)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withAlpha(100),
+                blurRadius: 8,
+                offset: Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.drag_indicator_rounded,
+                  color: context.appColors.textSecondary, size: 14),
+              SizedBox(width: 6),
+              ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: 180),
+                child: Text(
+                  dragData.label,
+                  style: TextStyle(
+                    color: context.appColors.textPrimary,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                    decoration: TextDecoration.none,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      childWhenDragging: Opacity(opacity: 0.4, child: tile),
+      child: tile,
+    );
+  }
+
+  Widget _buildSubtitle(BuildContext context, SessionInfo s) {
+    final dateStr = s.createdAt != null
+        ? () {
+            final local = s.createdAt!.toLocal();
+            return '${monthAbbr(local.month)} ${local.day}, '
+                '${local.hour.toString().padLeft(2, '0')}:'
+                '${local.minute.toString().padLeft(2, '0')}';
+          }()
+        : null;
+
+    final totalIn = s.totalInputTokens;
+    final totalOut = s.totalOutputTokens;
+    final hasTokens = totalIn > 0 || totalOut > 0;
+
+    if (!hasTokens) {
+      return Text(
+        dateStr ?? '',
+        style: TextStyle(color: context.appColors.textMuted, fontSize: 10),
+      );
+    }
+
+    final inLimit = worker?.inputTokenLimit ?? 0;
+    final outLimit = worker?.outputTokenLimit ?? 0;
+    final inStr = inLimit > 0
+        ? '${formatTokens(totalIn)}/${formatTokens(inLimit)}'
+        : formatTokens(totalIn);
+    final outStr = outLimit > 0
+        ? '${formatTokens(totalOut)}/${formatTokens(outLimit)}'
+        : formatTokens(totalOut);
+
+    final mutedStyle = TextStyle(color: context.appColors.textMuted, fontSize: 10);
+
+    return Row(
+      children: [
+        if (dateStr != null) ...[
+          Text(dateStr, style: mutedStyle),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: Text('\u00B7', style: mutedStyle),
+          ),
+        ],
+        Icon(Icons.token_outlined, size: 9, color: context.appColors.textMuted),
+        const SizedBox(width: 2),
+        Text('$inStr in \u00B7 $outStr out', style: mutedStyle),
+      ],
+    );
+  }
+
+  void _showWorkerContextMenu(BuildContext context, Offset position) {
+    final status = worker?.status ?? WorkerConnectionStatus.disconnected;
+    final isConnected = status == WorkerConnectionStatus.connected;
+    final isConnecting = status == WorkerConnectionStatus.connecting ||
+        status == WorkerConnectionStatus.reconnecting;
+
+    final overlay =
+        Overlay.of(context).context.findRenderObject() as RenderBox;
+    showMenu<String>(
+      context: context,
+      position: RelativeRect.fromRect(
+        position & Size(1, 1),
+        Offset.zero & overlay.size,
+      ),
+      color: context.appColors.bgSurface,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      items: [
+        if (!isConnected && !isConnecting)
+          PopupMenuItem(
+            value: 'connect',
+            child: Row(
+              children: [
+                Icon(Icons.link_rounded, color: context.appColors.accentLight, size: 18),
+                SizedBox(width: 8),
+                Text('Connect', style: TextStyle(color: context.appColors.textPrimary)),
+              ],
+            ),
+          ),
+        if (isConnected)
+          PopupMenuItem(
+            value: 'disconnect',
+            child: Row(
+              children: [
+                Icon(Icons.link_off_rounded,
+                    color: context.appColors.textSecondary, size: 18),
+                SizedBox(width: 8),
+                Text('Disconnect', style: TextStyle(color: context.appColors.textPrimary)),
+              ],
+            ),
+          ),
+        PopupMenuItem(
+          value: 'edit',
+          child: Row(
+            children: [
+              Icon(
+                Icons.edit_outlined,
+                color: context.appColors.textSecondary,
+                size: 18,
+              ),
+              SizedBox(width: 8),
+              Text(
+                'Edit Worker',
+                style: TextStyle(color: context.appColors.textPrimary),
+              ),
+            ],
+          ),
+        ),
+        PopupMenuItem(
+          value: 'remove',
+          child: Row(
+            children: [
+              Icon(Icons.delete_outline, color: context.appColors.errorText, size: 18),
+              SizedBox(width: 8),
+              Text('Remove', style: TextStyle(color: context.appColors.errorText)),
+            ],
+          ),
+        ),
+      ],
+    ).then((value) async {
+      if (!context.mounted) return;
+      switch (value) {
+        case 'connect':
+          state.connectWorker(config.id);
+        case 'disconnect':
+          state.disconnectWorker(config.id);
+        case 'edit':
+          final updated = await showWorkerEditDialog(context,
+              existing: config, worker: worker);
+          if (updated != null && context.mounted) {
+            state.updateWorker(updated);
+          }
+        case 'remove':
+          _confirmRemoveWorker(context);
+      }
+    });
+  }
+
+  void _confirmRemoveWorker(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: context.appColors.bgSurface,
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text('Remove worker?',
+            style: TextStyle(color: context.appColors.textPrimary, fontSize: 18)),
+        content: Text(
+          'This will disconnect and remove "${config.name}".',
+          style: TextStyle(color: context.appColors.textSecondary, fontSize: 14),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: Text('Cancel',
+                style: TextStyle(color: context.appColors.textSecondary)),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: context.appColors.errorText),
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              state.removeWorker(config.id);
+            },
+            child: const Text('Remove',
+                style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showContextMenu(BuildContext context, Offset position,
+      AppState state, SessionInfo session) {
+    final overlay =
+        Overlay.of(context).context.findRenderObject() as RenderBox;
+    final linkedTasks = state.tasksForSession(session.sessionId);
+    showMenu<String>(
+      context: context,
+      position: RelativeRect.fromRect(
+        position & Size(1, 1),
+        Offset.zero & overlay.size,
+      ),
+      color: context.appColors.bgSurface,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      items: [
+        PopupMenuItem(
+          value: 'rename',
+          child: Row(
+            children: [
+              Icon(Icons.edit_outlined, color: context.appColors.textSecondary, size: 18),
+              SizedBox(width: 8),
+              Text('Rename', style: TextStyle(color: context.appColors.textPrimary)),
+            ],
+          ),
+        ),
+        // Task view options for sessions linked to tasks
+        for (final task in linkedTasks) ...[
+          PopupMenuItem(
+            value: 'open_task:${task.taskId}',
+            child: Row(
+              children: [
+                Icon(Icons.task_outlined, color: context.appColors.accentLight, size: 18),
+                SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    linkedTasks.length == 1 ? 'Open Task' : 'Open Task: ${task.title}',
+                    style: TextStyle(color: context.appColors.textPrimary),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          PopupMenuItem(
+            value: 'open_task_split:${task.taskId}',
+            child: Row(
+              children: [
+                Icon(Icons.vertical_split_outlined, color: context.appColors.accentLight, size: 18),
+                SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    linkedTasks.length == 1 ? 'Open Task in Split' : 'Open Task in Split: ${task.title}',
+                    style: TextStyle(color: context.appColors.textPrimary),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+        if (!isTerminalStatus(session.status) && session.status != 'paused')
+          PopupMenuItem(
+            value: 'pause',
+            child: Row(
+              children: [
+                Icon(Icons.pause_rounded, color: context.appColors.accentLight, size: 18),
+                SizedBox(width: 8),
+                Text('Pause session',
+                    style: TextStyle(color: context.appColors.textPrimary)),
+              ],
+            ),
+          ),
+        if (session.status == 'paused')
+          PopupMenuItem(
+            value: 'resume',
+            child: Row(
+              children: [
+                Icon(Icons.play_arrow_rounded,
+                    color: context.appColors.accentLight, size: 18),
+                SizedBox(width: 8),
+                Text('Resume session',
+                    style: TextStyle(color: context.appColors.textPrimary)),
+              ],
+            ),
+          ),
+        if (isTerminalStatus(session.status))
+          PopupMenuItem(
+            value: 'restore',
+            child: Row(
+              children: [
+                Icon(Icons.restore_rounded, color: context.appColors.accentLight, size: 18),
+                SizedBox(width: 8),
+                Text('Restore session',
+                    style: TextStyle(color: context.appColors.textPrimary)),
+              ],
+            ),
+          ),
+        if (!isTerminalStatus(session.status))
+          PopupMenuItem(
+            value: 'cancel',
+            child: Row(
+              children: [
+                Icon(Icons.stop_circle_outlined,
+                    color: context.appColors.errorText, size: 18),
+                SizedBox(width: 8),
+                Text('End session',
+                    style: TextStyle(color: context.appColors.errorText)),
+              ],
+            ),
+          ),
+      ],
+    ).then((value) {
+      if (!context.mounted || value == null) return;
+      if (value == 'rename') {
+        _showRenameDialog(context, state, session);
+      } else if (value == 'pause') {
+        state.pauseSessionDirect(session.sessionId, session.workerId);
+      } else if (value == 'resume') {
+        state.resumeSessionDirect(session.sessionId, session.workerId);
+      } else if (value == 'restore') {
+        state.restoreSessionDirect(session.sessionId, session.workerId);
+      } else if (value == 'cancel') {
+        _confirmCancelSession(context, state, session);
+      } else if (value.startsWith('open_task_split:')) {
+        final taskId = value.substring('open_task_split:'.length);
+        state.splitPaneWithTask(
+          state.activePaneId,
+          DropZone.right,
+          taskId,
+        );
+      } else if (value.startsWith('open_task:')) {
+        final taskId = value.substring('open_task:'.length);
+        state.openTaskInPane(taskId);
+      }
+    });
+  }
+
+  void _confirmCancelSession(
+      BuildContext context, AppState state, SessionInfo session) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: context.appColors.bgSurface,
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text('End session?',
+            style: TextStyle(color: context.appColors.textPrimary, fontSize: 18)),
+        content: Text(
+          'This will end session ${session.shortId} on the server.',
+          style: TextStyle(color: context.appColors.textSecondary, fontSize: 14),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: Text('Keep',
+                style: TextStyle(color: context.appColors.textSecondary)),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: context.appColors.errorText),
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              onSessionSelected?.call();
+              state.cancelSessionDirect(session.sessionId, session.workerId);
+            },
+            child: const Text('End session',
+                style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showRenameDialog(
+      BuildContext context, AppState state, SessionInfo session) {
+    final controller = TextEditingController(text: session.title ?? '');
+    void submit(BuildContext ctx) {
+      Navigator.of(ctx).pop();
+      state.renameSessionDirect(
+          session.sessionId, session.workerId, controller.text);
+    }
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: context.appColors.bgSurface,
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text('Rename session',
+            style: TextStyle(color: context.appColors.textPrimary, fontSize: 18)),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLength: 200,
+          style: TextStyle(color: context.appColors.textPrimary, fontSize: 14),
+          decoration: InputDecoration(
+            hintText: 'Session title',
+            hintStyle: TextStyle(color: context.appColors.textMuted),
+          ),
+          onSubmitted: (_) => submit(ctx),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: Text('Cancel',
+                style: TextStyle(color: context.appColors.textSecondary)),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: context.appColors.accent),
+            onPressed: () => submit(ctx),
+            child: const Text('Rename',
+                style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+}

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import secrets
+import sys
 import uuid
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,9 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from src.paths import get_default_tools_dir, get_install_dir
+
+# Default port: 53891 on Windows, 53890 on Linux
+_DEFAULT_PORT = 53891 if sys.platform == "win32" else 53890
 
 
 def _default_tools_dir() -> Path:
@@ -82,7 +86,7 @@ class Settings(BaseSettings):
 
     # Server
     RCFLOW_HOST: str = "0.0.0.0"
-    RCFLOW_PORT: int = 8765
+    RCFLOW_PORT: int = _DEFAULT_PORT
     RCFLOW_API_KEY: str = ""
     RCFLOW_BACKEND_ID: str = ""
 
@@ -118,8 +122,8 @@ class Settings(BaseSettings):
     TTS_PROVIDER: str = "none"
     TTS_API_KEY: str = ""
 
-    # Projects
-    PROJECTS_DIR: Path = Field(default=Path("~/Projects"))
+    # Projects (comma-separated list of directories)
+    PROJECTS_DIR: str = "~/Projects"
 
     # Tools
     TOOLS_DIR: Path = Field(default_factory=_default_tools_dir)
@@ -132,12 +136,35 @@ class Settings(BaseSettings):
     # e.g. "claude-haiku-4-5-20251001" or "us.anthropic.claude-haiku-4-5-v1:0"
     SUMMARY_MODEL: str = ""
 
+    # Global prompt (appended to system prompt for all sessions)
+    GLOBAL_PROMPT: str = ""
+
     # Tool Management
     TOOL_AUTO_UPDATE: bool = True
     TOOL_UPDATE_INTERVAL_HOURS: float = 6.0
 
+    # Session token limits (0 = unlimited)
+    SESSION_INPUT_TOKEN_LIMIT: int = 0
+    SESSION_OUTPUT_TOKEN_LIMIT: int = 0
+
+    # Artifacts
+    ARTIFACT_INCLUDE_PATTERN: str = "*.md"
+    ARTIFACT_EXCLUDE_PATTERN: str = "node_modules/**,__pycache__/**,.git/**,.venv/**,venv/**,.env/**,build/**,dist/**,target/**,*.pyc"
+    ARTIFACT_AUTO_SCAN: bool = True
+    ARTIFACT_MAX_FILE_SIZE: int = 5242880  # 5MB in bytes
+
     # Logging
     LOG_LEVEL: str = "INFO"
+
+    @property
+    def projects_dirs(self) -> list[Path]:
+        """Parse PROJECTS_DIR into a list of expanded, resolved Path objects."""
+        raw = self.PROJECTS_DIR.strip()
+        if not raw:
+            return []
+        parts = [p.strip() for p in raw.split(",") if p.strip()]
+        return [Path(p).expanduser().resolve() for p in parts]
+
 
 
 def get_settings() -> Settings:
@@ -257,6 +284,16 @@ CONFIG_OPTIONS: list[dict[str, Any]] = [
         "required": False,
         "restart_required": True,
     },
+    # --- Prompt ---
+    {
+        "key": "GLOBAL_PROMPT",
+        "label": "Global Prompt",
+        "type": "textarea",
+        "group": "Prompt",
+        "description": "Custom instructions appended to the system prompt for every session (e.g. language preferences, behavioral guidelines, domain expertise)",
+        "required": False,
+        "restart_required": False,
+    },
     # --- STT ---
     {
         "key": "STT_PROVIDER",
@@ -315,10 +352,10 @@ CONFIG_OPTIONS: list[dict[str, Any]] = [
     # --- Paths ---
     {
         "key": "PROJECTS_DIR",
-        "label": "Projects Directory",
-        "type": "string",
+        "label": "Project Directories",
+        "type": "string_list",
         "group": "Paths",
-        "description": "Root directory containing project folders",
+        "description": "Root directories containing project folders",
         "required": True,
         "restart_required": False,
     },
@@ -338,6 +375,62 @@ CONFIG_OPTIONS: list[dict[str, Any]] = [
         "type": "string",
         "group": "Tool Management",
         "description": "How often to check for tool updates (in hours)",
+        "required": False,
+        "restart_required": False,
+    },
+    # --- Session Limits ---
+    {
+        "key": "SESSION_INPUT_TOKEN_LIMIT",
+        "label": "Input Token Limit",
+        "type": "number",
+        "group": "Session Limits",
+        "description": "Maximum input tokens per session (0 = unlimited)",
+        "required": False,
+        "restart_required": False,
+    },
+    {
+        "key": "SESSION_OUTPUT_TOKEN_LIMIT",
+        "label": "Output Token Limit",
+        "type": "number",
+        "group": "Session Limits",
+        "description": "Maximum output tokens per session (0 = unlimited)",
+        "required": False,
+        "restart_required": False,
+    },
+    # --- Artifacts ---
+    {
+        "key": "ARTIFACT_INCLUDE_PATTERN",
+        "label": "Include Pattern",
+        "type": "string",
+        "group": "Artifacts",
+        "description": "Glob pattern for files to include (e.g., '*.[mM][dD]' for markdown files)",
+        "required": False,
+        "restart_required": False,
+    },
+    {
+        "key": "ARTIFACT_EXCLUDE_PATTERN",
+        "label": "Exclude Pattern",
+        "type": "string",
+        "group": "Artifacts",
+        "description": "Comma-separated glob patterns to exclude (e.g., 'node_modules/**,build/**')",
+        "required": False,
+        "restart_required": False,
+    },
+    {
+        "key": "ARTIFACT_AUTO_SCAN",
+        "label": "Auto-Extract Artifacts",
+        "type": "boolean",
+        "group": "Artifacts",
+        "description": "Automatically extract file artifacts from messages in real time during session execution",
+        "required": False,
+        "restart_required": False,
+    },
+    {
+        "key": "ARTIFACT_MAX_FILE_SIZE",
+        "label": "Maximum File Size (bytes)",
+        "type": "number",
+        "group": "Artifacts",
+        "description": "Maximum file size to track as artifact (5242880 = 5MB)",
         "required": False,
         "restart_required": False,
     },
@@ -370,9 +463,17 @@ def get_config_schema(settings: Settings) -> list[dict[str, Any]]:
         key = opt["key"]
         raw_value = getattr(settings, key)
 
-        if isinstance(raw_value, Path):
-            value: Any = str(raw_value)
+        if opt["type"] == "string_list":
+            # Comma-separated string → list for the frontend
+            if isinstance(raw_value, str) and raw_value.strip():
+                value: Any = [p.strip() for p in raw_value.split(",") if p.strip()]
+            else:
+                value = []
+        elif isinstance(raw_value, Path):
+            value = str(raw_value)
         elif isinstance(raw_value, bool):
+            value = raw_value
+        elif isinstance(raw_value, (int, float)):
             value = raw_value
         else:
             value = str(raw_value) if raw_value is not None else ""

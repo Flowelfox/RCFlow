@@ -13,7 +13,7 @@ import '../../theme.dart';
 bool get _isDesktop =>
     Platform.isWindows || Platform.isLinux || Platform.isMacOS;
 
-enum _MentionType { project, tool }
+enum _MentionType { project, tool, file }
 
 class InputArea extends StatefulWidget {
   const InputArea({super.key});
@@ -32,6 +32,7 @@ class _InputAreaState extends State<InputArea> {
   OverlayEntry? _overlayEntry;
   List<String> _projectSuggestions = [];
   List<Map<String, String>> _toolSuggestions = [];
+  List<Map<String, String>> _fileSuggestions = [];
   int _selectedIndex = 0;
   int? _mentionStart;
   _MentionType? _mentionType;
@@ -42,10 +43,16 @@ class _InputAreaState extends State<InputArea> {
   void initState() {
     super.initState();
     _controller.addListener(_onTextChanged);
+    context.read<AppState>().inputFocusRequest.addListener(_onFocusRequest);
+  }
+
+  void _onFocusRequest() {
+    _focusNode.requestFocus();
   }
 
   @override
   void dispose() {
+    context.read<AppState>().inputFocusRequest.removeListener(_onFocusRequest);
     _debounceTimer?.cancel();
     _removeOverlay();
     _controller.dispose();
@@ -68,12 +75,12 @@ class _InputAreaState extends State<InputArea> {
     }
     final cursor = selection.baseOffset;
 
-    // Walk backwards from cursor to find the nearest unescaped '@' or '#'
+    // Walk backwards from cursor to find the nearest unescaped '@', '#', or '$'
     int? triggerPos;
     String? triggerChar;
     for (var i = cursor - 1; i >= 0; i--) {
       final ch = text[i];
-      if (ch == '@' || ch == '#') {
+      if (ch == '@' || ch == '#' || ch == '\$') {
         triggerPos = i;
         triggerChar = ch;
         break;
@@ -101,9 +108,13 @@ class _InputAreaState extends State<InputArea> {
     }
 
     _mentionStart = triggerPos;
-    _mentionType =
-        triggerChar == '@' ? _MentionType.project : _MentionType.tool;
-    _fetchSuggestions(query);
+    _mentionType = switch (triggerChar) {
+      '@' => _MentionType.project,
+      '#' => _MentionType.tool,
+      '\$' => _MentionType.file,
+      _ => null,
+    };
+    if (_mentionType != null) _fetchSuggestions(query);
   }
 
   void _fetchSuggestions(String query) {
@@ -130,7 +141,8 @@ class _InputAreaState extends State<InputArea> {
           _showingNoResults = false;
           _projectSuggestions = projects.take(6).toList();
           _toolSuggestions = [];
-        } else {
+          _fileSuggestions = [];
+        } else if (_mentionType == _MentionType.tool) {
           final tools = await ws.fetchTools(query: query);
           if (!mounted) return;
           if (tools.isEmpty) {
@@ -140,6 +152,18 @@ class _InputAreaState extends State<InputArea> {
           _showingNoResults = false;
           _toolSuggestions = tools.take(6).toList();
           _projectSuggestions = [];
+          _fileSuggestions = [];
+        } else if (_mentionType == _MentionType.file) {
+          final artifacts = await ws.fetchArtifactSuggestions(query: query);
+          if (!mounted) return;
+          if (artifacts.isEmpty) {
+            _showNoResults();
+            return;
+          }
+          _showingNoResults = false;
+          _fileSuggestions = artifacts.take(8).toList();
+          _projectSuggestions = [];
+          _toolSuggestions = [];
         }
 
         _selectedIndex = 0;
@@ -154,6 +178,7 @@ class _InputAreaState extends State<InputArea> {
     _showingNoResults = true;
     _projectSuggestions = [];
     _toolSuggestions = [];
+    _fileSuggestions = [];
     _selectedIndex = 0;
     _updateOverlay();
     // Auto-dismiss after a short delay
@@ -167,6 +192,7 @@ class _InputAreaState extends State<InputArea> {
   void _updateOverlay() {
     if (_projectSuggestions.isEmpty &&
         _toolSuggestions.isEmpty &&
+        _fileSuggestions.isEmpty &&
         !_showingNoResults) {
       _removeOverlay();
       return;
@@ -184,6 +210,7 @@ class _InputAreaState extends State<InputArea> {
     _mentionType = null;
     _projectSuggestions = [];
     _toolSuggestions = [];
+    _fileSuggestions = [];
     _selectedIndex = 0;
     _showingNoResults = false;
     _debounceTimer?.cancel();
@@ -199,6 +226,7 @@ class _InputAreaState extends State<InputArea> {
 
   int get _suggestionCount {
     if (_mentionType == _MentionType.tool) return _toolSuggestions.length;
+    if (_mentionType == _MentionType.file) return _fileSuggestions.length;
     return _projectSuggestions.length;
   }
 
@@ -208,7 +236,11 @@ class _InputAreaState extends State<InputArea> {
     final cursor = _controller.selection.baseOffset;
     final before = text.substring(0, _mentionStart!);
     final after = text.substring(cursor);
-    final prefix = _mentionType == _MentionType.project ? '@' : '#';
+    final prefix = switch (_mentionType!) {
+      _MentionType.project => '@',
+      _MentionType.tool => '#',
+      _MentionType.file => '\$',
+    };
     final insertion = '$prefix$name ';
     _controller.text = '$before$insertion$after';
     _controller.selection = TextSelection.collapsed(
@@ -258,9 +290,11 @@ class _InputAreaState extends State<InputArea> {
       if (event.logicalKey == LogicalKeyboardKey.enter ||
           event.logicalKey == LogicalKeyboardKey.tab) {
         if (_suggestionCount > 0) {
-          final name = _mentionType == _MentionType.tool
-              ? _toolSuggestions[_selectedIndex]['name']!
-              : _projectSuggestions[_selectedIndex];
+          final name = switch (_mentionType) {
+            _MentionType.tool => _toolSuggestions[_selectedIndex]['mention_name']!,
+            _MentionType.file => _fileSuggestions[_selectedIndex]['file_name']!,
+            _MentionType.project || null => _projectSuggestions[_selectedIndex],
+          };
           _selectSuggestion(name);
           return KeyEventResult.handled;
         }
@@ -291,14 +325,39 @@ class _InputAreaState extends State<InputArea> {
 
         Widget content;
         if (_showingNoResults) {
-          final label = _mentionType == _MentionType.tool
-              ? 'No tools found'
-              : 'No projects found';
+          final label = switch (_mentionType) {
+            _MentionType.tool => 'No tools found',
+            _MentionType.file => 'No artifacts found',
+            _MentionType.project || null => 'No projects found',
+          };
           content = Padding(
             padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             child: Text(
               label,
               style: TextStyle(color: context.appColors.textMuted, fontSize: 13),
+            ),
+          );
+        } else if (_mentionType == _MentionType.file &&
+            _fileSuggestions.isNotEmpty) {
+          content = ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 320),
+            child: ListView.builder(
+              padding: EdgeInsets.zero,
+              shrinkWrap: true,
+              itemCount: _fileSuggestions.length,
+              itemBuilder: (context, index) {
+                final file = _fileSuggestions[index];
+                final selected = index == _selectedIndex;
+                return _FileMentionItem(
+                  fileName: file['file_name']!,
+                  filePath: file['file_path']!,
+                  fileExtension: file['file_extension']!,
+                  isText: file['is_text'] == 'true',
+                  query: mentionQuery,
+                  selected: selected,
+                  onTap: () => _selectSuggestion(file['file_name']!),
+                );
+              },
             ),
           );
         } else if (_mentionType == _MentionType.tool &&
@@ -313,11 +372,11 @@ class _InputAreaState extends State<InputArea> {
                 final tool = _toolSuggestions[index];
                 final selected = index == _selectedIndex;
                 return _ToolMentionItem(
-                  name: tool['name']!,
+                  name: tool['display_name']!,
                   description: tool['description']!,
                   query: mentionQuery,
                   selected: selected,
-                  onTap: () => _selectSuggestion(tool['name']!),
+                  onTap: () => _selectSuggestion(tool['mention_name']!),
                 );
               },
             ),
@@ -343,8 +402,11 @@ class _InputAreaState extends State<InputArea> {
           );
         }
 
-        final overlayWidth =
-            _mentionType == _MentionType.tool ? 320.0 : 280.0;
+        final overlayWidth = switch (_mentionType) {
+          _MentionType.file => 400.0,
+          _MentionType.tool => 320.0,
+          _MentionType.project || null => 280.0,
+        };
 
         return CompositedTransformFollower(
           link: _layerLink,
@@ -490,9 +552,9 @@ class _InputAreaState extends State<InputArea> {
                         ? () {
                             final pane = context.read<PaneState>();
                             if (sessionPaused) {
-                              pane.resumeSession(sessionId!);
+                              pane.resumeSession(sessionId);
                             } else {
-                              pane.pauseSession(sessionId!);
+                              pane.pauseSession(sessionId);
                             }
                           }
                         : null,
@@ -780,6 +842,139 @@ class _ToolMentionItem extends StatelessWidget {
         if (matchIndex + query.length < name.length)
           TextSpan(
             text: name.substring(matchIndex + query.length),
+            style: TextStyle(color: context.appColors.textPrimary, fontSize: 13),
+          ),
+      ]),
+      overflow: TextOverflow.ellipsis,
+    );
+  }
+}
+
+class _FileMentionItem extends StatelessWidget {
+  final String fileName;
+  final String filePath;
+  final String fileExtension;
+  final bool isText;
+  final String query;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _FileMentionItem({
+    required this.fileName,
+    required this.filePath,
+    required this.fileExtension,
+    required this.isText,
+    required this.query,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        color: selected ? context.appColors.bgOverlay : Colors.transparent,
+        child: Row(
+          children: [
+            Icon(
+              _iconForExtension(fileExtension),
+              size: 16,
+              color: context.appColors.textMuted,
+            ),
+            SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildHighlightedName(context),
+                  Text(
+                    filePath,
+                    style: TextStyle(
+                      color: context.appColors.textMuted,
+                      fontSize: 11,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+            if (!isText)
+              Padding(
+                padding: EdgeInsets.only(left: 6),
+                child: Tooltip(
+                  message: 'Binary file (metadata only)',
+                  child: Icon(
+                    Icons.visibility_off_rounded,
+                    size: 12,
+                    color: context.appColors.textMuted,
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  static IconData _iconForExtension(String ext) {
+    final e = ext.toLowerCase();
+    if (const ['.py', '.js', '.ts', '.dart', '.java', '.cpp', '.c', '.go', '.rs', '.rb', '.php', '.swift', '.kt'].contains(e)) {
+      return Icons.code_rounded;
+    }
+    if (const ['.md', '.txt', '.rst', '.log'].contains(e)) {
+      return Icons.description_rounded;
+    }
+    if (const ['.json', '.yaml', '.yml', '.toml', '.xml'].contains(e)) {
+      return Icons.data_object_rounded;
+    }
+    if (const ['.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp'].contains(e)) {
+      return Icons.image_rounded;
+    }
+    if (e == '.pdf') return Icons.picture_as_pdf_rounded;
+    return Icons.insert_drive_file_rounded;
+  }
+
+  Widget _buildHighlightedName(BuildContext context) {
+    if (query.isEmpty) {
+      return Text(
+        fileName,
+        style: TextStyle(color: context.appColors.textPrimary, fontSize: 13),
+        overflow: TextOverflow.ellipsis,
+      );
+    }
+
+    final lowerName = fileName.toLowerCase();
+    final lowerQuery = query.toLowerCase();
+    final matchIndex = lowerName.indexOf(lowerQuery);
+
+    if (matchIndex < 0) {
+      return Text(
+        fileName,
+        style: TextStyle(color: context.appColors.textPrimary, fontSize: 13),
+        overflow: TextOverflow.ellipsis,
+      );
+    }
+
+    return Text.rich(
+      TextSpan(children: [
+        if (matchIndex > 0)
+          TextSpan(
+            text: fileName.substring(0, matchIndex),
+            style: TextStyle(color: context.appColors.textPrimary, fontSize: 13),
+          ),
+        TextSpan(
+          text: fileName.substring(matchIndex, matchIndex + query.length),
+          style: TextStyle(
+              color: context.appColors.accentLight,
+              fontSize: 13,
+              fontWeight: FontWeight.w600),
+        ),
+        if (matchIndex + query.length < fileName.length)
+          TextSpan(
+            text: fileName.substring(matchIndex + query.length),
             style: TextStyle(color: context.appColors.textPrimary, fontSize: 13),
           ),
       ]),

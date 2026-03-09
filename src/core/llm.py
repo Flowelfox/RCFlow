@@ -1,6 +1,7 @@
 import json
 import logging
 import platform
+import re
 from collections.abc import AsyncIterator, Callable, Coroutine
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -100,10 +101,19 @@ class LLMClient:
             raise ValueError(msg)
 
         self._summary_model = settings.SUMMARY_MODEL or self._model
-        self._system_prompt = PromptBuilder().build(
-            projects_dir=str(settings.PROJECTS_DIR.expanduser().resolve()),
+        self._settings = settings
+        self._base_system_prompt = PromptBuilder().build(
+            projects_dirs=", ".join(str(d) for d in settings.projects_dirs),
             os_name=platform.system(),
         )
+
+    @property
+    def _system_prompt(self) -> str:
+        """Compose the full system prompt, appending global prompt if set."""
+        global_prompt = self._settings.GLOBAL_PROMPT.strip()
+        if global_prompt:
+            return f"{self._base_system_prompt}\n\n{global_prompt}"
+        return self._base_system_prompt
 
     # ------------------------------------------------------------------
     # Streaming turn dispatch
@@ -473,17 +483,24 @@ class LLMClient:
 
     async def generate_title(self, user_prompt: str, assistant_response: str) -> str:
         """Generate a short title for a conversation from the first exchange."""
-        if assistant_response:
-            content = f"User: {user_prompt}\n\nAssistant: {assistant_response}"
+        truncated_response = assistant_response[:500] if assistant_response else ""
+        if truncated_response:
+            content = f"User: {user_prompt}\n\nAssistant: {truncated_response}"
         else:
             content = f"User: {user_prompt}"
         system = (
-            "Generate a short title (max 6 words) for this conversation. "
-            "Return only the title, no quotes or punctuation."
+            "You are a title generator. Generate a concise title (3-6 words) for this conversation. "
+            "Rules: return ONLY the title text, nothing else. "
+            "No descriptions, no explanations, no markdown, no headers, no quotes, "
+            "no punctuation at the end, no special characters. Just a few words as a title."
         )
         if self._provider == "openai":
-            return await self._openai_create(system, content, max_tokens=30)
-        return await self._anthropic_create(system, content, max_tokens=30)
+            title = await self._openai_create(system, content, max_tokens=30)
+        else:
+            title = await self._anthropic_create(system, content, max_tokens=30)
+        # Safety net: strip markdown headers and take only the first line
+        title = title.split("\n")[0].lstrip("#").strip()
+        return title
 
     async def summarize(self, text: str) -> str:
         """Generate a short TTS-friendly summary of the given text using a fast model."""
@@ -495,6 +512,144 @@ class LLMClient:
         if self._provider == "openai":
             return await self._openai_create(system, text, max_tokens=256)
         return await self._anthropic_create(system, text, max_tokens=256)
+
+    @staticmethod
+    def _parse_llm_json(raw: str, fallback: dict) -> dict:
+        """Parse JSON from an LLM response with robust extraction and repair.
+
+        Handles markdown code fences, truncated strings, and missing brackets.
+        Returns *fallback* if parsing is impossible.
+        """
+        text = raw.strip()
+
+        # Strip markdown code fences (```json ... ``` or ``` ... ```)
+        fence_match = re.search(r"```(?:json)?\s*\n?(.*?)```", text, re.DOTALL)
+        if fence_match:
+            text = fence_match.group(1).strip()
+        elif text.startswith("```"):
+            text = re.sub(r"^```(?:json)?\s*\n?", "", text)
+            text = re.sub(r"```\s*$", "", text)
+            text = text.strip()
+
+        # First attempt: direct parse
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            pass
+
+        # Try to extract the first JSON object from the text
+        obj_match = re.search(r"\{.*", text, re.DOTALL)
+        if obj_match:
+            candidate = obj_match.group(0)
+
+            # Try as-is
+            try:
+                return json.loads(candidate)
+            except json.JSONDecodeError:
+                pass
+
+            # Repair: balance braces/brackets and close unterminated strings
+            repaired = candidate
+            # Close an unterminated string (odd number of unescaped quotes)
+            quote_count = len(re.findall(r'(?<!\\)"', repaired))
+            if quote_count % 2 != 0:
+                repaired += '"'
+            # Balance brackets/braces
+            open_braces = repaired.count("{") - repaired.count("}")
+            open_brackets = repaired.count("[") - repaired.count("]")
+            repaired += "]" * max(open_brackets, 0)
+            repaired += "}" * max(open_braces, 0)
+
+            try:
+                return json.loads(repaired)
+            except json.JSONDecodeError:
+                pass
+
+        logger.debug("Failed to parse LLM JSON, raw content: %s", raw)
+        return fallback
+
+    async def extract_or_match_tasks(
+        self, user_prompt: str, assistant_response: str, existing_tasks: list[dict]
+    ) -> dict:
+        """Extract new tasks or match to existing ones.
+
+        Returns: {"new_tasks": [...], "attach_task_ids": [...]}
+        """
+        content = f"User: {user_prompt}\n\nAssistant: {assistant_response}"
+        existing_section = ""
+        if existing_tasks:
+            task_lines = "\n".join(
+                f"- [{t['task_id']}] {t['title']} (status: {t['status']}): {t.get('description', '')}"
+                for t in existing_tasks
+            )
+            existing_section = (
+                f"\n\nExisting tasks in the system:\n{task_lines}\n\n"
+                "If the conversation relates to an existing task, attach it instead of "
+                "creating a duplicate. Match by semantic similarity, not exact title match."
+            )
+        system = (
+            "Analyze this conversation and determine if it implies any actionable tasks "
+            "or work items. If the user is asking for something to be done (code changes, "
+            "bug fixes, feature implementations, investigations, etc.), extract each "
+            "distinct task.\n\n"
+            f"{existing_section}"
+            "Return a JSON object with two keys:\n"
+            '- "new_tasks": Array of new task objects, each with "title" (max 100 chars) '
+            'and "description" (1-3 sentences). Only create new tasks for work that does NOT '
+            "match any existing task.\n"
+            '- "attach_task_ids": Array of existing task IDs (from the list above) that this '
+            "session relates to.\n\n"
+            "If the conversation is just a question, greeting, or doesn't imply actionable work, "
+            'return: {"new_tasks": [], "attach_task_ids": []}\n\n'
+            "Return ONLY valid JSON, no markdown, no explanation."
+        )
+        try:
+            if self._provider == "openai":
+                raw = await self._openai_create(system, content, max_tokens=512)
+            else:
+                raw = await self._anthropic_create(system, content, max_tokens=512)
+            fallback = {"new_tasks": [], "attach_task_ids": []}
+            return self._parse_llm_json(raw, fallback)
+        except Exception:
+            logger.exception("Failed to extract/match tasks from session context")
+            return {"new_tasks": [], "attach_task_ids": []}
+
+    async def evaluate_task_status(
+        self, task_title: str, task_description: str | None, current_status: str, session_result: str,
+    ) -> dict[str, str]:
+        """Evaluate whether a task's status should change based on session results.
+
+        Returns: {"status": "...", "description": "..."}
+        """
+        system = (
+            "You are evaluating whether a task's status should be updated based on "
+            "the results of a work session.\n\n"
+            f"Task: {task_title}\n"
+            f"Description: {task_description or 'No description'}\n"
+            f"Current status: {current_status}\n\n"
+            "Based on the session results below, determine:\n"
+            "1. Whether the task status should change. Valid statuses: todo, in_progress, review\n"
+            "   - 'review' means the work appears complete and needs user review\n"
+            "   - You CANNOT set status to 'done' -- only users can do that\n"
+            "2. Whether the description should be updated with new context\n\n"
+            'Return JSON with "status" and "description" keys.\n'
+            "Return ONLY valid JSON, no markdown."
+        )
+        truncated = session_result[:2000] if session_result else ""
+        try:
+            if self._provider == "openai":
+                raw = await self._openai_create(system, truncated, max_tokens=256)
+            else:
+                raw = await self._anthropic_create(system, truncated, max_tokens=256)
+            fallback = {"status": current_status, "description": task_description or ""}
+            result = self._parse_llm_json(raw, fallback)
+            # Ensure AI never sets done
+            if result.get("status") == "done":
+                result["status"] = current_status
+            return result
+        except Exception:
+            logger.exception("Failed to evaluate task status")
+            return {"status": current_status, "description": task_description or ""}
 
     async def close(self) -> None:
         if self._anthropic_client is not None:

@@ -19,3 +19,18 @@
 - Use FastAPI with async endpoints and WebSocket handlers
 - All configuration via environment variables / `.env` file
 - Type-annotate all public functions and class attributes
+
+## Versioning
+
+This project uses [Semantic Versioning](https://semver.org/) (MAJOR.MINOR.PATCH).
+
+- **MAJOR** — breaking/incompatible changes
+- **MINOR** — new features or significant enhancements (backward-compatible)
+- **PATCH** — bug fixes, small improvements, refactors (backward-compatible)
+
+When a new feature is implemented, the version **must** be bumped as part of that same task.
+
+The backend and client are versioned independently.
+
+- **rcflow backend** — version lives in `pyproject.toml` → `version` field under `[project]`. Update this when backend code changes.
+- **rcflowclient** — version lives in `rcflowclient/pubspec.yaml` → `version` field. Update this when client code changes.

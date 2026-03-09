@@ -20,7 +20,7 @@ void showWorkersScreen(BuildContext context) {
 // ---------------------------------------------------------------------------
 
 class _WorkersPage extends StatelessWidget {
-  _WorkersPage();
+  const _WorkersPage();
 
   @override
   Widget build(BuildContext context) {
@@ -84,18 +84,118 @@ class _WorkersPage extends StatelessWidget {
 // Shared content
 // ---------------------------------------------------------------------------
 
-class _WorkersContent extends StatelessWidget {
+class _WorkersContent extends StatefulWidget {
   const _WorkersContent();
+
+  @override
+  State<_WorkersContent> createState() => _WorkersContentState();
+}
+
+class _WorkersContentState extends State<_WorkersContent> {
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
+  final Set<WorkerConnectionStatus> _activeStatusFilters = {};
+
+  static const _statusByName = {
+    'connected': WorkerConnectionStatus.connected,
+    'connecting': WorkerConnectionStatus.connecting,
+    'reconnecting': WorkerConnectionStatus.reconnecting,
+    'disconnected': WorkerConnectionStatus.disconnected,
+  };
+
+  static const _statusLabels = {
+    WorkerConnectionStatus.connected: 'Connected',
+    WorkerConnectionStatus.connecting: 'Connecting',
+    WorkerConnectionStatus.reconnecting: 'Reconnecting',
+    WorkerConnectionStatus.disconnected: 'Disconnected',
+  };
+  static const _statusColors = {
+    WorkerConnectionStatus.connected: Color(0xFF4ADE80),
+    WorkerConnectionStatus.connecting: Color(0xFFFBBF24),
+    WorkerConnectionStatus.reconnecting: Color(0xFFFBBF24),
+    WorkerConnectionStatus.disconnected: Color(0xFF6B7280),
+  };
+
+  @override
+  void initState() {
+    super.initState();
+    final settings =
+        Provider.of<AppState>(context, listen: false).settings;
+    _searchQuery = settings.workersFilterSearch;
+    _searchController.text = _searchQuery;
+    for (final name in settings.workersFilterStatus) {
+      final status = _statusByName[name];
+      if (status != null) _activeStatusFilters.add(status);
+    }
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  void _saveFilters() {
+    final settings =
+        Provider.of<AppState>(context, listen: false).settings;
+    settings.workersFilterSearch = _searchQuery;
+    settings.workersFilterStatus =
+        _activeStatusFilters.map((s) => s.name).toList();
+  }
+
+  bool get _hasActiveFilters =>
+      _searchQuery.isNotEmpty || _activeStatusFilters.isNotEmpty;
+
+  void _clearFilters() {
+    setState(() {
+      _searchController.clear();
+      _searchQuery = '';
+      _activeStatusFilters.clear();
+    });
+    _saveFilters();
+  }
+
+  List<(WorkerConfig, WorkerConnection?)> _filterWorkers(
+    List<WorkerConfig> configs,
+    AppState state,
+  ) {
+    var pairs = configs
+        .map((c) => (c, state.getWorker(c.id)))
+        .toList();
+
+    if (_activeStatusFilters.isNotEmpty) {
+      pairs = pairs.where((pair) {
+        final status = pair.$2?.status ?? WorkerConnectionStatus.disconnected;
+        return _activeStatusFilters.contains(status);
+      }).toList();
+    }
+
+    if (_searchQuery.isNotEmpty) {
+      final query = _searchQuery.toLowerCase();
+      pairs = pairs.where((pair) {
+        final config = pair.$1;
+        final worker = pair.$2;
+        final status = worker?.status ?? WorkerConnectionStatus.disconnected;
+        final statusText = _statusLabels[status] ?? '';
+        return config.name.toLowerCase().contains(query) ||
+            config.hostWithPort.toLowerCase().contains(query) ||
+            statusText.toLowerCase().contains(query) ||
+            (worker?.serverOs?.toLowerCase().contains(query) ?? false);
+      }).toList();
+    }
+
+    return pairs;
+  }
 
   @override
   Widget build(BuildContext context) {
     return Consumer<AppState>(
       builder: (context, state, _) {
         final configs = state.workerConfigs;
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (configs.isEmpty)
+        if (configs.isEmpty) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
               Container(
                 width: double.infinity,
                 padding: EdgeInsets.all(24),
@@ -105,59 +205,210 @@ class _WorkersContent extends StatelessWidget {
                 ),
                 child: Column(
                   children: [
-                    Icon(Icons.dns_outlined, color: context.appColors.textMuted, size: 40),
+                    Icon(Icons.dns_outlined,
+                        color: context.appColors.textMuted, size: 40),
                     SizedBox(height: 12),
                     Text('No workers configured',
-                        style: TextStyle(color: context.appColors.textSecondary, fontSize: 14)),
+                        style: TextStyle(
+                            color: context.appColors.textSecondary,
+                            fontSize: 14)),
                     SizedBox(height: 4),
                     Text('Add a worker to connect to an RCFlow server',
-                        style: TextStyle(color: context.appColors.textMuted, fontSize: 12)),
+                        style: TextStyle(
+                            color: context.appColors.textMuted, fontSize: 12)),
                   ],
                 ),
-              )
-            else
-              Expanded(
-                child: ListView.separated(
-                  itemCount: configs.length,
-                  separatorBuilder: (context, index) => const SizedBox(height: 8),
-                  itemBuilder: (context, index) {
-                    final config = configs[index];
-                    final worker = state.getWorker(config.id);
-                    return _WorkerCard(
-                      config: config,
-                      worker: worker,
-                      onEdit: () async {
-                        final updated = await showWorkerEditDialog(
-                          context,
-                          existing: config,
-                        );
-                        if (updated != null && context.mounted) {
-                          state.updateWorker(updated);
-                        }
-                      },
-                      onRemove: () =>
-                          _confirmRemove(context, state, config),
-                      onSettings: worker?.isConnected == true
-                          ? () => showServerConfigScreen(
-                                context,
-                                ws: worker!.ws,
-                                workerName: config.name,
-                              )
-                          : null,
-                      onToggleConnect: () {
-                        if (worker?.isConnected == true) {
-                          state.disconnectWorker(config.id);
-                        } else {
-                          state.connectWorker(config.id);
-                        }
-                      },
-                    );
-                  },
-                ),
               ),
+            ],
+          );
+        }
+
+        final filtered = _filterWorkers(configs, state);
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildFilterBar(context),
+            const SizedBox(height: 12),
+            Expanded(
+              child: filtered.isEmpty && _hasActiveFilters
+                  ? _buildNoResults(context)
+                  : ListView.separated(
+                      itemCount: filtered.length,
+                      separatorBuilder: (context, index) =>
+                          const SizedBox(height: 8),
+                      itemBuilder: (context, index) {
+                        final (config, worker) = filtered[index];
+                        return _WorkerCard(
+                          config: config,
+                          worker: worker,
+                          onEdit: () async {
+                            final updated = await showWorkerEditDialog(
+                              context,
+                              existing: config,
+                            );
+                            if (updated != null && context.mounted) {
+                              state.updateWorker(updated);
+                            }
+                          },
+                          onRemove: () =>
+                              _confirmRemove(context, state, config),
+                          onSettings: worker?.isConnected == true
+                              ? () => showServerConfigScreen(
+                                    context,
+                                    ws: worker!.ws,
+                                    workerName: config.name,
+                                  )
+                              : null,
+                          onToggleConnect: () {
+                            if (worker?.isConnected == true) {
+                              state.disconnectWorker(config.id);
+                            } else {
+                              state.connectWorker(config.id);
+                            }
+                          },
+                        );
+                      },
+                    ),
+            ),
           ],
         );
       },
+    );
+  }
+
+  Widget _buildFilterBar(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          height: 36,
+          child: TextField(
+            controller: _searchController,
+            onChanged: (v) {
+              setState(() => _searchQuery = v);
+              _saveFilters();
+            },
+            style: TextStyle(
+              color: context.appColors.textPrimary,
+              fontSize: 13,
+            ),
+            decoration: InputDecoration(
+              hintText: 'Search workers by name, host, status...',
+              hintStyle: TextStyle(
+                color: context.appColors.textMuted,
+                fontSize: 13,
+              ),
+              prefixIcon: Padding(
+                padding: const EdgeInsets.only(left: 12, right: 6),
+                child: Icon(Icons.search_rounded,
+                    color: context.appColors.textMuted, size: 18),
+              ),
+              prefixIconConstraints:
+                  const BoxConstraints(maxWidth: 36, maxHeight: 36),
+              suffixIcon: _searchQuery.isNotEmpty
+                  ? GestureDetector(
+                      onTap: () {
+                        _searchController.clear();
+                        setState(() => _searchQuery = '');
+                        _saveFilters();
+                      },
+                      child: Padding(
+                        padding: const EdgeInsets.only(right: 10),
+                        child: Icon(Icons.close_rounded,
+                            color: context.appColors.textMuted, size: 16),
+                      ),
+                    )
+                  : null,
+              suffixIconConstraints:
+                  const BoxConstraints(maxWidth: 30, maxHeight: 36),
+              filled: true,
+              fillColor: context.appColors.bgElevated,
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+              border: OutlineInputBorder(
+                borderSide: BorderSide.none,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderSide: BorderSide.none,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderSide:
+                    BorderSide(color: context.appColors.accent, width: 1),
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        SizedBox(
+          height: 28,
+          child: Row(
+            children: [
+              Expanded(
+                child: ListView(
+                  scrollDirection: Axis.horizontal,
+                  children: [
+                    for (final status in WorkerConnectionStatus.values)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 6),
+                        child: _WorkerStatusFilterChip(
+                          label: _statusLabels[status]!,
+                          color: _statusColors[status]!,
+                          selected: _activeStatusFilters.contains(status),
+                          onTap: () {
+                            setState(() {
+                              if (_activeStatusFilters.contains(status)) {
+                                _activeStatusFilters.remove(status);
+                              } else {
+                                _activeStatusFilters.add(status);
+                              }
+                            });
+                            _saveFilters();
+                          },
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              if (_hasActiveFilters)
+                GestureDetector(
+                  onTap: _clearFilters,
+                  child: Padding(
+                    padding: const EdgeInsets.only(left: 6),
+                    child: Icon(Icons.filter_alt_off_rounded,
+                        color: context.appColors.textMuted, size: 18),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildNoResults(BuildContext context) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.search_off_rounded,
+              color: context.appColors.textMuted, size: 40),
+          const SizedBox(height: 12),
+          Text('No matching workers',
+              style: TextStyle(
+                  color: context.appColors.textSecondary, fontSize: 14)),
+          const SizedBox(height: 6),
+          GestureDetector(
+            onTap: _clearFilters,
+            child: Text('Clear filters',
+                style: TextStyle(
+                    color: context.appColors.accent, fontSize: 13)),
+          ),
+        ],
+      ),
     );
   }
 
@@ -190,6 +441,50 @@ class _WorkersContent extends StatelessWidget {
                 style: TextStyle(color: Colors.white)),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Worker status filter chip
+// ---------------------------------------------------------------------------
+
+class _WorkerStatusFilterChip extends StatelessWidget {
+  final String label;
+  final Color color;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _WorkerStatusFilterChip({
+    required this.label,
+    required this.color,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(
+          color: selected ? color.withAlpha(40) : Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: selected ? color.withAlpha(120) : context.appColors.divider,
+            width: 1,
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: selected ? color : context.appColors.textMuted,
+            fontSize: 11,
+            fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+          ),
+        ),
       ),
     );
   }
@@ -271,7 +566,7 @@ class _WorkerCard extends StatelessWidget {
           ),
           SizedBox(height: 8),
           Text(
-            '${config.host}  \u00B7  $statusText',
+            '${config.hostWithPort}  \u00B7  $statusText',
             style: TextStyle(color: statusColor, fontSize: 12),
           ),
           if (worker?.serverOs != null)
@@ -338,7 +633,7 @@ class _SmallButton extends StatelessWidget {
   final VoidCallback? onPressed;
   final Color? color;
 
-  _SmallButton({
+  const _SmallButton({
     required this.label,
     required this.icon,
     required this.onPressed,

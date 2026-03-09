@@ -26,7 +26,7 @@ class _ServerConfigPage extends StatelessWidget {
   final WebSocketService ws;
   final String workerName;
 
-  _ServerConfigPage({required this.ws, required this.workerName});
+  const _ServerConfigPage({required this.ws, required this.workerName});
 
   @override
   Widget build(BuildContext context) {
@@ -66,12 +66,16 @@ class ServerConfigContent extends StatefulWidget {
   final WebSocketService ws;
   final String workerName;
   final ScrollController? scrollController;
+  /// When true, hides internal save buttons (used when embedded in a dialog
+  /// that provides its own save action).
+  final bool embedded;
 
   const ServerConfigContent({
     super.key,
     required this.ws,
     required this.workerName,
     this.scrollController,
+    this.embedded = false,
   });
 
   @override
@@ -508,14 +512,30 @@ class ServerConfigContentState extends State<ServerConfigContent> {
     }
     _textControllers.clear();
     for (final opt in options) {
-      if (opt.type == 'string' || opt.type == 'secret') {
+      if (opt.type == 'string' || opt.type == 'secret' || opt.type == 'textarea' || opt.type == 'number') {
         _textControllers[opt.key] =
             TextEditingController(text: opt.value?.toString() ?? '');
+      } else if (opt.type == 'string_list') {
+        final list = opt.value;
+        final text = list is List ? list.join('\n') : (opt.value?.toString() ?? '');
+        _textControllers[opt.key] = TextEditingController(text: text);
       }
     }
   }
 
   bool get _hasChanges => _editedValues.isNotEmpty;
+
+  /// Whether there are unsaved server config or tool settings changes.
+  bool get hasUnsavedChanges =>
+      _editedValues.isNotEmpty || _toolSettingsEdited.isNotEmpty;
+
+  /// Saves all pending changes (server config + all tool settings).
+  Future<void> saveAll() async {
+    if (_editedValues.isNotEmpty) await _save();
+    for (final toolName in _toolSettingsEdited.keys.toList()) {
+      await _saveToolSettings(toolName);
+    }
+  }
 
   void _onValueChanged(String key, dynamic value, dynamic originalValue) {
     setState(() {
@@ -665,7 +685,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if (_hasChanges || _saveMessage != null) ...[
+                if (!widget.embedded && (_hasChanges || _saveMessage != null)) ...[
                   Row(
                     mainAxisAlignment: MainAxisAlignment.end,
                     children: [
@@ -1311,7 +1331,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
                 child: _buildCodexLoginSection(),
               ),
           ],
-          if (hasEdits || saving)
+          if (!widget.embedded && (hasEdits || saving))
             Row(
               children: [
                 _ToolActionButton(
@@ -1511,6 +1531,22 @@ class ServerConfigContentState extends State<ServerConfigContent> {
           isModified: isModified,
           onChanged: (v) => _onValueChanged(opt.key, v, opt.value),
         );
+      case 'textarea':
+        return _TextAreaField(
+          option: opt,
+          controller: _textControllers[opt.key]!,
+          isModified: isModified,
+          onChanged: (v) => _onValueChanged(opt.key, v, opt.value),
+        );
+      case 'string_list':
+        return _StringListField(
+          option: opt,
+          currentValue: currentValue is List
+              ? List<String>.from(currentValue)
+              : (currentValue != null ? [currentValue.toString()] : []),
+          isModified: isModified,
+          onChanged: (v) => _onValueChanged(opt.key, v, opt.value),
+        );
       default:
         return _TextField(
           option: opt,
@@ -1654,6 +1690,46 @@ class _TextField extends StatelessWidget {
         controller: controller,
         style: TextStyle(color: context.appColors.textPrimary, fontSize: 14),
         onChanged: onChanged,
+        decoration: InputDecoration(
+          hintText: option.label,
+          fillColor: context.appColors.bgElevated,
+          border: OutlineInputBorder(
+            borderSide: BorderSide.none,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        ),
+      ),
+    );
+  }
+}
+
+class _TextAreaField extends StatelessWidget {
+  final ConfigOption option;
+  final TextEditingController controller;
+  final bool isModified;
+  final ValueChanged<String> onChanged;
+
+  const _TextAreaField({
+    required this.option,
+    required this.controller,
+    required this.isModified,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return _FieldWrapper(
+      option: option,
+      isModified: isModified,
+      child: TextField(
+        controller: controller,
+        style: TextStyle(color: context.appColors.textPrimary, fontSize: 14),
+        onChanged: onChanged,
+        maxLines: null,
+        minLines: 3,
+        keyboardType: TextInputType.multiline,
         decoration: InputDecoration(
           hintText: option.label,
           fillColor: context.appColors.bgElevated,
@@ -1827,6 +1903,185 @@ class _BoolField extends StatelessWidget {
         activeTrackColor: context.appColors.accent,
         contentPadding: EdgeInsets.zero,
         onChanged: onChanged,
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// String list field (add/remove/reorder)
+// ---------------------------------------------------------------------------
+
+class _StringListField extends StatefulWidget {
+  final ConfigOption option;
+  final List<String> currentValue;
+  final bool isModified;
+  final ValueChanged<List<String>> onChanged;
+
+  const _StringListField({
+    required this.option,
+    required this.currentValue,
+    required this.isModified,
+    required this.onChanged,
+  });
+
+  @override
+  State<_StringListField> createState() => _StringListFieldState();
+}
+
+class _StringListFieldState extends State<_StringListField> {
+  late List<TextEditingController> _controllers;
+  final List<FocusNode> _focusNodes = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _controllers = widget.currentValue
+        .map((v) => TextEditingController(text: v))
+        .toList();
+    for (var i = 0; i < _controllers.length; i++) {
+      _focusNodes.add(FocusNode());
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant _StringListField oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.currentValue.length != _controllers.length) {
+      for (final c in _controllers) {
+        c.dispose();
+      }
+      for (final f in _focusNodes) {
+        f.dispose();
+      }
+      _controllers = widget.currentValue
+          .map((v) => TextEditingController(text: v))
+          .toList();
+      _focusNodes.clear();
+      for (var i = 0; i < _controllers.length; i++) {
+        _focusNodes.add(FocusNode());
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    for (final c in _controllers) {
+      c.dispose();
+    }
+    for (final f in _focusNodes) {
+      f.dispose();
+    }
+    super.dispose();
+  }
+
+  void _emit() {
+    final values = _controllers
+        .map((c) => c.text.trim())
+        .where((s) => s.isNotEmpty)
+        .toList();
+    widget.onChanged(values);
+  }
+
+  void _addEntry() {
+    setState(() {
+      _controllers.add(TextEditingController());
+      _focusNodes.add(FocusNode());
+    });
+    _emit();
+    // Focus the new field after build.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_focusNodes.isNotEmpty) {
+        _focusNodes.last.requestFocus();
+      }
+    });
+  }
+
+  void _removeEntry(int index) {
+    setState(() {
+      _controllers[index].dispose();
+      _controllers.removeAt(index);
+      _focusNodes[index].dispose();
+      _focusNodes.removeAt(index);
+    });
+    _emit();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _FieldWrapper(
+      option: widget.option,
+      isModified: widget.isModified,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (var i = 0; i < _controllers.length; i++)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Row(
+                children: [
+                  Icon(Icons.folder_outlined,
+                      color: context.appColors.textMuted, size: 18),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: TextField(
+                      controller: _controllers[i],
+                      focusNode: _focusNodes[i],
+                      style: TextStyle(
+                          color: context.appColors.textPrimary,
+                          fontSize: 14),
+                      onChanged: (_) => _emit(),
+                      decoration: InputDecoration(
+                        hintText: '~/Projects',
+                        hintStyle: TextStyle(
+                            color: context.appColors.textMuted,
+                            fontSize: 13),
+                        fillColor: context.appColors.bgElevated,
+                        filled: true,
+                        border: OutlineInputBorder(
+                          borderSide: BorderSide.none,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 10),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  SizedBox(
+                    width: 32,
+                    height: 32,
+                    child: IconButton(
+                      padding: EdgeInsets.zero,
+                      iconSize: 18,
+                      tooltip: 'Remove folder',
+                      icon: Icon(Icons.delete_outline,
+                          color: context.appColors.textMuted),
+                      onPressed: () => _removeEntry(i),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          const SizedBox(height: 2),
+          SizedBox(
+            height: 32,
+            child: TextButton.icon(
+              onPressed: _addEntry,
+              icon: Icon(Icons.add_rounded, size: 18,
+                  color: context.appColors.accentLight),
+              label: Text('Add folder',
+                  style: TextStyle(
+                      color: context.appColors.accentLight, fontSize: 12)),
+              style: TextButton.styleFrom(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8)),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -2054,7 +2309,7 @@ class _SourceBadge extends StatelessWidget {
   final String label;
   final bool accent;
 
-  _SourceBadge({required this.label, required this.accent});
+  const _SourceBadge({required this.label, required this.accent});
 
   @override
   Widget build(BuildContext context) {

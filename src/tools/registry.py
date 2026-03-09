@@ -19,7 +19,15 @@ class ToolRegistry:
             self._tools[tool.name] = tool
 
     def get(self, name: str) -> ToolDefinition | None:
-        return self._tools.get(name)
+        """Look up a tool by internal name, mention name, or display name (case-insensitive)."""
+        tool = self._tools.get(name)
+        if tool is not None:
+            return tool
+        name_lower = name.lower()
+        for t in self._tools.values():
+            if t.mention_name.lower() == name_lower or t.display_name.lower() == name_lower:
+                return t
+        return None
 
     def list_tools(self) -> list[ToolDefinition]:
         return list(self._tools.values())

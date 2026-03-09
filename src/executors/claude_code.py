@@ -107,15 +107,13 @@ class ClaudeCodeExecutor(BaseExecutor):
 
         permission_mode = config.get("default_permission_mode")
         if permission_mode and permission_mode != "interactive":
-            # Pass standard Claude Code permission modes as-is.
-            # "interactive" is handled by RCFlow server-side (permission checks
-            # in _relay_claude_code_stream) so we use bypassPermissions on the
-            # CLI and intercept tool_use events before execution.
+            # Pass standard Claude Code permission modes as-is
+            # (e.g. bypassPermissions, allowEdits, plan).
             cmd.extend(["--permission-mode", permission_mode])
-        elif permission_mode == "interactive":
-            # Use bypassPermissions on the CLI; RCFlow handles approval via
-            # the PERMISSION_REQUEST buffer messages before tool execution.
-            cmd.extend(["--permission-mode", "bypassPermissions"])
+        # When "interactive" (or not set), don't pass --permission-mode so
+        # Claude Code uses its default behavior.  This lets it emit interactive
+        # prompts (AskUserQuestion, plan mode, tool permissions) via
+        # stream-json, which the relay intercepts and forwards to the client.
 
         max_turns = config.get("max_turns")
         if max_turns is not None:

@@ -54,8 +54,9 @@ class PlanModeAskCard extends StatelessWidget {
             Expanded(
               child: OutlinedButton(
                 onPressed: () {
-                  message.accepted = false;
-                  context.read<PaneState>().sendPrompt('no');
+                  context
+                      .read<PaneState>()
+                      .sendInteractiveResponse(message, 'no', accepted: false);
                 },
                 style: OutlinedButton.styleFrom(
                   foregroundColor: context.appColors.textSecondary,
@@ -74,8 +75,9 @@ class PlanModeAskCard extends StatelessWidget {
             Expanded(
               child: FilledButton(
                 onPressed: () {
-                  message.accepted = true;
-                  context.read<PaneState>().sendPrompt('yes');
+                  context
+                      .read<PaneState>()
+                      .sendInteractiveResponse(message, 'yes');
                 },
                 style: FilledButton.styleFrom(
                   backgroundColor: context.appColors.accent,

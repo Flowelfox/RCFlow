@@ -45,15 +45,30 @@ def _make_mock_process(
     returncode: int | None = None,
     stderr_lines: list[str] | None = None,
 ) -> MagicMock:
-    """Create a mock subprocess with predefined stdout/stderr lines."""
+    """Create a mock subprocess with predefined stdout/stderr lines.
+
+    The mock starts with ``returncode = None`` (process still running) so that
+    the ``_start_process`` early-exit check passes.  Once stdout is fully
+    drained (readline returns ``b""``), returncode switches to the final value.
+    """
     process = MagicMock()
     process.pid = 999999  # Non-existent PID so os.killpg raises ProcessLookupError
-    process.returncode = returncode
+    # Start as None (running); will be set to final value when stdout is exhausted
+    process.returncode = None
+    _final_returncode = returncode
 
-    # Build an async readline for stdout
-    stdout_data = iter([line.encode("utf-8") + b"\n" for line in stdout_lines] + [b""])
+    # Build an async readline for stdout that sets returncode on EOF
+    encoded_lines = [line.encode("utf-8") + b"\n" for line in stdout_lines]
+
+    async def _stdout_readline() -> bytes:
+        if encoded_lines:
+            return encoded_lines.pop(0)
+        # EOF — process has exited
+        process.returncode = _final_returncode
+        return b""
+
     stdout_reader = MagicMock()
-    stdout_reader.readline = AsyncMock(side_effect=stdout_data)
+    stdout_reader.readline = _stdout_readline
     process.stdout = stdout_reader
 
     # Build an async readline for stderr (drain task reads this)
@@ -65,6 +80,8 @@ def _make_mock_process(
     process.stdin = MagicMock()
     process.stdin.write = MagicMock()
     process.stdin.close = MagicMock()
+    process.stdin.drain = AsyncMock()
+    process.stdin.wait_closed = AsyncMock()
     process.kill = MagicMock()
     process.wait = AsyncMock()
 

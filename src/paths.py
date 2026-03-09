@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -73,3 +74,29 @@ def get_templates_dir() -> Path:
     if is_frozen():
         return Path(sys._MEIPASS) / "templates"  # type: ignore[attr-defined]
     return Path(__file__).resolve().parent / "prompts" / "templates"
+
+
+def get_managed_tools_dir() -> Path:
+    """Return the base directory for RCFlow-managed CLI tool binaries and config.
+
+    Resolution order:
+    1. ``~/.local/share/rcflow/tools`` (Linux) or ``%LOCALAPPDATA%/rcflow/tools``
+       (Windows) — if the home directory exists and is writable.
+    2. ``<install_dir>/managed-tools`` — fallback for service accounts or
+       environments where the home directory is absent or read-only (e.g. a
+       system user running from ``/opt/rcflow``).
+    """
+    if sys.platform == "win32":
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        if local_app_data:
+            candidate = Path(local_app_data) / "rcflow" / "tools"
+        else:
+            candidate = Path.home() / "AppData" / "Local" / "rcflow" / "tools"
+    else:
+        candidate = Path.home() / ".local" / "share" / "rcflow" / "tools"
+
+    try:
+        candidate.mkdir(parents=True, exist_ok=True)
+        return candidate
+    except OSError:
+        return get_install_dir() / "managed-tools"

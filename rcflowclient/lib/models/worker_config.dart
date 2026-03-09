@@ -4,6 +4,7 @@ class WorkerConfig {
   final String id;
   String name;
   String host;
+  int port;
   String apiKey;
   bool useSSL;
   bool allowSelfSigned;
@@ -14,6 +15,7 @@ class WorkerConfig {
     required this.id,
     required this.name,
     required this.host,
+    this.port = 53890,
     required this.apiKey,
     this.useSSL = false,
     this.allowSelfSigned = true,
@@ -21,11 +23,32 @@ class WorkerConfig {
     this.sortOrder = 0,
   });
 
+  /// Combined host:port string for use in URLs.
+  String get hostWithPort => '$host:$port';
+
   factory WorkerConfig.fromJson(Map<String, dynamic> json) {
+    // Support legacy format where host included the port (e.g. "192.168.1.100:8765")
+    final rawHost = json['host'] as String;
+    final legacyPort = json['port'];
+    String host;
+    int port;
+    if (legacyPort != null) {
+      host = rawHost;
+      port = legacyPort is int ? legacyPort : int.tryParse(legacyPort.toString()) ?? 53890;
+    } else if (rawHost.contains(':')) {
+      final parts = rawHost.split(':');
+      host = parts[0];
+      port = int.tryParse(parts[1]) ?? 53890;
+    } else {
+      host = rawHost;
+      port = 53890;
+    }
+
     return WorkerConfig(
       id: json['id'] as String,
       name: json['name'] as String,
-      host: json['host'] as String,
+      host: host,
+      port: port,
       apiKey: json['api_key'] as String,
       useSSL: json['use_ssl'] as bool? ?? false,
       allowSelfSigned: json['allow_self_signed'] as bool? ?? true,
@@ -38,6 +61,7 @@ class WorkerConfig {
         'id': id,
         'name': name,
         'host': host,
+        'port': port,
         'api_key': apiKey,
         'use_ssl': useSSL,
         'allow_self_signed': allowSelfSigned,
@@ -49,6 +73,7 @@ class WorkerConfig {
     String? id,
     String? name,
     String? host,
+    int? port,
     String? apiKey,
     bool? useSSL,
     bool? allowSelfSigned,
@@ -59,6 +84,7 @@ class WorkerConfig {
       id: id ?? this.id,
       name: name ?? this.name,
       host: host ?? this.host,
+      port: port ?? this.port,
       apiKey: apiKey ?? this.apiKey,
       useSSL: useSSL ?? this.useSSL,
       allowSelfSigned: allowSelfSigned ?? this.allowSelfSigned,
