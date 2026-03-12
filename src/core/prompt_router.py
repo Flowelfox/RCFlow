@@ -874,7 +874,7 @@ class PromptRouter:
                     select(ArtifactModel)
                     .where(ArtifactModel.backend_id == self._settings.RCFLOW_BACKEND_ID)
                     .where(func.lower(ArtifactModel.file_name) == lower_ref)
-                    .order_by(ArtifactModel.discovered_at.desc())
+                    .order_by(ArtifactModel.modified_at.desc())
                     .limit(1)
                 )
                 result = await db.execute(stmt)
