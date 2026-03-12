@@ -1700,7 +1700,7 @@ async def search_artifacts(
         stmt = (
             select(ArtifactModel)
             .where(ArtifactModel.backend_id == settings.RCFLOW_BACKEND_ID)
-            .order_by(ArtifactModel.discovered_at.desc())
+            .order_by(ArtifactModel.modified_at.desc())
         )
         if q:
             search_pattern = f"%{q}%"
