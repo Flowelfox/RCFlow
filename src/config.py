@@ -13,8 +13,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from src.paths import get_default_tools_dir, get_install_dir
 
-# Default port: 53891 on Windows, 53890 on Linux
-_DEFAULT_PORT = 53891 if sys.platform == "win32" else 53890
+# Default backend port across platforms
+_DEFAULT_PORT = 53890
 
 
 def _default_tools_dir() -> Path:
@@ -98,7 +98,7 @@ class Settings(BaseSettings):
     # Database
     DATABASE_URL: str = "sqlite+aiosqlite:///./data/rcflow.db"
 
-    # LLM provider: "anthropic" (direct API), "bedrock" (AWS Bedrock), or "openai"
+    # LLM provider: "anthropic" (direct API), "bedrock" (AWS Bedrock), "openai", or "none" (direct tool mode)
     LLM_PROVIDER: str = "anthropic"
 
     # Anthropic LLM (used when LLM_PROVIDER = "anthropic")
@@ -199,9 +199,10 @@ CONFIG_OPTIONS: list[dict[str, Any]] = [
             {"value": "anthropic", "label": "Anthropic Key"},
             {"value": "bedrock", "label": "Bedrock"},
             {"value": "openai", "label": "OpenAI"},
+            {"value": "none", "label": "None (Direct Tool Mode)"},
         ],
         "group": "LLM",
-        "description": "LLM backend to use for inference",
+        "description": "LLM backend for inference. 'None' bypasses the LLM — use #tool_name to invoke tools directly.",
         "required": True,
         "restart_required": True,
     },
@@ -223,7 +224,7 @@ CONFIG_OPTIONS: list[dict[str, Any]] = [
         "description": "Model ID (e.g. claude-sonnet-4-20250514). For Bedrock use Bedrock model IDs.",
         "required": False,
         "restart_required": True,
-        "visible_when": {"key": "LLM_PROVIDER", "value_not": "openai"},
+        "visible_when": {"key": "LLM_PROVIDER", "value_in": ["anthropic", "bedrock"]},
     },
     {
         "key": "AWS_REGION",
@@ -283,6 +284,7 @@ CONFIG_OPTIONS: list[dict[str, Any]] = [
         "description": "Model for TTS-friendly summaries (blank = use main model)",
         "required": False,
         "restart_required": True,
+        "visible_when": {"key": "LLM_PROVIDER", "value_not": "none"},
     },
     # --- Prompt ---
     {
@@ -293,6 +295,7 @@ CONFIG_OPTIONS: list[dict[str, Any]] = [
         "description": "Custom instructions appended to the system prompt for every session (e.g. language preferences, behavioral guidelines, domain expertise)",
         "required": False,
         "restart_required": False,
+        "visible_when": {"key": "LLM_PROVIDER", "value_not": "none"},
     },
     # --- STT ---
     {
@@ -387,6 +390,7 @@ CONFIG_OPTIONS: list[dict[str, Any]] = [
         "description": "Maximum input tokens per session (0 = unlimited)",
         "required": False,
         "restart_required": False,
+        "visible_when": {"key": "LLM_PROVIDER", "value_not": "none"},
     },
     {
         "key": "SESSION_OUTPUT_TOKEN_LIMIT",
@@ -396,6 +400,7 @@ CONFIG_OPTIONS: list[dict[str, Any]] = [
         "description": "Maximum output tokens per session (0 = unlimited)",
         "required": False,
         "restart_required": False,
+        "visible_when": {"key": "LLM_PROVIDER", "value_not": "none"},
     },
     # --- Artifacts ---
     {

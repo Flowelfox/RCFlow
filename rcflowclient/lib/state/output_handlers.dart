@@ -148,6 +148,25 @@ void handleTodoUpdate(Map<String, dynamic> msg, PaneState pane) {
   ));
 }
 
+void handleThinking(Map<String, dynamic> msg, PaneState pane) {
+  final content = msg['content'] as String? ?? '';
+  if (content.isEmpty) return;
+
+  // Append to an existing thinking message if one is currently at the tail
+  // of the stream target (similar to how assistant chunks aggregate).
+  if (pane.lastStreamMessage?.type == DisplayMessageType.thinking) {
+    pane.lastStreamMessage!.content += content;
+    pane.refresh();
+    return;
+  }
+
+  pane.addDisplayMessageInStream(DisplayMessage(
+    type: DisplayMessageType.thinking,
+    sessionId: msg['session_id'] as String?,
+    content: content,
+  ));
+}
+
 void handleAgentSessionStart(Map<String, dynamic> msg, PaneState pane) {
   pane.finalizeStream();
   pane.addDisplayMessage(DisplayMessage(
@@ -221,6 +240,7 @@ final Map<String, OutputHandler> outputHandlerRegistry = {
   'session_resumed': handleSessionResumed,
   'session_restored': handleSessionRestored,
   'todo_update': handleTodoUpdate,
+  'thinking': handleThinking,
   'agent_session_start': handleAgentSessionStart,
   'agent_group_start': handleAgentGroupStart,
   'agent_group_end': handleAgentGroupEnd,
@@ -437,6 +457,23 @@ void buildTodoUpdateHistory(Map<String, dynamic> msg, String sessionId,
   ));
 }
 
+void buildThinkingHistory(Map<String, dynamic> msg, String sessionId,
+    List<DisplayMessage> messages) {
+  final content = msg['content'] as String? ?? '';
+  if (messages.isNotEmpty &&
+      messages.last.type == DisplayMessageType.thinking &&
+      messages.last.sessionId == sessionId) {
+    messages.last.content += content;
+  } else {
+    messages.add(DisplayMessage(
+      type: DisplayMessageType.thinking,
+      content: content,
+      sessionId: sessionId,
+      finished: true,
+    ));
+  }
+}
+
 void buildAgentSessionStartHistory(Map<String, dynamic> msg, String sessionId,
     List<DisplayMessage> messages) {
   final metadata = msg['metadata'] as Map<String, dynamic>? ?? {};
@@ -469,5 +506,6 @@ final Map<String, HistoryBuilder> historyBuilderRegistry = {
   'plan_review_ask': buildPlanReviewAskHistory,
   'permission_request': buildPermissionRequestHistory,
   'todo_update': buildTodoUpdateHistory,
+  'thinking': buildThinkingHistory,
   'agent_session_start': buildAgentSessionStartHistory,
 };

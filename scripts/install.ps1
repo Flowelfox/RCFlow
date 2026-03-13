@@ -11,7 +11,7 @@
     Installation directory (default: C:\RCFlow)
 
 .PARAMETER Port
-    Server port (default: 8765)
+    Server port (default: 53890)
 
 .PARAMETER NoService
     Skip Windows Service setup
@@ -27,7 +27,7 @@
 
 param(
     [string]$InstallDir = "C:\RCFlow",
-    [int]$Port = 8765,
+    [int]$Port = 53890,
     [switch]$NoService,
     [switch]$Unattended
 )

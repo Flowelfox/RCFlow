@@ -23,6 +23,7 @@ class MessageType(StrEnum):
     PERMISSION_REQUEST = "permission_request"
     SESSION_RESTORED = "session_restored"
     TODO_UPDATE = "todo_update"
+    THINKING = "thinking"
     SESSION_UPDATE = "session_update"  # For broadcasting session metadata updates
 
 

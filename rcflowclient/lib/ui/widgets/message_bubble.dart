@@ -13,6 +13,7 @@ import 'message_components/session_end_ask_card.dart';
 import 'message_components/status_chip.dart';
 import 'message_components/summary_bubble.dart';
 import 'message_components/todo_list_block.dart';
+import 'message_components/thinking_block.dart';
 import 'message_components/tool_block.dart';
 import 'message_components/user_bubble.dart';
 
@@ -61,6 +62,8 @@ class MessageBubble extends StatelessWidget {
         return AgentGroupBlock(message: message);
       case DisplayMessageType.agentSessionStart:
         return AgentSessionStartBubble(message: message);
+      case DisplayMessageType.thinking:
+        return ThinkingBlock(message: message);
       case DisplayMessageType.todoUpdate:
         return TodoListBlock(message: message);
     }

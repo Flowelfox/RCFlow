@@ -75,7 +75,7 @@ class PromptRouter:
 
     def __init__(
         self,
-        llm_client: LLMClient,
+        llm_client: LLMClient | None,
         session_manager: SessionManager,
         tool_registry: ToolRegistry,
         db_session_factory: async_sessionmaker[AsyncSession] | None = None,
@@ -99,6 +99,11 @@ class PromptRouter:
         self._pending_archive_tasks: set[asyncio.Task[None]] = set()
         self._pending_task_creation_tasks: set[asyncio.Task[None]] = set()
         self._pending_task_update_tasks: set[asyncio.Task[None]] = set()
+
+    @property
+    def is_direct_tool_mode(self) -> bool:
+        """Whether the router is in direct tool mode (no LLM)."""
+        return self._llm is None
 
     async def cancel_pending_tasks(self) -> None:
         """Cancel and await all pending background tasks.
@@ -630,7 +635,12 @@ class PromptRouter:
         if self._tool_settings:
             tool_provider = self._tool_settings.get_settings("claude_code").get("provider", "")
 
-        if not tool_provider and self._settings and self._settings.ANTHROPIC_API_KEY:
+        if tool_provider == "anthropic_login":
+            # Anthropic Login uses OAuth tokens from .credentials.json —
+            # ensure no ANTHROPIC_API_KEY leaks from the server process env,
+            # which would override OAuth and cause "Invalid API key" errors.
+            extra_env["ANTHROPIC_API_KEY"] = ""
+        elif not tool_provider and self._settings and self._settings.ANTHROPIC_API_KEY:
             extra_env["ANTHROPIC_API_KEY"] = self._settings.ANTHROPIC_API_KEY
 
         if self._tool_settings:
@@ -729,6 +739,12 @@ class PromptRouter:
             val = settings.get(key)
             if val not in (None, "", []):
                 overrides[key] = val
+
+        # Don't pass model override when using Anthropic Login —
+        # let the CLI choose the model based on the user's subscription.
+        if tool_name == "claude_code" and settings.get("provider") == "anthropic_login":
+            overrides.pop("model", None)
+
         return overrides
 
     def _get_executor(self, executor_type: str, tool_def: ToolDefinition | None = None) -> BaseExecutor:
@@ -846,6 +862,141 @@ class PromptRouter:
             f"Prioritize using these tools. If the task can be accomplished with "
             f"the mentioned tools, use them rather than alternatives.]"
         )
+
+    def _resolve_project_path(self, name: str) -> Path | None:
+        """Resolve a @ProjectName mention to an absolute directory path, or None."""
+        if not self._settings:
+            return None
+        for projects_dir in self._settings.projects_dirs:
+            project_path = projects_dir / name
+            if project_path.is_dir():
+                return project_path
+        return None
+
+    def _parse_direct_tool_prompt(self, text: str) -> tuple[ToolDefinition, dict[str, Any], str] | str:
+        """Parse a direct-mode prompt into (tool_def, tool_input, display_text) or an error string.
+
+        The ``#tool_name`` and ``@ProjectName`` mentions can appear anywhere in the
+        text and in any order.  Everything else becomes the prompt/command.
+
+        Examples that all produce the same result::
+
+            #claude_code @RCFlow fix the bug
+            @RCFlow #ClaudeCode fix the bug
+            fix the bug @RCFlow #claude_code
+        """
+        # Find #tool mention anywhere in text
+        tool_mentions = self._TOOL_MENTION_RE.findall(text)
+        if not tool_mentions:
+            available = [t.name for t in self._tool_registry.list_tools()]
+            return f"Direct tool mode requires #tool_name syntax. Available tools: {', '.join(available)}"
+
+        # Resolve the first valid tool mention
+        tool_def: ToolDefinition | None = None
+        tool_mention_used: str = ""
+        for mention in tool_mentions:
+            candidate = self._tool_registry.get(mention)
+            if candidate is not None:
+                tool_def = candidate
+                tool_mention_used = mention
+                break
+
+        if tool_def is None:
+            available = [t.name for t in self._tool_registry.list_tools()]
+            return f"Unknown tool: #{tool_mentions[0]}. Available tools: {', '.join(available)}"
+
+        # Strip the matched #tool from text
+        clean = re.sub(rf"(?:^|\s)#{re.escape(tool_mention_used)}(?:\s|$)", " ", text, count=1).strip()
+
+        # Extract @ProjectName mentions for working directory
+        working_dir: str | None = None
+        project_mentions = self._MENTION_RE.findall(clean)
+        for mention in project_mentions:
+            resolved_path = self._resolve_project_path(mention)
+            if resolved_path is not None:
+                working_dir = str(resolved_path)
+                clean = re.sub(rf"(?:^|\s)@{re.escape(mention)}(?:\s|$)", " ", clean, count=1).strip()
+                break
+
+        display_text = clean
+
+        # Build tool_input based on executor type
+        tool_input: dict[str, Any] = {}
+        if tool_def.executor in ("claude_code", "codex"):
+            tool_input["prompt"] = display_text
+            if working_dir:
+                tool_input["working_directory"] = working_dir
+            elif self._settings and self._settings.projects_dirs:
+                tool_input["working_directory"] = str(self._settings.projects_dirs[0])
+        elif tool_def.executor == "shell":
+            tool_input["command"] = display_text
+        else:
+            params_schema = tool_def.parameters
+            properties = params_schema.get("properties", {})
+            required_params = params_schema.get("required", [])
+            if len(required_params) == 1:
+                tool_input[required_params[0]] = display_text
+            elif len(properties) == 1:
+                tool_input[next(iter(properties))] = display_text
+            else:
+                return (
+                    f"Tool #{tool_mention_used} has multiple required parameters and cannot "
+                    f"be used in direct mode. Parameters: {', '.join(properties.keys())}"
+                )
+
+        return (tool_def, tool_input, text.strip())
+
+    async def _handle_direct_prompt(self, session: ActiveSession, text: str) -> None:
+        """Handle a prompt in direct tool mode (no LLM)."""
+        parsed = self._parse_direct_tool_prompt(text)
+        if isinstance(parsed, str):
+            session.buffer.push_text(
+                MessageType.ERROR,
+                {
+                    "session_id": session.id,
+                    "content": parsed,
+                    "code": "DIRECT_TOOL_ERROR",
+                },
+            )
+            session.set_activity(ActivityState.IDLE)
+            return
+
+        tool_def, tool_input, display_text = parsed
+
+        tool_call = ToolCallRequest(
+            tool_use_id=str(uuid.uuid4()),
+            tool_name=tool_def.name,
+            tool_input=tool_input,
+        )
+
+        try:
+            await self._execute_tool(session, tool_call)
+        except Exception as e:
+            logger.exception("Error executing direct tool in session %s", session.id)
+            session.buffer.push_text(
+                MessageType.ERROR,
+                {
+                    "session_id": session.id,
+                    "content": str(e),
+                    "code": "DIRECT_TOOL_ERROR",
+                },
+            )
+            session.set_activity(ActivityState.IDLE)
+            return
+
+        # Set title from truncated prompt text
+        if session.title is None:
+            title = display_text[:50]
+            if len(display_text) > 50:
+                space_idx = title.rfind(" ")
+                if space_idx > 20:
+                    title = title[:space_idx]
+                title += "..."
+            session.title = title
+
+        # If non-agent tool completed, set IDLE
+        if session.claude_code_executor is None and session.codex_executor is None:
+            session.set_activity(ActivityState.IDLE)
 
     _MAX_FILE_CONTEXT_SIZE = 100_000  # ~100KB max file content to include in context
 
@@ -972,6 +1123,16 @@ class PromptRouter:
                 {"content": text, "role": "user"},
             )
             await self._forward_to_codex(session, text)
+            return session.id
+
+        # Direct tool mode: bypass LLM entirely, parse #tool_name syntax
+        if self.is_direct_tool_mode:
+            session.set_active()
+            session.buffer.push_text(
+                MessageType.TEXT_CHUNK,
+                {"content": text, "role": "user"},
+            )
+            await self._handle_direct_prompt(session, text)
             return session.id
 
         # Serialize prompt processing per session to prevent concurrent writes
@@ -1463,6 +1624,16 @@ class PromptRouter:
                             },
                         )
                         scan_texts.append(text_val)
+                    elif block_type == "thinking":
+                        thinking_text = block.get("thinking", "")
+                        if thinking_text:
+                            session.buffer.push_text(
+                                MessageType.THINKING,
+                                {
+                                    "session_id": session.id,
+                                    "content": thinking_text,
+                                },
+                            )
                     elif block_type == "tool_use":
                         tool_name = block.get("name", "unknown")
                         tool_input = block.get("input", {})
@@ -1651,17 +1822,13 @@ class PromptRouter:
             await executor.stop_process()
             return
 
-        await executor.stop_process()
-
         session.buffer.push_text(
             MessageType.AGENT_GROUP_END,
             {"session_id": session.id},
         )
 
-        # The process is killed after each turn to prevent memory exhaustion.
-        # Follow-up messages use restart_with_prompt (--resume) to respawn.
         logger.info(
-            "Claude Code initial streaming finished (session=%s)",
+            "Claude Code initial streaming finished, process kept alive (session=%s)",
             session.id,
         )
 
@@ -2079,12 +2246,23 @@ class PromptRouter:
 
     def _fire_title_task(self, session: ActiveSession, user_text: str, assistant_text: str) -> None:
         """Schedule a background task to generate a session title."""
+        if self._llm is None:
+            # Direct tool mode: set title from truncated user text
+            title = user_text[:50]
+            if len(user_text) > 50:
+                space_idx = title.rfind(" ")
+                if space_idx > 20:
+                    title = title[:space_idx]
+                title += "..."
+            session.title = title
+            return
         task = asyncio.create_task(self._generate_and_set_title(session, user_text, assistant_text))
         self._pending_title_tasks.add(task)
         task.add_done_callback(self._pending_title_tasks.discard)
 
     async def _generate_and_set_title(self, session: ActiveSession, user_text: str, assistant_text: str) -> None:
         """Generate a title and assign it to the session. Never raises."""
+        assert self._llm is not None
         try:
             title = await self._llm.generate_title(user_text, assistant_text)
             session.title = title
@@ -2096,6 +2274,8 @@ class PromptRouter:
 
     def _fire_task_creation_task(self, session: ActiveSession, user_text: str, assistant_text: str) -> None:
         """Schedule a background task to extract or match tasks from the session."""
+        if self._llm is None:
+            return
         task = asyncio.create_task(self._create_tasks_from_session(session, user_text, assistant_text))
         self._pending_task_creation_tasks.add(task)
         task.add_done_callback(self._pending_task_creation_tasks.discard)
@@ -2257,6 +2437,8 @@ class PromptRouter:
 
     def _fire_task_update_task(self, session: ActiveSession, session_result_text: str) -> None:
         """Schedule a background task to update tasks based on session results."""
+        if self._llm is None:
+            return
         task_ids = session.metadata.get("attached_task_ids", [])
         if not task_ids:
             return
@@ -2267,6 +2449,8 @@ class PromptRouter:
 
     def _fire_task_update_on_session_end(self, session: ActiveSession) -> None:
         """Fire task update when a session ends, if not already fired by a tool result."""
+        if self._llm is None:
+            return
         if session.metadata.get("_task_update_fired"):
             return
         result_text = self._extract_session_context(session)
@@ -2380,6 +2564,14 @@ class PromptRouter:
 
     def _fire_summary_task(self, session: ActiveSession, text: str, *, push_session_end_ask: bool = False) -> None:
         """Schedule a background task to summarize Claude Code result text."""
+        if self._llm is None:
+            # No LLM — skip summary, but still push SESSION_END_ASK if requested
+            if push_session_end_ask:
+                session.buffer.push_text(
+                    MessageType.SESSION_END_ASK,
+                    {"session_id": session.id},
+                )
+            return
         task = asyncio.create_task(self._summarize_and_push(session, text, push_session_end_ask=push_session_end_ask))
         self._pending_summary_tasks.add(task)
         task.add_done_callback(self._pending_summary_tasks.discard)
@@ -2505,10 +2697,7 @@ class PromptRouter:
                     "code": "CLAUDE_CODE_UNEXPECTED_EXIT",
                 },
             )
-            await executor.stop_process()
             return
-
-        await executor.stop_process()
 
         session.buffer.push_text(
             MessageType.AGENT_GROUP_END,
@@ -2565,10 +2754,7 @@ class PromptRouter:
                     "code": "CLAUDE_CODE_UNEXPECTED_EXIT",
                 },
             )
-            await executor.stop_process()
             return
-
-        await executor.stop_process()
 
         session.buffer.push_text(
             MessageType.AGENT_GROUP_END,
@@ -2585,7 +2771,7 @@ class PromptRouter:
         response_text: str | None,
     ) -> None:
         """Schedule a fire-and-forget background task to log an LLM call to the database."""
-        if self._db_session_factory is None:
+        if self._db_session_factory is None or self._llm is None:
             return
         task = asyncio.create_task(
             self._log_llm_call(

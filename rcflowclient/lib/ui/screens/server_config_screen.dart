@@ -122,6 +122,16 @@ class ServerConfigContentState extends State<ServerConfigContent> {
   String? _codexAuthUrl; // Browser OAuth URL (non-device-code flow)
   String? _codexLoginError;
 
+  // Claude Code Anthropic login state
+  bool? _claudeCodeLoggedIn;
+  bool _claudeCodeLoggingIn = false;
+  bool _claudeCodeSubmittingCode = false;
+  String? _claudeCodeAuthUrl;
+  String? _claudeCodeLoginError;
+  String? _claudeCodeEmail;
+  String? _claudeCodeSubscription;
+  final TextEditingController _claudeCodeAuthCodeController = TextEditingController();
+
   @override
   void initState() {
     super.initState();
@@ -138,6 +148,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
         c.dispose();
       }
     }
+    _claudeCodeAuthCodeController.dispose();
     super.dispose();
   }
 
@@ -474,6 +485,103 @@ class ServerConfigContentState extends State<ServerConfigContent> {
         _codexDeviceUrl = null;
         _codexDeviceCode = null;
         _codexAuthUrl = null;
+      });
+    }
+  }
+
+  Future<void> _checkClaudeCodeLoginStatus() async {
+    try {
+      final data = await widget.ws.claudeCodeLoginStatus();
+      if (!mounted) return;
+      setState(() {
+        _claudeCodeLoggedIn = data['logged_in'] as bool? ?? false;
+        _claudeCodeEmail = data['email'] as String?;
+        _claudeCodeSubscription = data['subscription'] as String?;
+        _claudeCodeLoginError = null;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _claudeCodeLoggedIn = null;
+        _claudeCodeLoginError = e.toString();
+      });
+    }
+  }
+
+  Future<void> _startClaudeCodeLogin() async {
+    setState(() {
+      _claudeCodeLoggingIn = true;
+      _claudeCodeAuthUrl = null;
+      _claudeCodeLoginError = null;
+      _claudeCodeAuthCodeController.clear();
+    });
+    try {
+      final result = await widget.ws.claudeCodeLogin();
+      if (!mounted) return;
+      final authUrl = result['auth_url'] as String?;
+      setState(() {
+        _claudeCodeAuthUrl = authUrl;
+      });
+      if (authUrl != null) {
+        launchUrl(Uri.parse(authUrl), mode: LaunchMode.externalApplication);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _claudeCodeLoggingIn = false;
+        _claudeCodeLoginError = e.toString();
+        _claudeCodeAuthUrl = null;
+      });
+    }
+  }
+
+  Future<void> _submitClaudeCodeAuthCode() async {
+    final code = _claudeCodeAuthCodeController.text.trim();
+    if (code.isEmpty) return;
+
+    setState(() {
+      _claudeCodeSubmittingCode = true;
+      _claudeCodeLoginError = null;
+    });
+    try {
+      final result = await widget.ws.claudeCodeLoginCode(code);
+      if (!mounted) return;
+      final loggedIn = result['logged_in'] as bool? ?? false;
+      setState(() {
+        _claudeCodeSubmittingCode = false;
+        _claudeCodeLoggingIn = false;
+        _claudeCodeLoggedIn = loggedIn;
+        _claudeCodeAuthUrl = null;
+        _claudeCodeAuthCodeController.clear();
+        if (loggedIn) {
+          _claudeCodeEmail = result['email'] as String?;
+          _claudeCodeSubscription = result['subscription'] as String?;
+        } else {
+          _claudeCodeLoginError = 'Login failed. Please try again.';
+        }
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _claudeCodeSubmittingCode = false;
+        _claudeCodeLoginError = e.toString();
+      });
+    }
+  }
+
+  Future<void> _claudeCodeLogout() async {
+    try {
+      await widget.ws.claudeCodeLogout();
+      if (!mounted) return;
+      setState(() {
+        _claudeCodeLoggedIn = false;
+        _claudeCodeEmail = null;
+        _claudeCodeSubscription = null;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _claudeCodeLoginError = e.toString();
       });
     }
   }
@@ -1010,26 +1118,36 @@ class ServerConfigContentState extends State<ServerConfigContent> {
     );
   }
 
-  bool _isToolFieldVisible(String toolName, Map<String, dynamic> field) {
-    final visibleWhen = field['visible_when'] as Map<String, dynamic>?;
-    if (visibleWhen == null) return true;
-    final depKey = visibleWhen['key'] as String;
-    final depValue = visibleWhen['value'] as String;
-    // Check edited values first, then saved values from schema.
+  String? _resolveToolFieldValue(String toolName, String depKey) {
     final edits = _toolSettingsEdited[toolName];
     if (edits != null && edits.containsKey(depKey)) {
-      return edits[depKey]?.toString() == depValue;
+      return edits[depKey]?.toString();
     }
-    // Fall back to the saved value from the fields list.
     final fields = _toolSettings[toolName];
     if (fields != null) {
       for (final f in fields) {
         if (f['key'] == depKey) {
-          return f['value']?.toString() == depValue;
+          return f['value']?.toString();
         }
       }
     }
-    return false;
+    return null;
+  }
+
+  bool _isToolFieldVisible(String toolName, Map<String, dynamic> field) {
+    // hidden_when: hide when the dependency key matches the value
+    final hiddenWhen = field['hidden_when'] as Map<String, dynamic>?;
+    if (hiddenWhen != null) {
+      final depKey = hiddenWhen['key'] as String;
+      final depValue = hiddenWhen['value'] as String;
+      if (_resolveToolFieldValue(toolName, depKey) == depValue) return false;
+    }
+    // visible_when: show only when the dependency key matches the value
+    final visibleWhen = field['visible_when'] as Map<String, dynamic>?;
+    if (visibleWhen == null) return true;
+    final depKey = visibleWhen['key'] as String;
+    final depValue = visibleWhen['value'] as String;
+    return _resolveToolFieldValue(toolName, depKey) == depValue;
   }
 
   /// Get the current effective value for a tool setting field.
@@ -1285,6 +1403,234 @@ class ServerConfigContentState extends State<ServerConfigContent> {
     );
   }
 
+  Widget _buildClaudeCodeLoginSection() {
+    // Fetch status on first render
+    if (_claudeCodeLoggedIn == null && !_claudeCodeLoggingIn && _claudeCodeLoginError == null) {
+      Future.microtask(() => _checkClaudeCodeLoginStatus());
+    }
+
+    return Container(
+      padding: EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: context.appColors.bgSurface,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: context.appColors.bgOverlay),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Anthropic Authentication',
+            style: TextStyle(
+              color: context.appColors.textPrimary,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 6),
+          // Status indicator
+          if (_claudeCodeLoggedIn == null && _claudeCodeLoginError == null && !_claudeCodeLoggingIn)
+            Row(
+              children: [
+                SizedBox(
+                  width: 12,
+                  height: 12,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 1.5,
+                    color: context.appColors.textMuted,
+                  ),
+                ),
+                SizedBox(width: 8),
+                Text('Checking status...',
+                    style: TextStyle(color: context.appColors.textMuted, fontSize: 11)),
+              ],
+            )
+          else if (_claudeCodeLoggedIn == true && !_claudeCodeLoggingIn)
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.check_circle, color: context.appColors.successText, size: 14),
+                    SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        _claudeCodeEmail != null
+                            ? 'Logged in as $_claudeCodeEmail'
+                            : 'Logged in',
+                        style: TextStyle(color: context.appColors.successText, fontSize: 11),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+                if (_claudeCodeSubscription != null) ...[
+                  SizedBox(height: 2),
+                  Padding(
+                    padding: EdgeInsets.only(left: 20),
+                    child: Text(
+                      'Subscription: ${_claudeCodeSubscription!}',
+                      style: TextStyle(color: context.appColors.textMuted, fontSize: 10),
+                    ),
+                  ),
+                ],
+                SizedBox(height: 6),
+                Row(
+                  children: [
+                    _ToolActionButton(
+                      label: 'Re-login',
+                      loading: false,
+                      accent: false,
+                      onPressed: () => _startClaudeCodeLogin(),
+                    ),
+                    SizedBox(width: 8),
+                    _ToolActionButton(
+                      label: 'Logout',
+                      loading: false,
+                      accent: false,
+                      onPressed: () => _claudeCodeLogout(),
+                    ),
+                  ],
+                ),
+              ],
+            )
+          else if (!_claudeCodeLoggingIn) ...[
+            Row(
+              children: [
+                Icon(Icons.cancel_outlined,
+                    color: context.appColors.textMuted, size: 14),
+                SizedBox(width: 6),
+                Text('Not logged in',
+                    style: TextStyle(color: context.appColors.textMuted, fontSize: 11)),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: _ToolActionButton(
+                    label: 'Login with Anthropic',
+                    loading: false,
+                    accent: true,
+                    onPressed: () => _startClaudeCodeLogin(),
+                  ),
+                ),
+              ],
+            ),
+          ],
+          // Active login flow — show URL + code input
+          if (_claudeCodeLoggingIn) ...[
+            if (_claudeCodeAuthUrl != null) ...[
+              SizedBox(height: 8),
+              Container(
+                width: double.infinity,
+                padding: EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: context.appColors.bgBase,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Sign in via your browser, then paste the code below.',
+                      style: TextStyle(color: context.appColors.textSecondary, fontSize: 11),
+                    ),
+                    SizedBox(height: 6),
+                    GestureDetector(
+                      onTap: () => launchUrl(
+                        Uri.parse(_claudeCodeAuthUrl!),
+                        mode: LaunchMode.externalApplication,
+                      ),
+                      child: Text(
+                        'Open login page',
+                        style: TextStyle(
+                          color: context.appColors.accentLight,
+                          fontSize: 11,
+                          decoration: TextDecoration.underline,
+                        ),
+                      ),
+                    ),
+                    SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: SizedBox(
+                            height: 32,
+                            child: TextField(
+                              controller: _claudeCodeAuthCodeController,
+                              style: TextStyle(
+                                color: context.appColors.textPrimary,
+                                fontSize: 12,
+                              ),
+                              decoration: InputDecoration(
+                                hintText: 'Paste auth code here',
+                                hintStyle: TextStyle(
+                                  color: context.appColors.textMuted,
+                                  fontSize: 12,
+                                ),
+                                contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(4),
+                                  borderSide: BorderSide(color: context.appColors.bgOverlay),
+                                ),
+                                enabledBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(4),
+                                  borderSide: BorderSide(color: context.appColors.bgOverlay),
+                                ),
+                                focusedBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(4),
+                                  borderSide: BorderSide(color: context.appColors.accent),
+                                ),
+                                filled: true,
+                                fillColor: context.appColors.bgSurface,
+                              ),
+                              onSubmitted: (_) => _submitClaudeCodeAuthCode(),
+                            ),
+                          ),
+                        ),
+                        SizedBox(width: 8),
+                        _ToolActionButton(
+                          label: 'Submit',
+                          loading: _claudeCodeSubmittingCode,
+                          accent: true,
+                          onPressed: _claudeCodeSubmittingCode
+                              ? null
+                              : () => _submitClaudeCodeAuthCode(),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ] else ...[
+              SizedBox(height: 6),
+              Row(
+                children: [
+                  SizedBox(
+                    width: 12,
+                    height: 12,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 1.5, color: context.appColors.accent),
+                  ),
+                  SizedBox(width: 8),
+                  Text('Starting login...',
+                      style: TextStyle(color: context.appColors.textMuted, fontSize: 11)),
+                ],
+              ),
+            ],
+          ],
+          if (_claudeCodeLoginError != null)
+            Padding(
+              padding: EdgeInsets.only(top: 4),
+              child: Text(_claudeCodeLoginError!,
+                  style: TextStyle(color: context.appColors.errorText, fontSize: 10)),
+            ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildToolSettingsPanel(String toolName) {
     final loading = _toolSettingsLoading[toolName] ?? false;
     final error = _toolSettingsError[toolName];
@@ -1329,6 +1675,14 @@ class ServerConfigContentState extends State<ServerConfigContent> {
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
                 child: _buildCodexLoginSection(),
+              ),
+            // Show Anthropic login section right after the provider field
+            if (toolName == 'claude_code' &&
+                field['key'] == 'provider' &&
+                _getToolFieldValue(toolName, 'provider') == 'anthropic_login')
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: _buildClaudeCodeLoginSection(),
               ),
           ],
           if (!widget.embedded && (hasEdits || saving))

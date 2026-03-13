@@ -102,8 +102,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     terminal_manager = TerminalSessionManager()
     app.state.terminal_manager = terminal_manager
 
-    # LLM client
-    llm_client = LLMClient(settings, tool_registry)
+    # LLM client (None in direct tool mode)
+    llm_client: LLMClient | None = None
+    if settings.LLM_PROVIDER != "none":
+        llm_client = LLMClient(settings, tool_registry)
     app.state.llm_client = llm_client
 
     # Prompt router
@@ -148,7 +150,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     logger.info("Shutting down RCFlow server")
     await terminal_manager.close_all()
     await prompt_router.cancel_pending_tasks()
-    await llm_client.close()
+    if llm_client is not None:
+        await llm_client.close()
 
     async with db_session_factory() as db:
         await session_manager.save_all_sessions(db)

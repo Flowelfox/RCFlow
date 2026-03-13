@@ -6,12 +6,14 @@ Usage:
     python scripts/bundle.py --platform linux              # Explicit platform
     python scripts/bundle.py --platform linux --installer  # Build .deb package
     python scripts/bundle.py --platform windows --installer # Build setup.exe
+    python scripts/bundle.py --platform macos --installer   # Build .pkg installer
 
 Outputs:
     dist/rcflow-{version}-{platform}-{arch}.tar.gz   (Linux archive)
     dist/rcflow_{version}_{deb_arch}.deb              (Linux .deb package)
     dist/rcflow-{version}-{platform}-{arch}.zip       (Windows archive)
     dist/rcflow-{version}-{arch}-setup.exe            (Windows installer)
+    dist/rcflow-{version}-macos-{arch}.pkg            (macOS installer)
 """
 
 from __future__ import annotations
@@ -331,6 +333,15 @@ def assemble_bundle(pyinstaller_dir: Path, target_platform: str, version: str, a
             if src.exists():
                 shutil.copy2(src, bundle_dir / script)
                 os.chmod(bundle_dir / script, 0o755)
+    elif target_platform == "macos":
+        for source_name, target_name in (
+            ("install_macos.sh", "install.sh"),
+            ("uninstall_macos.sh", "uninstall.sh"),
+        ):
+            src = scripts_dir / source_name
+            if src.exists():
+                shutil.copy2(src, bundle_dir / target_name)
+                os.chmod(bundle_dir / target_name, 0o755)
     elif target_platform == "windows":
         for script in ("install.ps1", "uninstall.ps1"):
             src = scripts_dir / script
@@ -353,7 +364,7 @@ def assemble_bundle(pyinstaller_dir: Path, target_platform: str, version: str, a
             print("Copied tray_icon.ico")
 
     # Make the main executable executable on Linux
-    if target_platform == "linux":
+    if target_platform in {"linux", "macos"}:
         exe = bundle_dir / "rcflow"
         if exe.exists():
             os.chmod(exe, 0o755)
@@ -701,6 +712,63 @@ fi
         return None
 
 
+def build_macos_pkg(bundle_dir: Path, version: str, arch: str) -> Path | None:
+    """Build a macOS .pkg installer from the assembled bundle directory."""
+    pkgbuild = shutil.which("pkgbuild")
+    if not pkgbuild:
+        print(
+            "ERROR: pkgbuild not found. Install Xcode command line tools:\n"
+            "  xcode-select --install",
+            file=sys.stderr,
+        )
+        return None
+
+    pkg_scripts_dir = PROJECT_ROOT / "build" / "macos-pkg" / "scripts"
+    if pkg_scripts_dir.exists():
+        shutil.rmtree(pkg_scripts_dir)
+    pkg_scripts_dir.mkdir(parents=True, exist_ok=True)
+
+    postinstall = pkg_scripts_dir / "postinstall"
+    postinstall.write_text(
+        """#!/bin/bash
+set -euo pipefail
+/usr/local/lib/rcflow/install.sh --prefix /usr/local/lib/rcflow --bin-dir /usr/local/bin --unattended
+"""
+    )
+    os.chmod(postinstall, 0o755)
+
+    dist_dir = PROJECT_ROOT / "dist"
+    dist_dir.mkdir(parents=True, exist_ok=True)
+    pkg_path = dist_dir / f"rcflow-{version}-macos-{arch}.pkg"
+
+    if pkg_path.exists():
+        pkg_path.unlink()
+
+    print(f"Building {pkg_path.name}...")
+    subprocess.check_call([
+        pkgbuild,
+        "--root",
+        str(bundle_dir),
+        "--scripts",
+        str(pkg_scripts_dir),
+        "--identifier",
+        "com.rcflow.backend",
+        "--version",
+        version,
+        "--install-location",
+        "/usr/local/lib/rcflow",
+        str(pkg_path),
+    ])
+
+    if pkg_path.exists():
+        size_mb = pkg_path.stat().st_size / (1024 * 1024)
+        print(f"Package created: {pkg_path} ({size_mb:.1f} MB)")
+        return pkg_path
+
+    print(f"WARNING: Expected .pkg at {pkg_path} but it was not found.", file=sys.stderr)
+    return None
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build RCFlow distributable package")
     parser.add_argument(
@@ -777,6 +845,10 @@ def main() -> None:
             print("=== Step 4: Building .deb package ===")
             installer_path = build_deb(bundle_dir, version, arch)
             print()
+        elif target_platform == "macos":
+            print("=== Step 4: Building .pkg package ===")
+            installer_path = build_macos_pkg(bundle_dir, version, arch)
+            print()
         else:
             print(f"WARNING: --installer is not supported on {target_platform}. Skipping.", file=sys.stderr)
 
@@ -794,6 +866,11 @@ def main() -> None:
         print("  sudo ./install.sh")
     elif installer_path and target_platform == "windows":
         print(f"  Run: {installer_path}")
+    elif installer_path and target_platform == "macos":
+        print(f"  sudo installer -pkg {installer_path} -target /")
+    elif target_platform == "macos":
+        print(f"  cd {bundle_dir}")
+        print("  sudo ./install.sh")
     else:
         print(f"  cd {bundle_dir}")
         print("  .\\install.ps1")

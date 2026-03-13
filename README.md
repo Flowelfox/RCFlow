@@ -74,7 +74,7 @@ Key settings:
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `RCFLOW_HOST` | Server bind address | `0.0.0.0` |
-| `RCFLOW_PORT` | Server port | `8765` |
+| `RCFLOW_PORT` | Server port | `53890` |
 | `RCFLOW_API_KEY` | API key for client authentication | *(required)* |
 | `LLM_PROVIDER` | `anthropic` or `bedrock` | `anthropic` |
 | `ANTHROPIC_API_KEY` | Anthropic API key (when using direct API) | |
@@ -100,7 +100,7 @@ just run
 uv run rcflow
 ```
 
-The server will start on the configured host and port (default: `0.0.0.0:8765`).
+The server will start on the configured host and port (default: `0.0.0.0:53890`).
 
 ### Database Migrations
 

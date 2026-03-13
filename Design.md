@@ -251,6 +251,10 @@ The client can connect to multiple RCFlow servers simultaneously. Each server co
 | PATCH  | `/api/tools/{tool_name}/settings`       | Yes  | Update per-tool settings. Body: `{"updates": {"key": value, ...}}`. Returns updated schema+values. |
 | POST   | `/api/tools/codex/login`                | Yes  | Start Codex ChatGPT login. Optional `?device_code=true` for device-code flow. Streams NDJSON events: `auth_url` or `device_code`, `waiting`, `complete`, `error`. Times out after 5 min. |
 | GET    | `/api/tools/codex/login/status`         | Yes  | Check Codex ChatGPT login status. Returns `{"logged_in": bool, "method": "ChatGPT"|null}`. |
+| POST   | `/api/tools/claude_code/login`          | Yes  | Start Claude Code Anthropic OAuth login. Returns `{"auth_url": "..."}`. Opens a `claude auth login` process that waits for a code. |
+| POST   | `/api/tools/claude_code/login/code`     | Yes  | Submit OAuth code to complete login. Body: `{"code": "..."}`. Returns `{"logged_in": bool, "email": String?, "subscription": String?}`. |
+| GET    | `/api/tools/claude_code/login/status`   | Yes  | Check Claude Code Anthropic login status. Returns `{"logged_in": bool, "method": String?, "email": String?, "subscription": String?}`. |
+| POST   | `/api/tools/claude_code/logout`         | Yes  | Log out of Claude Code Anthropic subscription. Returns `{"logged_out": true}`. |
 | GET    | `/api/tasks`                            | Yes  | List all tasks for the current backend. Optional `?status=` and `?source=` filters. Sorted by `updated_at` desc. |
 | GET    | `/api/tasks/{task_id}`                  | Yes  | Get a single task with attached sessions. |
 | POST   | `/api/tasks`                            | Yes  | Create a task. Body: `{"title", "description?", "source?", "session_id?"}`. Returns 201. |
@@ -477,6 +481,16 @@ Large tool outputs are truncated to 100,000 characters server-side before delive
 ```
 
 Emitted whenever Claude Code calls the `TodoWrite` tool. The `todos` array is the complete current task list (not a diff). The server also stores the latest todo state on the in-memory session object, queryable via `GET /api/sessions/{session_id}/todos`.
+
+```json
+{
+  "type": "thinking",
+  "session_id": "uuid",
+  "content": "Let me analyze this problem step by step..."
+}
+```
+
+Emitted when Claude Code produces `thinking` content blocks in `assistant` events (extended thinking / chain-of-thought). Multiple thinking messages for the same turn are aggregated client-side into a single collapsible block. The client renders thinking blocks as collapsed-by-default cards with a brain icon.
 
 ```json
 {
@@ -1101,6 +1115,53 @@ The client provides autocomplete suggestions via `GET /api/artifacts/search?q=<q
 
 ---
 
+## Direct Tool Mode (`LLM_PROVIDER = "none"`)
+
+When `LLM_PROVIDER` is set to `"none"`, the server operates in **direct tool mode**. No LLM client is created, no API keys are required, and all prompts must use `#tool_name` syntax to invoke tools directly.
+
+### Syntax
+
+```
+#claude_code @MyProject fix the bug in auth.py
+#codex @MyProject implement feature X
+#shell_exec ls -la /home/user
+#system_info
+```
+
+- `#tool_name` (required first token) — which tool to invoke. Matched against tool internal name, mention name, and display name (case-insensitive).
+- `@ProjectName` (optional, for agent tools) — resolves to a project directory under `PROJECTS_DIR`. The first valid match is used as `working_directory`.
+- Remaining text — becomes the tool's primary input parameter (`prompt` for agent tools, `command` for shell tools).
+
+### Behavior Differences
+
+| Aspect | Normal mode | Direct tool mode |
+|--------|-------------|------------------|
+| LLM required | Yes | No |
+| Prompt routing | LLM decides tool | User specifies `#tool_name` |
+| Session titles | LLM-generated | Truncated from prompt text |
+| Task creation/update | LLM-driven | Skipped |
+| Summaries | LLM-generated | Skipped (SESSION_END_ASK still sent) |
+| Token limits | Enforced | Not applicable |
+| Config UI fields | All shown | LLM-specific fields hidden |
+
+### Error Handling
+
+- Prompt without `#tool_name` prefix → error listing available tools
+- Unknown tool name → error listing available tools
+- Tool with multiple required parameters → error (cannot map single text input)
+
+### What Stays the Same
+
+- Session lifecycle (create, archive, restore, pause, resume)
+- Buffer/streaming infrastructure
+- Tool execution pipeline (`_execute_tool`, agent streaming)
+- Follow-up messages to active agent sessions
+- Permission system for interactive mode
+- WebSocket endpoints
+- All existing LLM provider modes
+
+---
+
 ## Pluggable Tool Definitions
 
 ### File Organization
@@ -1424,7 +1485,7 @@ Schema fields may include `"managed_only": true` — these are only exposed when
 | `permissions.allow`        | string_list | no           | —                      | Tool permissions to always allow                   |
 | `permissions.deny`         | string_list | no           | —                      | Tool permissions to always deny                    |
 | `enableAllProjectMcpServers` | boolean   | no           | —                      | Auto-enable project MCP servers                    |
-| `provider`                 | select      | yes          | —                      | API provider: Global / Anthropic / AWS Bedrock     |
+| `provider`                 | select      | yes          | —                      | API provider: Global / Anthropic Key / Anthropic Login / AWS Bedrock |
 | `anthropic_api_key`        | secret      | yes          | provider = anthropic   | API key for Anthropic provider                     |
 | `aws_region`               | string      | yes          | provider = bedrock     | AWS region for Bedrock (default us-east-1)         |
 | `aws_access_key_id`        | secret      | yes          | provider = bedrock     | AWS access key for Bedrock                         |
@@ -1436,7 +1497,8 @@ Schema fields may include `"managed_only": true` — these are only exposed when
 
 **Provider env sync:** When `provider` or any credential field is updated, `ToolSettingsManager` automatically rebuilds the `env` section of the Claude Code `settings.json`:
 
-- **Anthropic** (`provider=anthropic`): sets `env.ANTHROPIC_API_KEY` from `anthropic_api_key`.
+- **Anthropic Key** (`provider=anthropic`): sets `env.ANTHROPIC_API_KEY` from `anthropic_api_key`.
+- **Anthropic Login** (`provider=anthropic_login`): clears the `env` section (no API key). Claude Code CLI uses its own OAuth credentials stored in `CLAUDE_CONFIG_DIR`. The UI shows a "Login with Anthropic" button that triggers browser-based OAuth via `POST /api/tools/claude_code/login`.
 - **Bedrock** (`provider=bedrock`): sets `env.CLAUDE_CODE_USE_BEDROCK=1`, plus `AWS_REGION`, `AWS_ACCESS_KEY_ID`, and `AWS_SECRET_ACCESS_KEY` from their respective fields.
 - **Global** (`provider=""`): removes the `env` section so that `PromptRouter` injects the server-level `ANTHROPIC_API_KEY` instead.
 
@@ -1464,6 +1526,18 @@ Provider sync behavior:
   - **Device code**: runs `codex login --device-auth`, streams `{"step": "device_code", "url": "...", "code": "XXXX-XXXXX"}` for the user to enter in a browser.
   - Both modes stream `{"step": "waiting", ...}` while waiting, `{"step": "complete", ...}` on success, `{"step": "error", ...}` on failure. Times out after 5 minutes. Verifies with `codex login status` after process exit.
 - `GET /api/tools/codex/login/status` — Runs `codex login status` with managed `CODEX_HOME`. Returns `{"logged_in": true/false, "method": "ChatGPT"|null}`.
+
+**Claude Code Anthropic login flow:**
+
+Two-step PKCE OAuth flow (no CLI interaction required):
+
+1. `POST /api/tools/claude_code/login` — Generates a PKCE code_verifier/challenge, builds the Anthropic OAuth URL (`https://claude.ai/oauth/authorize`), stores the verifier, and returns `{"auth_url": "https://claude.ai/oauth/..."}`. The client opens this URL in a browser.
+2. `POST /api/tools/claude_code/login/code` — Accepts `{"code": "..."}`. Exchanges the authorization code for tokens at `https://platform.claude.com/v1/oauth/token` using the stored PKCE verifier. Writes credentials to `.credentials.json` in the managed config directory. Verifies via `claude auth status --json`. Returns `{"logged_in": true/false, "email": "..."|null, "subscription": "max"|"pro"|null}`.
+
+Supporting endpoints:
+
+- `GET /api/tools/claude_code/login/status` — Runs `claude auth status --json` with managed `CLAUDE_CONFIG_DIR`. Returns `{"logged_in": true/false, "method": "claude.ai"|null, "email": "..."|null, "subscription": "max"|"pro"|null}`.
+- `POST /api/tools/claude_code/logout` — Runs `claude auth logout` with managed `CLAUDE_CONFIG_DIR`. Returns `{"logged_out": true}`.
 
 **Config overrides:** When a managed tool has settings configured, `PromptRouter` reads them at executor creation time and passes non-empty values as `config_overrides` to the executor constructor. These overrides are merged on top of the tool definition's `executor_config` when building subprocess commands.
 
@@ -1698,7 +1772,7 @@ All configuration is via environment variables, loaded from a `settings.json` fi
 | `SSL_CERTFILE`          | no       |                 | Path to TLS certificate (enables WSS when both cert+key set) |
 | `SSL_KEYFILE`           | no       |                 | Path to TLS private key (enables WSS when both cert+key set) |
 | `DATABASE_URL`          | no       | `sqlite+aiosqlite:///./data/rcflow.db` | Database connection string (SQLite or PostgreSQL) |
-| `LLM_PROVIDER`          | no       | `anthropic`     | LLM provider: `anthropic`, `bedrock`, or `openai` |
+| `LLM_PROVIDER`          | no       | `anthropic`     | LLM provider: `anthropic`, `bedrock`, `openai`, or `none` (direct tool mode) |
 | `ANTHROPIC_API_KEY`     | cond.    |                 | Anthropic API key (required when `LLM_PROVIDER=anthropic`) |
 | `ANTHROPIC_MODEL`       | no       | `claude-sonnet-4-20250514`| Anthropic model ID (use Bedrock model IDs when `LLM_PROVIDER=bedrock`) |
 | `AWS_REGION`            | no       | `us-east-1`     | AWS region (used when `LLM_PROVIDER=bedrock`) |
