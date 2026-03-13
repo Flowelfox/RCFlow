@@ -136,8 +136,18 @@ class ClaudeCodeExecutor(BaseExecutor):
         env.pop("CLAUDECODE", None)
         # Remove CLAUDE_AVAILABLE_MODELS to avoid inheriting model restrictions
         env.pop("CLAUDE_AVAILABLE_MODELS", None)
-        # Inject extra env vars (e.g. ANTHROPIC_API_KEY from Settings)
-        env.update(self._extra_env)
+        # Remove ANTHROPIC_MODEL — the CLI reads it as a model override,
+        # but it may contain a Bedrock model ID from server settings.
+        # Model selection is handled via --model flag or CLI defaults.
+        env.pop("ANTHROPIC_MODEL", None)
+        # Inject extra env vars (e.g. ANTHROPIC_API_KEY from Settings).
+        # Empty-string values mean "remove from env" (e.g. anthropic_login
+        # clears ANTHROPIC_API_KEY so OAuth tokens are used instead).
+        for k, v in self._extra_env.items():
+            if v:
+                env[k] = v
+            else:
+                env.pop(k, None)
         return env
 
     async def _start_process(
@@ -168,10 +178,12 @@ class ClaudeCodeExecutor(BaseExecutor):
         self._last_parameters = parameters
 
         logger.info(
-            "Starting Claude Code: %s (cwd=%s, session=%s)",
+            "Starting Claude Code: %s (cwd=%s, session=%s, CLAUDE_CONFIG_DIR=%s, ANTHROPIC_API_KEY=%s)",
             " ".join(cmd),
             working_directory,
             self._session_id,
+            env.get("CLAUDE_CONFIG_DIR", "(not set)"),
+            "SET" if env.get("ANTHROPIC_API_KEY") else "(not set)",
         )
 
         self._stderr_output = ""

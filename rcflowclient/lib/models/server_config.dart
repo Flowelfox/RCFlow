@@ -16,19 +16,27 @@ class VisibleWhen {
   final String key;
   final String? value;
   final String? valueNot;
+  final List<String>? valueIn;
 
-  const VisibleWhen({required this.key, this.value, this.valueNot});
+  const VisibleWhen({required this.key, this.value, this.valueNot, this.valueIn});
 
   factory VisibleWhen.fromJson(Map<String, dynamic> json) {
+    List<String>? valueIn;
+    final rawValueIn = json['value_in'] as List<dynamic>?;
+    if (rawValueIn != null) {
+      valueIn = rawValueIn.map((e) => e.toString()).toList();
+    }
     return VisibleWhen(
       key: json['key'] as String,
       value: json['value'] as String?,
       valueNot: json['value_not'] as String?,
+      valueIn: valueIn,
     );
   }
 
   bool evaluate(Map<String, dynamic> currentValues) {
     final current = currentValues[key]?.toString() ?? '';
+    if (valueIn != null) return valueIn!.contains(current);
     if (value != null) return current == value;
     if (valueNot != null) return current != valueNot;
     return true;

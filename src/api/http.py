@@ -820,6 +820,283 @@ async def codex_login_status(request: Request) -> dict[str, Any]:
         return {"logged_in": False, "method": None}
 
 
+# ---------------------------------------------------------------------------
+# Claude Code Anthropic Subscription Login
+# ---------------------------------------------------------------------------
+
+_CLAUDE_OAUTH_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
+_CLAUDE_OAUTH_TOKEN_URL = "https://platform.claude.com/v1/oauth/token"
+_CLAUDE_OAUTH_AUTHORIZE_URL = "https://claude.ai/oauth/authorize"
+_CLAUDE_OAUTH_REDIRECT_URI = "https://platform.claude.com/oauth/code/callback"
+_CLAUDE_OAUTH_SCOPES = "org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers"
+
+
+class _ClaudeCodeLoginBody(BaseModel):
+    code: str
+
+
+def _generate_pkce() -> tuple[str, str]:
+    """Generate PKCE code_verifier and code_challenge (S256)."""
+    import base64  # noqa: PLC0415
+    import hashlib  # noqa: PLC0415
+    import secrets  # noqa: PLC0415
+
+    verifier = secrets.token_urlsafe(32)
+    digest = hashlib.sha256(verifier.encode("ascii")).digest()
+    challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+    return verifier, challenge
+
+
+@router.post(
+    "/tools/claude_code/login",
+    summary="Start Claude Code Anthropic login",
+    description=(
+        "Generates a PKCE OAuth URL for Anthropic login and returns it. "
+        "The client opens this URL in a browser. After the user authenticates, "
+        "they receive a code to submit via POST /tools/claude_code/login/code."
+    ),
+    tags=["Tools"],
+    dependencies=[Depends(verify_http_api_key)],
+)
+async def claude_code_login(request: Request) -> dict[str, Any]:
+    """Generate OAuth URL and return it for the client to open."""
+    import secrets  # noqa: PLC0415
+    from urllib.parse import urlencode  # noqa: PLC0415
+
+    verifier, challenge = _generate_pkce()
+    state = secrets.token_urlsafe(32)
+
+    # Match the JS URLSearchParams behavior (uses + for spaces, same as default urlencode)
+    params = {
+        "code": "true",
+        "client_id": _CLAUDE_OAUTH_CLIENT_ID,
+        "response_type": "code",
+        "redirect_uri": _CLAUDE_OAUTH_REDIRECT_URI,
+        "scope": _CLAUDE_OAUTH_SCOPES,
+        "code_challenge": challenge,
+        "code_challenge_method": "S256",
+        "state": state,
+    }
+    auth_url = f"{_CLAUDE_OAUTH_AUTHORIZE_URL}?{urlencode(params)}"
+
+    # Store verifier for the code exchange step
+    request.app.state._claude_login_verifier = verifier  # noqa: SLF001
+    request.app.state._claude_login_state = state  # noqa: SLF001
+
+    return {"auth_url": auth_url}
+
+
+@router.post(
+    "/tools/claude_code/login/code",
+    summary="Submit OAuth code to complete Claude Code login",
+    description=(
+        "After the user authenticates in the browser and receives a code, "
+        "submit it here. The server exchanges the code for OAuth tokens "
+        "using PKCE and stores the credentials for Claude Code."
+    ),
+    tags=["Tools"],
+    dependencies=[Depends(verify_http_api_key)],
+)
+async def claude_code_login_code(request: Request, body: _ClaudeCodeLoginBody) -> dict[str, Any]:
+    """Exchange the OAuth code for tokens and store credentials."""
+    import httpx  # noqa: PLC0415
+
+    tool_settings: ToolSettingsManager = request.app.state.tool_settings
+
+    verifier: str | None = getattr(request.app.state, "_claude_login_verifier", None)
+    if not verifier:
+        raise HTTPException(status_code=409, detail="No active login. Call POST /tools/claude_code/login first.")
+
+    config_dir = tool_settings.get_config_dir("claude_code")
+    config_dir.mkdir(parents=True, exist_ok=True)
+
+    raw_code = body.code.strip()
+    # The callback page concatenates code#state — split and use only the code part
+    code = raw_code.split("#")[0] if "#" in raw_code else raw_code
+    state: str | None = getattr(request.app.state, "_claude_login_state", None)
+
+    payload = {
+        "grant_type": "authorization_code",
+        "client_id": _CLAUDE_OAUTH_CLIENT_ID,
+        "code": code,
+        "redirect_uri": _CLAUDE_OAUTH_REDIRECT_URI,
+        "code_verifier": verifier,
+        "state": state or "",
+    }
+    # Exchange authorization code for tokens (Anthropic expects JSON, not form-encoded)
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(
+                _CLAUDE_OAUTH_TOKEN_URL,
+                json=payload,
+                headers={"Content-Type": "application/json"},
+            )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Token exchange failed: {exc}") from exc
+    finally:
+        # Clear verifier regardless of outcome
+        request.app.state._claude_login_verifier = None  # noqa: SLF001
+        request.app.state._claude_login_state = None  # noqa: SLF001
+
+    if resp.status_code != 200:
+        detail = resp.text[:500] if resp.text else f"HTTP {resp.status_code}"
+        logger.warning("Claude Code OAuth token exchange failed (%d): %s", resp.status_code, detail)
+        raise HTTPException(status_code=502, detail=f"Token exchange returned {resp.status_code}: {detail}")
+
+    token_data = resp.json()
+    access_token = token_data.get("access_token", "")
+    refresh_token = token_data.get("refresh_token", "")
+    expires_in = token_data.get("expires_in", 3600)
+
+    if not access_token:
+        raise HTTPException(status_code=502, detail="Token exchange succeeded but no access_token returned")
+
+    # Build credentials in the format Claude Code expects
+    import time  # noqa: PLC0415
+
+    credentials = {
+        "claudeAiOauth": {
+            "accessToken": access_token,
+            "refreshToken": refresh_token,
+            "expiresAt": int(time.time() * 1000) + expires_in * 1000,
+            "scopes": _CLAUDE_OAUTH_SCOPES.split(),
+            "subscriptionType": None,
+            "rateLimitTier": None,
+        }
+    }
+
+    # Write credentials file
+    cred_path = config_dir / ".credentials.json"
+    cred_path.write_text(json_mod.dumps(credentials) + "\n", encoding="utf-8")
+    cred_path.chmod(0o600)
+
+    logger.info("Claude Code OAuth credentials saved to %s", cred_path)
+
+    # Verify login via CLI to get subscription info
+    tool_manager: ToolManager = request.app.state.tool_manager
+    binary_path = tool_manager.get_binary_path("claude_code")
+    if binary_path:
+        env = dict(os.environ)
+        env["CLAUDE_CONFIG_DIR"] = str(config_dir)
+        try:
+            verify_proc = await asyncio.create_subprocess_exec(
+                binary_path, "auth", "status", "--json",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+                env=env,
+            )
+            verify_out, _ = await asyncio.wait_for(verify_proc.communicate(), timeout=10)
+            output = verify_out.decode("utf-8", errors="replace") if verify_out else ""
+            data = json_mod.loads(output)
+            if data.get("loggedIn"):
+                # Update credentials with subscription info from CLI
+                credentials["claudeAiOauth"]["subscriptionType"] = data.get("subscriptionType")
+                cred_path.write_text(json_mod.dumps(credentials) + "\n", encoding="utf-8")
+                return {
+                    "logged_in": True,
+                    "email": data.get("email"),
+                    "subscription": data.get("subscriptionType"),
+                }
+        except Exception:
+            logger.warning("Failed to verify login after token exchange", exc_info=True)
+
+    return {"logged_in": True, "email": None, "subscription": None}
+
+
+@router.get(
+    "/tools/claude_code/login/status",
+    summary="Check Claude Code Anthropic login status",
+    description=(
+        "Runs `claude auth status --json` with the managed config directory and "
+        "returns whether the user is logged in via Anthropic subscription."
+    ),
+    tags=["Tools"],
+    dependencies=[Depends(verify_http_api_key)],
+)
+async def claude_code_login_status(request: Request) -> dict[str, Any]:
+    """Check whether Claude Code is authenticated via Anthropic subscription."""
+    tool_manager: ToolManager = request.app.state.tool_manager
+    tool_settings: ToolSettingsManager = request.app.state.tool_settings
+
+    binary_path = tool_manager.get_binary_path("claude_code")
+    if not binary_path:
+        return {"logged_in": False, "method": None, "email": None, "subscription": None}
+
+    config_dir = tool_settings.get_config_dir("claude_code")
+    config_dir.mkdir(parents=True, exist_ok=True)
+
+    env = dict(os.environ)
+    env["CLAUDE_CONFIG_DIR"] = str(config_dir)
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            binary_path,
+            "auth",
+            "status",
+            "--json",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+            env=env,
+        )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
+        output = stdout.decode("utf-8", errors="replace") if stdout else ""
+
+        try:
+            data = json_mod.loads(output)
+            if data.get("loggedIn"):
+                return {
+                    "logged_in": True,
+                    "method": data.get("authMethod"),
+                    "email": data.get("email"),
+                    "subscription": data.get("subscriptionType"),
+                }
+        except (json_mod.JSONDecodeError, AttributeError):
+            pass
+
+        return {"logged_in": False, "method": None, "email": None, "subscription": None}
+    except Exception:
+        logger.warning("Failed to check Claude Code login status", exc_info=True)
+        return {"logged_in": False, "method": None, "email": None, "subscription": None}
+
+
+@router.post(
+    "/tools/claude_code/logout",
+    summary="Log out of Claude Code Anthropic account",
+    description="Runs `claude auth logout` with the managed config directory.",
+    tags=["Tools"],
+    dependencies=[Depends(verify_http_api_key)],
+)
+async def claude_code_logout(request: Request) -> dict[str, Any]:
+    """Log out from Claude Code Anthropic subscription."""
+    tool_manager: ToolManager = request.app.state.tool_manager
+    tool_settings: ToolSettingsManager = request.app.state.tool_settings
+
+    binary_path = tool_manager.get_binary_path("claude_code")
+    if not binary_path:
+        raise HTTPException(status_code=400, detail="Claude Code is not installed")
+
+    config_dir = tool_settings.get_config_dir("claude_code")
+
+    env = dict(os.environ)
+    env["CLAUDE_CONFIG_DIR"] = str(config_dir)
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            binary_path,
+            "auth",
+            "logout",
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+            env=env,
+        )
+        await asyncio.wait_for(proc.communicate(), timeout=10)
+        return {"logged_out": True}
+    except Exception:
+        logger.warning("Failed to log out of Claude Code", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to log out") from None
+
+
 @router.post(
     "/sessions/{session_id}/cancel",
     summary="Cancel a running session",

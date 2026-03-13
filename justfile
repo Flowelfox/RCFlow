@@ -64,6 +64,11 @@ bundle:
 bundle-linux-backend:
     uv run --extra bundle python scripts/bundle.py --platform linux --installer
 
+# Build macOS backend installer (.pkg, must be on macOS)
+[macos]
+bundle-macos-backend:
+    uv run --extra bundle python scripts/bundle.py --platform macos --installer
+
 # Build Linux Flutter client distributable (must be on Linux)
 [unix]
 bundle-linux-client:

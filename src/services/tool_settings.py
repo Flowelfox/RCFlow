@@ -86,7 +86,8 @@ CLAUDE_CODE_SETTINGS_SCHEMA: list[dict[str, Any]] = [
         "description": "LLM provider for Claude Code. 'Global' uses server-level config.",
         "options": [
             {"value": "", "label": "Global"},
-            {"value": "anthropic", "label": "Anthropic"},
+            {"value": "anthropic", "label": "Anthropic Key"},
+            {"value": "anthropic_login", "label": "Anthropic Login"},
             {"value": "bedrock", "label": "AWS Bedrock"},
         ],
         "managed_only": True,
@@ -134,6 +135,7 @@ CLAUDE_CODE_SETTINGS_SCHEMA: list[dict[str, Any]] = [
         "default": "",
         "description": "Default model override for Claude Code sessions.",
         "managed_only": True,
+        "hidden_when": {"key": "provider", "value": "anthropic_login"},
     },
     {
         "key": "default_permission_mode",
@@ -274,6 +276,10 @@ def _sync_provider_env(settings: dict[str, Any]) -> None:
         if api_key:
             env["ANTHROPIC_API_KEY"] = api_key
         settings["env"] = env if env else {}
+    elif provider == "anthropic_login":
+        # Anthropic subscription auth uses OAuth tokens managed by Claude Code CLI.
+        # No API key needed — clear the env section so the CLI uses its own credentials.
+        settings["env"] = {}
     elif provider == "bedrock":
         env = {"CLAUDE_CODE_USE_BEDROCK": "1"}
         for setting_key, env_key in (

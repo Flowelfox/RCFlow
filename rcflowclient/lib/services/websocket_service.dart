@@ -709,6 +709,95 @@ class WebSocketService {
     }
   }
 
+  /// Start Claude Code Anthropic login (step 1).
+  ///
+  /// Returns `{"auth_url": "https://claude.ai/oauth/..."}`.
+  /// After the user authenticates in the browser and gets a code,
+  /// call [claudeCodeLoginCode] with the code to complete login.
+  Future<Map<String, dynamic>> claudeCodeLogin() async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url = _serverUrl!.http('/api/tools/claude_code/login');
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.postUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      final response = await request.close();
+      final body =
+          await response.transform(const io.SystemEncoding().decoder).join();
+      if (response.statusCode != 200) {
+        throw Exception('Server returned ${response.statusCode}: $body');
+      }
+      return jsonDecode(body) as Map<String, dynamic>;
+    } finally {
+      client.close();
+    }
+  }
+
+  /// Submit OAuth code to complete Claude Code login (step 2).
+  ///
+  /// Returns `{"logged_in": bool, "email": String?, "subscription": String?}`.
+  Future<Map<String, dynamic>> claudeCodeLoginCode(String code) async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url = _serverUrl!.http('/api/tools/claude_code/login/code');
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.postUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      request.headers.contentType = io.ContentType.json;
+      request.add(utf8.encode(jsonEncode({'code': code})));
+      final response = await request.close();
+      final body =
+          await response.transform(const io.SystemEncoding().decoder).join();
+      if (response.statusCode != 200) {
+        throw Exception('Server returned ${response.statusCode}: $body');
+      }
+      return jsonDecode(body) as Map<String, dynamic>;
+    } finally {
+      client.close();
+    }
+  }
+
+  /// Check Claude Code Anthropic login status.
+  ///
+  /// Returns `{"logged_in": bool, "method": String?, "email": String?, "subscription": String?}`.
+  Future<Map<String, dynamic>> claudeCodeLoginStatus() async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url = _serverUrl!.http('/api/tools/claude_code/login/status');
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.getUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      final response = await request.close();
+      final body =
+          await response.transform(const io.SystemEncoding().decoder).join();
+      if (response.statusCode != 200) {
+        throw Exception('Server returned ${response.statusCode}: $body');
+      }
+      return jsonDecode(body) as Map<String, dynamic>;
+    } finally {
+      client.close();
+    }
+  }
+
+  /// Log out of Claude Code Anthropic account.
+  Future<void> claudeCodeLogout() async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url = _serverUrl!.http('/api/tools/claude_code/logout');
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.postUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      final response = await request.close();
+      final body =
+          await response.transform(const io.SystemEncoding().decoder).join();
+      if (response.statusCode != 200) {
+        throw Exception('Server returned ${response.statusCode}: $body');
+      }
+    } finally {
+      client.close();
+    }
+  }
+
   Future<Map<String, dynamic>> uninstallManagedTool(String toolName) async {
     if (_serverUrl == null) throw StateError('Not connected');
     final url = _serverUrl!.http('/api/tools/$toolName/install');

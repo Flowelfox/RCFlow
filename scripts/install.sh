@@ -8,7 +8,7 @@
 # Options:
 #   --prefix /path      Install directory (default: /opt/rcflow)
 #   --user username      Service user (default: rcflow)
-#   --port N             Server port (default: 8765)
+#   --port N             Server port (default: 53890)
 #   --no-service         Skip systemd service setup
 #   --unattended         Non-interactive mode (use all defaults)
 # ============================================================================
@@ -19,7 +19,7 @@ set -euo pipefail
 
 INSTALL_PREFIX="/opt/rcflow"
 SERVICE_USER="rcflow"
-RCFLOW_PORT="8765"
+RCFLOW_PORT="53890"
 SETUP_SERVICE=true
 UNATTENDED=false
 

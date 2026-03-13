@@ -591,6 +591,9 @@ class PaneState extends ChangeNotifier {
     return list.isEmpty ? null : list.last;
   }
 
+  /// The last message in the current stream target list (public, for handlers).
+  DisplayMessage? get lastStreamMessage => _streamTarget;
+
   /// Enter agent mode — subsequent tool calls will be auto-grouped.
   void startAgentGroup(String name, Map<String, dynamic>? input, {String? displayName}) {
     finalizeStream();

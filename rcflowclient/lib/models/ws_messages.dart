@@ -11,6 +11,7 @@ enum DisplayMessageType {
   permissionRequest,
   agentGroup,
   agentSessionStart,
+  thinking,
   todoUpdate,
 }
 
