@@ -293,7 +293,7 @@ RestartSec=5
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=${INSTALL_PREFIX}/data ${INSTALL_PREFIX}/logs ${INSTALL_PREFIX}/certs
+ReadWritePaths=${INSTALL_PREFIX}/data ${INSTALL_PREFIX}/logs ${INSTALL_PREFIX}/certs ${INSTALL_PREFIX}/managed-tools
 PrivateTmp=true
 
 [Install]

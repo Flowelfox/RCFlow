@@ -15,7 +15,7 @@ RestartSec=5
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/opt/rcflow/data /opt/rcflow/logs /opt/rcflow/certs
+ReadWritePaths=/opt/rcflow/data /opt/rcflow/logs /opt/rcflow/certs /opt/rcflow/managed-tools
 PrivateTmp=true
 
 [Install]
