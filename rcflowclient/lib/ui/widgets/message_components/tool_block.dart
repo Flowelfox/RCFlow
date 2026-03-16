@@ -57,7 +57,7 @@ class ToolBlock extends StatelessWidget {
     final expanded = message.expanded;
     final isError = message.isError;
     final summary = _toolSummary(toolName, message.toolInput);
-    final hasExpandableContent = output.isNotEmpty || !finished;
+    final hasExpandableContent = finished && output.isNotEmpty;
 
     return Padding(
       padding: EdgeInsets.symmetric(vertical: 4),
