@@ -713,7 +713,13 @@ fi
 
 
 def build_macos_pkg(bundle_dir: Path, version: str, arch: str) -> Path | None:
-    """Build a macOS .pkg installer from the assembled bundle directory."""
+    """Build a macOS .pkg installer from the assembled bundle directory.
+
+    The .pkg postinstall runs as root, so we detect the console user and
+    run the actual install.sh as that user to set up a user-level LaunchAgent.
+    Files are staged to a temp system location by pkgbuild, then the
+    postinstall moves them to the user's ~/.local/lib/rcflow.
+    """
     pkgbuild = shutil.which("pkgbuild")
     if not pkgbuild:
         print(
@@ -728,11 +734,58 @@ def build_macos_pkg(bundle_dir: Path, version: str, arch: str) -> Path | None:
         shutil.rmtree(pkg_scripts_dir)
     pkg_scripts_dir.mkdir(parents=True, exist_ok=True)
 
+    # The pkg installs files to /tmp/rcflow-pkg-stage, then postinstall
+    # runs install.sh as the console user to place them under ~/.local/lib/rcflow.
+    pkg_stage = "/tmp/rcflow-pkg-stage"
+
     postinstall = pkg_scripts_dir / "postinstall"
     postinstall.write_text(
-        """#!/bin/bash
+        f"""#!/bin/bash
 set -euo pipefail
-/usr/local/lib/rcflow/install.sh --prefix /usr/local/lib/rcflow --bin-dir /usr/local/bin --unattended
+
+CONSOLE_USER=$(stat -f '%Su' /dev/console)
+CONSOLE_HOME=$(dscl . -read "/Users/$CONSOLE_USER" NFSHomeDirectory | awk '{{print $2}}')
+SERVICE_LABEL="com.rcflow.server"
+
+# --- Clean up old LaunchDaemon install (we are root here) ---
+OLD_PLIST="/Library/LaunchDaemons/$SERVICE_LABEL.plist"
+if [ -f "$OLD_PLIST" ]; then
+    launchctl bootout system "$OLD_PLIST" 2>/dev/null || true
+    rm -f "$OLD_PLIST"
+fi
+
+OLD_PREFIX="/usr/local/lib/rcflow"
+if [ -d "$OLD_PREFIX" ]; then
+    # Migrate settings and data to staging dir so install.sh picks them up
+    if [ -f "$OLD_PREFIX/settings.json" ]; then
+        cp "$OLD_PREFIX/settings.json" {pkg_stage}/settings.json.migrated
+        # Fix paths in migrated settings
+        sed -i '' "s|$OLD_PREFIX|$CONSOLE_HOME/.local/lib/rcflow|g" {pkg_stage}/settings.json.migrated
+    fi
+    if [ -d "$OLD_PREFIX/data" ]; then
+        cp -R "$OLD_PREFIX/data" {pkg_stage}/data.migrated
+    fi
+    rm -rf "$OLD_PREFIX"
+fi
+
+if [ -L "/usr/local/bin/rcflow" ]; then
+    rm -f "/usr/local/bin/rcflow"
+fi
+
+# Remove old service user
+if dscl . -read "/Users/rcflow" &>/dev/null 2>&1; then
+    dscl . -delete "/Users/rcflow" 2>/dev/null || true
+fi
+
+# --- Run user-level install as the console user ---
+# chown staging dir so the user can read/move all files (including migrated ones)
+chown -R "$CONSOLE_USER:staff" {pkg_stage}
+
+# Use su -l to get a login shell with correct HOME
+su -l "$CONSOLE_USER" -c "cd {pkg_stage} && ./install.sh --skip-migration --unattended"
+
+# Clean up the staging directory
+rm -rf {pkg_stage}
 """
     )
     os.chmod(postinstall, 0o755)
@@ -756,7 +809,7 @@ set -euo pipefail
         "--version",
         version,
         "--install-location",
-        "/usr/local/lib/rcflow",
+        pkg_stage,
         str(pkg_path),
     ])
 
@@ -767,6 +820,36 @@ set -euo pipefail
 
     print(f"WARNING: Expected .pkg at {pkg_path} but it was not found.", file=sys.stderr)
     return None
+
+
+def run_install(bundle_dir: Path, installer_path: Path | None, target_platform: str) -> None:
+    """Run the platform-appropriate installer after a successful build."""
+    if target_platform == "linux":
+        if installer_path:
+            print(f"Installing {installer_path.name}...")
+            subprocess.check_call(["sudo", "dpkg", "-i", str(installer_path)])
+        else:
+            print("Running install.sh...")
+            subprocess.check_call(["sudo", "bash", str(bundle_dir / "install.sh")])
+    elif target_platform == "macos":
+        if installer_path:
+            print(f"Installing {installer_path.name}...")
+            subprocess.check_call(["sudo", "installer", "-pkg", str(installer_path), "-target", "/"])
+        else:
+            print("Running install.sh...")
+            subprocess.check_call(["bash", str(bundle_dir / "install.sh")])
+    elif target_platform == "windows":
+        if installer_path:
+            print(f"Launching {installer_path.name}...")
+            os.startfile(str(installer_path))  # type: ignore[attr-defined]  # Windows-only
+        else:
+            print("Running install.ps1...")
+            subprocess.check_call(["powershell", "-ExecutionPolicy", "Bypass", "-File", str(bundle_dir / "install.ps1")])
+    else:
+        print(f"Auto-install not supported on {target_platform}", file=sys.stderr)
+        sys.exit(1)
+
+    print("Installation complete.")
 
 
 def main() -> None:
@@ -787,7 +870,16 @@ def main() -> None:
         action="store_true",
         help="Build a platform installer (.deb on Linux, setup.exe on Windows)",
     )
+    parser.add_argument(
+        "--install",
+        action="store_true",
+        help="Install after building (implies --installer for platforms that use one)",
+    )
     args = parser.parse_args()
+
+    # --install implies --installer
+    if args.install:
+        args.installer = True
 
     target_platform = args.platform or detect_platform()
     version = get_version()
@@ -858,6 +950,13 @@ def main() -> None:
     if installer_path:
         print(f"  Installer: {installer_path}")
     print()
+
+    # Step 6: Auto-install if requested
+    if args.install:
+        print("=== Installing ===")
+        run_install(bundle_dir, installer_path, target_platform)
+        return
+
     print("To test locally:")
     if installer_path and target_platform == "linux":
         print(f"  sudo dpkg -i {installer_path}")
@@ -867,10 +966,10 @@ def main() -> None:
     elif installer_path and target_platform == "windows":
         print(f"  Run: {installer_path}")
     elif installer_path and target_platform == "macos":
-        print(f"  sudo installer -pkg {installer_path} -target /")
+        print(f"  installer -pkg {installer_path} -target /")
     elif target_platform == "macos":
         print(f"  cd {bundle_dir}")
-        print("  sudo ./install.sh")
+        print("  ./install.sh")
     else:
         print(f"  cd {bundle_dir}")
         print("  .\\install.ps1")
