@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from src.config import Settings
+from src.paths import get_install_dir
 
 _LOG_FORMAT = "%(asctime)s %(levelname)-8s %(name)s %(message)s"
 _DATE_FORMAT = "%Y-%m-%d,%H:%M:%S"
@@ -55,9 +56,8 @@ class HandshakeFilter(logging.Filter):
 def setup_logging(settings: Settings) -> None:
     level = settings.LOG_LEVEL.upper()
 
-    logs_folder = Path("logs")
-    if not logs_folder.exists():
-        logs_folder.mkdir()
+    logs_folder = get_install_dir() / "logs"
+    logs_folder.mkdir(parents=True, exist_ok=True)
 
     config: dict[str, Any] = {
         "version": 1,
