@@ -1,5 +1,6 @@
 import argparse
 import ipaddress
+import os
 import socket
 import sys
 from pathlib import Path
@@ -7,6 +8,44 @@ from pathlib import Path
 import uvicorn
 
 from src.config import _get_settings_path, get_settings
+from src.paths import get_install_dir
+
+
+def _check_not_root() -> None:
+    """Refuse to start when running as root/sudo.
+
+    Many tools (e.g. Claude Code) refuse to run with elevated privileges for
+    security reasons.  Running the entire backend as root is unnecessary and
+    dangerous — use a dedicated ``rcflow`` service user instead.
+
+    On Linux the systemd installer already handles this.  On macOS use
+    ``scripts/install-macos.sh`` to create a launchd service running as
+    a dedicated user.
+    """
+    if os.name != "posix":
+        return  # Windows doesn't have uid 0
+
+    if os.getuid() != 0:
+        return  # Not root — all good
+
+    print(
+        "ERROR: RCFlow must not run as root or with sudo.\n"
+        "\n"
+        "Running as root is a security risk and many tools (e.g. Claude Code)\n"
+        "refuse to operate under elevated privileges.\n"
+        "\n"
+        "Instead, run RCFlow as a dedicated unprivileged user:\n"
+        "\n"
+        "  Linux  — use scripts/install.sh to set up a systemd service\n"
+        "           (creates an 'rcflow' user automatically).\n"
+        "  macOS  — use scripts/install-macos.sh to set up a launchd service,\n"
+        "           or run manually:  sudo -u rcflow ./rcflow\n"
+        "\n"
+        "To run directly as your own user (development):\n"
+        "  Don't use sudo — just run:  python -m src  or  ./rcflow\n",
+        file=sys.stderr,
+    )
+    sys.exit(1)
 
 
 def _check_port_available(host: str, port: int) -> None:
@@ -77,6 +116,7 @@ def _ensure_self_signed_certs(certfile: Path, keyfile: Path) -> None:
 
 def _cmd_run(args: argparse.Namespace) -> None:
     """Start the RCFlow server (default command)."""
+    _check_not_root()
     settings = get_settings()
 
     _check_port_available(settings.RCFLOW_HOST, settings.RCFLOW_PORT)
@@ -127,6 +167,7 @@ def _cmd_migrate(args: argparse.Namespace) -> None:
 
 def _cmd_gui(args: argparse.Namespace) -> None:
     """Run RCFlow with a graphical window interface."""
+    _check_not_root()
     from src.gui import run_gui  # noqa: PLC0415
 
     run_gui()
@@ -134,6 +175,7 @@ def _cmd_gui(args: argparse.Namespace) -> None:
 
 def _cmd_tray(args: argparse.Namespace) -> None:
     """Run RCFlow as a Windows tray application (delegates to GUI mode)."""
+    _check_not_root()
     from src.gui import run_gui  # noqa: PLC0415
 
     run_gui()
@@ -162,12 +204,14 @@ def _cmd_info(args: argparse.Namespace) -> None:
     """Print server configuration info (bind IP, port, WSS status)."""
     settings = get_settings()
     protocol = "wss" if settings.WSS_ENABLED else "ws"
+    logs_dir = get_install_dir() / "logs"
     print("RCFlow Server Info")
     print(f"  Bind address : {settings.RCFLOW_HOST}")
     print(f"  Port         : {settings.RCFLOW_PORT}")
     print(f"  WSS enabled  : {'yes' if settings.WSS_ENABLED else 'no'}")
     print(f"  URL          : {protocol}://{settings.RCFLOW_HOST}:{settings.RCFLOW_PORT}")
     print(f"  Settings     : {_get_settings_path()}")
+    print(f"  Logs         : {logs_dir}")
 
 
 def _cmd_api_key(args: argparse.Namespace) -> None:
