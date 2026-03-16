@@ -64,10 +64,19 @@ bundle:
 bundle-linux-backend:
     uv run --extra bundle python scripts/bundle.py --platform linux --installer
 
+# Build and install Linux backend .deb package (must be on Linux)
+bundle-linux-backend-install:
+    uv run --extra bundle python scripts/bundle.py --platform linux --install
+
 # Build macOS backend installer (.pkg, must be on macOS)
 [macos]
 bundle-macos-backend:
     uv run --extra bundle python scripts/bundle.py --platform macos --installer
+
+# Build and install macOS backend (.pkg, must be on macOS)
+[macos]
+bundle-macos-backend-install:
+    uv run --extra bundle python scripts/bundle.py --platform macos --install
 
 # Build Linux Flutter client distributable (must be on Linux)
 [unix]
@@ -76,6 +85,15 @@ bundle-linux-client:
     mkdir -p dist
     tar -czf dist/rcflowclient-linux-$(uname -m).tar.gz -C rcflowclient/build/linux/x64/release bundle
 
+# Build and install Linux Flutter client (must be on Linux)
+[unix]
+bundle-linux-client-install: bundle-linux-client
+    @echo "Installing Linux Flutter client..."
+    mkdir -p ~/.local/bin ~/.local/lib/rcflowclient
+    tar -xzf dist/rcflowclient-linux-$(uname -m).tar.gz -C ~/.local/lib/rcflowclient --strip-components=1
+    ln -sfn ~/.local/lib/rcflowclient/rcflowclient ~/.local/bin/rcflowclient
+    @echo "Installed to ~/.local/lib/rcflowclient"
+
 # Build Windows Flutter client distributable (must be on Windows)
 [windows]
 bundle-windows-client:
@@ -83,10 +101,23 @@ bundle-windows-client:
     if (-not (Test-Path dist)) { New-Item -ItemType Directory -Path dist | Out-Null }
     Compress-Archive -Force -Path 'rcflowclient\build\windows\x64\runner\Release\*' -DestinationPath 'dist\rcflowclient-windows-x64.zip'
 
+# Build and install Windows Flutter client (must be on Windows)
+[windows]
+bundle-windows-client-install: bundle-windows-client
+    $dest = "$env:LOCALAPPDATA\RCFlowClient"
+    if (Test-Path $dest) { Remove-Item -Recurse -Force $dest }
+    Expand-Archive -Force -Path 'dist\rcflowclient-windows-x64.zip' -DestinationPath $dest
+    Write-Host "Installed to $dest"
+
 # Build Windows backend installer (setup.exe, must be on Windows)
 [windows]
 bundle-windows-backend:
     uv run --extra tray --extra bundle python scripts/bundle.py --platform windows --installer
+
+# Build and install Windows backend (setup.exe, must be on Windows)
+[windows]
+bundle-windows-backend-install:
+    uv run --extra tray --extra bundle python scripts/bundle.py --platform windows --install
 
 # Start Windows Android emulator (cold boot)
 [unix]
