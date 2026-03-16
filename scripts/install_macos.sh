@@ -1,21 +1,30 @@
 #!/usr/bin/env bash
 # ============================================================================
-# RCFlow macOS Installer
+# RCFlow macOS Installer (User-level LaunchAgent)
 #
-# Installs RCFlow under /usr/local and optionally registers a launchd daemon.
-# Run as root:
-#   sudo ./install.sh
+# Installs RCFlow under ~/.local and registers a launchd LaunchAgent
+# running as the current user (no root/sudo required).
+#
+# Usage:
+#   ./install_macos.sh
+#
+# Options:
+#   --prefix /path      Install directory (default: $HOME/.local/lib/rcflow)
+#   --bin-dir /path     Symlink directory (default: $HOME/.local/bin)
+#   --port N            Server port (default: 53890)
+#   --no-service        Skip launchd service setup
+#   --unattended        Non-interactive mode (use all defaults)
 # ============================================================================
 
 set -euo pipefail
 
-INSTALL_PREFIX="/usr/local/lib/rcflow"
-BIN_DIR="/usr/local/bin"
+INSTALL_PREFIX="$HOME/.local/lib/rcflow"
+BIN_DIR="$HOME/.local/bin"
 RCFLOW_PORT="53890"
 SERVICE_LABEL="com.rcflow.server"
-INSTALL_OWNER="${SUDO_USER:-$(id -un)}"
 SETUP_SERVICE=true
 UNATTENDED=false
+SKIP_MIGRATION=false
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -23,11 +32,11 @@ while [[ $# -gt 0 ]]; do
         --bin-dir) BIN_DIR="$2"; shift 2 ;;
         --port) RCFLOW_PORT="$2"; shift 2 ;;
         --service-label) SERVICE_LABEL="$2"; shift 2 ;;
-        --owner) INSTALL_OWNER="$2"; shift 2 ;;
         --no-service) SETUP_SERVICE=false; shift ;;
+        --skip-migration) SKIP_MIGRATION=true; shift ;;
         --unattended) UNATTENDED=true; shift ;;
         -h|--help)
-            head -14 "$0" | tail -12
+            head -17 "$0" | tail -15
             exit 0
             ;;
         *)
@@ -66,15 +75,100 @@ generate_api_key() {
 }
 
 stop_service() {
-    local plist_path="/Library/LaunchDaemons/${SERVICE_LABEL}.plist"
-    if [[ -f "$plist_path" ]]; then
-        launchctl bootout system "$plist_path" >/dev/null 2>&1 || true
+    # Stop new-style LaunchAgent
+    local agent_plist="$HOME/Library/LaunchAgents/${SERVICE_LABEL}.plist"
+    if [[ -f "$agent_plist" ]]; then
+        launchctl unload "$agent_plist" >/dev/null 2>&1 || true
+    fi
+
+    # Stop old-style LaunchDaemon (requires sudo)
+    local daemon_plist="/Library/LaunchDaemons/${SERVICE_LABEL}.plist"
+    if [[ -f "$daemon_plist" ]]; then
+        sudo launchctl bootout system "$daemon_plist" >/dev/null 2>&1 || true
     fi
 }
 
-if [[ $EUID -ne 0 ]]; then
-    error "This installer must be run as root. Try: sudo $0"
-    exit 1
+migrate_from_daemon() {
+    local old_prefix="/usr/local/lib/rcflow"
+    local old_plist="/Library/LaunchDaemons/${SERVICE_LABEL}.plist"
+    local old_user="rcflow"
+
+    # Check if old daemon install exists
+    if [[ ! -f "$old_plist" ]] && [[ ! -d "$old_prefix" ]]; then
+        return 0
+    fi
+
+    echo ""
+    warn "Detected old system-level LaunchDaemon installation."
+    info "Migrating to user-level LaunchAgent..."
+    info "This requires sudo (one-time) to clean up system-level artifacts."
+    echo ""
+
+    # Stop old daemon
+    if [[ -f "$old_plist" ]]; then
+        info "Stopping old LaunchDaemon..."
+        sudo launchctl bootout system "$old_plist" >/dev/null 2>&1 || true
+        sudo rm -f "$old_plist"
+        ok "Old LaunchDaemon removed"
+    fi
+
+    # Migrate data and settings
+    if [[ -d "$old_prefix" ]]; then
+        mkdir -p "$INSTALL_PREFIX"
+
+        if [[ -f "$old_prefix/settings.json" ]] && [[ ! -f "$INSTALL_PREFIX/settings.json" ]]; then
+            info "Migrating settings.json..."
+            sudo cp "$old_prefix/settings.json" "$INSTALL_PREFIX/settings.json"
+            chown "$(whoami)" "$INSTALL_PREFIX/settings.json"
+            # Fix DATABASE_URL path in migrated settings
+            if command -v sed &>/dev/null; then
+                sed -i '' "s|${old_prefix}|${INSTALL_PREFIX}|g" "$INSTALL_PREFIX/settings.json" 2>/dev/null || true
+            fi
+            ok "Settings migrated (DATABASE_URL paths updated)"
+        fi
+
+        if [[ -d "$old_prefix/data" ]] && [[ ! -d "$INSTALL_PREFIX/data" ]]; then
+            info "Migrating data directory..."
+            sudo cp -R "$old_prefix/data" "$INSTALL_PREFIX/data"
+            chown -R "$(whoami)" "$INSTALL_PREFIX/data"
+            ok "Data migrated"
+        fi
+
+        # Remove old install directory
+        info "Removing old install directory..."
+        sudo rm -rf "$old_prefix"
+        ok "Old install directory removed"
+    fi
+
+    # Remove old symlink
+    if [[ -L "/usr/local/bin/rcflow" ]]; then
+        sudo rm -f "/usr/local/bin/rcflow"
+        ok "Old symlink removed"
+    fi
+
+    # Remove old service user
+    if dscl . -read "/Users/${old_user}" &>/dev/null 2>&1; then
+        info "Removing old service user: ${old_user}"
+        sudo dscl . -delete "/Users/${old_user}" 2>/dev/null || true
+        ok "Old service user removed"
+    fi
+
+    echo ""
+    ok "Migration from LaunchDaemon complete!"
+    echo ""
+}
+
+# ── Warn if running as root ──────────────────────────────────────────────
+if [[ $EUID -eq 0 ]]; then
+    warn "Running as root is not recommended. This installer sets up a"
+    warn "user-level LaunchAgent and should run as your normal user."
+    if ! $UNATTENDED; then
+        read -rp "Continue anyway? [y/N] " confirm
+        if [[ "$confirm" != [yY] ]]; then
+            echo "Cancelled."
+            exit 0
+        fi
+    fi
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -95,6 +189,24 @@ echo -e "${CYAN}============================================${NC}"
 echo -e "${CYAN}  RCFlow Installer v${BUNDLE_VERSION} (macOS)${NC}"
 echo -e "${CYAN}============================================${NC}"
 echo ""
+
+# ── Migrate from old daemon install if present ───────────────────────────
+if ! $SKIP_MIGRATION; then
+    migrate_from_daemon
+fi
+
+# ── Pick up data migrated by pkg postinstall ─────────────────────────────
+if [[ -f "$SCRIPT_DIR/settings.json.migrated" ]] && [[ ! -f "$INSTALL_PREFIX/settings.json" ]]; then
+    mkdir -p "$INSTALL_PREFIX"
+    mv "$SCRIPT_DIR/settings.json.migrated" "$INSTALL_PREFIX/settings.json"
+    chmod 600 "$INSTALL_PREFIX/settings.json"
+    ok "Migrated settings.json from old daemon install"
+fi
+if [[ -d "$SCRIPT_DIR/data.migrated" ]] && [[ ! -d "$INSTALL_PREFIX/data" ]]; then
+    mkdir -p "$INSTALL_PREFIX"
+    mv "$SCRIPT_DIR/data.migrated" "$INSTALL_PREFIX/data"
+    ok "Migrated data from old daemon install"
+fi
 
 UPGRADING=false
 if [[ -d "$INSTALL_PREFIX" ]] && [[ -f "$INSTALL_PREFIX/rcflow" ]]; then
@@ -118,7 +230,6 @@ fi
 info "Install directory: ${INSTALL_PREFIX}"
 info "Binary symlink dir: ${BIN_DIR}"
 info "Server port:        ${RCFLOW_PORT}"
-info "Settings owner:     ${INSTALL_OWNER}"
 echo ""
 
 stop_service
@@ -201,7 +312,6 @@ if [[ ! -f "$INSTALL_PREFIX/settings.json" ]]; then
 }
 JSONEOF
 
-    chown "$INSTALL_OWNER" "$INSTALL_PREFIX/settings.json"
     chmod 600 "$INSTALL_PREFIX/settings.json"
     ok "Configuration created with generated API key"
     echo ""
@@ -210,8 +320,6 @@ JSONEOF
     echo -e "  ${YELLOW}Config file: ${INSTALL_PREFIX}/settings.json${NC}"
     echo ""
 else
-    chown "$INSTALL_OWNER" "$INSTALL_PREFIX/settings.json"
-    chmod 600 "$INSTALL_PREFIX/settings.json"
     ok "Existing configuration preserved at ${INSTALL_PREFIX}/settings.json"
 fi
 
@@ -221,16 +329,26 @@ if ./rcflow migrate; then
     ok "Database migrations complete"
 else
     error "Migration failed. Check your DATABASE_URL in ${INSTALL_PREFIX}/settings.json"
-    error "You can retry with: cd ${INSTALL_PREFIX} && sudo ./rcflow migrate"
+    error "You can retry with: cd ${INSTALL_PREFIX} && ./rcflow migrate"
 fi
 
 mkdir -p "$BIN_DIR"
 ln -sfn "$INSTALL_PREFIX/rcflow" "$BIN_DIR/rcflow"
 ok "Symlink installed at ${BIN_DIR}/rcflow"
 
+# ── Check if BIN_DIR is in PATH ──────────────────────────────────────────
+if [[ ":$PATH:" != *":${BIN_DIR}:"* ]]; then
+    echo ""
+    warn "${BIN_DIR} is not in your \$PATH."
+    warn "Add it to your shell profile:"
+    warn "  echo 'export PATH=\"${BIN_DIR}:\$PATH\"' >> ~/.zshrc"
+    warn "  source ~/.zshrc"
+fi
+
 if $SETUP_SERVICE; then
-    info "Setting up launchd service..."
-    PLIST_PATH="/Library/LaunchDaemons/${SERVICE_LABEL}.plist"
+    info "Setting up launchd LaunchAgent..."
+    mkdir -p "$HOME/Library/LaunchAgents"
+    PLIST_PATH="$HOME/Library/LaunchAgents/${SERVICE_LABEL}.plist"
 
     cat > "$PLIST_PATH" <<PLISTEOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -249,6 +367,8 @@ if $SETUP_SERVICE; then
   <true/>
   <key>KeepAlive</key>
   <true/>
+  <key>ProcessType</key>
+  <string>Background</string>
   <key>StandardOutPath</key>
   <string>${INSTALL_PREFIX}/logs/service-stdout.log</string>
   <key>StandardErrorPath</key>
@@ -258,13 +378,12 @@ if $SETUP_SERVICE; then
 PLISTEOF
 
     chmod 644 "$PLIST_PATH"
-    launchctl bootstrap system "$PLIST_PATH"
-    launchctl enable "system/${SERVICE_LABEL}" >/dev/null 2>&1 || true
+    launchctl load -w "$PLIST_PATH"
 
-    if launchctl print "system/${SERVICE_LABEL}" >/dev/null 2>&1; then
-        ok "launchd service installed"
+    if launchctl list "$SERVICE_LABEL" >/dev/null 2>&1; then
+        ok "LaunchAgent installed and running"
     else
-        warn "Service registration may have failed. Check: sudo launchctl print system/${SERVICE_LABEL}"
+        warn "Service registration may have failed. Check: launchctl list ${SERVICE_LABEL}"
     fi
 fi
 
@@ -281,21 +400,21 @@ echo "  Binary symlink:     ${BIN_DIR}/rcflow"
 echo ""
 if $SETUP_SERVICE; then
     echo "  Service commands:"
-    echo "    sudo launchctl print system/${SERVICE_LABEL}"
-    echo "    sudo launchctl kickstart -k system/${SERVICE_LABEL}"
-    echo "    sudo launchctl bootout system/${SERVICE_LABEL}"
+    echo "    launchctl list ${SERVICE_LABEL}"
+    echo "    launchctl unload ${PLIST_PATH} && launchctl load -w ${PLIST_PATH}"
+    echo "    launchctl unload ${PLIST_PATH}"
     echo ""
 fi
 echo "  Edit configuration:"
-echo "    sudo nano ${INSTALL_PREFIX}/settings.json"
+echo "    nano ${INSTALL_PREFIX}/settings.json"
 if $SETUP_SERVICE; then
-    echo "    sudo launchctl kickstart -k system/${SERVICE_LABEL}"
+    echo "    launchctl unload ${PLIST_PATH} && launchctl load -w ${PLIST_PATH}"
 else
     echo "    ${BIN_DIR}/rcflow"
 fi
 echo ""
 echo "  Uninstall:"
-echo "    sudo ${INSTALL_PREFIX}/uninstall.sh"
+echo "    ${INSTALL_PREFIX}/uninstall.sh"
 echo ""
 
 if ! $UPGRADING; then

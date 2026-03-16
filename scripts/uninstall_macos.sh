@@ -2,15 +2,17 @@
 # ============================================================================
 # RCFlow macOS Uninstaller
 #
-# Removes the RCFlow installation and launchd daemon.
-# Run as root:
-#   sudo ./uninstall.sh
+# Removes the RCFlow installation and LaunchAgent.
+# No root/sudo required (unless cleaning up an old LaunchDaemon install).
+#
+# Usage:
+#   ./uninstall.sh
 # ============================================================================
 
 set -euo pipefail
 
-INSTALL_PREFIX="/usr/local/lib/rcflow"
-BIN_DIR="/usr/local/bin"
+INSTALL_PREFIX="$HOME/.local/lib/rcflow"
+BIN_DIR="$HOME/.local/bin"
 SERVICE_LABEL="com.rcflow.server"
 KEEP_DATA=false
 KEEP_CONFIG=false
@@ -25,7 +27,7 @@ while [[ $# -gt 0 ]]; do
         --keep-config) KEEP_CONFIG=true; shift ;;
         --yes) SKIP_CONFIRM=true; shift ;;
         -h|--help)
-            head -14 "$0" | tail -12
+            head -11 "$0" | tail -9
             exit 0
             ;;
         *)
@@ -44,11 +46,6 @@ NC='\033[0m'
 info()  { echo -e "${CYAN}[INFO]${NC}  $*"; }
 ok()    { echo -e "${GREEN}[OK]${NC}    $*"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
-
-if [[ $EUID -ne 0 ]]; then
-    echo -e "${RED}[ERROR]${NC} This uninstaller must be run as root. Try: sudo $0" >&2
-    exit 1
-fi
 
 if [[ ! -d "$INSTALL_PREFIX" ]]; then
     echo -e "${RED}[ERROR]${NC} No installation found at ${INSTALL_PREFIX}" >&2
@@ -73,17 +70,51 @@ if ! $SKIP_CONFIRM; then
     fi
 fi
 
-PLIST_PATH="/Library/LaunchDaemons/${SERVICE_LABEL}.plist"
+# ── Stop and remove LaunchAgent ──────────────────────────────────────────
+PLIST_PATH="$HOME/Library/LaunchAgents/${SERVICE_LABEL}.plist"
 if [[ -f "$PLIST_PATH" ]]; then
-    info "Stopping launchd service..."
-    launchctl bootout system "$PLIST_PATH" >/dev/null 2>&1 || true
+    info "Stopping LaunchAgent..."
+    launchctl unload "$PLIST_PATH" >/dev/null 2>&1 || true
     ok "Service stopped"
 
-    info "Removing launchd service file..."
+    info "Removing LaunchAgent plist..."
     rm -f "$PLIST_PATH"
-    ok "Service file removed"
+    ok "LaunchAgent plist removed"
 fi
 
+# ── Clean up old LaunchDaemon if present ─────────────────────────────────
+OLD_DAEMON_PLIST="/Library/LaunchDaemons/${SERVICE_LABEL}.plist"
+if [[ -f "$OLD_DAEMON_PLIST" ]]; then
+    warn "Found old LaunchDaemon plist at ${OLD_DAEMON_PLIST}"
+    info "Cleaning up (requires sudo)..."
+    sudo launchctl bootout system "$OLD_DAEMON_PLIST" >/dev/null 2>&1 || true
+    sudo rm -f "$OLD_DAEMON_PLIST"
+    ok "Old LaunchDaemon removed"
+
+    # Remove old service user if it exists
+    if dscl . -read "/Users/rcflow" &>/dev/null 2>&1; then
+        info "Removing old service user: rcflow"
+        sudo dscl . -delete "/Users/rcflow" 2>/dev/null || true
+        ok "Old service user removed"
+    fi
+fi
+
+# ── Clean up old system-level install directory ──────────────────────────
+OLD_INSTALL="/usr/local/lib/rcflow"
+if [[ -d "$OLD_INSTALL" ]]; then
+    warn "Found old system-level install at ${OLD_INSTALL}"
+    info "Removing (requires sudo)..."
+    sudo rm -rf "$OLD_INSTALL"
+    ok "Old install directory removed"
+fi
+
+OLD_SYMLINK="/usr/local/bin/rcflow"
+if [[ -L "$OLD_SYMLINK" ]]; then
+    sudo rm -f "$OLD_SYMLINK"
+    ok "Old symlink removed"
+fi
+
+# ── Back up data/config if requested ─────────────────────────────────────
 if $KEEP_DATA && [[ -d "$INSTALL_PREFIX/data" ]]; then
     BACKUP_DIR="/tmp/rcflow-data-backup-$(date +%s)"
     info "Backing up data to ${BACKUP_DIR}..."
@@ -98,6 +129,7 @@ if $KEEP_CONFIG && [[ -f "$INSTALL_PREFIX/settings.json" ]]; then
     ok "Config backed up"
 fi
 
+# ── Remove symlink ───────────────────────────────────────────────────────
 SYMLINK_PATH="$BIN_DIR/rcflow"
 if [[ -L "$SYMLINK_PATH" ]] || [[ -f "$SYMLINK_PATH" ]]; then
     if [[ "$(readlink "$SYMLINK_PATH" 2>/dev/null || true)" == "$INSTALL_PREFIX/rcflow" ]]; then
@@ -107,6 +139,7 @@ if [[ -L "$SYMLINK_PATH" ]] || [[ -f "$SYMLINK_PATH" ]]; then
     fi
 fi
 
+# ── Remove install directory ─────────────────────────────────────────────
 info "Removing ${INSTALL_PREFIX}..."
 rm -rf "$INSTALL_PREFIX"
 ok "Installation removed"
