@@ -556,6 +556,8 @@ class ServerConfigContentState extends State<ServerConfigContent> {
         if (loggedIn) {
           _claudeCodeEmail = result['email'] as String?;
           _claudeCodeSubscription = result['subscription'] as String?;
+          // Reload settings to pick up auto-set provider
+          _loadToolSettings('claude_code');
         } else {
           _claudeCodeLoginError = 'Login failed. Please try again.';
         }
@@ -578,6 +580,8 @@ class ServerConfigContentState extends State<ServerConfigContent> {
         _claudeCodeEmail = null;
         _claudeCodeSubscription = null;
       });
+      // Reload settings to pick up provider reset
+      _loadToolSettings('claude_code');
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -598,7 +602,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
     for (final field in fields) {
       final type = field['type'] as String;
       final key = field['key'] as String;
-      if (type == 'string') {
+      if (type == 'string' || type == 'model_select') {
         controllers[key] =
             TextEditingController(text: field['value']?.toString() ?? '');
       } else if (type == 'string_list') {
@@ -620,7 +624,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
     }
     _textControllers.clear();
     for (final opt in options) {
-      if (opt.type == 'string' || opt.type == 'secret' || opt.type == 'textarea' || opt.type == 'number') {
+      if (opt.type == 'string' || opt.type == 'secret' || opt.type == 'textarea' || opt.type == 'number' || opt.type == 'model_select') {
         _textControllers[opt.key] =
             TextEditingController(text: opt.value?.toString() ?? '');
       } else if (opt.type == 'string_list') {
@@ -1819,6 +1823,80 @@ class ServerConfigContentState extends State<ServerConfigContent> {
                 EdgeInsets.symmetric(horizontal: 10, vertical: 8),
           ),
         );
+      case 'model_select':
+        // Resolve current provider value from the provider_key field.
+        final providerKey = field['provider_key'] as String?;
+        String providerValue = '';
+        if (providerKey != null) {
+          providerValue = _getToolFieldValue(toolName, providerKey);
+        }
+        final modelsMap = field['models'] as Map<String, dynamic>?;
+        final providerModels = modelsMap != null
+            ? modelsMap[providerValue] as Map<String, dynamic>?
+            : null;
+        final modelOptions = providerModels != null
+            ? (providerModels['options'] as List<dynamic>?)
+                    ?.cast<Map<String, dynamic>>() ??
+                []
+            : <Map<String, dynamic>>[];
+        final allowCustom = providerModels?['allow_custom'] == true;
+
+        if (modelOptions.isEmpty && allowCustom) {
+          // No predefined options — plain text field.
+          final controller = _toolSettingsControllers[toolName]?[key];
+          input = TextField(
+            controller: controller,
+            style: TextStyle(color: context.appColors.textPrimary, fontSize: 13),
+            onChanged: (v) => onChanged(v),
+            decoration: InputDecoration(
+              hintText: label,
+              hintStyle: TextStyle(color: context.appColors.textMuted, fontSize: 12),
+              fillColor: context.appColors.bgSurface,
+              filled: true,
+              border: OutlineInputBorder(
+                borderSide: BorderSide.none,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            ),
+          );
+        } else {
+          // Dropdown with optional custom entry.
+          final entries = modelOptions
+              .map((o) => DropdownMenuEntry<String>(
+                    value: o['value'] as String,
+                    label: o['label'] as String,
+                  ))
+              .toList();
+          input = DropdownMenu<String>(
+            initialSelection: entries.any((e) => e.value == currentValue?.toString())
+                ? currentValue?.toString()
+                : null,
+            dropdownMenuEntries: entries,
+            enableFilter: true,
+            enableSearch: true,
+            requestFocusOnTap: true,
+            expandedInsets: EdgeInsets.zero,
+            textStyle: TextStyle(color: context.appColors.textPrimary, fontSize: 13),
+            menuStyle: MenuStyle(
+              backgroundColor: WidgetStatePropertyAll(context.appColors.bgSurface),
+            ),
+            inputDecorationTheme: InputDecorationTheme(
+              fillColor: context.appColors.bgSurface,
+              filled: true,
+              border: OutlineInputBorder(
+                borderSide: BorderSide.none,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              hintStyle: TextStyle(color: context.appColors.textMuted, fontSize: 12),
+              isDense: true,
+            ),
+            onSelected: (v) {
+              if (v != null) onChanged(v);
+            },
+          );
+        }
       default:
         final controller = _toolSettingsControllers[toolName]?[key];
         input = TextField(
@@ -1890,6 +1968,39 @@ class ServerConfigContentState extends State<ServerConfigContent> {
           option: opt,
           controller: _textControllers[opt.key]!,
           isModified: isModified,
+          onChanged: (v) => _onValueChanged(opt.key, v, opt.value),
+        );
+      case 'model_select':
+        // Resolve current provider value to pick the right model options.
+        final providerKey = opt.providerKey;
+        String providerValue = '';
+        if (providerKey != null) {
+          providerValue = (_editedValues.containsKey(providerKey)
+                  ? _editedValues[providerKey]
+                  : _options
+                      ?.where((o) => o.key == providerKey)
+                      .firstOrNull
+                      ?.value)
+              ?.toString() ??
+              '';
+        }
+        final modelsMap = opt.models;
+        final providerModels = modelsMap != null
+            ? modelsMap[providerValue] as Map<String, dynamic>?
+            : null;
+        final modelOptions = providerModels != null
+            ? (providerModels['options'] as List<dynamic>?)
+                    ?.cast<Map<String, dynamic>>() ??
+                []
+            : <Map<String, dynamic>>[];
+        final allowCustom = providerModels?['allow_custom'] == true;
+        return _ModelSelectField(
+          option: opt,
+          value: currentValue?.toString() ?? '',
+          isModified: isModified,
+          modelOptions: modelOptions,
+          allowCustom: allowCustom,
+          controller: _textControllers[opt.key],
           onChanged: (v) => _onValueChanged(opt.key, v, opt.value),
         );
       case 'string_list':
@@ -2227,6 +2338,89 @@ class _SelectField extends StatelessWidget {
             },
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _ModelSelectField extends StatelessWidget {
+  final ConfigOption option;
+  final String value;
+  final bool isModified;
+  final List<Map<String, dynamic>> modelOptions;
+  final bool allowCustom;
+  final ValueChanged<String> onChanged;
+  final TextEditingController? controller;
+
+  const _ModelSelectField({
+    required this.option,
+    required this.value,
+    required this.isModified,
+    required this.modelOptions,
+    required this.allowCustom,
+    required this.onChanged,
+    this.controller,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (modelOptions.isEmpty) {
+      // No predefined options — plain text field.
+      return _FieldWrapper(
+        option: option,
+        isModified: isModified,
+        child: TextField(
+          controller: controller ?? TextEditingController(text: value),
+          style: TextStyle(color: context.appColors.textPrimary, fontSize: 14),
+          onChanged: onChanged,
+          decoration: InputDecoration(
+            hintText: option.label,
+            fillColor: context.appColors.bgElevated,
+            border: OutlineInputBorder(
+              borderSide: BorderSide.none,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          ),
+        ),
+      );
+    }
+
+    final entries = modelOptions
+        .map((o) => DropdownMenuEntry<String>(
+              value: o['value'] as String,
+              label: o['label'] as String,
+            ))
+        .toList();
+
+    return _FieldWrapper(
+      option: option,
+      isModified: isModified,
+      child: DropdownMenu<String>(
+        initialSelection: entries.any((e) => e.value == value) ? value : null,
+        dropdownMenuEntries: entries,
+        enableFilter: true,
+        enableSearch: true,
+        requestFocusOnTap: true,
+        expandedInsets: EdgeInsets.zero,
+        textStyle: TextStyle(color: context.appColors.textPrimary, fontSize: 14),
+        menuStyle: MenuStyle(
+          backgroundColor: WidgetStatePropertyAll(context.appColors.bgElevated),
+        ),
+        inputDecorationTheme: InputDecorationTheme(
+          fillColor: context.appColors.bgElevated,
+          filled: true,
+          border: OutlineInputBorder(
+            borderSide: BorderSide.none,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          hintStyle: TextStyle(color: context.appColors.textMuted, fontSize: 14),
+          isDense: true,
+        ),
+        onSelected: (v) {
+          if (v != null) onChanged(v);
+        },
       ),
     );
   }
