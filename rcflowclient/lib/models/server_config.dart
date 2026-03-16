@@ -54,6 +54,8 @@ class ConfigOption {
   final bool required;
   final bool restartRequired;
   final VisibleWhen? visibleWhen;
+  final String? providerKey;
+  final Map<String, dynamic>? models;
 
   const ConfigOption({
     required this.key,
@@ -66,6 +68,8 @@ class ConfigOption {
     required this.required,
     required this.restartRequired,
     this.visibleWhen,
+    this.providerKey,
+    this.models,
   });
 
   factory ConfigOption.fromJson(Map<String, dynamic> json) {
@@ -94,6 +98,8 @@ class ConfigOption {
       required: json['required'] as bool? ?? false,
       restartRequired: json['restart_required'] as bool? ?? false,
       visibleWhen: visibleWhen,
+      providerKey: json['provider_key'] as String?,
+      models: json['models'] as Map<String, dynamic>?,
     );
   }
 }

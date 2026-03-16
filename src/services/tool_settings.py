@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+from src.config import PROVIDER_MODELS
 from src.paths import get_managed_tools_dir
 
 logger = logging.getLogger(__name__)
@@ -131,11 +132,17 @@ CLAUDE_CODE_SETTINGS_SCHEMA: list[dict[str, Any]] = [
     {
         "key": "model",
         "label": "Model",
-        "type": "string",
+        "type": "model_select",
         "default": "",
         "description": "Default model override for Claude Code sessions.",
         "managed_only": True,
         "hidden_when": {"key": "provider", "value": "anthropic_login"},
+        "provider_key": "provider",
+        "models": {
+            "": {"options": [], "allow_custom": True},
+            "anthropic": PROVIDER_MODELS["anthropic"],
+            "bedrock": PROVIDER_MODELS["bedrock"],
+        },
     },
     {
         "key": "default_permission_mode",
@@ -195,9 +202,15 @@ CODEX_SETTINGS_SCHEMA: list[dict[str, Any]] = [
     {
         "key": "model",
         "label": "Model",
-        "type": "string",
+        "type": "model_select",
         "default": "",
         "description": "Model name to use for Codex sessions.",
+        "provider_key": "provider",
+        "models": {
+            "": {"options": [], "allow_custom": True},
+            "openai": PROVIDER_MODELS["openai"],
+            "chatgpt": PROVIDER_MODELS["openai"],
+        },
     },
     {
         "key": "approval_mode",
@@ -384,10 +397,9 @@ class ToolSettingsManager:
                 "default": field_def["default"],
                 "description": field_def["description"],
             }
-            if "options" in field_def:
-                entry["options"] = field_def["options"]
-            if "visible_when" in field_def:
-                entry["visible_when"] = field_def["visible_when"]
+            for extra_key in ("options", "visible_when", "hidden_when", "provider_key", "models"):
+                if extra_key in field_def:
+                    entry[extra_key] = field_def[extra_key]
             fields.append(entry)
 
         return {"tool": tool_name, "fields": fields}

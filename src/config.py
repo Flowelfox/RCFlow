@@ -13,6 +13,37 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from src.paths import get_default_tools_dir, get_install_dir
 
+# Provider-aware model lists for model_select fields.
+PROVIDER_MODELS: dict[str, dict[str, Any]] = {
+    "anthropic": {
+        "options": [
+            {"value": "claude-sonnet-4-20250514", "label": "Claude Sonnet 4"},
+            {"value": "claude-opus-4-20250514", "label": "Claude Opus 4"},
+            {"value": "claude-haiku-4-5-20251001", "label": "Claude Haiku 4.5"},
+        ],
+        "allow_custom": True,
+    },
+    "bedrock": {
+        "options": [
+            {"value": "us.anthropic.claude-sonnet-4-20250514-v1:0", "label": "Claude Sonnet 4"},
+            {"value": "us.anthropic.claude-opus-4-20250514-v1:0", "label": "Claude Opus 4"},
+            {"value": "us.anthropic.claude-haiku-4-5-20251001-v1:0", "label": "Claude Haiku 4.5"},
+        ],
+        "allow_custom": True,
+    },
+    "openai": {
+        "options": [
+            {"value": "gpt-4o", "label": "GPT-4o"},
+            {"value": "gpt-4.1", "label": "GPT-4.1"},
+            {"value": "gpt-4.1-mini", "label": "GPT-4.1 Mini"},
+            {"value": "gpt-4.1-nano", "label": "GPT-4.1 Nano"},
+            {"value": "o3", "label": "o3"},
+            {"value": "o4-mini", "label": "o4-mini"},
+        ],
+        "allow_custom": True,
+    },
+}
+
 # Default backend port across platforms
 _DEFAULT_PORT = 53890
 
@@ -43,7 +74,16 @@ def _load_settings_into_env() -> None:
     if not cfg_path.exists():
         return
 
-    data = json.loads(cfg_path.read_text(encoding="utf-8"))
+    try:
+        data = json.loads(cfg_path.read_text(encoding="utf-8"))
+    except PermissionError:
+        print(
+            f"WARNING: Cannot read {cfg_path} — permission denied.\n"
+            f"Using default settings. Run with appropriate permissions or set "
+            f"environment variables directly.",
+            file=sys.stderr,
+        )
+        return
 
     for key, value in data.items():
         env_key = key.upper()
@@ -219,12 +259,17 @@ CONFIG_OPTIONS: list[dict[str, Any]] = [
     {
         "key": "ANTHROPIC_MODEL",
         "label": "Anthropic Model",
-        "type": "string",
+        "type": "model_select",
         "group": "LLM",
         "description": "Model ID (e.g. claude-sonnet-4-20250514). For Bedrock use Bedrock model IDs.",
         "required": False,
         "restart_required": True,
         "visible_when": {"key": "LLM_PROVIDER", "value_in": ["anthropic", "bedrock"]},
+        "provider_key": "LLM_PROVIDER",
+        "models": {
+            "anthropic": PROVIDER_MODELS["anthropic"],
+            "bedrock": PROVIDER_MODELS["bedrock"],
+        },
     },
     {
         "key": "AWS_REGION",
@@ -269,22 +314,32 @@ CONFIG_OPTIONS: list[dict[str, Any]] = [
     {
         "key": "OPENAI_MODEL",
         "label": "OpenAI Model",
-        "type": "string",
+        "type": "model_select",
         "group": "LLM",
         "description": "OpenAI model ID (e.g. gpt-4o, gpt-4.1, o3)",
         "required": False,
         "restart_required": True,
         "visible_when": {"key": "LLM_PROVIDER", "value": "openai"},
+        "provider_key": "LLM_PROVIDER",
+        "models": {
+            "openai": PROVIDER_MODELS["openai"],
+        },
     },
     {
         "key": "SUMMARY_MODEL",
         "label": "Summary Model",
-        "type": "string",
+        "type": "model_select",
         "group": "LLM",
         "description": "Model for TTS-friendly summaries (blank = use main model)",
         "required": False,
         "restart_required": True,
         "visible_when": {"key": "LLM_PROVIDER", "value_not": "none"},
+        "provider_key": "LLM_PROVIDER",
+        "models": {
+            "anthropic": PROVIDER_MODELS["anthropic"],
+            "bedrock": PROVIDER_MODELS["bedrock"],
+            "openai": PROVIDER_MODELS["openai"],
+        },
     },
     # --- Prompt ---
     {
@@ -501,21 +556,35 @@ def update_settings_file(updates: dict[str, str]) -> None:
     Creates the file if it does not exist. Existing keys are updated; new keys
     are added. Also updates ``os.environ`` so that any subsequent ``Settings()``
     call picks up the new values.
+
+    If the settings file cannot be read or written due to permission errors,
+    the environment variables are still updated in-memory but the file is
+    left unchanged.
     """
     import os  # noqa: PLC0415
 
     path = _get_settings_path()
     data: dict[str, str] = {}
 
-    if path.exists():
-        data = json.loads(path.read_text(encoding="utf-8"))
+    try:
+        if path.exists():
+            data = json.loads(path.read_text(encoding="utf-8"))
+    except PermissionError:
+        pass
 
     for key, value in updates.items():
         data[key] = value
         os.environ[key.upper()] = value
 
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    except PermissionError:
+        print(
+            f"WARNING: Cannot write to {path} — permission denied. "
+            f"Settings applied in-memory only.",
+            file=sys.stderr,
+        )
 
 
 _load_settings_into_env()
