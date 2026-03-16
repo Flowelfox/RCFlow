@@ -972,6 +972,9 @@ async def claude_code_login_code(request: Request, body: _ClaudeCodeLoginBody) -
 
     logger.info("Claude Code OAuth credentials saved to %s", cred_path)
 
+    # Auto-set provider to anthropic_login on successful login
+    tool_settings.update_settings("claude_code", {"provider": "anthropic_login"})
+
     # Verify login via CLI to get subscription info
     tool_manager: ToolManager = request.app.state.tool_manager
     binary_path = tool_manager.get_binary_path("claude_code")
@@ -1091,6 +1094,8 @@ async def claude_code_logout(request: Request) -> dict[str, Any]:
             env=env,
         )
         await asyncio.wait_for(proc.communicate(), timeout=10)
+        # Reset provider to global on logout
+        tool_settings.update_settings("claude_code", {"provider": ""})
         return {"logged_out": True}
     except Exception:
         logger.warning("Failed to log out of Claude Code", exc_info=True)
@@ -1446,7 +1451,8 @@ def _reload_components(request: Request, settings: Settings) -> None:
     request.app.state.stt_provider = create_stt_provider(settings.STT_PROVIDER, settings.STT_API_KEY)
     request.app.state.tts_provider = create_tts_provider(settings.TTS_PROVIDER, settings.TTS_API_KEY)
 
-    asyncio.get_event_loop().create_task(old_llm.close())
+    if old_llm is not None:
+        asyncio.get_event_loop().create_task(old_llm.close())
 
 
 # ---------------------------------------------------------------------------
