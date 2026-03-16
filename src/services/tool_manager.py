@@ -82,7 +82,7 @@ def _is_musl() -> bool:
 
 
 def _detect_claude_platform() -> str:
-    """Return Claude Code platform string for GCS downloads (e.g. ``linux-x64``, ``win32-x64``)."""
+    """Return Claude Code platform string for GCS downloads (e.g. ``linux-x64``, ``darwin-arm64``, ``win32-x64``)."""
     machine = platform.machine()
 
     if sys.platform == "win32":
@@ -92,7 +92,6 @@ def _detect_claude_platform() -> str:
             return "win32-arm64"
         raise RuntimeError(f"Unsupported Windows architecture: {machine}")
 
-    # Linux
     if machine in ("x86_64", "amd64"):
         arch = "x64"
     elif machine in ("arm64", "aarch64"):
@@ -100,6 +99,10 @@ def _detect_claude_platform() -> str:
     else:
         raise RuntimeError(f"Unsupported architecture: {machine}")
 
+    if sys.platform == "darwin":
+        return f"darwin-{arch}"
+
+    # Linux
     suffix = "-musl" if _is_musl() else ""
     return f"linux-{arch}{suffix}"
 
@@ -119,7 +122,6 @@ def _detect_codex_target() -> str:
             return "aarch64-pc-windows-msvc"
         raise RuntimeError(f"Unsupported Windows architecture: {machine}")
 
-    # Linux
     if machine in ("x86_64", "amd64"):
         arch = "x86_64"
     elif machine in ("arm64", "aarch64"):
@@ -127,6 +129,10 @@ def _detect_codex_target() -> str:
     else:
         raise RuntimeError(f"Unsupported architecture: {machine}")
 
+    if sys.platform == "darwin":
+        return f"{arch}-apple-darwin"
+
+    # Linux
     libc = "musl" if _is_musl() or _glibc_too_old() else "gnu"
     return f"{arch}-unknown-linux-{libc}"
 
