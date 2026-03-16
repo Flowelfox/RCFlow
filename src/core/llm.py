@@ -16,6 +16,13 @@ from src.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
 
+_OPENAI_REASONING_PREFIXES = ("o1", "o3", "o4")
+
+
+def _is_openai_reasoning_model(model: str) -> bool:
+    """Return True if *model* is an OpenAI reasoning model (o1/o3/o4 series)."""
+    return any(model.startswith(p) for p in _OPENAI_REASONING_PREFIXES)
+
 
 @dataclass
 class TextChunk:
@@ -238,9 +245,10 @@ class LLMClient:
             *messages,
         ]
 
+        token_param = "max_completion_tokens" if _is_openai_reasoning_model(self._model) else "max_tokens"
         kwargs: dict[str, Any] = {
             "model": self._model,
-            "max_tokens": 4096,
+            token_param: 4096,
             "messages": openai_messages,
             "stream": True,
             "stream_options": {"include_usage": True},
@@ -471,13 +479,14 @@ class LLMClient:
     async def _openai_create(self, system: str, content: str, max_tokens: int) -> str:
         """Make a non-streaming OpenAI call and return the text."""
         assert self._openai_client is not None
+        token_key = "max_completion_tokens" if _is_openai_reasoning_model(self._summary_model) else "max_tokens"
         response = await self._openai_client.chat.completions.create(
             model=self._summary_model,
-            max_tokens=max_tokens,
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": content},
             ],
+            **{token_key: max_tokens},
         )
         return (response.choices[0].message.content or "").strip()
 
