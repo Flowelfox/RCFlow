@@ -5,6 +5,7 @@ import logging
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 
 from src.api.deps import verify_ws_api_key
+from src.core.attachment_store import AttachmentStore, ResolvedAttachment
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -26,9 +27,15 @@ async def ws_input_text(
     Input Message Format:
         {
             "type": "prompt",
-            "text": "list all files in the current directory",
-            "session_id": null | "uuid"
+            "text": "describe this image",
+            "session_id": null | "uuid",
+            "attachments": [
+                {"id": "<attachment_id>", "name": "photo.jpg", "mime_type": "image/jpeg"}
+            ]
         }
+
+    The ``attachments`` field is optional. Each entry must reference an ID
+    previously returned by ``POST /api/uploads``.
 
     Response Message Format:
         {
@@ -223,6 +230,35 @@ async def ws_input_text(
 
             session_id = message.get("session_id")
 
+            # Resolve optional attachments
+            resolved_attachments: list[ResolvedAttachment] | None = None
+            raw_attachments = message.get("attachments")
+            if raw_attachments and isinstance(raw_attachments, list):
+                attachment_store: AttachmentStore | None = getattr(
+                    websocket.app.state, "attachment_store", None
+                )
+                if attachment_store is not None:
+                    resolved_attachments = []
+                    for att in raw_attachments:
+                        if not isinstance(att, dict):
+                            continue
+                        att_id = att.get("id")
+                        if not att_id:
+                            continue
+                        stored = attachment_store.pop(att_id)
+                        if stored is None:
+                            logger.warning("Attachment %s not found or expired", att_id)
+                            continue
+                        resolved_attachments.append(
+                            ResolvedAttachment(
+                                file_name=stored.file_name,
+                                mime_type=stored.mime_type,
+                                data=stored.data,
+                            )
+                        )
+                    if not resolved_attachments:
+                        resolved_attachments = None
+
             # Create/resolve session and acknowledge immediately so the
             # client can subscribe to the output channel *before* chunks
             # start flowing.
@@ -230,7 +266,9 @@ async def ws_input_text(
             await websocket.send_json({"type": "ack", "session_id": result_session_id})
 
             # Process prompt in the background
-            task = asyncio.create_task(prompt_router.handle_prompt(text, result_session_id))
+            task = asyncio.create_task(
+                prompt_router.handle_prompt(text, result_session_id, attachments=resolved_attachments)
+            )
             background_tasks.add(task)
             task.add_done_callback(background_tasks.discard)
 

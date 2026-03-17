@@ -84,6 +84,8 @@ TOOL_RISK_LEVELS: dict[str, str] = {
     # Execution tools — high risk
     "Bash": "high",
     "Agent": "medium",
+    # Worktree tool (action-based risk applied in classify_risk)
+    "worktree": "medium",
     # Default for unknown tools
     "_default": "medium",
 }
@@ -135,6 +137,15 @@ def classify_risk(tool_name: str, tool_input: dict[str, Any]) -> str:
         if any(path.startswith(p) for p in _SENSITIVE_PREFIXES):
             return "high"
 
+    # Worktree risk depends on the action being requested
+    if tool_name == "worktree":
+        action = tool_input.get("action", "")
+        if action == "list":
+            return "low"
+        if action in ("merge", "rm"):
+            return "high"
+        return "medium"  # new
+
     return base_risk
 
 
@@ -160,6 +171,25 @@ def describe_tool_action(tool_name: str, tool_input: dict[str, Any]) -> str:
             return f"Fetch URL: {tool_input.get('url', '')}"
         case "NotebookEdit":
             return f"Edit notebook: {tool_input.get('notebook_path', '')}"
+        case "worktree":
+            action = tool_input.get("action", "")
+            repo = tool_input.get("repo_path", "")
+            match action:
+                case "new":
+                    branch = tool_input.get("branch", "")
+                    base = tool_input.get("base", "main")
+                    return f"Create worktree branch {branch!r} from {base!r} in {repo}"
+                case "merge":
+                    name = tool_input.get("name", "")
+                    msg = tool_input.get("message", "")
+                    return f"Merge worktree {name!r} into main ({msg!r}) in {repo}"
+                case "rm":
+                    name = tool_input.get("name", "")
+                    return f"Remove worktree {name!r} and delete its branch in {repo}"
+                case "list":
+                    return f"List worktrees in {repo}"
+                case _:
+                    return f"Worktree operation in {repo}"
         case _:
             return f"Use tool: {tool_name}"
 
