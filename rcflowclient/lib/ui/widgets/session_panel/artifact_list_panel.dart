@@ -8,8 +8,8 @@ import 'helpers.dart';
 
 /// Artifact list panel for the sidebar Artifacts tab.
 ///
-/// Shows all discovered artifacts with a search bar. Clicking an artifact opens
-/// it in the active pane as an ArtifactPane.
+/// Groups artifacts by worker, then by project within each worker.
+/// Artifacts not belonging to any project are shown under "Other".
 class ArtifactListPanel extends StatefulWidget {
   final VoidCallback? onArtifactSelected;
 
@@ -22,6 +22,9 @@ class ArtifactListPanel extends StatefulWidget {
 class _ArtifactListPanelState extends State<ArtifactListPanel> {
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
+  final Set<String> _expandedWorkers = {};
+  final Set<String> _expandedProjects = {};
+  bool _initialized = false;
 
   @override
   void initState() {
@@ -30,6 +33,15 @@ class _ArtifactListPanelState extends State<ArtifactListPanel> {
         Provider.of<AppState>(context, listen: false).settings;
     _searchQuery = settings.artifactsFilterSearch;
     _searchController.text = _searchQuery;
+    final savedWorkers = settings.artifactsExpandedWorkers;
+    final savedProjects = settings.artifactsExpandedProjects;
+    if (savedWorkers != null) {
+      _expandedWorkers.addAll(savedWorkers);
+      _initialized = true;
+    }
+    if (savedProjects != null) {
+      _expandedProjects.addAll(savedProjects);
+    }
   }
 
   @override
@@ -44,6 +56,13 @@ class _ArtifactListPanelState extends State<ArtifactListPanel> {
     settings.artifactsFilterSearch = _searchQuery;
   }
 
+  void _saveExpandedState() {
+    final settings =
+        Provider.of<AppState>(context, listen: false).settings;
+    settings.artifactsExpandedWorkers = _expandedWorkers.toList();
+    settings.artifactsExpandedProjects = _expandedProjects.toList();
+  }
+
   List<ArtifactInfo> _filterArtifacts(List<ArtifactInfo> artifacts) {
     if (_searchQuery.isEmpty) return artifacts;
     final query = _searchQuery.toLowerCase();
@@ -52,6 +71,20 @@ class _ArtifactListPanelState extends State<ArtifactListPanel> {
           a.filePath.toLowerCase().contains(query) ||
           a.workerName.toLowerCase().contains(query);
     }).toList();
+  }
+
+  /// Build a grouped structure: workerId -> projectName -> artifacts.
+  /// The key for "Other" (no project) is null.
+  Map<String, Map<String?, List<ArtifactInfo>>> _groupArtifacts(
+      List<ArtifactInfo> artifacts) {
+    final grouped = <String, Map<String?, List<ArtifactInfo>>>{};
+    for (final a in artifacts) {
+      grouped
+          .putIfAbsent(a.workerId, () => {})
+          .putIfAbsent(a.projectName, () => [])
+          .add(a);
+    }
+    return grouped;
   }
 
   @override
@@ -84,6 +117,24 @@ class _ArtifactListPanelState extends State<ArtifactListPanel> {
         }
 
         final filtered = _filterArtifacts(artifacts);
+        final grouped = _groupArtifacts(filtered);
+        final workerConfigs = state.workerConfigs;
+        final hasMultipleWorkers = workerConfigs.length > 1;
+
+        // Auto-expand all workers & projects on first build (no saved state)
+        if (!_initialized) {
+          _initialized = true;
+          for (final config in workerConfigs) {
+            _expandedWorkers.add(config.id);
+          }
+          // Expand all project groups
+          for (final entry in grouped.entries) {
+            for (final projectName in entry.value.keys) {
+              _expandedProjects.add(_projectKey(entry.key, projectName));
+            }
+          }
+          _saveExpandedState();
+        }
 
         return Column(
           children: [
@@ -91,23 +142,118 @@ class _ArtifactListPanelState extends State<ArtifactListPanel> {
             Expanded(
               child: filtered.isEmpty && _searchQuery.isNotEmpty
                   ? _buildNoResults(context)
-                  : ListView.builder(
-                      padding: const EdgeInsets.symmetric(vertical: 4),
-                      itemCount: filtered.length,
-                      itemBuilder: (context, index) {
-                        final artifact = filtered[index];
-                        return _ArtifactTile(
-                          artifact: artifact,
-                          state: state,
-                          onArtifactSelected: widget.onArtifactSelected,
-                        );
-                      },
-                    ),
+                  : _buildGroupedList(
+                      context, state, grouped, workerConfigs, hasMultipleWorkers),
             ),
           ],
         );
       },
     );
+  }
+
+  /// Stable key for a project group: "workerId:projectName" or "workerId:_other".
+  String _projectKey(String workerId, String? projectName) =>
+      '$workerId:${projectName ?? '_other'}';
+
+  Widget _buildGroupedList(
+    BuildContext context,
+    AppState state,
+    Map<String, Map<String?, List<ArtifactInfo>>> grouped,
+    List workerConfigs,
+    bool hasMultipleWorkers,
+  ) {
+    final children = <Widget>[];
+
+    // Sort workers by config order
+    final workerOrder = <String, int>{};
+    for (var i = 0; i < workerConfigs.length; i++) {
+      workerOrder[workerConfigs[i].id] = i;
+    }
+    final sortedWorkerIds = grouped.keys.toList()
+      ..sort((a, b) => (workerOrder[a] ?? 999).compareTo(workerOrder[b] ?? 999));
+
+    for (final workerId in sortedWorkerIds) {
+      final projectMap = grouped[workerId]!;
+      final workerName = _findWorkerName(workerConfigs, workerId);
+      final workerArtifactCount =
+          projectMap.values.fold<int>(0, (sum, list) => sum + list.length);
+      final workerExpanded = _expandedWorkers.contains(workerId);
+
+      if (hasMultipleWorkers) {
+        children.add(_WorkerHeader(
+          workerName: workerName,
+          artifactCount: workerArtifactCount,
+          expanded: workerExpanded,
+          onToggle: () {
+            setState(() {
+              if (workerExpanded) {
+                _expandedWorkers.remove(workerId);
+              } else {
+                _expandedWorkers.add(workerId);
+              }
+            });
+            _saveExpandedState();
+          },
+        ));
+      }
+
+      if (!hasMultipleWorkers || workerExpanded) {
+        // Sort projects: named projects alphabetically, then "Other" last
+        final projectNames = projectMap.keys.toList()
+          ..sort((a, b) {
+            if (a == null && b == null) return 0;
+            if (a == null) return 1;
+            if (b == null) return -1;
+            return a.toLowerCase().compareTo(b.toLowerCase());
+          });
+
+        for (final projectName in projectNames) {
+          final projectArtifacts = projectMap[projectName]!;
+          final pKey = _projectKey(workerId, projectName);
+          final projectExpanded = _expandedProjects.contains(pKey);
+
+          children.add(_ProjectHeader(
+            projectName: projectName,
+            artifactCount: projectArtifacts.length,
+            expanded: projectExpanded,
+            indented: hasMultipleWorkers,
+            onToggle: () {
+              setState(() {
+                if (projectExpanded) {
+                  _expandedProjects.remove(pKey);
+                } else {
+                  _expandedProjects.add(pKey);
+                }
+              });
+              _saveExpandedState();
+            },
+          ));
+
+          if (projectExpanded) {
+            for (final artifact in projectArtifacts) {
+              children.add(_ArtifactTile(
+                artifact: artifact,
+                state: state,
+                onArtifactSelected: widget.onArtifactSelected,
+                indented: hasMultipleWorkers,
+              ));
+            }
+          }
+        }
+      }
+    }
+
+    return ListView(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      children: children,
+    );
+  }
+
+  String _findWorkerName(List workerConfigs, String workerId) {
+    for (final config in workerConfigs) {
+      if (config.id == workerId) return config.name;
+    }
+    return workerId;
   }
 
   Widget _buildFilterBar(BuildContext context) {
@@ -212,15 +358,129 @@ class _ArtifactListPanelState extends State<ArtifactListPanel> {
 
 }
 
+/// Collapsible header for a worker group.
+class _WorkerHeader extends StatelessWidget {
+  final String workerName;
+  final int artifactCount;
+  final bool expanded;
+  final VoidCallback onToggle;
+
+  const _WorkerHeader({
+    required this.workerName,
+    required this.artifactCount,
+    required this.expanded,
+    required this.onToggle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onToggle,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+        child: Row(
+          children: [
+            Icon(
+              expanded
+                  ? Icons.expand_more_rounded
+                  : Icons.chevron_right_rounded,
+              color: context.appColors.textSecondary,
+              size: 18,
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                '$workerName ($artifactCount)',
+                style: TextStyle(
+                  color: context.appColors.textPrimary,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Collapsible header for a project group within a worker.
+class _ProjectHeader extends StatelessWidget {
+  final String? projectName;
+  final int artifactCount;
+  final bool expanded;
+  final bool indented;
+  final VoidCallback onToggle;
+
+  const _ProjectHeader({
+    required this.projectName,
+    required this.artifactCount,
+    required this.expanded,
+    required this.indented,
+    required this.onToggle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final label = projectName ?? 'Other';
+    return InkWell(
+      onTap: onToggle,
+      child: Padding(
+        padding: EdgeInsets.only(
+          left: indented ? 32 : 16,
+          right: 16,
+          top: 4,
+          bottom: 4,
+        ),
+        child: Row(
+          children: [
+            Icon(
+              expanded
+                  ? Icons.expand_more_rounded
+                  : Icons.chevron_right_rounded,
+              color: context.appColors.textMuted,
+              size: 16,
+            ),
+            const SizedBox(width: 4),
+            Icon(
+              projectName != null
+                  ? Icons.folder_outlined
+                  : Icons.folder_off_outlined,
+              color: context.appColors.textMuted,
+              size: 14,
+            ),
+            const SizedBox(width: 4),
+            Expanded(
+              child: Text(
+                '$label ($artifactCount)',
+                style: TextStyle(
+                  color: context.appColors.textSecondary,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _ArtifactTile extends StatelessWidget {
   final ArtifactInfo artifact;
   final AppState state;
   final VoidCallback? onArtifactSelected;
+  final bool indented;
 
   const _ArtifactTile({
     required this.artifact,
     required this.state,
     this.onArtifactSelected,
+    this.indented = false,
   });
 
   static const _extIcons = {
@@ -298,7 +558,7 @@ class _ArtifactTile extends StatelessWidget {
         ),
         dense: true,
         visualDensity: const VisualDensity(vertical: -4),
-        contentPadding: const EdgeInsets.only(left: 16, right: 8),
+        contentPadding: EdgeInsets.only(left: indented ? 36 : 16, right: 8),
         onTap: () {
           state.openArtifactInPane(artifact.artifactId);
           onArtifactSelected?.call();

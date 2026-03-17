@@ -54,6 +54,16 @@ class _SessionListPanelState extends State<SessionListPanel>
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
+    final settings =
+        Provider.of<AppState>(context, listen: false).settings;
+    _workerSearchQuery = settings.workersFilterSearch;
+    _workerSearchController.text = _workerSearchQuery;
+    _activeStatusFilters.addAll(settings.workersFilterStatus);
+    final savedExpanded = settings.workersExpanded;
+    if (savedExpanded != null) {
+      _expandedWorkers.addAll(savedExpanded);
+      _initialized = true;
+    }
   }
 
   @override
@@ -163,6 +173,19 @@ class _SessionListPanelState extends State<SessionListPanel>
     );
   }
 
+  void _saveFilters() {
+    final settings =
+        Provider.of<AppState>(context, listen: false).settings;
+    settings.workersFilterSearch = _workerSearchQuery;
+    settings.workersFilterStatus = _activeStatusFilters.toList();
+  }
+
+  void _saveExpanded() {
+    final settings =
+        Provider.of<AppState>(context, listen: false).settings;
+    settings.workersExpanded = _expandedWorkers.toList();
+  }
+
   bool get _hasActiveFilters =>
       _workerSearchQuery.isNotEmpty || _activeStatusFilters.isNotEmpty;
 
@@ -172,6 +195,7 @@ class _SessionListPanelState extends State<SessionListPanel>
       _workerSearchQuery = '';
       _activeStatusFilters.clear();
     });
+    _saveFilters();
   }
 
   /// Normalize 'executing' to 'active' for display grouping.
@@ -183,12 +207,13 @@ class _SessionListPanelState extends State<SessionListPanel>
       builder: (context, state, _) {
         final configs = state.workerConfigs;
 
-        // Auto-expand all workers on first build
+        // Auto-expand all workers on first build (no saved state)
         if (!_initialized) {
           _initialized = true;
           for (final c in configs) {
             _expandedWorkers.add(c.id);
           }
+          _saveExpanded();
         }
 
         if (configs.isEmpty) {
@@ -250,7 +275,10 @@ class _SessionListPanelState extends State<SessionListPanel>
                       children: [
                         Expanded(child: TextField(
                       controller: _workerSearchController,
-                      onChanged: (v) => setState(() => _workerSearchQuery = v),
+                      onChanged: (v) {
+                        setState(() => _workerSearchQuery = v);
+                        _saveFilters();
+                      },
                       style: TextStyle(
                         color: context.appColors.textPrimary,
                         fontSize: 12,
@@ -273,6 +301,7 @@ class _SessionListPanelState extends State<SessionListPanel>
                                 onTap: () {
                                   _workerSearchController.clear();
                                   setState(() => _workerSearchQuery = '');
+                                  _saveFilters();
                                 },
                                 child: Padding(
                                   padding: const EdgeInsets.only(right: 6),
@@ -351,6 +380,7 @@ class _SessionListPanelState extends State<SessionListPanel>
                                           _activeStatusFilters.add(status);
                                         }
                                       });
+                                      _saveFilters();
                                     },
                                   ),
                                 ),
@@ -419,6 +449,7 @@ class _SessionListPanelState extends State<SessionListPanel>
                                 _expandedWorkers.add(config.id);
                               }
                             });
+                            _saveExpanded();
                           },
                           onSessionTap: (sessionId) {
                             state.ensureChatPane().switchSession(sessionId);

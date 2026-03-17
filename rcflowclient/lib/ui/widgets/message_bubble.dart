@@ -5,6 +5,7 @@ import '../../theme.dart';
 import 'message_components/agent_group_block.dart';
 import 'message_components/agent_session_start_bubble.dart';
 import 'message_components/assistant_bubble.dart';
+import 'message_components/max_turns_pause_card.dart';
 import 'message_components/permission_request_card.dart';
 import 'message_components/plan_mode_ask_card.dart';
 import 'message_components/plan_review_ask_card.dart';
@@ -66,6 +67,8 @@ class MessageBubble extends StatelessWidget {
         return ThinkingBlock(message: message);
       case DisplayMessageType.todoUpdate:
         return TodoListBlock(message: message);
+      case DisplayMessageType.pausedMaxTurns:
+        return MaxTurnsPauseCard(message: message);
     }
   }
 }
