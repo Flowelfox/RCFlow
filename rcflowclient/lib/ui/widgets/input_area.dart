@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io' show Platform;
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -22,11 +23,28 @@ class InputArea extends StatefulWidget {
   State<InputArea> createState() => _InputAreaState();
 }
 
+/// A pending attachment selected by the user but not yet uploaded.
+class _PendingAttachment {
+  final String name;
+  final String mimeType;
+  final List<int> bytes;
+
+  _PendingAttachment({
+    required this.name,
+    required this.mimeType,
+    required this.bytes,
+  });
+}
+
 class _InputAreaState extends State<InputArea> {
   final TextEditingController _controller = TextEditingController();
   final FocusNode _focusNode = FocusNode();
   final LayerLink _layerLink = LayerLink();
   bool _hasText = false;
+
+  // Pending attachments — files selected but not yet uploaded/sent
+  final List<_PendingAttachment> _pendingAttachments = [];
+  bool _uploadingAttachments = false;
 
   // Mention overlay state
   OverlayEntry? _overlayEntry;
@@ -44,6 +62,11 @@ class _InputAreaState extends State<InputArea> {
     super.initState();
     _controller.addListener(_onTextChanged);
     context.read<AppState>().inputFocusRequest.addListener(_onFocusRequest);
+    // Check for pending input text on next frame (e.g. from "Start Session
+    // from Task" which pre-fills the input area).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _consumePendingInput();
+    });
   }
 
   void _onFocusRequest() {
@@ -58,6 +81,72 @@ class _InputAreaState extends State<InputArea> {
     _controller.dispose();
     _focusNode.dispose();
     super.dispose();
+  }
+
+  Future<void> _pickAttachments() async {
+    final result = await FilePicker.platform.pickFiles(
+      allowMultiple: true,
+      withData: true,
+    );
+    if (result == null || result.files.isEmpty) return;
+    if (!mounted) return;
+    setState(() {
+      for (final f in result.files) {
+        final bytes = f.bytes;
+        if (bytes == null) continue;
+        final name = f.name;
+        final ext = f.extension?.toLowerCase() ?? '';
+        final mime = _mimeForExtension(ext);
+        _pendingAttachments.add(_PendingAttachment(
+          name: name,
+          mimeType: mime,
+          bytes: bytes,
+        ));
+      }
+    });
+  }
+
+  void _removeAttachment(int index) {
+    setState(() => _pendingAttachments.removeAt(index));
+  }
+
+  static String _mimeForExtension(String ext) {
+    switch (ext) {
+      case 'jpg':
+      case 'jpeg':
+        return 'image/jpeg';
+      case 'png':
+        return 'image/png';
+      case 'gif':
+        return 'image/gif';
+      case 'webp':
+        return 'image/webp';
+      case 'pdf':
+        return 'application/pdf';
+      case 'txt':
+      case 'log':
+      case 'rst':
+        return 'text/plain';
+      case 'md':
+        return 'text/markdown';
+      case 'html':
+        return 'text/html';
+      case 'css':
+        return 'text/css';
+      case 'csv':
+        return 'text/csv';
+      case 'json':
+        return 'application/json';
+      case 'yaml':
+      case 'yml':
+        return 'application/yaml';
+      case 'toml':
+        return 'application/toml';
+      case 'xml':
+        return 'application/xml';
+      default:
+        return 'application/octet-stream';
+    }
   }
 
   void _onTextChanged() {
@@ -259,14 +348,63 @@ class _InputAreaState extends State<InputArea> {
     _overlayEntry?.markNeedsBuild();
   }
 
-  void _send() {
+  Future<void> _send() async {
     final text = _controller.text.trim();
-    if (text.isEmpty) return;
+    if (text.isEmpty && _pendingAttachments.isEmpty) return;
+    if (text.isEmpty) return; // text is still required
+    if (_uploadingAttachments) return;
+
     final pane = context.read<PaneState>();
+    final state = context.read<AppState>();
     context.read<AppState>().setActivePane(pane.paneId);
-    pane.sendPrompt(text);
+
+    // Snapshot and clear pending attachments immediately so the UI unblocks
+    final toUpload = List<_PendingAttachment>.from(_pendingAttachments);
+    setState(() {
+      _pendingAttachments.clear();
+      _uploadingAttachments = toUpload.isNotEmpty;
+    });
     _controller.clear();
     _focusNode.requestFocus();
+
+    if (toUpload.isEmpty) {
+      pane.sendPrompt(text);
+      return;
+    }
+
+    // Upload all files concurrently then send the prompt with the attachment IDs
+    List<Map<String, dynamic>>? uploaded;
+    try {
+      final wid = pane.workerId ?? state.defaultWorkerId;
+      final ws = wid != null ? state.wsForWorker(wid) : null;
+      if (ws == null) {
+        pane.sendPrompt(text); // fall back to text-only on no connection
+        return;
+      }
+      final results = await Future.wait(
+        toUpload.map((att) => ws.uploadAttachment(
+              bytes: att.bytes,
+              fileName: att.name,
+              mimeType: att.mimeType,
+            )),
+      );
+      uploaded = [
+        for (int i = 0; i < results.length; i++)
+          {
+            'id': results[i]['attachment_id'] as String,
+            'name': toUpload[i].name,
+            'mime_type': toUpload[i].mimeType,
+          }
+      ];
+    } catch (e) {
+      // Upload failed — send text-only and surface an error in the pane
+      pane.addSystemMessage('Attachment upload failed: $e', isError: true);
+      uploaded = null;
+    } finally {
+      if (mounted) setState(() => _uploadingAttachments = false);
+    }
+
+    pane.sendPrompt(text, attachments: uploaded);
   }
 
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
@@ -304,7 +442,7 @@ class _InputAreaState extends State<InputArea> {
     if (event.logicalKey == LogicalKeyboardKey.enter) {
       final shift = HardwareKeyboard.instance.isShiftPressed;
       if (!shift) {
-        _send();
+        _send(); // unawaited — intentional
         return KeyEventResult.handled;
       }
     }
@@ -444,14 +582,35 @@ class _InputAreaState extends State<InputArea> {
     );
   }
 
+  void _consumePendingInput() {
+    final pane = context.read<PaneState>();
+    final pending = pane.pendingInputText;
+    if (pending != null) {
+      _controller.text = pending;
+      _controller.selection = TextSelection.collapsed(offset: pending.length);
+      pane.consumePendingInputText();
+      _focusNode.requestFocus();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final pendingInput =
+        context.select<PaneState, String?>((s) => s.pendingInputText);
+    if (pendingInput != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _consumePendingInput();
+      });
+    }
+
     final canSend =
         context.select<PaneState, bool>((s) => s.canSendMessage);
     final sessionEnded =
         context.select<PaneState, bool>((s) => s.sessionEnded);
     final sessionPaused =
         context.select<PaneState, bool>((s) => s.sessionPaused);
+    final pausedReason =
+        context.select<PaneState, String?>((s) => s.pausedReason);
     final sessionId =
         context.select<PaneState, String?>((s) => s.sessionId);
     final paneWorkerId =
@@ -459,6 +618,10 @@ class _InputAreaState extends State<InputArea> {
     final bottom = MediaQuery.of(context).viewPadding.bottom;
     final showPauseResume =
         _isDesktop && sessionId != null && !sessionEnded;
+    final modelSupportsAttachments = context.select<AppState, bool>(
+      (s) => s.workerSupportsAttachments(paneWorkerId),
+    );
+    final canAttach = canSend && !_uploadingAttachments && modelSupportsAttachments;
 
     // Worker selector chip for new chats
     final state = context.watch<AppState>();
@@ -475,6 +638,9 @@ class _InputAreaState extends State<InputArea> {
     if (sessionEnded) {
       hintText = 'Session ended';
       prefixIcon = Icons.lock_rounded;
+    } else if (sessionPaused && pausedReason == 'max_turns') {
+      hintText = 'Turn limit reached — send a message to continue...';
+      prefixIcon = Icons.hourglass_bottom_rounded;
     } else if (sessionPaused) {
       hintText = 'Send a message to resume...';
       prefixIcon = Icons.pause_rounded;
@@ -501,7 +667,7 @@ class _InputAreaState extends State<InputArea> {
       maxLines: _isDesktop ? 8 : 4,
       minLines: 1,
       textInputAction: _isDesktop ? TextInputAction.newline : TextInputAction.send,
-      onSubmitted: _isDesktop ? null : (_) => _send(),
+      onSubmitted: _isDesktop ? null : (_) => _send(), // unawaited — intentional
     );
 
     if (_isDesktop) {
@@ -529,6 +695,35 @@ class _InputAreaState extends State<InputArea> {
                   onSelected: (id) {
                     context.read<PaneState>().setTargetWorker(id);
                   },
+                ),
+              ),
+            // Pending attachment chips
+            if (_pendingAttachments.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(left: 4, bottom: 6),
+                child: Wrap(
+                  spacing: 6,
+                  runSpacing: 4,
+                  children: [
+                    for (int i = 0; i < _pendingAttachments.length; i++)
+                      _AttachmentChip(
+                        name: _pendingAttachments[i].name,
+                        mimeType: _pendingAttachments[i].mimeType,
+                        onRemove: canAttach ? () => _removeAttachment(i) : null,
+                      ),
+                    if (_uploadingAttachments)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        child: SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: context.appColors.textMuted,
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
               ),
             Row(
@@ -577,6 +772,31 @@ class _InputAreaState extends State<InputArea> {
               duration: const Duration(milliseconds: 200),
               width: showPauseResume ? 8 : 0,
             ),
+            // Attach file button
+            Tooltip(
+              message: modelSupportsAttachments
+                  ? 'Attach file'
+                  : 'Attachments are not supported by the current model',
+              child: Material(
+                color: Colors.transparent,
+                shape: const CircleBorder(),
+                clipBehavior: Clip.antiAlias,
+                child: InkWell(
+                  onTap: canAttach ? _pickAttachments : null,
+                  child: Padding(
+                    padding: const EdgeInsets.all(10),
+                    child: Icon(
+                      Icons.attach_file_rounded,
+                      size: 20,
+                      color: canAttach
+                          ? context.appColors.textSecondary
+                          : context.appColors.textMuted,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 2),
             Expanded(child: textField),
             SizedBox(width: 8),
             AnimatedContainer(
@@ -584,21 +804,32 @@ class _InputAreaState extends State<InputArea> {
               width: 46,
               height: 46,
               child: Material(
-                color: _hasText && canSend
+                color: (_hasText || _pendingAttachments.isNotEmpty) && canSend
                     ? context.appColors.accent
                     : context.appColors.bgElevated,
                 shape: CircleBorder(),
                 clipBehavior: Clip.antiAlias,
                 child: InkWell(
-                  onTap: _hasText && canSend ? _send : null,
+                  onTap: (_hasText || _pendingAttachments.isNotEmpty) && canSend
+                      ? () => _send() // unawaited — intentional
+                      : null,
                   child: Center(
-                    child: Icon(
-                      Icons.arrow_upward_rounded,
-                      color: _hasText && canSend
-                          ? Colors.white
-                          : context.appColors.textMuted,
-                      size: 22,
-                    ),
+                    child: _uploadingAttachments
+                        ? SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : Icon(
+                            Icons.arrow_upward_rounded,
+                            color: (_hasText || _pendingAttachments.isNotEmpty) && canSend
+                                ? Colors.white
+                                : context.appColors.textMuted,
+                            size: 22,
+                          ),
                   ),
                 ),
               ),
@@ -619,6 +850,64 @@ class _InputAreaState extends State<InputArea> {
       if (c.id == id) return c.name;
     }
     return connectedWorkers.isNotEmpty ? connectedWorkers.first.name : null;
+  }
+}
+
+/// A chip displayed above the input field for each pending attachment.
+class _AttachmentChip extends StatelessWidget {
+  final String name;
+  final String mimeType;
+  final VoidCallback? onRemove;
+
+  const _AttachmentChip({
+    required this.name,
+    required this.mimeType,
+    this.onRemove,
+  });
+
+  static bool _isImage(String mime) =>
+      mime.startsWith('image/');
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: context.appColors.bgElevated,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: context.appColors.divider),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            _isImage(mimeType)
+                ? Icons.image_rounded
+                : Icons.insert_drive_file_rounded,
+            size: 13,
+            color: context.appColors.textMuted,
+          ),
+          const SizedBox(width: 5),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 160),
+            child: Text(
+              name,
+              style: TextStyle(
+                  color: context.appColors.textSecondary, fontSize: 12),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          if (onRemove != null) ...[
+            const SizedBox(width: 4),
+            GestureDetector(
+              onTap: onRemove,
+              child: Icon(Icons.close_rounded,
+                  size: 13, color: context.appColors.textMuted),
+            ),
+          ],
+        ],
+      ),
+    );
   }
 }
 
