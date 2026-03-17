@@ -10,7 +10,8 @@ a = Analysis(
     ['/home/flowelfox/Projects/RCFlow/src/__main__.py'],
     pathex=[],
     binaries=[],
-    datas=[('/home/flowelfox/Projects/RCFlow/src/prompts/templates', 'templates')],
+    datas=[('/home/flowelfox/Projects/RCFlow/src/prompts/templates', 'templates'),
+           ('/home/flowelfox/Projects/RCFlow/assets/tray_icon.ico', 'assets')],
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
@@ -37,6 +38,8 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon=['/home/flowelfox/Projects/RCFlow/assets/tray_icon.icns',
+          '/home/flowelfox/Projects/RCFlow/assets/tray_icon.ico'],
 )
 coll = COLLECT(
     exe,
