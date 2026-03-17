@@ -1,0 +1,59 @@
+{
+  "name": "worktree",
+  "display_name": "Worktree",
+  "description": "Manage git worktrees — create, list, merge, and remove isolated branches.",
+  "version": "1.0.0",
+  "os": ["linux", "darwin"],
+  "session_type": "one-shot",
+  "llm_context": "stateless",
+  "executor": "worktree",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "action": {
+        "type": "string",
+        "enum": ["new", "list", "merge", "rm"],
+        "description": "Operation: 'new' creates a worktree, 'list' shows all, 'merge' squash-merges into base, 'rm' removes a worktree."
+      },
+      "repo_path": {
+        "type": "string",
+        "description": "Absolute path to the git repository root."
+      },
+      "branch": {
+        "type": "string",
+        "description": "(new) Branch name for the new worktree."
+      },
+      "base": {
+        "type": "string",
+        "description": "(new) Base branch to create from. Defaults to 'main'."
+      },
+      "name": {
+        "type": "string",
+        "description": "(merge / rm) Name of the worktree to act on."
+      },
+      "message": {
+        "type": "string",
+        "description": "(merge) Squash-merge commit message."
+      },
+      "into": {
+        "type": "string",
+        "description": "(merge) Target branch to merge into. Defaults to the worktree's base branch."
+      },
+      "no_ff": {
+        "type": "boolean",
+        "description": "(merge) Disable fast-forward merge."
+      },
+      "keep": {
+        "type": "boolean",
+        "description": "(merge) Keep the worktree directory after merging."
+      }
+    },
+    "required": ["action", "repo_path"]
+  },
+  "executor_config": {
+    "worktree": {
+      "default_base_branch": "main",
+      "validate_branch_type": true
+    }
+  }
+}
