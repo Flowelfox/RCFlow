@@ -75,7 +75,7 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
   final _serverConfigKey = GlobalKey<ServerConfigContentState>();
 
   bool get _hasWorker => widget.worker != null;
-  int get _tabCount => _hasWorker ? 3 : 2;
+  int get _tabCount => _hasWorker ? 2 : 1;
 
   @override
   void initState() {
@@ -287,7 +287,7 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
     final screenHeight = MediaQuery.of(context).size.height;
     final contentHeight = _hasWorker
         ? (screenHeight * 0.7).clamp(400.0, 700.0)
-        : 310.0;
+        : 480.0;
 
     return Dialog(
       backgroundColor: context.appColors.bgSurface,
@@ -313,32 +313,34 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
               ),
             ),
             SizedBox(height: 16),
-            // Tab bar
-            TabBar(
-              controller: _tabController,
-              indicatorColor: context.appColors.accent,
-              labelColor: context.appColors.textPrimary,
-              unselectedLabelColor: context.appColors.textMuted,
-              dividerColor: context.appColors.divider,
-              tabs: [
-                const Tab(text: 'Main'),
-                const Tab(text: 'Other'),
-                if (_hasWorker) const Tab(text: 'Server'),
-              ],
-            ),
+            // Tab bar (only shown when Server tab is available)
+            if (_hasWorker)
+              TabBar(
+                controller: _tabController,
+                indicatorColor: context.appColors.accent,
+                labelColor: context.appColors.textPrimary,
+                unselectedLabelColor: context.appColors.textMuted,
+                dividerColor: context.appColors.divider,
+                tabs: [
+                  const Tab(text: 'Main'),
+                  const Tab(text: 'Server'),
+                ],
+              ),
             // Tab views
             Flexible(
               child: ConstrainedBox(
                 constraints: BoxConstraints(maxHeight: contentHeight),
-                child: TabBarView(
-                controller: _tabController,
-                children: [
-                  _buildMainTab(),
-                  _buildOtherTab(),
-                  if (_hasWorker) _buildServerTab(),
-                ],
+                child: _hasWorker
+                  ? TabBarView(
+                      controller: _tabController,
+                      children: [
+                        _buildMainTab(),
+                        _buildServerTab(),
+                      ],
+                    )
+                  : _buildMainTab(),
               ),
-            ),),
+            ),
             // Test connection area
             _buildTestArea(),
             Divider(height: 1, color: context.appColors.divider),
@@ -491,17 +493,7 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
               if (_submitted) setState(() {});
             },
           ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildOtherTab() {
-    return Padding(
-      padding: EdgeInsets.fromLTRB(24, 20, 24, 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
+          SizedBox(height: 16),
           SwitchListTile(
             title: Text('Use SSL (wss://)',
                 style: TextStyle(color: context.appColors.textPrimary, fontSize: 14)),
