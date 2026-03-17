@@ -114,10 +114,14 @@ void handlePlanReviewAsk(Map<String, dynamic> msg, PaneState pane) {
 
 void handlePermissionRequest(Map<String, dynamic> msg, PaneState pane) {
   pane.finalizeStream();
-  pane.addDisplayMessage(DisplayMessage(
+  pane.addDisplayMessageInStream(DisplayMessage(
     type: DisplayMessageType.permissionRequest,
     sessionId: msg['session_id'] as String?,
     content: msg['description'] as String? ?? '',
+    // When replaying a session buffer that already has a resolved permission,
+    // the backend includes 'accepted' in the message data so the widget
+    // renders in its resolved state instead of showing the pending UI.
+    accepted: msg['accepted'] as bool?,
     toolInput: {
       'request_id': msg['request_id'],
       'tool_name': msg['tool_name'],
@@ -198,7 +202,15 @@ void handleAgentGroupEnd(Map<String, dynamic> msg, PaneState pane) {
 void handleSessionPaused(Map<String, dynamic> msg, PaneState pane) {
   pane.finalizeStream();
   final pausedId = msg['session_id'] as String?;
-  pane.handleSessionPaused(pausedId);
+  final reason = msg['reason'] as String?;
+  pane.handleSessionPaused(pausedId, reason: reason);
+  if (reason == 'max_turns') {
+    pane.addDisplayMessage(DisplayMessage(
+      type: DisplayMessageType.pausedMaxTurns,
+      sessionId: pausedId,
+      finished: true,
+    ));
+  }
 }
 
 void handleSessionResumed(Map<String, dynamic> msg, PaneState pane) {
@@ -382,12 +394,22 @@ void buildSessionEndHistory(Map<String, dynamic> msg, String sessionId,
 
 void buildSessionPausedHistory(Map<String, dynamic> msg, String sessionId,
     List<DisplayMessage> messages) {
-  messages.add(DisplayMessage(
-    type: DisplayMessageType.system,
-    content: 'Session paused',
-    sessionId: sessionId,
-    finished: true,
-  ));
+  final metadata = msg['metadata'] as Map<String, dynamic>? ?? {};
+  final reason = metadata['reason'] as String?;
+  if (reason == 'max_turns') {
+    messages.add(DisplayMessage(
+      type: DisplayMessageType.pausedMaxTurns,
+      sessionId: sessionId,
+      finished: true,
+    ));
+  } else {
+    messages.add(DisplayMessage(
+      type: DisplayMessageType.system,
+      content: 'Session paused',
+      sessionId: sessionId,
+      finished: true,
+    ));
+  }
 }
 
 void buildSessionResumedHistory(Map<String, dynamic> msg, String sessionId,
