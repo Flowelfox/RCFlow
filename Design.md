@@ -32,6 +32,7 @@ RCFlow is a background server running on Linux or Windows that provides a WebSoc
 | Windows Tray         | pystray + Pillow (system tray icon)        |
 | Windows Terminal PTY | pywinpty (ConPTY wrapper)                   |
 | Windows Installer    | Inno Setup 6 (setup.exe builder)           |
+| Worktree Manager     | wtpython (WorktreeManager library)         |
 
 ---
 
@@ -110,19 +111,21 @@ RCFlow is a background server running on Linux or Windows that provides a WebSoc
 ```
 1. Client connects to /ws/input/text or /ws/input/audio
 2. If audio → RCFlow forwards to Wispr Flow STT → receives transcribed text
-3. Text prompt is routed to the Prompt Router
-4. Prompt Router creates or resumes a Session
-5. Prompt + tool definitions + session context sent to LLM provider (Anthropic API, AWS Bedrock, or OpenAI, streaming)
-6. LLM responds with text and/or tool_use blocks
-7. For each tool_use → Tool Executor runs the tool (shell command or HTTP API call)
-8. Tool output fed back to LLM for further reasoning (agentic loop)
-9. All LLM text output streams to /ws/output/text chunk-by-chunk
-10. All LLM text output also sent to TTS → audio streams to /ws/output/audio
-11. When the LLM finishes (no more tool calls), the session remains active.
+3. (Optional) Client uploads files via POST /api/uploads → receives attachment_id(s)
+4. Text prompt (+ optional attachment IDs) is routed to the Prompt Router
+5. Prompt Router creates or resumes a Session; resolves attachment IDs from AttachmentStore
+6. Prompt + attachment content blocks + tool definitions + session context sent to LLM provider
+   (Anthropic API, AWS Bedrock, or OpenAI, streaming)
+7. LLM responds with text and/or tool_use blocks
+8. For each tool_use → Tool Executor runs the tool (shell command or HTTP API call)
+9. Tool output fed back to LLM for further reasoning (agentic loop)
+10. All LLM text output streams to /ws/output/text chunk-by-chunk
+11. All LLM text output also sent to TTS → audio streams to /ws/output/audio
+12. When the LLM finishes (no more tool calls), the session remains active.
     If the LLM included [SessionEndAsk], the server pushes a session_end_ask
     message; the client shows a confirmation card. The session only ends
     when the user explicitly confirms or sends POST /api/sessions/{id}/end.
-12. Completed sessions are archived from memory to the database
+13. Completed sessions are archived from memory to the database
 ```
 
 ### Flutter Client — Multi-Platform
@@ -262,6 +265,12 @@ The client can connect to multiple RCFlow servers simultaneously. Each server co
 | DELETE | `/api/tasks/{task_id}`                  | Yes  | Delete a task and all session associations. |
 | POST   | `/api/tasks/{task_id}/sessions`         | Yes  | Attach a session to a task. Body: `{"session_id": "..."}`. Returns 201. |
 | DELETE | `/api/tasks/{task_id}/sessions/{sid}`   | Yes  | Detach a session from a task. |
+| POST   | `/api/uploads`                          | Yes  | Upload a file attachment for inclusion in a prompt. Accepts `multipart/form-data` with field `file`. Returns `{attachment_id, file_name, mime_type, size, is_image}`. Max 20 MB. Attachment expires after 10 minutes if not consumed. |
+| GET    | `/api/worktrees`                        | Yes  | List worktrees for a repo. Required query param `repo_path`. Returns `{"worktrees": [{name, branch, base, path, created_at}]}`. Linux/macOS only. |
+| POST   | `/api/worktrees`                        | Yes  | Create a worktree. Body: `{"branch", "base"="main", "repo_path"}`. Branch must follow `type/ticket/description` pattern. Returns 201 with `{"worktree": {...}}`. |
+| POST   | `/api/worktrees/{name}/merge`           | Yes  | Squash-merge a worktree into its base branch and clean up. Body: `{"message", "repo_path", "into"?, "no_ff"?, "keep"?}`. |
+| DELETE | `/api/worktrees/{name}`                 | Yes  | Remove a worktree and its branch without merging. Required query param `repo_path`. |
+| PATCH  | `/api/sessions/{session_id}/worktree`   | Yes  | Set or clear the selected worktree for a session. Body: `{"path": string \| null}`. When set, Claude Code and Codex agents use this path as their working directory. Returns `{"session_id", "selected_worktree_path"}`. |
 
 Authentication for HTTP endpoints uses the `X-API-Key` header with the same key as `RCFLOW_API_KEY`.
 
@@ -298,7 +307,23 @@ Client sends JSON messages:
 }
 ```
 
+To include file attachments, upload each file first via `POST /api/uploads`, then reference the returned `attachment_id`s in the `attachments` field:
+
+```json
+{
+  "type": "prompt",
+  "text": "What is in this image?",
+  "session_id": null,
+  "attachments": [
+    {"id": "<attachment_id>", "name": "photo.jpg", "mime_type": "image/jpeg"}
+  ]
+}
+```
+
+The server resolves each `attachment_id` from the `AttachmentStore`, builds multimodal content blocks (image blocks for JPEG/PNG/GIF/WEBP, inline text blocks for text/code files, metadata placeholders for other binary files), and passes them to the LLM alongside the user's text. Attachment content is adapted to the active LLM provider format (Anthropic base64 image blocks or OpenAI `image_url` blocks). Unused attachment IDs expire after 10 minutes.
+
 - `session_id`: `null` to create a new session, or an existing session ID to send a follow-up prompt to a conversational or long-running session.
+- `attachments`: Optional list. Each entry must have `id` (from `POST /api/uploads`) and `name`/`mime_type` for display. Entries with missing or expired IDs are silently skipped.
 
 End a session (user-confirmed completion):
 
@@ -525,9 +550,13 @@ Emitted when Claude Code produces `thinking` content blocks in `assistant` event
 {
   "type": "session_paused",
   "session_id": "uuid",
-  "paused_at": "2025-01-15T10:30:00+00:00"
+  "paused_at": "2025-01-15T10:30:00+00:00",
+  "reason": "max_turns",
+  "claude_code_interrupted": false
 }
 ```
+
+The `reason` field is optional. `"max_turns"` means Claude Code hit its configured `--max-turns` limit and the session was automatically paused. `null` (or absent) indicates a manual pause triggered by the user. The Flutter client renders a distinct `MaxTurnsPauseCard` widget in the message stream when `reason == "max_turns"`.
 
 ```json
 {
@@ -572,9 +601,12 @@ Emitted when Claude Code produces `thinking` content blocks in `assistant` event
   "cache_read_input_tokens": 200,
   "tool_input_tokens": 5000,
   "tool_output_tokens": 3000,
-  "tool_cost_usd": 0.05
+  "tool_cost_usd": 0.05,
+  "paused_reason": "max_turns"
 }
 ```
+
+The `paused_reason` field is only present when `status == "paused"`. `"max_turns"` means the session was automatically paused because Claude Code reached its `--max-turns` limit. `null` (absent) means a manual pause.
 
 Token usage fields are included in every `session_update` broadcast:
 - `input_tokens` / `output_tokens`: Tokens used by the global LLM pipeline (Anthropic/Bedrock/OpenAI).
@@ -648,13 +680,15 @@ Server responds with:
       "cache_read_input_tokens": 0,
       "tool_input_tokens": 0,
       "tool_output_tokens": 0,
-      "tool_cost_usd": 0.0
+      "tool_cost_usd": 0.0,
+      "worktree": null,
+      "selected_worktree_path": null
     }
   ]
 }
 ```
 
-Sessions are sorted by `created_at` descending (most recent first). The list includes both in-memory active sessions and archived sessions from the database. The `title` field is `null` until auto-generated after the first LLM response.
+Sessions are sorted by `created_at` descending (most recent first). The list includes both in-memory active sessions and archived sessions from the database. The `title` field is `null` until auto-generated after the first LLM response. The `worktree` field is `null` for sessions that have never used a worktree tool, or a dict with `repo_path`, `last_action`, `branch?`, and `base?` for sessions that have. The `selected_worktree_path` field is `null` by default and is set via `PATCH /api/sessions/{id}/worktree`; when non-null it overrides the agent working directory for Claude Code and Codex runs in that session.
 
 ### Task Messages
 
@@ -734,6 +768,15 @@ AI agents (source: `"ai"`) are forbidden from setting status to `done`. Only use
 - **On session end**, the LLM evaluates each attached task and may advance it to `review` if the work appears complete, or keep it at `in_progress` if more work is needed. The LLM cannot set `done`.
 - **Task matching** considers all non-done tasks (`todo`, `in_progress`, `review`) to prevent duplicate creation.
 
+#### Task Description Format
+
+Task descriptions generated by the LLM use **markdown formatting** for readability. Every task description includes:
+
+1. A brief summary paragraph explaining what needs to be done.
+2. A **Review Checklist** section with `- [ ]` items specifying what reviewers should focus on when the task enters `review` status. The checklist is task-specific (e.g., logic correctness, edge cases, tests, documentation).
+
+When a task's status is updated (especially to `review`), the LLM refreshes the description to reflect the actual work performed and updates the review checklist accordingly.
+
 ### Artifact Messages
 
 Artifacts are files discovered by parsing session conversation messages for file paths. When `ARTIFACT_AUTO_SCAN` is enabled, the scanner runs in real time after each assistant message and tool result during session execution, as well as after session archival. It extracts file paths from message content, verifies they exist on disk, and tracks files matching the configured include/exclude patterns.
@@ -761,11 +804,16 @@ Server responds with:
       "mime_type": "text/markdown",
       "discovered_at": "2025-01-15T10:30:00+00:00",
       "modified_at": "2025-01-15T11:00:00+00:00",
-      "session_id": "uuid or null"
+      "session_id": "uuid or null",
+      "project_name": "repo or null"
     }
   ]
 }
 ```
+
+Each artifact includes a `project_name` field derived from its `file_path` relative to the configured `PROJECTS_DIR` directories. If the artifact's path falls under a subdirectory of any projects directory, the first path component is used as the project name. Artifacts outside any project directory have `project_name: null`.
+
+The client groups artifacts by worker, then by project name. Artifacts with no project are shown under an "Other" category.
 
 The server broadcasts `artifact_list` after each extraction that discovers new artifacts.
 
@@ -789,6 +837,31 @@ When an artifact is deleted via the HTTP API, the server broadcasts:
 | DELETE | `/api/artifacts/{id}` | Delete artifact record (not the file) |
 | GET | `/api/artifacts/settings` | Get extraction settings |
 | PATCH | `/api/artifacts/settings` | Update extraction settings |
+
+#### Chat Attachments
+
+Chat attachments are user-uploaded files sent alongside a prompt message (images, code files, PDFs, etc.). They are distinct from **Artifacts** (server-side files discovered during execution).
+
+**Upload flow:**
+1. Client calls `POST /api/uploads` with `multipart/form-data` containing the file.
+2. Server stores the file bytes in `AttachmentStore` (in-memory, 10-minute TTL) and returns `{attachment_id, file_name, mime_type, size, is_image}`.
+3. Client includes the returned `attachment_id`s in the WebSocket `prompt` message's `attachments` list.
+4. Server resolves IDs from `AttachmentStore` (consuming each entry) and passes `ResolvedAttachment` objects to `PromptRouter.handle_prompt`.
+5. Prompt router converts each attachment to an LLM content block:
+   - **Images** (JPEG, PNG, GIF, WEBP): provider-specific image block (Anthropic `type: image / source.type: base64` or OpenAI `type: image_url`).
+   - **Text files** (any `text/*` MIME, or known text extensions: `.py`, `.dart`, `.json`, `.md`, `.yaml`, etc.): `type: text` block with filename header and decoded UTF-8 content.
+   - **Other binary**: `type: text` placeholder noting the filename and byte size.
+6. Attachment blocks are prepended to the prompt text in the conversation history turn.
+7. Server pushes the user's text to the buffer with `attachments: [{name, mime_type, size}]` metadata so the client can display file chips in the chat.
+
+**Implementation:**
+- `src/core/attachment_store.py` — `AttachmentStore` (store/get/pop with TTL eviction) and `ResolvedAttachment` dataclass.
+- `src/api/routes/uploads.py` — `POST /api/uploads` endpoint.
+- `src/core/prompt_router.py` — `_build_attachment_blocks()` helper; `handle_prompt(attachments=...)`.
+- `src/api/ws/input_text.py` — resolves `attachments` list from `AttachmentStore` before dispatching to `handle_prompt`.
+- **Client**: `WebSocketService.uploadAttachment()` HTTP POST helper; `sendPrompt(attachments: ...)` extended; `InputArea` shows paperclip button and pending-attachment chips above the text field.
+
+**Constraints:** Max file size 20 MB per file. Attachments expire in 10 minutes if the prompt is never sent. Missing or expired IDs in the `attachments` list are silently skipped. No attachment data is stored in the database (only the text echo is logged).
 
 #### Artifact Scanner
 
@@ -921,7 +994,7 @@ Each active session tracks an in-memory list of todo items, updated whenever Cla
 
 ### Session Titles
 
-Sessions receive auto-generated human-readable titles (max 6 words) derived from the first user prompt and LLM response. After the agentic loop completes for the first turn of a session, a background task sends the user prompt and assistant response to the summary model (`SUMMARY_MODEL`) to generate a short title. The title is stored in the `title` column of the `sessions` table and included in all session list responses (HTTP and WebSocket). Title generation failures are logged but never break the session. The `title` field is `null` until generated. Users can also manually rename sessions at any time via `PATCH /api/sessions/{session_id}/title`. Setting the title to `null` clears it.
+Sessions receive auto-generated human-readable titles (max 6 words) derived from the first user prompt and LLM response. After the agentic loop completes for the first turn of a session, a background task sends the user prompt and assistant response to the title model (`TITLE_MODEL`, falls back to main model) to generate a short title. The title is stored in the `title` column of the `sessions` table and included in all session list responses (HTTP and WebSocket). Title generation failures are logged but never break the session. The `title` field is `null` until generated. Users can also manually rename sessions at any time via `PATCH /api/sessions/{session_id}/title`. Setting the title to `null` clears it.
 
 ### Concurrency
 
@@ -1552,9 +1625,55 @@ Supporting endpoints:
 | `os`              | list   | no       | OS restriction: subset of `["windows","linux","darwin"]`. Empty = all platforms. Tools are skipped at load time if the current OS is not in the list. |
 | `session_type`    | enum   | yes      | `one-shot` or `long-running`                          |
 | `llm_context`     | enum   | yes      | `stateless` or `session-scoped`                       |
-| `executor`        | enum   | yes      | `shell`, `http`, `claude_code`, or `codex`            |
+| `executor`        | enum   | yes      | `shell`, `http`, `claude_code`, `codex`, or `worktree` |
 | `parameters`      | object | yes      | JSON Schema describing the tool's input parameters    |
 | `executor_config` | object | yes      | Executor-specific configuration                       |
+
+---
+
+## Worktree Executor
+
+The `worktree` executor wraps the [`wtpython`](https://github.com/Flowelfox/worktree-manager-python) library's `WorktreeManager` class. Unlike `shell` or `http` executors, it calls Python library code directly rather than spawning a subprocess. All blocking git operations run via `asyncio.to_thread` to avoid blocking the event loop.
+
+### Tool Definition
+
+A single `worktree` tool definition (display name **Worktree**) covers all operations. The required `action` parameter selects the operation at call time:
+
+| `action` value | Operation                                    | Additional parameters                              |
+|---------------|----------------------------------------------|-----------------------------------------------------|
+| `new`         | Create a new worktree on a new branch        | `branch`, `base` (default `"main"`), `repo_path`   |
+| `list`        | List all active worktrees for a repository   | `repo_path`                                         |
+| `merge`       | Squash-merge a worktree branch and clean up  | `name`, `message`, `repo_path`                      |
+| `rm`          | Remove a worktree and its branch             | `name`, `repo_path`                                 |
+
+All four actions share `repo_path` (required) and live in a single `tools/worktree.json`.
+
+### Configuration (`WorktreeExecutorConfig`)
+
+| Field                  | Default | Description                                            |
+|------------------------|---------|--------------------------------------------------------|
+| `default_base_branch`  | `"main"` | Branch to base new worktrees on when `base` is omitted |
+| `validate_branch_type` | `true`  | Enforce `type/ticket/description` branch naming        |
+
+### Platform Restriction
+
+The `worktree` tool definition includes `"os": ["linux", "darwin"]`. It is skipped at load time on Windows because the `.worktrees/` directory convention and shell hooks are Unix-only.
+
+### Default Base Branch (`main`)
+
+The executor and all tool definitions explicitly default `base` to `"main"`. This is the upstream default — no assumptions about the current HEAD branch are made.
+
+### Branch Naming Convention
+
+New branches must follow the `type/ticket/description` pattern (e.g. `feature/PROJ-123/add-auth`, `fix/PROJ-456/null-check`). Valid type prefixes are: `feature`, `fix`, `docs`, `hotfix`, `tech-debt`. Validation can be disabled per-tool via `"validate_branch_type": false` in `executor_config.worktree`.
+
+### Auto-commit on Merge
+
+The `merge` action always passes `auto_commit_changes=True` to `WorktreeManager.merge()`. Since RCFlow is a non-interactive server, interactive prompts for uncommitted changes are not feasible; any uncommitted work is committed automatically with the provided merge message.
+
+### HTTP API
+
+The worktree HTTP routes (`src/api/routes/worktrees.py`) provide the same operations over REST for the Flutter client. See the HTTP API table above for endpoint details.
 
 ---
 
@@ -1774,12 +1893,12 @@ All configuration is via environment variables, loaded from a `settings.json` fi
 | `DATABASE_URL`          | no       | `sqlite+aiosqlite:///./data/rcflow.db` | Database connection string (SQLite or PostgreSQL) |
 | `LLM_PROVIDER`          | no       | `anthropic`     | LLM provider: `anthropic`, `bedrock`, `openai`, or `none` (direct tool mode) |
 | `ANTHROPIC_API_KEY`     | cond.    |                 | Anthropic API key (required when `LLM_PROVIDER=anthropic`) |
-| `ANTHROPIC_MODEL`       | no       | `claude-sonnet-4-20250514`| Anthropic model ID (use Bedrock model IDs when `LLM_PROVIDER=bedrock`) |
+| `ANTHROPIC_MODEL`       | no       | `claude-sonnet-4-6`| Anthropic model ID (use Bedrock model IDs when `LLM_PROVIDER=bedrock`) |
 | `AWS_REGION`            | no       | `us-east-1`     | AWS region (used when `LLM_PROVIDER=bedrock`) |
 | `AWS_ACCESS_KEY_ID`     | no       |                 | AWS access key ID (optional if using IAM roles/instance profiles) |
 | `AWS_SECRET_ACCESS_KEY` | no       |                 | AWS secret access key (optional if using IAM roles/instance profiles) |
 | `OPENAI_API_KEY`        | cond.    |                 | OpenAI API key (required when `LLM_PROVIDER=openai`) |
-| `OPENAI_MODEL`          | no       | `gpt-4o`        | OpenAI model ID (e.g. gpt-4o, gpt-4.1, o3) |
+| `OPENAI_MODEL`          | no       | `gpt-5.4`       | OpenAI model ID (e.g. gpt-5.4, gpt-4.1, o3) |
 | `STT_PROVIDER`          | no       | `wispr_flow`    | STT provider name                    |
 | `STT_API_KEY`           | yes      |                 | STT provider API key (Wispr Flow)    |
 | `TTS_PROVIDER`          | no       | `none`          | TTS provider name                    |
@@ -1787,7 +1906,9 @@ All configuration is via environment variables, loaded from a `settings.json` fi
 | `PROJECTS_DIR`          | no       | `~/Projects`    | Comma-separated list of project directories (used in system prompt, path resolution, and `/api/projects` endpoint) |
 | `TOOLS_DIR`             | no       | `./tools`       | Path to tool definitions directory   |
 | `CODEX_API_KEY`         | no       |                 | OpenAI API key for Codex CLI         |
-| `SUMMARY_MODEL`         | no       | auto (per provider) | Fast model for summaries/titles. Defaults to `claude-haiku-4-5-20251001` (Anthropic) or `{region}.anthropic.claude-haiku-4-5-v1:0` (Bedrock, region prefix derived from `AWS_REGION`) |
+| `SUMMARY_MODEL`         | no       | _(main model)_  | Model for TTS-friendly summaries. When blank, falls back to the main model. |
+| `TITLE_MODEL`           | no       | _(main model)_  | Model for session title generation. When blank, falls back to the main model. |
+| `TASK_MODEL`            | no       | _(main model)_  | Model for task extraction and status evaluation. When blank, falls back to the main model. |
 | `GLOBAL_PROMPT`         | no       |                 | Custom instructions appended to the system prompt for every session |
 | `SESSION_INPUT_TOKEN_LIMIT` | no   | `0` (unlimited) | Max total input tokens (LLM + tool) per session. `0` = no limit. |
 | `SESSION_OUTPUT_TOKEN_LIMIT`| no   | `0` (unlimited) | Max total output tokens (LLM + tool) per session. `0` = no limit. |
@@ -1847,6 +1968,15 @@ RCFlow/
 │   ├── api/
 │   │   ├── __init__.py
 │   │   ├── deps.py              # Shared dependencies (auth, db session)
+│   │   ├── http.py              # Main API router (assembles sub-routers)
+│   │   ├── routes/
+│   │   │   ├── __init__.py      # Collects and re-exports all sub-routers
+│   │   │   ├── sessions.py      # Session CRUD & lifecycle endpoints
+│   │   │   ├── tools.py         # Tool management & settings endpoints
+│   │   │   ├── auth.py          # Claude Code & Codex login/logout
+│   │   │   ├── tasks.py         # Task CRUD & session attachment
+│   │   │   ├── artifacts.py     # Artifact CRUD & settings
+│   │   │   └── config.py        # Health, info, config, projects
 │   │   └── ws/
 │   │       ├── __init__.py
 │   │       ├── input_text.py    # /ws/input/text handler
@@ -1857,7 +1987,12 @@ RCFlow/
 │   ├── core/
 │   │   ├── __init__.py
 │   │   ├── session.py           # Session manager and session state
-│   │   ├── prompt_router.py     # Routes text to LLM pipeline
+│   │   ├── prompt_router.py     # Routes text to LLM pipeline (orchestrator)
+│   │   ├── session_lifecycle.py # Session create/cancel/end/pause/resume (mixin)
+│   │   ├── context.py           # Mention extraction & context building (mixin)
+│   │   ├── agent_claude_code.py # Claude Code agent lifecycle (mixin)
+│   │   ├── agent_codex.py       # Codex CLI agent lifecycle (mixin)
+│   │   ├── background_tasks.py  # Fire-and-forget background tasks (mixin)
 │   │   ├── llm.py               # LLM client (Anthropic, Bedrock, OpenAI)
 │   │   └── buffer.py            # Output buffer for session history
 │   │
