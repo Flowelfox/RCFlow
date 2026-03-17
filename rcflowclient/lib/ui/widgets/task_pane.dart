@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:provider/provider.dart';
 
 import '../../models/split_tree.dart';
@@ -474,12 +475,67 @@ class _TaskDetailContentState extends State<_TaskDetailContent> {
                           color: context.appColors.bgElevated,
                           borderRadius: BorderRadius.circular(8),
                         ),
-                        child: SelectableText(
-                          task.description!,
-                          style: TextStyle(
-                            color: context.appColors.textPrimary,
-                            fontSize: 13,
-                            height: 1.5,
+                        child: MarkdownBody(
+                          data: task.description!,
+                          shrinkWrap: true,
+                          selectable: true,
+                          styleSheet: MarkdownStyleSheet(
+                            p: TextStyle(
+                              color: context.appColors.textPrimary,
+                              fontSize: 13,
+                              height: 1.5,
+                            ),
+                            code: TextStyle(
+                              color: context.appColors.textPrimary,
+                              backgroundColor: context.appColors.toolBg
+                                  .withValues(alpha: 0.6),
+                              fontSize: 12.5,
+                              fontFamily: 'monospace',
+                            ),
+                            codeblockDecoration: BoxDecoration(
+                              color: context.appColors.toolBg,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            codeblockPadding: EdgeInsets.all(12),
+                            a: TextStyle(
+                                color: context.appColors.accentLight),
+                            listBullet: TextStyle(
+                                color: context.appColors.textPrimary,
+                                fontSize: 13),
+                            h1: TextStyle(
+                                color: context.appColors.textPrimary,
+                                fontSize: 20,
+                                fontWeight: FontWeight.bold),
+                            h2: TextStyle(
+                                color: context.appColors.textPrimary,
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold),
+                            h3: TextStyle(
+                                color: context.appColors.textPrimary,
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold),
+                            blockquoteDecoration: BoxDecoration(
+                              border: Border(
+                                  left: BorderSide(
+                                      color: context.appColors.accentDim,
+                                      width: 3)),
+                              color: context.appColors.toolBg
+                                  .withValues(alpha: 0.3),
+                            ),
+                            blockquotePadding:
+                                EdgeInsets.only(left: 12, top: 4, bottom: 4),
+                            tableBorder: TableBorder.all(
+                                color: context.appColors.divider),
+                            tableHead: TextStyle(
+                                color: context.appColors.textPrimary,
+                                fontWeight: FontWeight.bold),
+                            tableBody: TextStyle(
+                                color: context.appColors.textPrimary),
+                            horizontalRuleDecoration: BoxDecoration(
+                              border: Border(
+                                  top: BorderSide(
+                                      color: context.appColors.divider)),
+                            ),
                           ),
                         ),
                       ),

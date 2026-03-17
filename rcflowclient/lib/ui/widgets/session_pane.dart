@@ -15,6 +15,7 @@ import 'artifact_pane.dart';
 import 'task_pane.dart';
 import 'terminal_pane.dart';
 import 'todo_panel.dart';
+import 'worktree_panel.dart';
 
 /// Data carried during a session drag from the sidebar.
 class SessionDragData {
@@ -173,7 +174,7 @@ class _SessionPaneState extends State<SessionPane> {
                               children: [
                                 const PaneHeader(),
                                 Expanded(
-                                  child: _OutputWithTodoPanel(pane: widget.pane),
+                                  child: _OutputWithRightPanels(pane: widget.pane),
                                 ),
                                 const InputArea(),
                               ],
@@ -189,108 +190,177 @@ class _SessionPaneState extends State<SessionPane> {
   }
 }
 
-/// Wraps [OutputDisplay] with an optional resizable [TodoPanel] on the right.
-/// When the panel is hidden but todos exist, shows a small tab to reopen it.
-class _OutputWithTodoPanel extends StatefulWidget {
+/// Wraps [OutputDisplay] with optional resizable right panels (Todo, Worktree).
+///
+/// Bookmark tabs are always shown on the right edge when any panel is
+/// available, styled like sideways page-tabs.  Tapping a tab opens that panel;
+/// tapping the active tab closes it.
+class _OutputWithRightPanels extends StatefulWidget {
   final PaneState pane;
-  const _OutputWithTodoPanel({required this.pane});
+  const _OutputWithRightPanels({required this.pane});
 
   @override
-  State<_OutputWithTodoPanel> createState() => _OutputWithTodoPanelState();
+  State<_OutputWithRightPanels> createState() =>
+      _OutputWithRightPanelsState();
 }
 
-class _OutputWithTodoPanelState extends State<_OutputWithTodoPanel> {
+class _OutputWithRightPanelsState extends State<_OutputWithRightPanels> {
   bool _dragging = false;
 
   @override
   Widget build(BuildContext context) {
     final pane = context.watch<PaneState>();
     final hasTodos = pane.todos.isNotEmpty;
-    final showPanel = pane.todoPanelVisible && hasTodos;
 
-    if (!hasTodos) return const OutputDisplay();
+    final activePanel = pane.activeRightPanel;
+    final panelWidth = pane.rightPanelWidth;
 
-    if (!showPanel) {
-      // Collapsed: show output with a small vertical tab on the right edge
-      return Stack(
-        children: [
-          const OutputDisplay(),
-          Positioned(
-            right: 0,
-            top: 0,
-            bottom: 0,
-            child: Center(
-              child: _CollapsedTodoTab(onTap: pane.toggleTodoPanel),
-            ),
-          ),
-        ],
-      );
-    }
-
-    // Expanded: resizable panel with drag handle
-    final panelWidth = pane.todoPanelWidth;
     return Row(
       children: [
-        const Expanded(child: OutputDisplay()),
-        // Drag handle / divider
-        MouseRegion(
-          cursor: SystemMouseCursors.resizeColumn,
-          child: GestureDetector(
-            onHorizontalDragStart: (_) => setState(() => _dragging = true),
-            onHorizontalDragUpdate: (details) {
-              final box = context.findRenderObject() as RenderBox?;
-              if (box == null) return;
-              final newWidth = panelWidth - details.delta.dx;
-              pane.setTodoPanelWidth(newWidth);
-            },
-            onHorizontalDragEnd: (_) => setState(() => _dragging = false),
-            child: Container(
-              width: 5,
-              color: _dragging
-                  ? context.appColors.accent.withAlpha(80)
-                  : Colors.transparent,
-              child: Center(
-                child: Container(
-                  width: 1,
-                  height: double.infinity,
-                  color: context.appColors.divider,
-                ),
-              ),
-            ),
-          ),
+        // Main content
+        Expanded(
+          child: activePanel != null
+              ? Row(
+                  children: [
+                    const Expanded(child: OutputDisplay()),
+                    // Drag handle
+                    MouseRegion(
+                      cursor: SystemMouseCursors.resizeColumn,
+                      child: GestureDetector(
+                        onHorizontalDragStart: (_) =>
+                            setState(() => _dragging = true),
+                        onHorizontalDragUpdate: (details) {
+                          final newWidth =
+                              panelWidth - details.delta.dx;
+                          pane.setRightPanelWidth(newWidth);
+                        },
+                        onHorizontalDragEnd: (_) =>
+                            setState(() => _dragging = false),
+                        child: Container(
+                          width: 5,
+                          color: _dragging
+                              ? context.appColors.accent.withAlpha(80)
+                              : Colors.transparent,
+                          child: Center(
+                            child: Container(
+                              width: 1,
+                              height: double.infinity,
+                              color: context.appColors.divider,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    // Active panel content
+                    SizedBox(
+                      width: panelWidth,
+                      child: activePanel == 'todo'
+                          ? const TodoPanel()
+                          : const WorktreePanel(),
+                    ),
+                  ],
+                )
+              : const OutputDisplay(),
         ),
-        SizedBox(
-          width: panelWidth,
-          child: const TodoPanel(),
+        // Bookmark tabs column — always visible so user can open any panel
+        _RightBookmarks(
+          hasTodos: hasTodos,
+          activePanel: activePanel,
+          pane: pane,
         ),
       ],
     );
   }
 }
 
-/// Small vertical tab shown on the right edge when the todo panel is collapsed.
-class _CollapsedTodoTab extends StatelessWidget {
-  final VoidCallback onTap;
-  const _CollapsedTodoTab({required this.onTap});
+/// Vertical column of sideways bookmark tabs on the right edge.
+/// Always rendered so the user can open any panel regardless of content.
+class _RightBookmarks extends StatelessWidget {
+  final bool hasTodos;
+  final String? activePanel;
+  final PaneState pane;
+
+  const _RightBookmarks({
+    required this.hasTodos,
+    required this.activePanel,
+    required this.pane,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final pane = context.watch<PaneState>();
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        _BookmarkTab(
+          panelKey: 'todo',
+          icon: Icons.checklist_rounded,
+          label: _todoLabel(pane),
+          activePanel: activePanel,
+          iconColor: context.appColors.toolAccent,
+          onTap: () => pane.toggleRightPanel('todo'),
+        ),
+        const SizedBox(height: 4),
+        _BookmarkTab(
+          panelKey: 'worktree',
+          icon: Icons.device_hub_outlined,
+          label: 'Worktree',
+          activePanel: activePanel,
+          iconColor: context.appColors.accent,
+          onTap: () => pane.toggleRightPanel('worktree'),
+        ),
+      ],
+    );
+  }
+
+  String _todoLabel(PaneState pane) {
     final completed =
         pane.todos.where((t) => t.status == TodoStatus.completed).length;
-    final total = pane.todos.length;
+    return 'Todo $completed/${pane.todos.length}';
+  }
+}
 
+/// A single sideways bookmark tab.
+class _BookmarkTab extends StatelessWidget {
+  final String panelKey;
+  final IconData icon;
+  final String label;
+  final String? activePanel;
+  final Color iconColor;
+  final VoidCallback onTap;
+
+  const _BookmarkTab({
+    required this.panelKey,
+    required this.icon,
+    required this.label,
+    required this.activePanel,
+    required this.iconColor,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isActive = activePanel == panelKey;
     return Tooltip(
-      message: 'Show todo ($completed/$total)',
+      message: label,
       child: InkWell(
         onTap: onTap,
-        borderRadius: const BorderRadius.horizontal(left: Radius.circular(6)),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 12),
+        borderRadius:
+            const BorderRadius.horizontal(left: Radius.circular(6)),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          padding:
+              const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
           decoration: BoxDecoration(
-            color: context.appColors.bgSurface,
+            color: isActive
+                ? context.appColors.bgSurface
+                : context.appColors.bgBase,
             border: Border(
-              left: BorderSide(color: context.appColors.divider),
+              left: BorderSide(
+                color: isActive
+                    ? iconColor.withAlpha(200)
+                    : context.appColors.divider,
+                width: isActive ? 2 : 1,
+              ),
               top: BorderSide(color: context.appColors.divider),
               bottom: BorderSide(color: context.appColors.divider),
             ),
@@ -300,20 +370,22 @@ class _CollapsedTodoTab extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(
-                Icons.checklist_rounded,
-                size: 14,
-                color: context.appColors.toolAccent,
-              ),
+              Icon(icon,
+                  size: 14,
+                  color: isActive ? iconColor : context.appColors.textMuted),
               const SizedBox(height: 4),
               RotatedBox(
                 quarterTurns: 1,
                 child: Text(
-                  'Todo $completed/$total',
+                  label,
                   style: TextStyle(
-                    color: context.appColors.textMuted,
+                    color: isActive
+                        ? context.appColors.textPrimary
+                        : context.appColors.textMuted,
                     fontSize: 10,
-                    fontWeight: FontWeight.w500,
+                    fontWeight: isActive
+                        ? FontWeight.w600
+                        : FontWeight.w500,
                   ),
                 ),
               ),

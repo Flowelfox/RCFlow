@@ -59,6 +59,11 @@ class _TaskListPanelState extends State<TaskListPanel> {
     _searchController.text = _searchQuery;
     _activeStatusFilters.addAll(settings.tasksFilterStatus);
     _activeSourceFilters.addAll(settings.tasksFilterSource);
+    final savedCollapsed = settings.tasksCollapsedGroups;
+    if (savedCollapsed != null) {
+      _collapsedGroups.clear();
+      _collapsedGroups.addAll(savedCollapsed);
+    }
   }
 
   @override
@@ -73,6 +78,12 @@ class _TaskListPanelState extends State<TaskListPanel> {
     settings.tasksFilterSearch = _searchQuery;
     settings.tasksFilterStatus = _activeStatusFilters.toList();
     settings.tasksFilterSource = _activeSourceFilters.toList();
+  }
+
+  void _saveCollapsedGroups() {
+    final settings =
+        Provider.of<AppState>(context, listen: false).settings;
+    settings.tasksCollapsedGroups = _collapsedGroups.toList();
   }
 
   List<TaskInfo> _filterTasks(List<TaskInfo> tasks, AppState state) {
@@ -407,6 +418,7 @@ class _TaskListPanelState extends State<TaskListPanel> {
                 _collapsedGroups.add(status);
               }
             });
+            _saveCollapsedGroups();
           },
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
