@@ -86,6 +86,8 @@ class ActiveSession:
         self.tool_cost_usd: float = 0.0
         # In-memory todo state — updated on each TodoWrite tool_use
         self._todos: list[dict[str, str]] = []
+        # Reason why the session was paused (e.g. "max_turns"); None for manual pauses
+        self.paused_reason: str | None = None
 
     @property
     def todos(self) -> list[dict[str, str]]:
@@ -121,7 +123,10 @@ class ActiveSession:
             self._on_update()
 
     def set_active(self) -> None:
-        if self.status == SessionStatus.PAUSED:
+        if self.status in (
+            SessionStatus.PAUSED, SessionStatus.COMPLETED,
+            SessionStatus.FAILED, SessionStatus.CANCELLED,
+        ):
             return
         old = self.status
         self.status = SessionStatus.ACTIVE
@@ -129,7 +134,10 @@ class ActiveSession:
             self._on_update()
 
     def set_executing(self) -> None:
-        if self.status == SessionStatus.PAUSED:
+        if self.status in (
+            SessionStatus.PAUSED, SessionStatus.COMPLETED,
+            SessionStatus.FAILED, SessionStatus.CANCELLED,
+        ):
             return
         old = self.status
         self.status = SessionStatus.EXECUTING
@@ -167,8 +175,13 @@ class ActiveSession:
         if self._on_update:
             self._on_update()
 
-    def pause(self) -> None:
-        """Pause the session. Any running subprocess is killed; new prompts are rejected."""
+    def pause(self, reason: str | None = None) -> None:
+        """Pause the session. Any running subprocess is killed; new prompts are rejected.
+
+        Args:
+            reason: Optional reason for the pause (e.g. ``"max_turns"`` when Claude Code
+                hit its turn limit). ``None`` indicates a manual/user-initiated pause.
+        """
         terminal = (SessionStatus.COMPLETED, SessionStatus.FAILED, SessionStatus.CANCELLED)
         if self.status in terminal:
             raise RuntimeError(f"Cannot pause session in terminal state: {self.status.value}")
@@ -177,6 +190,7 @@ class ActiveSession:
         self.status = SessionStatus.PAUSED
         self._activity_state = ActivityState.IDLE
         self.paused_at = datetime.now(UTC)
+        self.paused_reason = reason
         if self._on_update:
             self._on_update()
 
@@ -187,6 +201,7 @@ class ActiveSession:
         self.status = SessionStatus.ACTIVE
         self._activity_state = ActivityState.IDLE
         self.paused_at = None
+        self.paused_reason = None
         self.last_activity_at = datetime.now(UTC)
         if self._on_update:
             self._on_update()
@@ -253,6 +268,9 @@ class SessionManager:
             "tool_input_tokens": session.tool_input_tokens,
             "tool_output_tokens": session.tool_output_tokens,
             "tool_cost_usd": session.tool_cost_usd,
+            "paused_reason": session.paused_reason,
+            "worktree": session.metadata.get("worktree"),
+            "selected_worktree_path": session.metadata.get("selected_worktree_path"),
         }
         for queue in self._update_subscribers.values():
             queue.put_nowait(update)
@@ -368,8 +386,11 @@ class SessionManager:
             # background thread even though the asyncio task was cancelled.
             # Always remove the session from memory to prevent
             # save_all_sessions from encountering duplicate messages.
-            self._sessions.pop(session_id, None)
+            removed = self._sessions.pop(session_id, None)
+            if removed is not None:
+                removed._on_update = None
             raise
+        session._on_update = None  # Prevent late broadcasts from background tasks
         del self._sessions[session_id]
         logger.info("Archived session %s to database", session_id)
 
@@ -485,6 +506,8 @@ class SessionManager:
                     "tool_input_tokens": s.tool_input_tokens,
                     "tool_output_tokens": s.tool_output_tokens,
                     "tool_cost_usd": s.tool_cost_usd,
+                    "worktree": s.metadata.get("worktree"),
+                    "selected_worktree_path": s.metadata.get("selected_worktree_path"),
                 }
             )
 
@@ -498,6 +521,7 @@ class SessionManager:
         for row in rows.scalars():
             sid = str(row.id)
             if sid not in in_memory_ids:
+                archived_meta: dict[str, Any] = dict(row.metadata_) if row.metadata_ else {}
                 result.append(
                     {
                         "session_id": sid,
@@ -513,6 +537,8 @@ class SessionManager:
                         "tool_input_tokens": row.tool_input_tokens or 0,
                         "tool_output_tokens": row.tool_output_tokens or 0,
                         "tool_cost_usd": row.tool_cost_usd or 0.0,
+                        "worktree": archived_meta.get("worktree"),
+                        "selected_worktree_path": archived_meta.get("selected_worktree_path"),
                     }
                 )
 
@@ -531,6 +557,22 @@ class SessionManager:
         ]
         for session_id in to_archive:
             await self.archive_session(session_id, db)
+
+    def complete_all_active(self) -> int:
+        """Mark all non-terminal sessions as completed for graceful shutdown.
+
+        Returns the number of sessions that were moved to COMPLETED status.
+        """
+        terminal = (SessionStatus.COMPLETED, SessionStatus.FAILED, SessionStatus.CANCELLED)
+        count = 0
+        for session in self._sessions.values():
+            if session.status not in terminal:
+                # For paused sessions, clear paused state first so complete() takes effect
+                if session.status == SessionStatus.PAUSED:
+                    session.status = SessionStatus.ACTIVE
+                session.complete()
+                count += 1
+        return count
 
     async def save_all_sessions(self, db: AsyncSession) -> None:
         """Save ALL in-memory sessions to the database for graceful shutdown.

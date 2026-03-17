@@ -7,6 +7,7 @@ from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from sqlalchemy import select
 
 from src.api.deps import verify_ws_api_key
+from src.core.prompt_router import PromptRouter
 from src.models.db import Artifact as ArtifactModel
 from src.models.db import Task as TaskModel
 from src.models.db import TaskSession as TaskSessionModel
@@ -168,6 +169,7 @@ async def ws_output_text(
                             "tool_input_tokens": s.get("tool_input_tokens", 0),
                             "tool_output_tokens": s.get("tool_output_tokens", 0),
                             "tool_cost_usd": s.get("tool_cost_usd", 0.0),
+                            "worktree": s.get("worktree"),
                         }
                         for s in all_sessions
                     ]
@@ -187,6 +189,7 @@ async def ws_output_text(
                             "tool_input_tokens": s.tool_input_tokens,
                             "tool_output_tokens": s.tool_output_tokens,
                             "tool_cost_usd": s.tool_cost_usd,
+                            "worktree": s.metadata.get("worktree"),
                         }
                         for s in session_manager.list_all_sessions()
                     ]
@@ -239,6 +242,7 @@ async def ws_output_text(
                 settings = websocket.app.state.settings
                 db_session_factory = websocket.app.state.db_session_factory
                 if db_session_factory is not None:
+                    projects_dirs = settings.projects_dirs
                     async with db_session_factory() as db:
                         stmt = (
                             select(ArtifactModel)
@@ -259,6 +263,7 @@ async def ws_output_text(
                                 "discovered_at": a.discovered_at.isoformat() if a.discovered_at else "",
                                 "modified_at": a.modified_at.isoformat() if a.modified_at else "",
                                 "session_id": str(a.session_id) if a.session_id else None,
+                                "project_name": PromptRouter._resolve_artifact_project(a.file_path, projects_dirs),
                             })
                     await websocket.send_json({"type": "artifact_list", "artifacts": artifacts_out})
                 else:
