@@ -1,13 +1,18 @@
 import asyncio
 import json
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from src.core.buffer import MessageType
+from src.core.permissions import PermissionManager
 from src.core.prompt_router import PromptRouter
 from src.core.session import SessionManager, SessionStatus, SessionType
 from src.executors.base import ExecutionChunk
+from src.tools.registry import ToolRegistry
+
+_TOOLS_DIR = Path(__file__).parent.parent.parent / "tools"
 
 
 def _make_router(session_manager: SessionManager) -> PromptRouter:
@@ -15,6 +20,14 @@ def _make_router(session_manager: SessionManager) -> PromptRouter:
     llm_client = MagicMock()
     tool_registry = MagicMock()
     return PromptRouter(llm_client, session_manager, tool_registry)
+
+
+def _make_router_with_real_registry(session_manager: SessionManager) -> PromptRouter:
+    """Create a PromptRouter with a real tool registry loaded from the tools directory."""
+    llm_client = MagicMock()
+    registry = ToolRegistry()
+    registry.load_from_directory(_TOOLS_DIR)
+    return PromptRouter(llm_client, session_manager, registry)
 
 
 @pytest.mark.asyncio
@@ -282,7 +295,7 @@ async def test_relay_claude_code_stream_empty_result_still_pushes_end_ask(sessio
 
 @pytest.mark.asyncio
 async def test_relay_claude_code_stream_max_turns_subtype(session_manager: SessionManager) -> None:
-    """When result has subtype=max_turns, a summary with fallback text and SESSION_END_ASK should fire."""
+    """When result has subtype=max_turns, the session is paused with reason='max_turns' (no SESSION_END_ASK)."""
     router = _make_router(session_manager)
     router._llm.summarize = AsyncMock(return_value="Hit max turns limit.")
 
@@ -303,9 +316,24 @@ async def test_relay_claude_code_stream_max_turns_subtype(session_manager: Sessi
     summary_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.SUMMARY]
     assert len(summary_msgs) == 1
 
-    # SESSION_END_ASK should also be pushed
+    # SESSION_END_ASK must NOT be pushed — the session is paused instead
     end_ask_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.SESSION_END_ASK]
-    assert len(end_ask_msgs) == 1
+    assert len(end_ask_msgs) == 0
+
+    # Session should be paused with reason "max_turns"
+    assert session.status == SessionStatus.PAUSED
+    assert session.paused_reason == "max_turns"
+
+    # SESSION_PAUSED with reason and AGENT_GROUP_END must be in the buffer
+    paused_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.SESSION_PAUSED]
+    assert len(paused_msgs) == 1
+    assert paused_msgs[0].data["reason"] == "max_turns"
+    assert paused_msgs[0].data["claude_code_interrupted"] is False
+
+    agent_end_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.AGENT_GROUP_END]
+    assert len(agent_end_msgs) == 1
+    # AGENT_GROUP_END must precede SESSION_PAUSED
+    assert agent_end_msgs[0].sequence < paused_msgs[0].sequence
 
 
 # --- Pause / Resume tests ---
@@ -507,3 +535,138 @@ async def test_end_paused_session(session_manager: SessionManager) -> None:
 
     assert result.status == SessionStatus.COMPLETED
     assert result.ended_at is not None
+
+
+# --- _build_tool_context tests ---
+
+
+def test_build_tool_context_agent_only(session_manager: SessionManager) -> None:
+    """A single agent mention produces a MUST directive."""
+    router = _make_router_with_real_registry(session_manager)
+    ctx = router._build_tool_context(["ClaudeCode"])
+    assert ctx is not None
+    assert "MUST" in ctx
+    assert "claude_code" in ctx
+    assert "worktree" not in ctx.lower() or "Step 1" not in ctx
+
+
+def test_build_tool_context_worktree_only(session_manager: SessionManager) -> None:
+    """A worktree-only mention produces a preference block (no orchestration)."""
+    router = _make_router_with_real_registry(session_manager)
+    ctx = router._build_tool_context(["Worktree"])
+    assert ctx is not None
+    assert "Tool preference" in ctx
+    assert "Step 1" not in ctx
+
+
+def test_build_tool_context_worktree_and_agent_orchestration(session_manager: SessionManager) -> None:
+    """Worktree + agent mention produces the two-step orchestration directive."""
+    router = _make_router_with_real_registry(session_manager)
+    ctx = router._build_tool_context(["Worktree", "ClaudeCode"])
+    assert ctx is not None
+    assert "Step 1" in ctx
+    assert "Step 2" in ctx
+    assert "worktree" in ctx
+    assert "working_directory" in ctx
+    # Must not fall back to the split MUST + preference blocks
+    assert "Mandatory tool selection" not in ctx
+    assert "Tool preference" not in ctx
+
+
+def test_build_tool_context_worktree_and_agent_case_insensitive(session_manager: SessionManager) -> None:
+    """Case-insensitive mention matching still triggers orchestration."""
+    router = _make_router_with_real_registry(session_manager)
+    ctx = router._build_tool_context(["worktree", "claude_code"])
+    assert ctx is not None
+    assert "Step 1" in ctx
+    assert "Step 2" in ctx
+
+
+def test_build_tool_context_unknown_mention_ignored(session_manager: SessionManager) -> None:
+    """Unknown tool mentions are silently ignored; valid ones still produce output."""
+    router = _make_router_with_real_registry(session_manager)
+    ctx = router._build_tool_context(["NonExistentTool", "ClaudeCode"])
+    assert ctx is not None
+    assert "MUST" in ctx
+
+
+def test_build_tool_context_all_unknown_returns_none(session_manager: SessionManager) -> None:
+    """All-unknown mentions return None."""
+    router = _make_router_with_real_registry(session_manager)
+    ctx = router._build_tool_context(["Foo", "Bar"])
+    assert ctx is None
+
+
+# ---------------------------------------------------------------------------
+# Permission resolution — buffer persistence
+# ---------------------------------------------------------------------------
+
+def test_resolve_permission_sets_accepted_in_buffer(session_manager: SessionManager) -> None:
+    """Resolving a permission request persists 'accepted' in the buffer message.
+
+    This ensures that when a session is re-opened in a new pane the replayed
+    PERMISSION_REQUEST message carries the decision and the widget renders in
+    its resolved (non-pending) state.
+    """
+    router = _make_router(session_manager)
+    session = session_manager.create_session(SessionType.LONG_RUNNING)
+    session.set_active()
+
+    pm = PermissionManager()
+    session.permission_manager = pm
+
+    # Simulate what _handle_permission_check does: create a pending request and
+    # push the corresponding buffer message.
+    pending = pm.create_request("Bash", {"command": "ls"})
+    session.buffer.push_text(
+        MessageType.PERMISSION_REQUEST,
+        {
+            "session_id": session.id,
+            "request_id": pending.request_id,
+            "tool_name": "Bash",
+            "tool_input": {"command": "ls"},
+            "description": "Execute command: ls",
+            "risk_level": "high",
+            "scope_options": ["once", "tool_session", "all_session"],
+        },
+    )
+
+    # Before resolution the buffer message has no 'accepted' key.
+    perm_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.PERMISSION_REQUEST]
+    assert len(perm_msgs) == 1
+    assert "accepted" not in perm_msgs[0].data
+
+    # Resolve the request via the router (the path taken by the WS input handler).
+    router.resolve_permission(session.id, pending.request_id, "allow", "once")
+
+    # After resolution the buffer message must carry accepted=True.
+    assert perm_msgs[0].data.get("accepted") is True
+
+
+def test_resolve_permission_deny_sets_accepted_false_in_buffer(session_manager: SessionManager) -> None:
+    """Denying a permission request persists accepted=False in the buffer."""
+    router = _make_router(session_manager)
+    session = session_manager.create_session(SessionType.LONG_RUNNING)
+    session.set_active()
+
+    pm = PermissionManager()
+    session.permission_manager = pm
+
+    pending = pm.create_request("Write", {"file_path": "/tmp/x"})
+    session.buffer.push_text(
+        MessageType.PERMISSION_REQUEST,
+        {
+            "session_id": session.id,
+            "request_id": pending.request_id,
+            "tool_name": "Write",
+            "tool_input": {"file_path": "/tmp/x"},
+            "description": "Write file: /tmp/x",
+            "risk_level": "medium",
+            "scope_options": ["once", "tool_session", "tool_path", "all_session"],
+        },
+    )
+
+    router.resolve_permission(session.id, pending.request_id, "deny", "once")
+
+    perm_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.PERMISSION_REQUEST]
+    assert perm_msgs[0].data.get("accepted") is False
