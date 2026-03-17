@@ -121,15 +121,66 @@ class WebSocketService {
     _connectionController.add(true);
   }
 
-  void sendPrompt(String text, String? sessionId) {
+  void sendPrompt(
+    String text,
+    String? sessionId, {
+    List<Map<String, dynamic>>? attachments,
+  }) {
     if (_inputChannel == null) return;
-    final msg = {
+    final msg = <String, dynamic>{
       'type': 'prompt',
       'text': text,
       'session_id': sessionId,
+      if (attachments != null && attachments.isNotEmpty)
+        'attachments': attachments,
     };
     _inputChannel!.sink.add(jsonEncode(msg));
   }
+
+  /// Upload a file to the server and return the attachment metadata,
+  /// including the ``attachment_id`` to include in a subsequent prompt.
+  ///
+  /// Throws if the upload fails or the server returns a non-2xx status.
+  Future<Map<String, dynamic>> uploadAttachment({
+    required List<int> bytes,
+    required String fileName,
+    required String mimeType,
+  }) async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url = _serverUrl!.http('/api/uploads');
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      // Build a minimal multipart/form-data body manually.
+      const boundary = '----RCFlowBoundary7MA4YWxkTrZu0gW';
+      final header =
+          '--$boundary\r\nContent-Disposition: form-data; name="file"; filename="${_escapeFilename(fileName)}"\r\nContent-Type: $mimeType\r\n\r\n';
+      final footer = '\r\n--$boundary--\r\n';
+      final headerBytes = utf8.encode(header);
+      final footerBytes = utf8.encode(footer);
+      final body = [...headerBytes, ...bytes, ...footerBytes];
+
+      final request = await client.postUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      request.headers.set(
+          'Content-Type', 'multipart/form-data; boundary=$boundary');
+      request.headers.contentLength = body.length;
+      request.add(body);
+
+      final response = await request.close();
+      final responseBody =
+          await response.transform(const io.SystemEncoding().decoder).join();
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw Exception(
+            'Upload failed (${response.statusCode}): $responseBody');
+      }
+      return jsonDecode(responseBody) as Map<String, dynamic>;
+    } finally {
+      client.close();
+    }
+  }
+
+  static String _escapeFilename(String name) =>
+      name.replaceAll('"', '\\"').replaceAll('\n', '').replaceAll('\r', '');
 
   void subscribe(String sessionId) {
     if (_outputChannel == null) return;
@@ -236,6 +287,8 @@ class WebSocketService {
     }
   }
 
+  /// Ends a session.  Returns `true` if the session was ended (or was already
+  /// ended), `false` should never happen (throws on real errors).
   Future<void> endSession(String sessionId) async {
     if (_serverUrl == null) throw StateError('Not connected');
     final url = _serverUrl!.http('/api/sessions/$sessionId/end');
@@ -247,12 +300,13 @@ class WebSocketService {
       final response = await request.close();
       final body =
           await response.transform(const io.SystemEncoding().decoder).join();
+      // Treat 409 (already ended) as success — the session IS ended on the
+      // server, so the client should update its state accordingly.
+      if (response.statusCode == 409) return;
       if (response.statusCode != 200) {
         throw Exception(response.statusCode == 404
             ? 'Session not found'
-            : response.statusCode == 409
-                ? 'Session already ended'
-                : 'Server returned ${response.statusCode}: $body');
+            : 'Server returned ${response.statusCode}: $body');
       }
     } finally {
       client.close();
@@ -1149,6 +1203,136 @@ class WebSocketService {
   /// Send a WebSocket message to request artifacts list
   void requestArtifacts() {
     _outputChannel!.sink.add(jsonEncode({'type': 'list_artifacts'}));
+  }
+
+  // ---------------------------------------------------------------------------
+  // Worktree API
+  // ---------------------------------------------------------------------------
+
+  /// List all active worktrees for [repoPath].
+  Future<Map<String, dynamic>> listWorktrees(String repoPath) async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url = _serverUrl!.http('/api/worktrees', {'repo_path': repoPath});
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.getUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      final response = await request.close();
+      final body =
+          await response.transform(const io.SystemEncoding().decoder).join();
+      if (response.statusCode != 200) {
+        throw Exception('Server returned ${response.statusCode}: $body');
+      }
+      return jsonDecode(body) as Map<String, dynamic>;
+    } finally {
+      client.close();
+    }
+  }
+
+  /// Create a new worktree with [branch] branched from [base] (default "main").
+  Future<Map<String, dynamic>> createWorktree({
+    required String branch,
+    required String repoPath,
+    String base = 'main',
+  }) async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url = _serverUrl!.http('/api/worktrees');
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.postUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      request.headers.contentType = io.ContentType.json;
+      request.write(jsonEncode({
+        'branch': branch,
+        'base': base,
+        'repo_path': repoPath,
+      }));
+      final response = await request.close();
+      final body =
+          await response.transform(const io.SystemEncoding().decoder).join();
+      if (response.statusCode != 201) {
+        throw Exception('Server returned ${response.statusCode}: $body');
+      }
+      return jsonDecode(body) as Map<String, dynamic>;
+    } finally {
+      client.close();
+    }
+  }
+
+  /// Squash-merge [name] into its base branch with [message] and clean up.
+  Future<Map<String, dynamic>> mergeWorktree({
+    required String name,
+    required String message,
+    required String repoPath,
+  }) async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url = _serverUrl!.http('/api/worktrees/$name/merge');
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.postUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      request.headers.contentType = io.ContentType.json;
+      request.write(jsonEncode({'message': message, 'repo_path': repoPath}));
+      final response = await request.close();
+      final body =
+          await response.transform(const io.SystemEncoding().decoder).join();
+      if (response.statusCode != 200) {
+        throw Exception('Server returned ${response.statusCode}: $body');
+      }
+      return jsonDecode(body) as Map<String, dynamic>;
+    } finally {
+      client.close();
+    }
+  }
+
+  /// Remove a worktree and its branch without merging.
+  Future<Map<String, dynamic>> removeWorktree({
+    required String name,
+    required String repoPath,
+  }) async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url =
+        _serverUrl!.http('/api/worktrees/$name', {'repo_path': repoPath});
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.deleteUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      final response = await request.close();
+      final body =
+          await response.transform(const io.SystemEncoding().decoder).join();
+      if (response.statusCode != 200) {
+        throw Exception('Server returned ${response.statusCode}: $body');
+      }
+      return jsonDecode(body) as Map<String, dynamic>;
+    } finally {
+      client.close();
+    }
+  }
+
+  /// Set or clear the selected worktree path for a session.
+  ///
+  /// [path] is the absolute path of the worktree to select, or null to clear.
+  /// When set, Claude Code and Codex agents will use this directory.
+  Future<void> setSessionWorktree(String sessionId, String? path) async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url = _serverUrl!.http('/api/sessions/$sessionId/worktree');
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.openUrl('PATCH', url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      request.headers.contentType = io.ContentType.json;
+      request.add(utf8.encode(jsonEncode({'path': path})));
+      final response = await request.close();
+      final body =
+          await response.transform(const io.SystemEncoding().decoder).join();
+      if (response.statusCode != 200) {
+        throw Exception(response.statusCode == 404
+            ? 'Session not found'
+            : 'Server returned ${response.statusCode}: $body');
+      }
+    } finally {
+      client.close();
+    }
   }
 
   void disconnect() {

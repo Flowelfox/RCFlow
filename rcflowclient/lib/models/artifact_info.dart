@@ -10,6 +10,7 @@ class ArtifactInfo {
   final String? sessionId;
   final String workerId;
   final String workerName;
+  final String? projectName;
 
   ArtifactInfo({
     required this.artifactId,
@@ -23,6 +24,7 @@ class ArtifactInfo {
     this.sessionId,
     required this.workerId,
     required this.workerName,
+    this.projectName,
   });
 
   factory ArtifactInfo.fromJson(Map<String, dynamic> json, {
@@ -53,6 +55,7 @@ class ArtifactInfo {
       sessionId: json['session_id'] as String?,
       workerId: workerId,
       workerName: workerName,
+      projectName: json['project_name'] as String?,
     );
   }
 
@@ -61,6 +64,7 @@ class ArtifactInfo {
     int? fileSize,
     DateTime? modifiedAt,
     String? sessionId,
+    String? projectName,
   }) {
     return ArtifactInfo(
       artifactId: artifactId,
@@ -74,6 +78,7 @@ class ArtifactInfo {
       sessionId: sessionId ?? this.sessionId,
       workerId: workerId,
       workerName: workerName,
+      projectName: projectName ?? this.projectName,
     );
   }
 

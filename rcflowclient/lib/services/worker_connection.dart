@@ -26,6 +26,10 @@ class WorkerConnection extends ChangeNotifier {
   /// Operating system reported by the server (e.g. "Windows", "Linux").
   String? serverOs;
 
+  /// Whether the server's active model supports image/file attachments.
+  /// Defaults to true (optimistic) until server info is fetched.
+  bool supportsAttachments = true;
+
   /// Token limits from server config (0 = unlimited).
   int inputTokenLimit = 0;
   int outputTokenLimit = 0;
@@ -145,6 +149,7 @@ class WorkerConnection extends ChangeNotifier {
     _cancelReconnect();
     subscribedSessions.clear();
     serverOs = null;
+    supportsAttachments = true;
     _terminalService?.disconnect();
     ws.disconnect();
     _inputSub?.cancel();
@@ -205,10 +210,24 @@ class WorkerConnection extends ChangeNotifier {
   }
 
   void _updateSessionList(List<dynamic> list) {
-    sessions = list
-        .map((s) => SessionInfo.fromJson(s as Map<String, dynamic>,
-            workerId: config.id))
-        .toList();
+    // Build a lookup of existing sessions so we can preserve worktreeInfo when
+    // the server omits or sends null for it (e.g. for archived sessions whose
+    // metadata hasn't been re-hydrated yet).
+    final existingById = {for (final s in sessions) s.sessionId: s};
+
+    sessions = list.map((s) {
+      final json = s as Map<String, dynamic>;
+      final parsed = SessionInfo.fromJson(json, workerId: config.id);
+      // If the server didn't include worktree context, fall back to whatever
+      // we already have in memory for that session.
+      if (parsed.worktreeInfo == null) {
+        final existing = existingById[parsed.sessionId];
+        if (existing?.worktreeInfo != null) {
+          return parsed.copyWith(worktreeInfo: existing!.worktreeInfo);
+        }
+      }
+      return parsed;
+    }).toList();
     sessions.sort((a, b) {
       final aTime = a.createdAt ?? DateTime(2000);
       final bTime = b.createdAt ?? DateTime(2000);
@@ -240,6 +259,12 @@ class WorkerConnection extends ChangeNotifier {
     final toolOutputTokens = (msg['tool_output_tokens'] as num?)?.toInt();
     final toolCostUsd = (msg['tool_cost_usd'] as num?)?.toDouble();
 
+    // Parse worktree context
+    final wtJson = msg['worktree'] as Map<String, dynamic>?;
+    final worktreeProvided = msg.containsKey('worktree');
+    final worktreeInfo =
+        wtJson != null ? WorktreeInfo.fromJson(wtJson) : null;
+
     final index = sessions.indexWhere((s) => s.sessionId == sessionId);
     if (index >= 0) {
       final existing = sessions[index];
@@ -262,6 +287,7 @@ class WorkerConnection extends ChangeNotifier {
         toolInputTokens: toolInputTokens ?? existing.toolInputTokens,
         toolOutputTokens: toolOutputTokens ?? existing.toolOutputTokens,
         toolCostUsd: toolCostUsd ?? existing.toolCostUsd,
+        worktreeInfo: worktreeProvided ? worktreeInfo : existing.worktreeInfo,
       );
     } else {
       sessions.insert(
@@ -283,6 +309,7 @@ class WorkerConnection extends ChangeNotifier {
           toolInputTokens: toolInputTokens ?? 0,
           toolOutputTokens: toolOutputTokens ?? 0,
           toolCostUsd: toolCostUsd ?? 0.0,
+          worktreeInfo: worktreeInfo,
         ),
       );
     }
@@ -312,6 +339,7 @@ class WorkerConnection extends ChangeNotifier {
   void _fetchServerInfo() {
     ws.fetchServerInfo().then((info) {
       serverOs = info['os'] as String?;
+      supportsAttachments = (info['supports_attachments'] as bool?) ?? true;
       notifyListeners();
     }).catchError((_) {});
   }
