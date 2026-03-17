@@ -10,6 +10,7 @@ import '../../dialogs/worker_edit_dialog.dart';
 import '../notification_toast.dart';
 import '../settings_menu.dart';
 import 'artifact_list_panel.dart';
+import 'linear_issue_list_panel.dart';
 import 'task_list_panel.dart';
 import 'worker_group.dart';
 
@@ -53,7 +54,7 @@ class _SessionListPanelState extends State<SessionListPanel>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 4, vsync: this);
     final settings =
         Provider.of<AppState>(context, listen: false).settings;
     _workerSearchQuery = settings.workersFilterSearch;
@@ -107,6 +108,7 @@ class _SessionListPanelState extends State<SessionListPanel>
                     Tab(text: 'Workers'),
                     Tab(text: 'Tasks'),
                     Tab(text: 'Artifacts'),
+                    Tab(text: 'Linear'),
                   ],
                 ),
               ),
@@ -127,6 +129,8 @@ class _SessionListPanelState extends State<SessionListPanel>
               TaskListPanel(onTaskSelected: widget.onSessionSelected),
               // Artifacts tab
               ArtifactListPanel(onArtifactSelected: widget.onSessionSelected),
+              // Linear integration tab
+              LinearIssueListPanel(onIssueSelected: widget.onSessionSelected),
             ],
           ),
         ),

@@ -1874,6 +1874,32 @@ CREATE TABLE artifacts (
 );
 CREATE INDEX ix_artifacts_backend_id ON artifacts(backend_id);
 CREATE INDEX ix_artifacts_session_id ON artifacts(session_id);
+
+-- Cached Linear issues (synced from Linear GraphQL API)
+CREATE TABLE linear_issues (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    backend_id VARCHAR(36) NOT NULL DEFAULT '',
+    linear_id VARCHAR(255) NOT NULL,        -- Linear's internal issue ID
+    identifier VARCHAR(50) NOT NULL,         -- Human-readable ID, e.g. "ENG-123"
+    title VARCHAR(500) NOT NULL,
+    description TEXT,
+    priority INTEGER NOT NULL DEFAULT 0,     -- 0=none 1=urgent 2=high 3=medium 4=low
+    state_name VARCHAR(100) NOT NULL,        -- Display name, e.g. "In Progress"
+    state_type VARCHAR(50) NOT NULL,         -- triage|backlog|unstarted|started|completed|cancelled
+    assignee_id VARCHAR(255),
+    assignee_name VARCHAR(255),
+    team_id VARCHAR(255) NOT NULL,
+    team_name VARCHAR(255),
+    url TEXT NOT NULL,                       -- Linear issue URL
+    labels TEXT NOT NULL DEFAULT '[]',       -- JSON array of label names
+    created_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL,
+    synced_at TIMESTAMPTZ NOT NULL,
+    task_id UUID REFERENCES tasks(id) ON DELETE SET NULL,
+    UNIQUE(backend_id, linear_id)
+);
+CREATE INDEX ix_linear_issues_backend_id ON linear_issues(backend_id);
+CREATE INDEX ix_linear_issues_state_type ON linear_issues(state_type);
 ```
 
 ---
@@ -1917,6 +1943,9 @@ All configuration is via environment variables, loaded from a `settings.json` fi
 | `ARTIFACT_AUTO_SCAN`    | no       | `true`          | Auto-extract artifacts from messages in real time during session execution |
 | `ARTIFACT_MAX_FILE_SIZE`| no       | `5242880`       | Max file size in bytes for artifact content viewing (default 5 MB) |
 | `LOG_LEVEL`             | no       | `INFO`          | Logging level                        |
+| `LINEAR_API_KEY`        | no       |                 | Linear personal API token for issue sync |
+| `LINEAR_TEAM_ID`        | no       |                 | Linear team ID to scope issue queries to a specific team |
+| `LINEAR_SYNC_ON_STARTUP`| no       | `false`         | Automatically sync Linear issues from API on server startup |
 
 ### Remote Configuration (Client-Side Editing)
 
@@ -1936,13 +1965,156 @@ The server exposes `GET /api/config` and `PATCH /api/config` endpoints that allo
 | `required`         | bool   | Whether the field is required                      |
 | `restart_required` | bool   | Whether changing requires a server restart          |
 
-**Configurable groups**: LLM, Prompt, STT, TTS, Claude Code, Codex, Paths, Session Limits, Logging. Groups are rendered as collapsible sections in the client UI.
+**Configurable groups**: LLM, Prompt, STT, TTS, Claude Code, Codex, Paths, Session Limits, Logging, Linear. Groups are rendered as collapsible sections in the client UI.
 
 **Excluded from remote config** (for security): `RCFLOW_API_KEY`, `RCFLOW_HOST`, `RCFLOW_PORT`, `SSL_CERTFILE`, `SSL_KEYFILE`, `DATABASE_URL`.
 
 **Hot-reload**: When config is updated via `PATCH /api/config`, the server persists changes to `settings.json` and recreates the LLM client, STT provider, and TTS provider with the new settings. The old LLM client is gracefully closed.
 
 **Client UI**: The Flutter client shows a "Settings" button on each connected worker card. Tapping it opens a dialog (desktop) or bottom sheet (mobile) that renders a dynamic form based on the server's config schema. Fields are grouped by section and rendered as text fields, multi-line text areas, dropdowns, switches, or password fields depending on type.
+
+---
+
+## Linear Integration
+
+RCFlow integrates with the [Linear](https://linear.app) project management API to sync issues into the local database and expose them in the Flutter client's sidebar.
+
+### Overview
+
+- Issues are fetched via the **Linear GraphQL API** using a personal API token (`LINEAR_API_KEY`).
+- Synced issues are stored in the `linear_issues` table and survive server restarts.
+- The Flutter client renders a dedicated **Linear tab** in the sidebar, groups issues by state, and allows opening a full detail pane.
+- Issues can be **linked to tasks** (sets `task_id` on `LinearIssue`), enabling cross-referencing between tasks and issues.
+
+### Backend Service — `LinearService`
+
+`src/services/linear_service.py`
+
+An async HTTP client wrapper around the Linear GraphQL API. Uses `httpx.AsyncClient` with bearer-token auth.
+
+| Method | Description |
+|--------|-------------|
+| `fetch_issues(team_id)` | Query all issues for a team (paginated, up to 250 per page) |
+| `get_issue(linear_id)` | Fetch a single issue by its Linear ID |
+| `create_issue(team_id, title, description, priority)` | Create a new issue in Linear |
+| `update_issue(linear_id, title, description, state_id, priority)` | Update an existing issue |
+| `aclose()` | Close the underlying HTTP client |
+
+Raises `LinearServiceError` on API errors. All methods are `async`.
+
+### HTTP Endpoints
+
+All endpoints are under `/api/integrations/linear/` and require bearer-token auth (`RCFLOW_API_KEY`). After mutating the database, each endpoint broadcasts a `linear_issue_update` or `linear_issue_deleted` WebSocket message to all connected output clients.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET`  | `/api/integrations/linear/issues` | List all cached issues for this backend |
+| `GET`  | `/api/integrations/linear/issues/{id}` | Get a single cached issue by UUID |
+| `POST` | `/api/integrations/linear/sync` | Sync issues from Linear API, upsert into DB |
+| `POST` | `/api/integrations/linear/issues` | Create an issue in Linear and cache locally |
+| `PATCH`| `/api/integrations/linear/issues/{id}` | Update an issue (local cache + Linear API) |
+| `POST` | `/api/integrations/linear/issues/{id}/link` | Link an issue to a task (`task_id`) |
+| `DELETE`| `/api/integrations/linear/issues/{id}/link` | Unlink an issue from a task |
+
+### WebSocket Messages
+
+#### Outbound (server → client)
+
+**`linear_issue_list`** — sent in response to a `list_linear_issues` request. Delivers all cached issues for the backend.
+
+```json
+{
+  "type": "linear_issue_list",
+  "issues": [
+    {
+      "id": "uuid",
+      "linear_id": "...",
+      "identifier": "ENG-123",
+      "title": "...",
+      "description": "...",
+      "priority": 2,
+      "state_name": "In Progress",
+      "state_type": "started",
+      "assignee_id": "...",
+      "assignee_name": "...",
+      "team_id": "...",
+      "team_name": "...",
+      "url": "https://linear.app/...",
+      "labels": ["bug", "frontend"],
+      "created_at": "...",
+      "updated_at": "...",
+      "synced_at": "...",
+      "task_id": "uuid or null"
+    }
+  ]
+}
+```
+
+**`linear_issue_update`** — broadcast when an issue is created, synced, or modified. Contains the same issue dict as above.
+
+**`linear_issue_deleted`** — broadcast when an issue is removed from the cache.
+
+```json
+{ "type": "linear_issue_deleted", "id": "uuid" }
+```
+
+#### Inbound (client → server)
+
+**`list_linear_issues`** — request the full list of cached issues for this backend.
+
+```json
+{ "type": "list_linear_issues" }
+```
+
+### Flutter Client
+
+#### Model — `LinearIssueInfo`
+
+`rcflowclient/lib/models/linear_issue_info.dart`
+
+Dart model mirroring the backend `linear_issues` table. Includes `workerId`, `priorityLabel` getter, and `isTerminal` getter. Constructed via `LinearIssueInfo.fromJson()`.
+
+#### State — `AppState`
+
+- `_linearIssues: Map<String, LinearIssueInfo>` — all cached issues keyed by UUID.
+- `linearIssues` — sorted list (by `updatedAt` desc).
+- `getLinearIssue(id)` — lookup by UUID.
+- `openLinearIssueInPane(id)` — open issue in active pane (or new pane), pushing nav history.
+- `_handleLinearIssueList/Update/Deleted` — WebSocket message handlers that update `_linearIssues`.
+
+#### Pane — `PaneType.linearIssue`
+
+`PaneType` enum includes `linearIssue`. `PaneState` has a `linearIssueId` field. `SessionPane` dispatches to `LinearIssuePane` when `paneType == PaneType.linearIssue`.
+
+#### `LinearIssuePane`
+
+`rcflowclient/lib/ui/widgets/linear_issue_pane.dart`
+
+Full-pane detail view showing:
+- Header: identifier badge, title, back button, close button (multi-pane)
+- Priority + state metadata chips
+- Assignee and team chips
+- Labels
+- Description (selectable text)
+- Timestamps (created, updated, synced)
+- "Copy URL" button
+- "Link to Task" / "Unlink Task" button (calls backend link/unlink endpoints)
+
+#### Sidebar Tab — "Linear"
+
+The sidebar `SessionListPanel` has a 4-tab layout: **Workers**, **Tasks**, **Artifacts**, **Linear**.
+
+`LinearIssueListPanel` (`rcflowclient/lib/ui/widgets/session_panel/linear_issue_list_panel.dart`):
+- Search bar + state filter chips
+- Issues grouped by `stateType` with collapsible sections
+- "Sync" button calls `worker.ws.syncLinearIssues()` then `listLinearIssues()`
+- Empty and unconfigured states
+
+`LinearIssueTile` (`rcflowclient/lib/ui/widgets/session_panel/linear_issue_tile.dart`):
+- Priority icon + colored state background
+- Identifier badge, title, state/time subtitle
+- Link indicator icon when `taskId` is set
+- Active/viewed highlight via pane state
 
 ---
 
@@ -1977,12 +2149,15 @@ RCFlow/
 │   │   │   ├── tasks.py         # Task CRUD & session attachment
 │   │   │   ├── artifacts.py     # Artifact CRUD & settings
 │   │   │   └── config.py        # Health, info, config, projects
-│   │   └── ws/
+│   │   ├── ws/
+│   │   │   ├── __init__.py
+│   │   │   ├── input_text.py    # /ws/input/text handler
+│   │   │   ├── input_audio.py   # /ws/input/audio handler
+│   │   │   ├── output_text.py   # /ws/output/text handler
+│   │   │   └── output_audio.py  # /ws/output/audio handler
+│   │   └── integrations/
 │   │       ├── __init__.py
-│   │       ├── input_text.py    # /ws/input/text handler
-│   │       ├── input_audio.py   # /ws/input/audio handler
-│   │       ├── output_text.py   # /ws/output/text handler
-│   │       └── output_audio.py  # /ws/output/audio handler
+│   │       └── linear.py        # /api/integrations/linear/ endpoints
 │   │
 │   ├── core/
 │   │   ├── __init__.py
@@ -2006,7 +2181,8 @@ RCFlow/
 │   │
 │   ├── services/
 │   │   ├── __init__.py
-│   │   └── tool_manager.py      # Auto-install/update for Claude Code & Codex CLIs
+│   │   ├── tool_manager.py      # Auto-install/update for Claude Code & Codex CLIs
+│   │   └── linear_service.py    # Linear GraphQL API client
 │   │
 │   ├── speech/
 │   │   ├── __init__.py

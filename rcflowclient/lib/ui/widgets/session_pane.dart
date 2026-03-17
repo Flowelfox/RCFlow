@@ -12,6 +12,7 @@ import 'pane_header.dart';
 import 'session_panel.dart' show TerminalDragData;
 import 'session_panel/task_drag_data.dart';
 import 'artifact_pane.dart';
+import 'linear_issue_pane.dart';
 import 'task_pane.dart';
 import 'terminal_pane.dart';
 import 'todo_panel.dart';
@@ -118,6 +119,7 @@ class _SessionPaneState extends State<SessionPane> {
           final isTerminalPane = paneType == PaneType.terminal;
           final isTaskPane = paneType == PaneType.task;
           final isArtifactPane = paneType == PaneType.artifact;
+          final isLinearIssuePane = paneType == PaneType.linearIssue;
           final terminalInfo = isTerminalPane
               ? appState.getTerminalPaneInfo(widget.pane.paneId)
               : null;
@@ -170,7 +172,12 @@ class _SessionPaneState extends State<SessionPane> {
                                   paneId: widget.pane.paneId,
                                   pane: widget.pane,
                                 )
-                              : Column(
+                              : isLinearIssuePane
+                                  ? LinearIssuePane(
+                                      paneId: widget.pane.paneId,
+                                      pane: widget.pane,
+                                    )
+                                  : Column(
                               children: [
                                 const PaneHeader(),
                                 Expanded(

@@ -287,6 +287,18 @@ class SessionManager:
         for queue in self._update_subscribers.values():
             queue.put_nowait(msg)
 
+    def broadcast_linear_issue_update(self, issue_data: dict[str, Any]) -> None:
+        """Broadcast a Linear issue update to all connected output clients."""
+        msg = {"type": "linear_issue_update", **issue_data}
+        for queue in self._update_subscribers.values():
+            queue.put_nowait(msg)
+
+    def broadcast_linear_issue_deleted(self, issue_id: str) -> None:
+        """Broadcast a Linear issue deletion to all connected output clients."""
+        msg = {"type": "linear_issue_deleted", "id": issue_id}
+        for queue in self._update_subscribers.values():
+            queue.put_nowait(msg)
+
     def broadcast_artifact_update(self, artifact_data: dict[str, Any]) -> None:
         """Broadcast an artifact update to all connected output clients."""
         msg = {"type": "artifact_update", **artifact_data}
