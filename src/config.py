@@ -17,26 +17,28 @@ from src.paths import get_default_tools_dir, get_install_dir
 PROVIDER_MODELS: dict[str, dict[str, Any]] = {
     "anthropic": {
         "options": [
-            {"value": "claude-sonnet-4-20250514", "label": "Claude Sonnet 4"},
-            {"value": "claude-opus-4-20250514", "label": "Claude Opus 4"},
-            {"value": "claude-haiku-4-5-20251001", "label": "Claude Haiku 4.5"},
+            {"value": "claude-opus-4-6", "label": "Claude Opus 4.6"},
+            {"value": "claude-sonnet-4-6", "label": "Claude Sonnet 4.6"},
+            {"value": "claude-haiku-4-5", "label": "Claude Haiku 4.5"},
         ],
         "allow_custom": True,
     },
     "bedrock": {
         "options": [
+            {"value": "us.anthropic.claude-opus-4-5-20251101-v1:0", "label": "Claude Opus 4.5"},
             {"value": "us.anthropic.claude-sonnet-4-20250514-v1:0", "label": "Claude Sonnet 4"},
-            {"value": "us.anthropic.claude-opus-4-20250514-v1:0", "label": "Claude Opus 4"},
             {"value": "us.anthropic.claude-haiku-4-5-20251001-v1:0", "label": "Claude Haiku 4.5"},
         ],
         "allow_custom": True,
     },
     "openai": {
         "options": [
-            {"value": "gpt-4o", "label": "GPT-4o"},
+            {"value": "gpt-5.4", "label": "GPT-5.4"},
             {"value": "gpt-4.1", "label": "GPT-4.1"},
             {"value": "gpt-4.1-mini", "label": "GPT-4.1 Mini"},
             {"value": "gpt-4.1-nano", "label": "GPT-4.1 Nano"},
+            {"value": "gpt-4o", "label": "GPT-4o"},
+            {"value": "gpt-5-mini", "label": "GPT-5 Mini"},
             {"value": "o3", "label": "o3"},
             {"value": "o4-mini", "label": "o4-mini"},
         ],
@@ -143,7 +145,7 @@ class Settings(BaseSettings):
 
     # Anthropic LLM (used when LLM_PROVIDER = "anthropic")
     ANTHROPIC_API_KEY: str = ""
-    ANTHROPIC_MODEL: str = "claude-sonnet-4-20250514"
+    ANTHROPIC_MODEL: str = "claude-sonnet-4-6"
 
     # AWS Bedrock (used when LLM_PROVIDER = "bedrock")
     AWS_REGION: str = "us-east-1"
@@ -152,7 +154,7 @@ class Settings(BaseSettings):
 
     # OpenAI (used when LLM_PROVIDER = "openai")
     OPENAI_API_KEY: str = ""
-    OPENAI_MODEL: str = "gpt-4o"
+    OPENAI_MODEL: str = "gpt-5.4"
 
     # STT (Speech-to-Text)
     STT_PROVIDER: str = "wispr_flow"
@@ -171,10 +173,13 @@ class Settings(BaseSettings):
     # Codex CLI (OpenAI Codex)
     CODEX_API_KEY: str = ""
 
-    # Summarization (TTS-friendly summary of Claude Code results)
-    # Use Anthropic model ID for direct API, Bedrock model ID for Bedrock
-    # e.g. "claude-haiku-4-5-20251001" or "us.anthropic.claude-haiku-4-5-v1:0"
+    # Utility models for background operations.
+    # Use Anthropic model ID for direct API, Bedrock model ID for Bedrock.
+    # e.g. "claude-haiku-4-5" or "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+    # When blank, each falls back to the main model.
     SUMMARY_MODEL: str = ""
+    TITLE_MODEL: str = ""
+    TASK_MODEL: str = ""
 
     # Global prompt (appended to system prompt for all sessions)
     GLOBAL_PROMPT: str = ""
@@ -261,7 +266,7 @@ CONFIG_OPTIONS: list[dict[str, Any]] = [
         "label": "Anthropic Model",
         "type": "model_select",
         "group": "LLM",
-        "description": "Model ID (e.g. claude-sonnet-4-20250514). For Bedrock use Bedrock model IDs.",
+        "description": "Model ID (e.g. claude-sonnet-4-6). For Bedrock use Bedrock model IDs.",
         "required": False,
         "restart_required": True,
         "visible_when": {"key": "LLM_PROVIDER", "value_in": ["anthropic", "bedrock"]},
@@ -316,7 +321,7 @@ CONFIG_OPTIONS: list[dict[str, Any]] = [
         "label": "OpenAI Model",
         "type": "model_select",
         "group": "LLM",
-        "description": "OpenAI model ID (e.g. gpt-4o, gpt-4.1, o3)",
+        "description": "OpenAI model ID (e.g. gpt-5.4, gpt-4.1, o3)",
         "required": False,
         "restart_required": True,
         "visible_when": {"key": "LLM_PROVIDER", "value": "openai"},
@@ -331,6 +336,38 @@ CONFIG_OPTIONS: list[dict[str, Any]] = [
         "type": "model_select",
         "group": "LLM",
         "description": "Model for TTS-friendly summaries (blank = use main model)",
+        "required": False,
+        "restart_required": True,
+        "visible_when": {"key": "LLM_PROVIDER", "value_not": "none"},
+        "provider_key": "LLM_PROVIDER",
+        "models": {
+            "anthropic": PROVIDER_MODELS["anthropic"],
+            "bedrock": PROVIDER_MODELS["bedrock"],
+            "openai": PROVIDER_MODELS["openai"],
+        },
+    },
+    {
+        "key": "TITLE_MODEL",
+        "label": "Title Model",
+        "type": "model_select",
+        "group": "LLM",
+        "description": "Model for session title generation (blank = use main model)",
+        "required": False,
+        "restart_required": True,
+        "visible_when": {"key": "LLM_PROVIDER", "value_not": "none"},
+        "provider_key": "LLM_PROVIDER",
+        "models": {
+            "anthropic": PROVIDER_MODELS["anthropic"],
+            "bedrock": PROVIDER_MODELS["bedrock"],
+            "openai": PROVIDER_MODELS["openai"],
+        },
+    },
+    {
+        "key": "TASK_MODEL",
+        "label": "Task Model",
+        "type": "model_select",
+        "group": "LLM",
+        "description": "Model for task extraction and status evaluation (blank = use main model)",
         "required": False,
         "restart_required": True,
         "visible_when": {"key": "LLM_PROVIDER", "value_not": "none"},

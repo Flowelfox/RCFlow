@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from sqlalchemy import select
 
 from src.api.http import router as http_router
+from src.core.attachment_store import AttachmentStore
 from src.api.ws.input_audio import router as input_audio_router
 from src.api.ws.input_text import router as input_text_router
 from src.api.ws.output_audio import router as output_audio_router
@@ -72,6 +73,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     # Settings
     app.state.settings = settings
+
+    # Attachment store (temporary in-memory store for user-uploaded files)
+    app.state.attachment_store = AttachmentStore()
 
     # Tool manager — detect and install CLI tools
     tool_manager = ToolManager(settings)
@@ -152,6 +156,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     await prompt_router.cancel_pending_tasks()
     if llm_client is not None:
         await llm_client.close()
+
+    completed = session_manager.complete_all_active()
+    if completed:
+        logger.info("Marked %d active session(s) as completed for graceful shutdown", completed)
 
     async with db_session_factory() as db:
         await session_manager.save_all_sessions(db)
