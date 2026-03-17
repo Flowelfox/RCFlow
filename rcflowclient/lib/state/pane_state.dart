@@ -51,6 +51,10 @@ abstract class PaneHost {
     required String title,
     String? body,
   });
+
+  /// Whether the worker for [workerId] (or the default worker) supports
+  /// image/file attachments based on its configured model.
+  bool workerSupportsAttachments(String? workerId);
 }
 
 class PaneState extends ChangeNotifier {
@@ -98,6 +102,10 @@ class PaneState extends ChangeNotifier {
   bool get sessionEnded => _sessionEnded;
   bool _sessionPaused = false;
   bool get sessionPaused => _sessionPaused;
+  /// Reason why the session is paused, or null for a manual pause.
+  /// "max_turns" means Claude Code hit its configured turn limit.
+  String? _pausedReason;
+  String? get pausedReason => _pausedReason;
   bool pendingAck = false;
 
   // Callback invoked once when a new session is created (ack received).
@@ -105,6 +113,23 @@ class PaneState extends ChangeNotifier {
 
   void setNewSessionCallback(void Function(String sessionId)? callback) {
     _onNewSessionAck = callback;
+  }
+
+  // Pre-fill text for the input area (e.g. from "Start Session from Task").
+  // InputArea listens to this and populates its controller when non-null.
+  String? _pendingInputText;
+  String? get pendingInputText => _pendingInputText;
+
+  /// Set text to pre-fill in the input area. InputArea will consume and clear
+  /// this after applying it.
+  void setPendingInputText(String? text) {
+    _pendingInputText = text;
+    notifyListeners();
+  }
+
+  /// Called by InputArea after it has applied the pending text.
+  void consumePendingInputText() {
+    _pendingInputText = null;
   }
 
   // Message display
@@ -126,12 +151,40 @@ class PaneState extends ChangeNotifier {
   // Todo list state (from TodoWrite tool calls)
   List<TodoItem> _todos = [];
   List<TodoItem> get todos => _todos;
-  bool _todoPanelVisible = false;
-  bool get todoPanelVisible => _todoPanelVisible;
-  double _todoPanelWidth = 260;
-  double get todoPanelWidth => _todoPanelWidth;
-  static const double todoPanelMinWidth = 180;
-  static const double todoPanelMaxWidth = 500;
+
+  // Right panel state — which panel is open (null = closed).
+  // "todo" and "worktree" are the two supported panels.
+  String? _activeRightPanel;
+  String? get activeRightPanel => _activeRightPanel;
+  double _rightPanelWidth = 260;
+  double get rightPanelWidth => _rightPanelWidth;
+  static const double rightPanelMinWidth = 180;
+  static const double rightPanelMaxWidth = 500;
+
+  // Kept for backwards compat — derived from _activeRightPanel.
+  bool get todoPanelVisible => _activeRightPanel == 'todo';
+  double get todoPanelWidth => _rightPanelWidth;
+  static const double todoPanelMinWidth = rightPanelMinWidth;
+  static const double todoPanelMaxWidth = rightPanelMaxWidth;
+
+  /// The [WorktreeInfo] for the session currently shown in this pane, or null.
+  WorktreeInfo? get currentWorktreeInfo {
+    if (_sessionId == null) return null;
+    return _host.sessions.cast<SessionInfo?>().firstWhere(
+          (s) => s?.sessionId == _sessionId,
+          orElse: () => null,
+        )?.worktreeInfo;
+  }
+
+  /// The selected worktree path for the session currently shown in this pane,
+  /// or null when no worktree is explicitly selected.
+  String? get currentSelectedWorktreePath {
+    if (_sessionId == null) return null;
+    return _host.sessions.cast<SessionInfo?>().firstWhere(
+          (s) => s?.sessionId == _sessionId,
+          orElse: () => null,
+        )?.selectedWorktreePath;
+  }
 
   // --- Back-navigation history ---
   static const int _maxNavHistory = 30;
@@ -227,7 +280,10 @@ class PaneState extends ChangeNotifier {
 
   // --- Session operations ---
 
-  void sendPrompt(String text) {
+  void sendPrompt(
+    String text, {
+    List<Map<String, dynamic>>? attachments,
+  }) {
     if (!_host.connected || text.trim().isEmpty) return;
     if (_sessionId == null && !_readyForNewChat) {
       _readyForNewChat = true;
@@ -244,11 +300,12 @@ class PaneState extends ChangeNotifier {
       content: text,
       sessionId: _sessionId,
       pendingLocalEcho: true,
+      attachments: attachments,
     ));
     pendingAck = _sessionId == null; // new chat — expect ack
     notifyListeners();
 
-    _ws?.sendPrompt(text, _sessionId);
+    _ws?.sendPrompt(text, _sessionId, attachments: attachments);
   }
 
   void switchSession(String sessionId, {bool recordHistory = true}) {
@@ -270,11 +327,12 @@ class PaneState extends ChangeNotifier {
     _agentToolGroupIndex = null;
     _messages.clear();
     _todos = [];
-    _todoPanelVisible = false;
+    _activeRightPanel = null;
     _resetPagination();
     _pendingLocalUserMessages = 0;
     _sessionEnded = false;
     _sessionPaused = false;
+    _pausedReason = null;
     _sessionId = sessionId;
 
     final session = _host.sessions.cast<SessionInfo?>().firstWhere(
@@ -298,6 +356,7 @@ class PaneState extends ChangeNotifier {
     } else {
       if (session != null && session.status == 'paused') {
         _sessionPaused = true;
+        _pausedReason = session.pausedReason;
       }
       _host.muteSessionSound(sessionId);
       _ws?.subscribe(sessionId);
@@ -327,10 +386,11 @@ class PaneState extends ChangeNotifier {
     _readyForNewChat = false;
     _sessionEnded = false;
     _sessionPaused = false;
+    _pausedReason = null;
     _pendingLocalUserMessages = 0;
     _messages.clear();
     _todos = [];
-    _todoPanelVisible = false;
+    _activeRightPanel = null;
     _resetPagination();
 
     if (oldSessionId != null && oldWorkerId != null) {
@@ -351,10 +411,12 @@ class PaneState extends ChangeNotifier {
     _readyForNewChat = true;
     _sessionEnded = false;
     _sessionPaused = false;
+    _pausedReason = null;
     _pendingLocalUserMessages = 0;
+    _pendingInputText = null;
     _messages.clear();
     _todos = [];
-    _todoPanelVisible = false;
+    _activeRightPanel = null;
     _resetPagination();
 
     if (oldSessionId != null && oldWorkerId != null) {
@@ -452,10 +514,11 @@ class PaneState extends ChangeNotifier {
     }
   }
 
-  void handleSessionPaused(String? sessionId) {
+  void handleSessionPaused(String? sessionId, {String? reason}) {
     if (_sessionId == sessionId) {
       finalizeStream();
       _sessionPaused = true;
+      _pausedReason = reason;
     }
     _host.refreshSessions();
     notifyListeners();
@@ -464,6 +527,7 @@ class PaneState extends ChangeNotifier {
   void handleSessionResumed(String? sessionId) {
     if (_sessionId == sessionId) {
       _sessionPaused = false;
+      _pausedReason = null;
     }
     _host.refreshSessions();
     notifyListeners();
@@ -612,12 +676,25 @@ class PaneState extends ChangeNotifier {
     notifyListeners();
   }
 
+  // -- Right panel management --
+
+  /// Open [panelKey] ("todo" or "worktree"), or toggle it off if already active.
+  void toggleRightPanel(String panelKey) {
+    _activeRightPanel = _activeRightPanel == panelKey ? null : panelKey;
+    notifyListeners();
+  }
+
+  void setRightPanelWidth(double width) {
+    _rightPanelWidth = width.clamp(rightPanelMinWidth, rightPanelMaxWidth);
+    notifyListeners();
+  }
+
   // -- Todo list management --
 
   void updateTodos(List<TodoItem> todos) {
     _todos = todos;
-    if (todos.isNotEmpty && !_todoPanelVisible) {
-      _todoPanelVisible = true;
+    if (todos.isNotEmpty && _activeRightPanel == null) {
+      _activeRightPanel = 'todo';
     }
     notifyListeners();
   }
@@ -625,19 +702,13 @@ class PaneState extends ChangeNotifier {
   void clearTodos() {
     if (_todos.isEmpty) return;
     _todos = [];
-    _todoPanelVisible = false;
+    if (_activeRightPanel == 'todo') _activeRightPanel = null;
     notifyListeners();
   }
 
-  void toggleTodoPanel() {
-    _todoPanelVisible = !_todoPanelVisible;
-    notifyListeners();
-  }
+  void toggleTodoPanel() => toggleRightPanel('todo');
 
-  void setTodoPanelWidth(double width) {
-    _todoPanelWidth = width.clamp(todoPanelMinWidth, todoPanelMaxWidth);
-    notifyListeners();
-  }
+  void setTodoPanelWidth(double width) => setRightPanelWidth(width);
 
   /// Reconstruct todo state from a history message's metadata.
   void _reconstructTodosFromHistory(Map<String, dynamic> msg) {
@@ -735,6 +806,7 @@ class PaneState extends ChangeNotifier {
     }
     if (isError && target.isNotEmpty) {
       target.last.isError = true;
+      target.last.expanded = true;
     }
     _enqueueText(text);
   }

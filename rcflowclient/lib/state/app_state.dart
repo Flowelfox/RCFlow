@@ -535,8 +535,9 @@ class AppState extends ChangeNotifier implements PaneHost {
     notifyListeners();
   }
 
-  /// Start a new session from a task, sending the task context as the initial
-  /// prompt and auto-attaching the session to the task.
+  /// Start a new session from a task by opening a fresh chat pane with the
+  /// task context pre-filled in the input area, allowing the user to edit
+  /// before sending.
   void startSessionFromTask(String paneId, TaskInfo task) {
     final pane = _panes[paneId];
     if (pane == null) return;
@@ -562,8 +563,9 @@ class AppState extends ChangeNotifier implements PaneHost {
       buffer.write('\n\n${task.description}');
     }
 
-    // Send prompt — creates a new session since sessionId is null
-    pane.sendPrompt(buffer.toString());
+    // Pre-fill input area so the user can review/edit before sending
+    pane.setPendingInputText(buffer.toString());
+    requestInputFocus();
   }
 
   PaneState get activePane {
@@ -923,6 +925,13 @@ class AppState extends ChangeNotifier implements PaneHost {
     String? body,
   }) {
     _notificationService.show(level: level, title: title, body: body);
+  }
+
+  @override
+  bool workerSupportsAttachments(String? workerId) {
+    final id = workerId ?? defaultWorkerId;
+    if (id == null) return true;
+    return _workers[id]?.supportsAttachments ?? true;
   }
 
   @override
