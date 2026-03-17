@@ -31,7 +31,7 @@ def test_settings() -> Settings:
         DATABASE_URL="postgresql+asyncpg://test:test@localhost:5432/rcflow_test",
         LLM_PROVIDER="anthropic",
         ANTHROPIC_API_KEY="test-anthropic-key",
-        ANTHROPIC_MODEL="claude-sonnet-4-20250514",
+        ANTHROPIC_MODEL="claude-sonnet-4-6",
         STT_PROVIDER="wispr_flow",
         STT_API_KEY="test-stt-key",
         TTS_PROVIDER="none",

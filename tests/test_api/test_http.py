@@ -331,3 +331,49 @@ class TestGetSessionMessagesPagination:
         assert resp.status_code == 200
         seqs = [m["sequence"] for m in resp.json()["messages"]]
         assert seqs == sorted(seqs)
+
+
+class TestSetSessionWorktree:
+    def test_set_worktree_path(self, client: TestClient, session_manager: SessionManager) -> None:
+        session = session_manager.create_session(SessionType.CONVERSATIONAL)
+
+        resp = client.patch(
+            f"/api/sessions/{session.id}/worktree",
+            json={"path": "/projects/myrepo/.worktrees/feature-abc"},
+            headers=_auth_headers(),
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["session_id"] == session.id
+        assert body["selected_worktree_path"] == "/projects/myrepo/.worktrees/feature-abc"
+        assert session.metadata["selected_worktree_path"] == "/projects/myrepo/.worktrees/feature-abc"
+
+    def test_clear_worktree_path(self, client: TestClient, session_manager: SessionManager) -> None:
+        session = session_manager.create_session(SessionType.CONVERSATIONAL)
+        session.metadata["selected_worktree_path"] = "/some/path"
+
+        resp = client.patch(
+            f"/api/sessions/{session.id}/worktree",
+            json={"path": None},
+            headers=_auth_headers(),
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["selected_worktree_path"] is None
+        assert "selected_worktree_path" not in session.metadata
+
+    def test_set_worktree_unknown_session(self, client: TestClient) -> None:
+        resp = client.patch(
+            "/api/sessions/nonexistent-id/worktree",
+            json={"path": "/some/path"},
+            headers=_auth_headers(),
+        )
+        assert resp.status_code == 404
+
+    def test_set_worktree_requires_auth(self, client: TestClient, session_manager: SessionManager) -> None:
+        session = session_manager.create_session(SessionType.CONVERSATIONAL)
+        resp = client.patch(
+            f"/api/sessions/{session.id}/worktree",
+            json={"path": "/some/path"},
+        )
+        assert resp.status_code in (401, 403, 422)
