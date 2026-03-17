@@ -13,6 +13,9 @@ enum DisplayMessageType {
   agentSessionStart,
   thinking,
   todoUpdate,
+  /// Session was automatically paused because Claude Code reached its
+  /// configured maximum number of turns (--max-turns limit).
+  pausedMaxTurns,
 }
 
 class DisplayMessage {
@@ -40,6 +43,11 @@ class DisplayMessage {
   /// been confirmed by a server echo. Used for content-based deduplication.
   bool pendingLocalEcho;
 
+  /// File attachments included with this user message.
+  /// Each entry has at minimum: ``name`` (String) and ``mime_type`` (String).
+  /// May also include ``size`` (int) and ``attachment_id`` (String).
+  List<Map<String, dynamic>>? attachments;
+
   DisplayMessage({
     required this.type,
     this.content = '',
@@ -53,6 +61,7 @@ class DisplayMessage {
     this.accepted,
     this.children,
     this.pendingLocalEcho = false,
+    this.attachments,
   });
 
   bool get isQuestion => toolName == 'AskUserQuestion';

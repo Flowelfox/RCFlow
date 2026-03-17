@@ -47,6 +47,12 @@ class SettingsService {
   static const _tasksFilterSourceKey = 'rcflow_tasks_filter_source';
   static const _artifactsFilterSearchKey = 'rcflow_artifacts_filter_search';
 
+  // Expanded/collapsed state persistence keys
+  static const _workersExpandedKey = 'rcflow_workers_expanded';
+  static const _tasksCollapsedGroupsKey = 'rcflow_tasks_collapsed_groups';
+  static const _artifactsExpandedWorkersKey = 'rcflow_artifacts_expanded_workers';
+  static const _artifactsExpandedProjectsKey = 'rcflow_artifacts_expanded_projects';
+
   static const _defaultHost = '192.168.1.100:8765';
 
   late final SharedPreferences _prefs;
@@ -290,4 +296,68 @@ class SettingsService {
       _prefs.getString(_artifactsFilterSearchKey) ?? '';
   set artifactsFilterSearch(String value) =>
       _prefs.setString(_artifactsFilterSearchKey, value);
+
+  // --- Expanded/collapsed state persistence ---
+
+  /// Workers tab: which worker IDs are expanded. Null means "not yet set"
+  /// (first-time use should auto-expand all).
+  List<String>? get workersExpanded {
+    final raw = _prefs.getString(_workersExpandedKey);
+    if (raw == null) return null;
+    return _getJsonStringList(_workersExpandedKey);
+  }
+
+  set workersExpanded(List<String>? value) {
+    if (value == null) {
+      _prefs.remove(_workersExpandedKey);
+    } else {
+      _setJsonStringList(_workersExpandedKey, value);
+    }
+  }
+
+  /// Tasks tab: which status groups are collapsed. Null means "not yet set"
+  /// (first-time use should default to {'done'}).
+  List<String>? get tasksCollapsedGroups {
+    final raw = _prefs.getString(_tasksCollapsedGroupsKey);
+    if (raw == null) return null;
+    return _getJsonStringList(_tasksCollapsedGroupsKey);
+  }
+
+  set tasksCollapsedGroups(List<String>? value) {
+    if (value == null) {
+      _prefs.remove(_tasksCollapsedGroupsKey);
+    } else {
+      _setJsonStringList(_tasksCollapsedGroupsKey, value);
+    }
+  }
+
+  /// Artifacts tab: which worker IDs are expanded. Null means "not yet set".
+  List<String>? get artifactsExpandedWorkers {
+    final raw = _prefs.getString(_artifactsExpandedWorkersKey);
+    if (raw == null) return null;
+    return _getJsonStringList(_artifactsExpandedWorkersKey);
+  }
+
+  set artifactsExpandedWorkers(List<String>? value) {
+    if (value == null) {
+      _prefs.remove(_artifactsExpandedWorkersKey);
+    } else {
+      _setJsonStringList(_artifactsExpandedWorkersKey, value);
+    }
+  }
+
+  /// Artifacts tab: which project keys are expanded. Null means "not yet set".
+  List<String>? get artifactsExpandedProjects {
+    final raw = _prefs.getString(_artifactsExpandedProjectsKey);
+    if (raw == null) return null;
+    return _getJsonStringList(_artifactsExpandedProjectsKey);
+  }
+
+  set artifactsExpandedProjects(List<String>? value) {
+    if (value == null) {
+      _prefs.remove(_artifactsExpandedProjectsKey);
+    } else {
+      _setJsonStringList(_artifactsExpandedProjectsKey, value);
+    }
+  }
 }

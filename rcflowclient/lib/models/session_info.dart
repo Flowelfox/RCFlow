@@ -1,3 +1,32 @@
+/// Worktree context attached to a session after a worktree tool call succeeds.
+class WorktreeInfo {
+  final String repoPath;
+  final String lastAction; // "new" | "merge" | "rm" | "list"
+  final String? branch;
+  final String? base;
+
+  const WorktreeInfo({
+    required this.repoPath,
+    required this.lastAction,
+    this.branch,
+    this.base,
+  });
+
+  factory WorktreeInfo.fromJson(Map<String, dynamic> json) => WorktreeInfo(
+        repoPath: json['repo_path'] as String? ?? '',
+        lastAction: json['last_action'] as String? ?? '',
+        branch: json['branch'] as String?,
+        base: json['base'] as String?,
+      );
+
+  Map<String, dynamic> toJson() => {
+        'repo_path': repoPath,
+        'last_action': lastAction,
+        if (branch != null) 'branch': branch,
+        if (base != null) 'base': base,
+      };
+}
+
 class SessionInfo {
   final String sessionId;
   final String sessionType;
@@ -6,6 +35,9 @@ class SessionInfo {
   final DateTime? createdAt;
   final String? title;
   final String workerId;
+  /// Reason the session is paused, if applicable. "max_turns" means Claude Code
+  /// hit its configured turn limit. Null for manual pauses or non-paused sessions.
+  final String? pausedReason;
   // Token usage
   final int inputTokens;
   final int outputTokens;
@@ -14,6 +46,11 @@ class SessionInfo {
   final int toolInputTokens;
   final int toolOutputTokens;
   final double toolCostUsd;
+  /// Non-null when this session has executed at least one worktree tool.
+  final WorktreeInfo? worktreeInfo;
+  /// Absolute path of the worktree selected as the agent working directory,
+  /// or null if no worktree is explicitly selected for this session.
+  final String? selectedWorktreePath;
 
   SessionInfo({
     required this.sessionId,
@@ -23,6 +60,7 @@ class SessionInfo {
     this.createdAt,
     this.title,
     this.workerId = '',
+    this.pausedReason,
     this.inputTokens = 0,
     this.outputTokens = 0,
     this.cacheCreationInputTokens = 0,
@@ -30,6 +68,8 @@ class SessionInfo {
     this.toolInputTokens = 0,
     this.toolOutputTokens = 0,
     this.toolCostUsd = 0.0,
+    this.worktreeInfo,
+    this.selectedWorktreePath,
   });
 
   bool get isProcessing {
@@ -47,6 +87,7 @@ class SessionInfo {
     if (raw != null) {
       createdAt = DateTime.tryParse(raw);
     }
+    final wtJson = json['worktree'] as Map<String, dynamic>?;
     return SessionInfo(
       sessionId: json['session_id'] as String,
       sessionType: json['session_type'] as String? ?? 'unknown',
@@ -55,6 +96,7 @@ class SessionInfo {
       createdAt: createdAt,
       title: json['title'] as String?,
       workerId: json['worker_id'] as String? ?? workerId,
+      pausedReason: json['paused_reason'] as String?,
       inputTokens: (json['input_tokens'] as num?)?.toInt() ?? 0,
       outputTokens: (json['output_tokens'] as num?)?.toInt() ?? 0,
       cacheCreationInputTokens:
@@ -64,6 +106,8 @@ class SessionInfo {
       toolInputTokens: (json['tool_input_tokens'] as num?)?.toInt() ?? 0,
       toolOutputTokens: (json['tool_output_tokens'] as num?)?.toInt() ?? 0,
       toolCostUsd: (json['tool_cost_usd'] as num?)?.toDouble() ?? 0.0,
+      worktreeInfo: wtJson != null ? WorktreeInfo.fromJson(wtJson) : null,
+      selectedWorktreePath: json['selected_worktree_path'] as String?,
     );
   }
 
@@ -75,6 +119,7 @@ class SessionInfo {
         if (createdAt != null) 'created_at': createdAt!.toIso8601String(),
         if (title != null) 'title': title,
         'worker_id': workerId,
+        if (pausedReason != null) 'paused_reason': pausedReason,
         'input_tokens': inputTokens,
         'output_tokens': outputTokens,
         'cache_creation_input_tokens': cacheCreationInputTokens,
@@ -82,6 +127,8 @@ class SessionInfo {
         'tool_input_tokens': toolInputTokens,
         'tool_output_tokens': toolOutputTokens,
         'tool_cost_usd': toolCostUsd,
+        if (worktreeInfo != null) 'worktree': worktreeInfo!.toJson(),
+        if (selectedWorktreePath != null) 'selected_worktree_path': selectedWorktreePath,
       };
 
   String get shortId => sessionId.length >= 8
@@ -96,6 +143,7 @@ class SessionInfo {
     DateTime? createdAt,
     String? title,
     String? workerId,
+    String? pausedReason,
     int? inputTokens,
     int? outputTokens,
     int? cacheCreationInputTokens,
@@ -103,6 +151,9 @@ class SessionInfo {
     int? toolInputTokens,
     int? toolOutputTokens,
     double? toolCostUsd,
+    // Pass Object() sentinel to explicitly clear worktreeInfo
+    Object? worktreeInfo = _keep,
+    String? selectedWorktreePath,
   }) {
     return SessionInfo(
       sessionId: sessionId ?? this.sessionId,
@@ -112,6 +163,7 @@ class SessionInfo {
       createdAt: createdAt ?? this.createdAt,
       title: title ?? this.title,
       workerId: workerId ?? this.workerId,
+      pausedReason: pausedReason ?? this.pausedReason,
       inputTokens: inputTokens ?? this.inputTokens,
       outputTokens: outputTokens ?? this.outputTokens,
       cacheCreationInputTokens:
@@ -121,6 +173,14 @@ class SessionInfo {
       toolInputTokens: toolInputTokens ?? this.toolInputTokens,
       toolOutputTokens: toolOutputTokens ?? this.toolOutputTokens,
       toolCostUsd: toolCostUsd ?? this.toolCostUsd,
+      worktreeInfo: identical(worktreeInfo, _keep)
+          ? this.worktreeInfo
+          : worktreeInfo as WorktreeInfo?,
+      selectedWorktreePath: selectedWorktreePath ?? this.selectedWorktreePath,
     );
   }
 }
+
+/// Sentinel used by [SessionInfo.copyWith] to distinguish "not provided" from
+/// an explicit `null` for the [SessionInfo.worktreeInfo] parameter.
+const Object _keep = Object();
