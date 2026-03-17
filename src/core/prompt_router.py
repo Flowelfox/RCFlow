@@ -1,39 +1,42 @@
+"""Routes user prompts through the LLM pipeline with tool execution.
+
+The ``PromptRouter`` class is composed from five mixin modules:
+
+- :class:`~src.core.session_lifecycle.SessionLifecycleMixin` — session
+  create/cancel/end/pause/resume/restore, permissions, inactivity reaper
+- :class:`~src.core.context.ContextMixin` — @project, #tool, $file mention
+  extraction, context building, direct tool mode
+- :class:`~src.core.agent_claude_code.ClaudeCodeAgentMixin` — Claude Code
+  subprocess lifecycle
+- :class:`~src.core.agent_codex.CodexAgentMixin` — Codex CLI subprocess
+  lifecycle
+- :class:`~src.core.background_tasks.BackgroundTasksMixin` — fire-and-forget
+  background tasks (logging, archiving, summaries, titles, tasks, artifacts)
+"""
+
 import asyncio
-import contextlib
-import json
 import logging
-import re
-import uuid
-from collections.abc import AsyncGenerator
-from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from src.config import Settings
+from src.core.agent_claude_code import ClaudeCodeAgentMixin
+from src.core.agent_codex import CodexAgentMixin
+from src.core.attachment_store import ResolvedAttachment
+from src.core.background_tasks import BackgroundTasksMixin
 from src.core.buffer import MessageType
-from src.core.llm import LLMClient, StreamDone, TextChunk, ToolCallRequest, TurnUsage
-from src.core.permissions import (
-    PermissionDecision,
-    PermissionManager,
-    PermissionScope,
-    classify_risk,
-    describe_tool_action,
-    get_scope_options,
-)
-from src.core.session import ActiveSession, ActivityState, SessionManager, SessionStatus, SessionType
+from src.core.context import ContextMixin
+from src.core.llm import LLMClient, StreamDone, TextChunk, ToolCallRequest
+from src.core.session import ActiveSession, ActivityState, SessionManager, SessionStatus
+from src.core.session_lifecycle import SessionLifecycleMixin
 from src.executors.base import BaseExecutor, ExecutionChunk
 from src.executors.claude_code import ClaudeCodeExecutor
 from src.executors.codex import CodexExecutor
 from src.executors.http import HttpExecutor
 from src.executors.shell import ShellExecutor
-from src.models.db import Artifact as ArtifactModel
-from src.models.db import LLMCall
-from src.models.db import Session as SessionModel
-from src.models.db import Task as TaskModel
-from src.models.db import TaskSession as TaskSessionModel
+from src.executors.worktree import WorktreeExecutor
 from src.services.artifact_scanner import ArtifactScanner
 from src.services.tool_manager import ToolManager
 from src.services.tool_settings import ToolSettingsManager
@@ -44,24 +47,6 @@ logger = logging.getLogger(__name__)
 
 _MAX_TOOL_OUTPUT_CHARS = 100_000
 
-# Text file extensions that support content inclusion in $file references
-_TEXT_EXTENSIONS: frozenset[str] = frozenset({
-    ".md", ".txt", ".log", ".json", ".yaml", ".yml", ".toml", ".cfg", ".ini",
-    ".csv", ".xml", ".html", ".css", ".js", ".ts", ".py", ".sh", ".bash", ".sql",
-    ".rs", ".go", ".java", ".c", ".cpp", ".h", ".hpp", ".cs", ".rb", ".php",
-    ".jsx", ".tsx", ".vue", ".dart", ".swift", ".kt", ".r", ".m", ".mm",
-})
-
-
-def _format_file_size(size_bytes: int) -> str:
-    """Format a byte count to a human-readable string."""
-    if size_bytes < 1024:
-        return f"{size_bytes} B"
-    elif size_bytes < 1024 * 1024:
-        return f"{size_bytes / 1024:.1f} KB"
-    else:
-        return f"{size_bytes / (1024 * 1024):.1f} MB"
-
 
 def _truncate_tool_output(content: str) -> str:
     """Truncate tool output that exceeds the size limit for client delivery."""
@@ -70,7 +55,13 @@ def _truncate_tool_output(content: str) -> str:
     return content
 
 
-class PromptRouter:
+class PromptRouter(
+    SessionLifecycleMixin,
+    ContextMixin,
+    ClaudeCodeAgentMixin,
+    CodexAgentMixin,
+    BackgroundTasksMixin,
+):
     """Routes user prompts through the LLM pipeline with tool execution."""
 
     def __init__(
@@ -100,628 +91,9 @@ class PromptRouter:
         self._pending_task_creation_tasks: set[asyncio.Task[None]] = set()
         self._pending_task_update_tasks: set[asyncio.Task[None]] = set()
 
-    @property
-    def is_direct_tool_mode(self) -> bool:
-        """Whether the router is in direct tool mode (no LLM)."""
-        return self._llm is None
-
-    async def cancel_pending_tasks(self) -> None:
-        """Cancel and await all pending background tasks.
-
-        Should be called during shutdown before the DB engine is disposed.
-        """
-        all_pending: set[asyncio.Task[None]] = set()
-        for task_set in (
-            self._pending_log_tasks,
-            self._pending_summary_tasks,
-            self._pending_title_tasks,
-            self._pending_archive_tasks,
-            self._pending_task_creation_tasks,
-            self._pending_task_update_tasks,
-        ):
-            all_pending.update(task_set)
-
-        if not all_pending:
-            return
-
-        logger.info("Cancelling %d pending background tasks", len(all_pending))
-        for task in all_pending:
-            task.cancel()
-        await asyncio.gather(*all_pending, return_exceptions=True)
-
-    def ensure_session(self, session_id: str | None = None) -> str:
-        """Get an existing session or create a new one. Returns the session ID."""
-        session: ActiveSession | None = None
-        if session_id:
-            session = self._session_manager.get_session(session_id)
-            if session is None:
-                logger.warning("Session %s not found, will create new session", session_id)
-        if session is None:
-            session = self._session_manager.create_session(SessionType.CONVERSATIONAL)
-        return session.id
-
-    async def cancel_session(self, session_id: str) -> ActiveSession:
-        """Cancel a running session, killing any active subprocess.
-
-        Returns the cancelled session.
-
-        Raises:
-            ValueError: If the session does not exist.
-            RuntimeError: If the session is already in a terminal state.
-        """
-        session = self._session_manager.get_session(session_id)
-        if session is None:
-            raise ValueError(f"Session not found: {session_id}")
-
-        terminal_states = (SessionStatus.COMPLETED, SessionStatus.FAILED, SessionStatus.CANCELLED)
-        if session.status in terminal_states:
-            raise RuntimeError(f"Session already in terminal state: {session.status.value}")
-
-        # Kill Claude Code subprocess if running
-        had_claude_code = session.claude_code_executor is not None
-        if session.claude_code_executor is not None:
-            await session.claude_code_executor.cancel()
-            session.claude_code_executor = None
-
-        # Cancel the background stream task if running
-        if session._claude_code_stream_task is not None and not session._claude_code_stream_task.done():
-            session._claude_code_stream_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await session._claude_code_stream_task
-        session._claude_code_stream_task = None
-
-        # Kill Codex subprocess if running
-        had_codex = session.codex_executor is not None
-        if session.codex_executor is not None:
-            await session.codex_executor.cancel()
-            session.codex_executor = None
-
-        if session._codex_stream_task is not None and not session._codex_stream_task.done():
-            session._codex_stream_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await session._codex_stream_task
-        session._codex_stream_task = None
-
-        # Auto-deny any pending permission requests
-        if session.permission_manager is not None:
-            session.permission_manager.cancel_all_pending()
-
-        # Close any open agent group before ending the session
-        if had_claude_code or had_codex:
-            session.buffer.push_text(
-                MessageType.AGENT_GROUP_END,
-                {"session_id": session.id},
-            )
-
-        # Push SESSION_END before cancel() closes the buffer
-        session.buffer.push_text(
-            MessageType.SESSION_END,
-            {
-                "session_id": session.id,
-                "reason": "cancelled",
-            },
-        )
-
-        # Update attached task statuses if not already triggered by a tool result
-        self._fire_task_update_on_session_end(session)
-
-        session.cancel()
-        self._fire_archive_task(session_id)
-        logger.info("Cancelled session %s", session_id)
-        return session
-
-    async def end_session(self, session_id: str) -> ActiveSession:
-        """Gracefully end a session (user-confirmed completion).
-
-        Returns the ended session.
-
-        Raises:
-            ValueError: If the session does not exist.
-            RuntimeError: If the session is already in a terminal state.
-        """
-        session = self._session_manager.get_session(session_id)
-        if session is None:
-            raise ValueError(f"Session not found: {session_id}")
-
-        terminal_states = (SessionStatus.COMPLETED, SessionStatus.FAILED, SessionStatus.CANCELLED)
-        if session.status in terminal_states:
-            raise RuntimeError(f"Session already in terminal state: {session.status.value}")
-
-        # Kill Claude Code subprocess if running
-        had_claude_code = session.claude_code_executor is not None
-        if session.claude_code_executor is not None:
-            await session.claude_code_executor.cancel()
-            session.claude_code_executor = None
-
-        # Cancel the background stream task if running
-        if session._claude_code_stream_task is not None and not session._claude_code_stream_task.done():
-            session._claude_code_stream_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await session._claude_code_stream_task
-        session._claude_code_stream_task = None
-
-        # Kill Codex subprocess if running
-        had_codex = session.codex_executor is not None
-        if session.codex_executor is not None:
-            await session.codex_executor.cancel()
-            session.codex_executor = None
-
-        if session._codex_stream_task is not None and not session._codex_stream_task.done():
-            session._codex_stream_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await session._codex_stream_task
-        session._codex_stream_task = None
-
-        self._resolve_session_end_ask(session, accepted=True)
-
-        # Close any open agent group before ending the session
-        if had_claude_code or had_codex:
-            session.buffer.push_text(
-                MessageType.AGENT_GROUP_END,
-                {"session_id": session.id},
-            )
-
-        session.buffer.push_text(
-            MessageType.SESSION_END,
-            {
-                "session_id": session.id,
-                "reason": "user_ended",
-            },
-        )
-
-        # Clear paused state so complete() proceeds (explicit user action)
-        if session.status == SessionStatus.PAUSED:
-            session.status = SessionStatus.ACTIVE
-            session.paused_at = None
-
-        # Update attached task statuses if not already triggered by a tool result
-        self._fire_task_update_on_session_end(session)
-
-        session.complete()
-        self._fire_archive_task(session_id)
-        logger.info("Ended session %s (user confirmed)", session_id)
-        return session
-
-    def dismiss_session_end_ask(self, session_id: str) -> None:
-        """Mark the last unresolved SESSION_END_ASK as declined (user clicked Continue).
-
-        This persists the dismissal in the buffer so that replaying the history
-        does not show the widget as pending again.
-
-        Raises:
-            ValueError: If the session does not exist.
-        """
-        session = self._session_manager.get_session(session_id)
-        if session is None:
-            raise ValueError(f"Session not found: {session_id}")
-        self._resolve_session_end_ask(session, accepted=False)
-
-    def resolve_permission(
-        self,
-        session_id: str,
-        request_id: str,
-        decision: str,
-        scope: str,
-        path_prefix: str | None = None,
-    ) -> None:
-        """Resolve a pending permission request from the client.
-
-        Raises:
-            ValueError: If the session does not exist.
-            RuntimeError: If the session does not have interactive permissions
-                enabled, or the request_id is unknown.
-        """
-        session = self._session_manager.get_session(session_id)
-        if session is None:
-            raise ValueError(f"Session not found: {session_id}")
-        if session.permission_manager is None:
-            raise RuntimeError("Session does not have interactive permissions enabled")
-
-        resolved = session.permission_manager.resolve_request(
-            request_id=request_id,
-            decision=PermissionDecision(decision),
-            scope=PermissionScope(scope),
-            path_prefix=path_prefix,
-        )
-        if not resolved:
-            raise RuntimeError(f"Unknown or already-resolved permission request: {request_id}")
-
-    async def send_interactive_response(self, session_id: str, text: str) -> None:
-        """Send an interactive response directly to Claude Code's stdin.
-
-        Used for answering AskUserQuestion prompts, plan mode approval, and
-        other mid-turn interactions.  Unlike :meth:`handle_prompt`, this does
-        **not** open a new agent group or create a new reading task — the
-        original streaming task picks up the follow-on events.
-
-        Falls back to :meth:`handle_prompt` when there is no active Claude
-        Code process (e.g. the process exited while the user was answering).
-
-        Raises:
-            ValueError: If the session does not exist.
-        """
-        session = self._session_manager.get_session(session_id)
-        if session is None:
-            raise ValueError(f"Session not found: {session_id}")
-
-        executor = session.claude_code_executor
-        if executor is not None and executor.is_running:
-            # Mid-turn: just send to stdin; the original relay task handles the rest
-            await executor.send_input(text)
-            return
-
-        # Fallback: process is gone — treat as a regular follow-up prompt
-        await self.handle_prompt(text, session_id)
-
-    async def pause_session(self, session_id: str) -> ActiveSession:
-        """Pause an active session.
-
-        If a Claude Code or Codex subprocess is running, it is killed and the
-        background stream task is cancelled.  New prompts are rejected
-        until the session is resumed.
-
-        Returns the paused session.
-
-        Raises:
-            ValueError: If the session does not exist.
-            RuntimeError: If the session cannot be paused (terminal or already paused).
-        """
-        session = self._session_manager.get_session(session_id)
-        if session is None:
-            raise ValueError(f"Session not found: {session_id}")
-
-        # Kill Claude Code subprocess if running
-        had_claude_code = session.claude_code_executor is not None
-        if session.claude_code_executor is not None:
-            await session.claude_code_executor.cancel()
-            session.claude_code_executor = None
-
-        # Cancel the background stream task if running
-        if session._claude_code_stream_task is not None and not session._claude_code_stream_task.done():
-            session._claude_code_stream_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await session._claude_code_stream_task
-        session._claude_code_stream_task = None
-
-        # Kill Codex subprocess if running
-        had_codex = session.codex_executor is not None
-        if session.codex_executor is not None:
-            await session.codex_executor.cancel()
-            session.codex_executor = None
-
-        if session._codex_stream_task is not None and not session._codex_stream_task.done():
-            session._codex_stream_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await session._codex_stream_task
-        session._codex_stream_task = None
-
-        had_agent = had_claude_code or had_codex
-
-        # Auto-deny any pending permission requests
-        if session.permission_manager is not None:
-            session.permission_manager.cancel_all_pending()
-
-        session.pause()
-
-        # Close any open agent group
-        if had_agent:
-            session.buffer.push_text(
-                MessageType.AGENT_GROUP_END,
-                {"session_id": session.id},
-            )
-
-        session.buffer.push_text(
-            MessageType.SESSION_PAUSED,
-            {
-                "session_id": session.id,
-                "paused_at": session.paused_at.isoformat() if session.paused_at else None,
-                "claude_code_interrupted": had_agent,
-            },
-        )
-
-        logger.info("Paused session %s (agent_interrupted=%s)", session_id, had_agent)
-        return session
-
-    async def resume_session(self, session_id: str) -> ActiveSession:
-        """Resume a paused session.
-
-        The client can subscribe to the session's output channel to receive
-        all buffered messages produced while paused, then send new prompts.
-
-        Returns the resumed session.
-
-        Raises:
-            ValueError: If the session does not exist.
-            RuntimeError: If the session is not paused.
-        """
-        session = self._session_manager.get_session(session_id)
-        if session is None:
-            raise ValueError(f"Session not found: {session_id}")
-
-        session.resume()
-
-        session.buffer.push_text(
-            MessageType.SESSION_RESUMED,
-            {"session_id": session.id},
-        )
-
-        # If the underlying work completed while paused, finalize now.
-        if session.metadata.pop("completed_while_paused", False):
-            if session.codex_executor is not None:
-                await self._end_codex_session(session)
-            else:
-                await self._end_claude_code_session(session)
-
-        logger.info("Resumed session %s", session_id)
-        return session
-
-    async def restore_session(self, session_id: str) -> ActiveSession:
-        """Restore an archived session from the database back to active state.
-
-        Loads session metadata, conversation history, and buffer messages.
-        For Claude Code sessions, prepares the executor state for lazy restart
-        on the next user message.
-
-        Returns the restored session.
-
-        Raises:
-            ValueError: If the session is not found in the DB.
-            RuntimeError: If the session is already active or DB is unavailable.
-        """
-        if self._db_session_factory is None:
-            raise RuntimeError("Database is not configured; cannot restore sessions")
-
-        async with self._db_session_factory() as db:
-            session = await self._session_manager.restore_session(session_id, db)
-
-        # If this was a Claude Code session, set up executor for lazy restart
-        cc_session_id = session.metadata.get("claude_code_session_id")
-        cc_tool_name = session.metadata.get("claude_code_tool_name")
-        if cc_session_id and cc_tool_name:
-            tool_def = self._tool_registry.get(cc_tool_name)
-            if tool_def is not None and tool_def.executor == "claude_code":
-                binary_path = "claude"
-                config = tool_def.get_claude_code_config()
-                binary_path = config.binary_path
-                if self._tool_manager:
-                    resolved = self._tool_manager.get_binary_path("claude_code")
-                    if resolved:
-                        binary_path = resolved
-
-                executor = ClaudeCodeExecutor(
-                    binary_path=binary_path,
-                    session_id=cc_session_id,
-                    extra_env=self._build_claude_code_extra_env(),
-                    config_overrides=self._get_managed_config_overrides("claude_code"),
-                )
-                # Pre-set the tool_def and last_parameters so restart_with_prompt works
-                executor._tool_def = tool_def
-                cc_params = session.metadata.get("claude_code_parameters", {})
-                executor._last_parameters = cc_params
-
-                session.claude_code_executor = executor
-                session.session_type = SessionType.LONG_RUNNING
-
-        # Restore permission rules if they were saved
-        saved_rules = session.metadata.get("permission_rules")
-        if saved_rules:
-            pm = PermissionManager()
-            pm.restore_rules(saved_rules)
-            session.permission_manager = pm
-
-        # If this was a Codex session, set up executor for lazy restart
-        codex_thread_id = session.metadata.get("codex_thread_id")
-        codex_tool_name = session.metadata.get("codex_tool_name")
-        if codex_thread_id and codex_tool_name:
-            tool_def = self._tool_registry.get(codex_tool_name)
-            if tool_def is not None and tool_def.executor == "codex":
-                binary_path = "codex"
-                config = tool_def.get_codex_config()
-                binary_path = config.binary_path
-                if self._tool_manager:
-                    resolved = self._tool_manager.get_binary_path("codex")
-                    if resolved:
-                        binary_path = resolved
-
-                codex_executor = CodexExecutor(
-                    binary_path=binary_path,
-                    thread_id=codex_thread_id,
-                    extra_env=self._build_codex_extra_env(),
-                    config_overrides=self._get_managed_config_overrides("codex"),
-                )
-                codex_executor._tool_def = tool_def
-                codex_params = session.metadata.get("codex_parameters", {})
-                codex_executor._last_parameters = codex_params
-
-                session.codex_executor = codex_executor
-                session.session_type = SessionType.LONG_RUNNING
-
-        # Repopulate attached task IDs from task_sessions table
-        if self._db_session_factory is not None:
-            try:
-                async with self._db_session_factory() as db:
-                    stmt = select(TaskSessionModel.task_id).where(
-                        TaskSessionModel.session_id == uuid.UUID(session_id)
-                    )
-                    result = await db.execute(stmt)
-                    task_ids = [str(row[0]) for row in result.all()]
-                    if task_ids:
-                        session.metadata["attached_task_ids"] = task_ids
-                        logger.info(
-                            "Restored %d attached task IDs for session %s",
-                            len(task_ids), session_id,
-                        )
-            except Exception:
-                logger.exception("Failed to restore task IDs for session %s", session_id)
-
-        session.buffer.push_text(
-            MessageType.SESSION_RESTORED,
-            {"session_id": session.id},
-        )
-
-        logger.info("Restored session %s via prompt router", session_id)
-        return session
-
-    _SESSION_END_ASK_TAG = "[SessionEndAsk]"
-
-    @staticmethod
-    def _resolve_session_end_ask(session: ActiveSession, *, accepted: bool) -> None:
-        """Mark the last unresolved SESSION_END_ASK in the buffer as accepted/declined."""
-        for msg in reversed(session.buffer.text_history):
-            if msg.message_type == MessageType.SESSION_END_ASK and "accepted" not in msg.data:
-                msg.data["accepted"] = accepted
-                return
-
-    def _check_token_limit_exceeded(self, session: ActiveSession) -> bool:
-        """Check if the session has exceeded its token limits.
-
-        If exceeded, pushes an error message to the buffer and returns True.
-        """
-        if self._settings is None:
-            return False
-
-        total_in = session.input_tokens + session.tool_input_tokens
-        total_out = session.output_tokens + session.tool_output_tokens
-        input_limit = self._settings.SESSION_INPUT_TOKEN_LIMIT
-        output_limit = self._settings.SESSION_OUTPUT_TOKEN_LIMIT
-
-        if input_limit > 0 and total_in >= input_limit:
-            session.buffer.push_text(
-                MessageType.ERROR,
-                {
-                    "session_id": session.id,
-                    "content": f"Session input token limit reached ({total_in:,}/{input_limit:,}). "
-                    "End this session and start a new one, or ask your admin to increase the limit.",
-                    "code": "TOKEN_LIMIT_REACHED",
-                },
-            )
-            return True
-
-        if output_limit > 0 and total_out >= output_limit:
-            session.buffer.push_text(
-                MessageType.ERROR,
-                {
-                    "session_id": session.id,
-                    "content": f"Session output token limit reached ({total_out:,}/{output_limit:,}). "
-                    "End this session and start a new one, or ask your admin to increase the limit.",
-                    "code": "TOKEN_LIMIT_REACHED",
-                },
-            )
-            return True
-
-        return False
-
-    @staticmethod
-    def _contains_session_end_ask(assistant_message: dict[str, Any]) -> bool:
-        """Check if an assistant message contains the [SessionEndAsk] tag."""
-        tag = PromptRouter._SESSION_END_ASK_TAG
-        content = assistant_message.get("content")
-        if isinstance(content, str):
-            return tag in content
-        if isinstance(content, list):
-            for block in content:
-                if isinstance(block, dict) and block.get("type") == "text" and tag in block.get("text", ""):
-                    return True
-        return False
-
-    def _build_claude_code_extra_env(self) -> dict[str, str]:
-        """Build extra environment variables for Claude Code subprocesses."""
-        extra_env: dict[str, str] = {}
-
-        # Check if the tool has its own provider configured — if so, skip
-        # injecting the global ANTHROPIC_API_KEY so the settings.json env
-        # section takes precedence.
-        tool_provider = ""
-        if self._tool_settings:
-            tool_provider = self._tool_settings.get_settings("claude_code").get("provider", "")
-
-        if tool_provider == "anthropic_login":
-            # Anthropic Login uses OAuth tokens from .credentials.json —
-            # ensure no ANTHROPIC_API_KEY leaks from the server process env,
-            # which would override OAuth and cause "Invalid API key" errors.
-            extra_env["ANTHROPIC_API_KEY"] = ""
-        elif not tool_provider and self._settings and self._settings.ANTHROPIC_API_KEY:
-            extra_env["ANTHROPIC_API_KEY"] = self._settings.ANTHROPIC_API_KEY
-
-        if self._tool_settings:
-            config_dir = self._tool_settings.get_config_dir("claude_code")
-            config_dir.mkdir(parents=True, exist_ok=True)
-            extra_env["CLAUDE_CONFIG_DIR"] = str(config_dir)
-        return extra_env
-
-    def _build_codex_extra_env(self) -> dict[str, str]:
-        """Build extra environment variables for Codex CLI subprocesses."""
-        extra_env: dict[str, str] = {}
-
-        # Check if the tool has its own provider configured — if so,
-        # inject env vars from the per-tool settings instead of the
-        # global CODEX_API_KEY.  Unlike Claude Code (which natively reads
-        # settings.json via CLAUDE_CONFIG_DIR), Codex CLI only reads API
-        # keys from actual environment variables, so we must inject them.
-        tool_settings: dict[str, Any] = {}
-        if self._tool_settings:
-            tool_settings = self._tool_settings.get_settings("codex")
-
-        tool_provider = tool_settings.get("provider", "")
-
-        if tool_provider == "chatgpt":
-            # ChatGPT subscription auth — no API key needed; Codex CLI
-            # reads OAuth tokens from $CODEX_HOME/auth.json instead.
-            pass
-        elif tool_provider:
-            # Inject env vars from the per-tool settings env section
-            tool_env = tool_settings.get("env", {})
-            if isinstance(tool_env, dict):
-                extra_env.update(tool_env)
-        elif self._settings and self._settings.CODEX_API_KEY:
-            extra_env["CODEX_API_KEY"] = self._settings.CODEX_API_KEY
-
-        if self._tool_settings:
-            config_dir = self._tool_settings.get_config_dir("codex")
-            config_dir.mkdir(parents=True, exist_ok=True)
-            extra_env["CODEX_HOME"] = str(config_dir)
-
-            # For ChatGPT auth, symlink the default auth.json into CODEX_HOME
-            # so the isolated Codex instance can use the user's OAuth tokens.
-            if tool_provider == "chatgpt":
-                self._ensure_codex_auth_symlink(config_dir)
-
-        return extra_env
-
-    @staticmethod
-    def _ensure_codex_auth_symlink(codex_home: Path) -> None:
-        """Symlink ``~/.codex/auth.json`` into *codex_home* if not already present.
-
-        Uses a symlink so that token refreshes by the Codex CLI are
-        automatically visible to both the user's default install and RCFlow.
-        """
-        default_auth = Path.home() / ".codex" / "auth.json"
-        target_auth = codex_home / "auth.json"
-
-        if target_auth.is_file() and not target_auth.is_symlink():
-            # A real file already exists (e.g. user ran codex login with
-            # this CODEX_HOME) — don't overwrite it.
-            return
-
-        if target_auth.is_symlink() and not target_auth.exists():
-            # Broken symlink — remove it so we can recreate.
-            target_auth.unlink()
-
-        if target_auth.exists():
-            return
-
-        if not default_auth.is_file():
-            logger.warning(
-                "ChatGPT auth selected but ~/.codex/auth.json not found. "
-                "Run 'codex login' first to authenticate."
-            )
-            return
-
-        try:
-            target_auth.symlink_to(default_auth)
-            logger.info("Symlinked %s -> %s", target_auth, default_auth)
-        except OSError:
-            logger.warning("Failed to symlink auth.json", exc_info=True)
+    # ------------------------------------------------------------------
+    # Executor / config helpers
+    # ------------------------------------------------------------------
 
     def _get_managed_config_overrides(self, tool_name: str) -> dict[str, Any]:
         """Read tool settings and return overrides for managed tools only."""
@@ -786,312 +158,204 @@ class PromptRouter:
                     self._executors[executor_type] = ShellExecutor()
                 case "http":
                     self._executors[executor_type] = HttpExecutor()
+                case "worktree":
+                    self._executors[executor_type] = WorktreeExecutor()
                 case _:
                     raise ValueError(f"Unknown executor type: {executor_type}")
         return self._executors[executor_type]
 
-    _MENTION_RE = re.compile(r"(?:^|(?<=\s))@(\S+)")
-    _TOOL_MENTION_RE = re.compile(r"(?:^|(?<=\s))#(\S+)")
-    _FILE_REF_RE = re.compile(r"(?:^|(?<=\s))\$(\S+)")
+    def _resolve_working_directory(self, working_dir: str) -> Path:
+        """Resolve a working directory path, using configured PROJECTS_DIR for ~ expansion.
 
-    def _extract_project_mentions(self, text: str) -> list[str]:
-        """Extract @ProjectName mentions from user text."""
-        return self._MENTION_RE.findall(text)
-
-    def _extract_tool_mentions(self, text: str) -> list[str]:
-        """Extract #ToolName mentions from user text."""
-        return self._TOOL_MENTION_RE.findall(text)
-
-    def _extract_file_references(self, text: str) -> list[str]:
-        """Extract $filename references from user text."""
-        return self._FILE_REF_RE.findall(text)
-
-    def _build_project_context(self, mentions: list[str]) -> str | None:
-        """Resolve mentions to project directories and build a context string.
-
-        Returns None if no mentions resolve to valid directories.
+        The system prompt tells the LLM to use the absolute PROJECTS_DIR path, so
+        most calls will already be absolute. This also handles the legacy ~/Projects
+        prefix in case the LLM still uses it.
         """
-        if not self._settings:
-            return None
-
-        resolved: list[tuple[str, Path]] = []
-        for name in mentions:
+        if self._settings is not None:
             for projects_dir in self._settings.projects_dirs:
-                project_path = projects_dir / name
-                if project_path.is_dir():
-                    resolved.append((name, project_path))
-                    break
+                projects_dir_str = str(projects_dir)
+                # Handle absolute path that already matches a configured projects dir
+                if working_dir.startswith(projects_dir_str):
+                    return Path(working_dir)
+            # Handle ~/Projects prefix (legacy or fallback) — resolve against first dir
+            if working_dir.startswith("~/Projects") and self._settings.projects_dirs:
+                first_dir = self._settings.projects_dirs[0]
+                suffix = working_dir[len("~/Projects") :]
+                return first_dir / suffix.lstrip("/")
+        return Path(working_dir).expanduser()
 
-        if not resolved:
-            return None
+    # ------------------------------------------------------------------
+    # Attachment helpers
+    # ------------------------------------------------------------------
 
-        if len(resolved) == 1:
-            name, path = resolved[0]
-            return (
-                f'[Context: This message references project "{name}" '
-                f"located at {path}. All instructions in this message "
-                f"relate to this project.]"
-            )
+    # MIME types whose raw bytes can be decoded as UTF-8 text
+    _TEXT_MIME_PREFIXES = ("text/",)
+    _TEXT_MIME_TYPES = frozenset(
+        {
+            "application/json",
+            "application/xml",
+            "application/javascript",
+            "application/typescript",
+            "application/toml",
+            "application/x-yaml",
+            "application/yaml",
+        }
+    )
+    _TEXT_EXTENSIONS = frozenset(
+        {
+            ".txt", ".md", ".rst", ".log", ".csv",
+            ".py", ".js", ".ts", ".jsx", ".tsx",
+            ".dart", ".java", ".kt", ".swift", ".go", ".rs", ".rb",
+            ".c", ".cpp", ".h", ".hpp", ".cs", ".php",
+            ".html", ".css", ".scss", ".less",
+            ".json", ".yaml", ".yml", ".toml", ".xml",
+            ".sh", ".bash", ".zsh", ".fish", ".ps1",
+            ".sql", ".graphql", ".proto",
+            ".gitignore", ".env", "Dockerfile",
+        }
+    )
+    _IMAGE_MIME_TYPES = frozenset({"image/jpeg", "image/png", "image/gif", "image/webp"})
 
-        lines = ", ".join(f'"{name}" ({path})' for name, path in resolved)
-        return (
-            f"[Context: This message references projects: {lines}. "
-            f"All instructions in this message relate to these projects.]"
-        )
+    def _is_text_attachment(self, att: ResolvedAttachment) -> bool:
+        """Return True if this attachment should be inlined as plain text."""
+        if any(att.mime_type.startswith(p) for p in self._TEXT_MIME_PREFIXES):
+            return True
+        if att.mime_type in self._TEXT_MIME_TYPES:
+            return True
+        import os
+        _, ext = os.path.splitext(att.file_name.lower())
+        return ext in self._TEXT_EXTENSIONS
 
-    def _build_tool_context(self, mentions: list[str]) -> str | None:
-        """Resolve #tool mentions against the tool registry and build a context string.
+    def _build_attachment_blocks(
+        self, attachments: list[ResolvedAttachment]
+    ) -> list[dict[str, Any]]:
+        """Convert resolved attachments into LLM content blocks.
 
-        Returns None if no mentions resolve to valid tools.
+        - Images → image content blocks (Anthropic base64 or OpenAI image_url),
+          or a text placeholder when the model does not support vision.
+        - Text files → inline text blocks with a filename header
+        - Other binary → a brief placeholder text block
         """
-        resolved: list[tuple[str, str]] = []  # (name, description)
-        seen: set[str] = set()
-        for name in mentions:
-            tool = self._tool_registry.get(name)
-            if tool is not None and tool.name not in seen:
-                seen.add(tool.name)
-                resolved.append((tool.name, tool.description))
+        import base64
 
-        if not resolved:
-            return None
+        provider = self._llm.provider if self._llm else "anthropic"
+        vision_ok = self._llm.supports_vision if self._llm else False
+        blocks: list[dict[str, Any]] = []
 
-        tool_lines = "\n".join(f'- "{name}": {desc}' for name, desc in resolved)
-        return (
-            f"[Tool preference: The user has explicitly requested that you use "
-            f"the following tool(s) to accomplish this task:\n{tool_lines}\n"
-            f"Prioritize using these tools. If the task can be accomplished with "
-            f"the mentioned tools, use them rather than alternatives.]"
-        )
-
-    def _resolve_project_path(self, name: str) -> Path | None:
-        """Resolve a @ProjectName mention to an absolute directory path, or None."""
-        if not self._settings:
-            return None
-        for projects_dir in self._settings.projects_dirs:
-            project_path = projects_dir / name
-            if project_path.is_dir():
-                return project_path
-        return None
-
-    def _parse_direct_tool_prompt(self, text: str) -> tuple[ToolDefinition, dict[str, Any], str] | str:
-        """Parse a direct-mode prompt into (tool_def, tool_input, display_text) or an error string.
-
-        The ``#tool_name`` and ``@ProjectName`` mentions can appear anywhere in the
-        text and in any order.  Everything else becomes the prompt/command.
-
-        Examples that all produce the same result::
-
-            #claude_code @RCFlow fix the bug
-            @RCFlow #ClaudeCode fix the bug
-            fix the bug @RCFlow #claude_code
-        """
-        # Find #tool mention anywhere in text
-        tool_mentions = self._TOOL_MENTION_RE.findall(text)
-        if not tool_mentions:
-            available = [t.name for t in self._tool_registry.list_tools()]
-            return f"Direct tool mode requires #tool_name syntax. Available tools: {', '.join(available)}"
-
-        # Resolve the first valid tool mention
-        tool_def: ToolDefinition | None = None
-        tool_mention_used: str = ""
-        for mention in tool_mentions:
-            candidate = self._tool_registry.get(mention)
-            if candidate is not None:
-                tool_def = candidate
-                tool_mention_used = mention
-                break
-
-        if tool_def is None:
-            available = [t.name for t in self._tool_registry.list_tools()]
-            return f"Unknown tool: #{tool_mentions[0]}. Available tools: {', '.join(available)}"
-
-        # Strip the matched #tool from text
-        clean = re.sub(rf"(?:^|\s)#{re.escape(tool_mention_used)}(?:\s|$)", " ", text, count=1).strip()
-
-        # Extract @ProjectName mentions for working directory
-        working_dir: str | None = None
-        project_mentions = self._MENTION_RE.findall(clean)
-        for mention in project_mentions:
-            resolved_path = self._resolve_project_path(mention)
-            if resolved_path is not None:
-                working_dir = str(resolved_path)
-                clean = re.sub(rf"(?:^|\s)@{re.escape(mention)}(?:\s|$)", " ", clean, count=1).strip()
-                break
-
-        display_text = clean
-
-        # Build tool_input based on executor type
-        tool_input: dict[str, Any] = {}
-        if tool_def.executor in ("claude_code", "codex"):
-            tool_input["prompt"] = display_text
-            if working_dir:
-                tool_input["working_directory"] = working_dir
-            elif self._settings and self._settings.projects_dirs:
-                tool_input["working_directory"] = str(self._settings.projects_dirs[0])
-        elif tool_def.executor == "shell":
-            tool_input["command"] = display_text
-        else:
-            params_schema = tool_def.parameters
-            properties = params_schema.get("properties", {})
-            required_params = params_schema.get("required", [])
-            if len(required_params) == 1:
-                tool_input[required_params[0]] = display_text
-            elif len(properties) == 1:
-                tool_input[next(iter(properties))] = display_text
-            else:
-                return (
-                    f"Tool #{tool_mention_used} has multiple required parameters and cannot "
-                    f"be used in direct mode. Parameters: {', '.join(properties.keys())}"
-                )
-
-        return (tool_def, tool_input, text.strip())
-
-    async def _handle_direct_prompt(self, session: ActiveSession, text: str) -> None:
-        """Handle a prompt in direct tool mode (no LLM)."""
-        parsed = self._parse_direct_tool_prompt(text)
-        if isinstance(parsed, str):
-            session.buffer.push_text(
-                MessageType.ERROR,
-                {
-                    "session_id": session.id,
-                    "content": parsed,
-                    "code": "DIRECT_TOOL_ERROR",
-                },
-            )
-            session.set_activity(ActivityState.IDLE)
-            return
-
-        tool_def, tool_input, display_text = parsed
-
-        tool_call = ToolCallRequest(
-            tool_use_id=str(uuid.uuid4()),
-            tool_name=tool_def.name,
-            tool_input=tool_input,
-        )
-
-        try:
-            await self._execute_tool(session, tool_call)
-        except Exception as e:
-            logger.exception("Error executing direct tool in session %s", session.id)
-            session.buffer.push_text(
-                MessageType.ERROR,
-                {
-                    "session_id": session.id,
-                    "content": str(e),
-                    "code": "DIRECT_TOOL_ERROR",
-                },
-            )
-            session.set_activity(ActivityState.IDLE)
-            return
-
-        # Set title from truncated prompt text
-        if session.title is None:
-            title = display_text[:50]
-            if len(display_text) > 50:
-                space_idx = title.rfind(" ")
-                if space_idx > 20:
-                    title = title[:space_idx]
-                title += "..."
-            session.title = title
-
-        # If non-agent tool completed, set IDLE
-        if session.claude_code_executor is None and session.codex_executor is None:
-            session.set_activity(ActivityState.IDLE)
-
-    _MAX_FILE_CONTEXT_SIZE = 100_000  # ~100KB max file content to include in context
-
-    async def _build_file_context(self, references: list[str]) -> str | None:
-        """Resolve $filename references against the artifact database and build file context.
-
-        For text files: includes the file content in a fenced code block.
-        For non-text files: includes file metadata.
-
-        Returns None if no references resolve to valid artifacts.
-        """
-        if not self._db_session_factory or not self._settings:
-            return None
-
-        context_parts: list[str] = []
-        seen: set[str] = set()
-
-        async with self._db_session_factory() as db:
-            for ref_name in references:
-                lower_ref = ref_name.lower()
-                if lower_ref in seen:
-                    continue
-
-                # Look up artifact by file_name (case-insensitive)
-                stmt = (
-                    select(ArtifactModel)
-                    .where(ArtifactModel.backend_id == self._settings.RCFLOW_BACKEND_ID)
-                    .where(func.lower(ArtifactModel.file_name) == lower_ref)
-                    .order_by(ArtifactModel.modified_at.desc())
-                    .limit(1)
-                )
-                result = await db.execute(stmt)
-                artifact = result.scalar_one_or_none()
-
-                if artifact is None:
-                    continue
-
-                seen.add(lower_ref)
-                file_path = Path(artifact.file_path)
-
-                if not file_path.exists():
-                    context_parts.append(
-                        f"[File: {artifact.file_name} -- File not found on disk at {artifact.file_path}]"
+        for att in attachments:
+            if att.mime_type in self._IMAGE_MIME_TYPES:
+                if not vision_ok:
+                    # Model does not support images — send a descriptive placeholder
+                    blocks.append(
+                        {
+                            "type": "text",
+                            "text": (
+                                f"[Attached image: {att.file_name} "
+                                f"({att.mime_type}, {len(att.data):,} bytes) — "
+                                "image content not supported by current model]"
+                            ),
+                        }
                     )
-                    continue
-
-                if artifact.file_extension.lower() in _TEXT_EXTENSIONS:
-                    # Text file: include content
-                    try:
-                        content = file_path.read_text(encoding="utf-8")
-                    except UnicodeDecodeError:
-                        try:
-                            content = file_path.read_text(encoding="latin-1")
-                        except Exception as e:
-                            context_parts.append(f"[File: {artifact.file_name} -- Error reading: {e}]")
-                            continue
-                    except OSError as e:
-                        context_parts.append(f"[File: {artifact.file_name} -- Error reading: {e}]")
-                        continue
-
-                    lang_hint = artifact.file_extension.lstrip(".")
-                    if len(content) > self._MAX_FILE_CONTEXT_SIZE:
-                        content = content[: self._MAX_FILE_CONTEXT_SIZE]
-                        context_parts.append(
-                            f"[File: {artifact.file_name} ({artifact.file_path}) -- "
-                            f"truncated to {self._MAX_FILE_CONTEXT_SIZE // 1024}KB]\n"
-                            f"```{lang_hint}\n{content}\n```"
-                        )
-                    else:
-                        context_parts.append(
-                            f"[File: {artifact.file_name} ({artifact.file_path})]\n"
-                            f"```{lang_hint}\n{content}\n```"
-                        )
+                elif provider == "openai":
+                    b64 = base64.standard_b64encode(att.data).decode()
+                    blocks.append(
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:{att.mime_type};base64,{b64}"},
+                        }
+                    )
                 else:
-                    # Non-text file: include metadata only
-                    size_str = _format_file_size(artifact.file_size)
-                    modified = artifact.modified_at.isoformat() if artifact.modified_at else "unknown"
-                    context_parts.append(
-                        f"[File: {artifact.file_name} ({artifact.file_path})\n"
-                        f"  Type: {artifact.mime_type or 'unknown'}\n"
-                        f"  Extension: {artifact.file_extension}\n"
-                        f"  Size: {size_str}\n"
-                        f"  Modified: {modified}\n"
-                        f"  Note: Binary/non-text file -- content not included]"
+                    b64 = base64.standard_b64encode(att.data).decode()
+                    blocks.append(
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": att.mime_type,
+                                "data": b64,
+                            },
+                        }
                     )
+            elif self._is_text_attachment(att):
+                try:
+                    decoded = att.data.decode("utf-8", errors="replace")
+                except Exception:
+                    decoded = att.data.decode("latin-1", errors="replace")
+                blocks.append(
+                    {
+                        "type": "text",
+                        "text": f"[Attached file: {att.file_name}]\n{decoded}",
+                    }
+                )
+            else:
+                # Binary file — include a metadata placeholder
+                blocks.append(
+                    {
+                        "type": "text",
+                        "text": (
+                            f"[Attached file: {att.file_name} "
+                            f"({att.mime_type}, {len(att.data):,} bytes) — binary content not shown]"
+                        ),
+                    }
+                )
 
-        if not context_parts:
-            return None
+        return blocks
 
-        return "\n\n".join(context_parts)
+    # ------------------------------------------------------------------
+    # Worktree metadata helpers
+    # ------------------------------------------------------------------
 
-    async def handle_prompt(self, text: str, session_id: str | None = None) -> str:
+    def _update_session_worktree_meta(
+        self, session: ActiveSession, tool_call: ToolCallRequest
+    ) -> None:
+        """Store the most recent worktree context in session metadata and broadcast."""
+        tool_input = tool_call.tool_input
+        repo_path = tool_input.get("repo_path", "")
+        action = tool_input.get("action", "")
+
+        match action:
+            case "new":
+                session.metadata["worktree"] = {
+                    "repo_path": repo_path,
+                    "last_action": "new",
+                    "branch": tool_input.get("branch", ""),
+                    "base": tool_input.get("base", "main"),
+                }
+            case "merge" | "rm":
+                session.metadata["worktree"] = {
+                    "repo_path": repo_path,
+                    "last_action": action,
+                }
+            case "list":
+                session.metadata["worktree"] = {
+                    "repo_path": repo_path,
+                    "last_action": "list",
+                }
+
+        # Broadcast so the client can update the worktree panel immediately
+        if self._session_manager:
+            self._session_manager.broadcast_session_update(session)
+
+    # ------------------------------------------------------------------
+    # Main prompt handler
+    # ------------------------------------------------------------------
+
+    async def handle_prompt(
+        self,
+        text: str,
+        session_id: str | None = None,
+        attachments: list[ResolvedAttachment] | None = None,
+    ) -> str:
         """Handle a user prompt. Creates a new session or resumes an existing one.
 
-        Returns the session ID.
+        Args:
+            text: The user's plain-text prompt.
+            session_id: Existing session UUID, or None to create a new session.
+            attachments: Optional list of resolved file attachments whose content
+                will be included as multimodal content blocks sent to the LLM.
+
+        Returns:
+            The session ID.
         """
         resolved_id = self.ensure_session(session_id)
         session = self._session_manager.get_session(resolved_id)
@@ -1109,29 +373,38 @@ class PromptRouter:
 
         # If session has an active Claude Code executor, forward message directly
         if session.claude_code_executor is not None:
-            session.buffer.push_text(
-                MessageType.TEXT_CHUNK,
-                {"content": text, "role": "user"},
-            )
+            buffer_data: dict[str, Any] = {"content": text, "role": "user"}
+            if attachments:
+                buffer_data["attachments"] = [
+                    {"name": a.file_name, "mime_type": a.mime_type, "size": len(a.data)}
+                    for a in attachments
+                ]
+            session.buffer.push_text(MessageType.TEXT_CHUNK, buffer_data)
             await self._forward_to_claude_code(session, text)
             return session.id
 
         # If session has an active Codex executor, forward message directly
         if session.codex_executor is not None:
-            session.buffer.push_text(
-                MessageType.TEXT_CHUNK,
-                {"content": text, "role": "user"},
-            )
+            buffer_data2: dict[str, Any] = {"content": text, "role": "user"}
+            if attachments:
+                buffer_data2["attachments"] = [
+                    {"name": a.file_name, "mime_type": a.mime_type, "size": len(a.data)}
+                    for a in attachments
+                ]
+            session.buffer.push_text(MessageType.TEXT_CHUNK, buffer_data2)
             await self._forward_to_codex(session, text)
             return session.id
 
         # Direct tool mode: bypass LLM entirely, parse #tool_name syntax
         if self.is_direct_tool_mode:
             session.set_active()
-            session.buffer.push_text(
-                MessageType.TEXT_CHUNK,
-                {"content": text, "role": "user"},
-            )
+            buffer_data3: dict[str, Any] = {"content": text, "role": "user"}
+            if attachments:
+                buffer_data3["attachments"] = [
+                    {"name": a.file_name, "mime_type": a.mime_type, "size": len(a.data)}
+                    for a in attachments
+                ]
+            session.buffer.push_text(MessageType.TEXT_CHUNK, buffer_data3)
             await self._handle_direct_prompt(session, text)
             return session.id
 
@@ -1166,8 +439,17 @@ class PromptRouter:
                     {"type": "text", "text": file_context, "cache_control": {"type": "ephemeral"}},
                 )
 
-            if context_blocks:
-                content: str | list[dict[str, Any]] = [*context_blocks, {"type": "text", "text": text}]
+            # Build attachment content blocks (images, text files, etc.)
+            attachment_blocks: list[dict[str, Any]] = (
+                self._build_attachment_blocks(attachments) if attachments else []
+            )
+
+            if context_blocks or attachment_blocks:
+                content: str | list[dict[str, Any]] = [
+                    *context_blocks,
+                    *attachment_blocks,
+                    {"type": "text", "text": text},
+                ]
             else:
                 content = text
 
@@ -1179,14 +461,15 @@ class PromptRouter:
                 }
             )
 
-            # Push the original user prompt to the buffer (no injected context)
-            session.buffer.push_text(
-                MessageType.TEXT_CHUNK,
-                {
-                    "content": text,
-                    "role": "user",
-                },
-            )
+            # Push the original user prompt to the buffer (no injected context).
+            # Attachment metadata is included so clients can display file names.
+            buffer_data: dict[str, Any] = {"content": text, "role": "user"}
+            if attachments:
+                buffer_data["attachments"] = [
+                    {"name": a.file_name, "mime_type": a.mime_type, "size": len(a.data)}
+                    for a in attachments
+                ]
+            session.buffer.push_text(MessageType.TEXT_CHUNK, buffer_data)
 
             # Define tool execution callback
             agent_started = False
@@ -1305,6 +588,10 @@ class PromptRouter:
 
         return session.id
 
+    # ------------------------------------------------------------------
+    # Tool execution
+    # ------------------------------------------------------------------
+
     async def _execute_tool(self, session: ActiveSession, tool_call: ToolCallRequest) -> str:
         """Execute a tool call and stream output to the session buffer."""
         tool_def = self._tool_registry.get(tool_call.tool_name)
@@ -1363,6 +650,32 @@ class PromptRouter:
         if tool_def.executor == "codex":
             return await self._start_codex(session, tool_def, tool_call)
 
+        # Worktree tool always requires explicit user approval before execution,
+        # regardless of the session's existing permission mode.  The 'list'
+        # action is read-only and is exempted from the approval gate.
+        if tool_def.executor == "worktree" and tool_call.tool_input.get("action") != "list":
+            if session.permission_manager is None:
+                from src.core.permissions import PermissionManager
+                session.permission_manager = PermissionManager()
+            decision = await self._handle_permission_check(
+                session, tool_call.tool_name, tool_call.tool_input
+            )
+            if decision.value == "deny":
+                deny_msg = f"Worktree operation '{tool_call.tool_input.get('action')}' denied by user."
+                session.buffer.push_text(
+                    MessageType.TOOL_OUTPUT,
+                    {
+                        "session_id": session.id,
+                        "tool_name": tool_call.tool_name,
+                        "content": deny_msg,
+                        "stream": "stdout",
+                        "is_error": True,
+                    },
+                )
+                session.set_active()
+                session.set_activity(ActivityState.PROCESSING_LLM)
+                return deny_msg
+
         executor = self._get_executor(tool_def.executor)
 
         try:
@@ -1385,9 +698,13 @@ class PromptRouter:
             else:
                 # Non-streaming execution
                 result = await executor.execute(tool_def, tool_call.tool_input)
-                result_text = result.output
-                if result.error:
-                    result_text += f"\n[error] {result.error}"
+                failed = bool(result.exit_code)
+                if result.output and result.error:
+                    result_text = f"{result.output}\n[error] {result.error}"
+                elif result.error:
+                    result_text = result.error
+                else:
+                    result_text = result.output
 
                 session.buffer.push_text(
                     MessageType.TOOL_OUTPUT,
@@ -1396,6 +713,7 @@ class PromptRouter:
                         "tool_name": tool_call.tool_name,
                         "content": result_text,
                         "stream": "stdout",
+                        "is_error": failed,
                     },
                 )
 
@@ -1421,1529 +739,9 @@ class PromptRouter:
                     scan_texts.append(v)
             self._fire_text_artifact_scan(session, scan_texts)
 
+        # Track active worktree context in session metadata so clients can show
+        # worktree controls.  Updated on every successful mutating worktree call.
+        if tool_def is not None and tool_def.executor == "worktree":
+            self._update_session_worktree_meta(session, tool_call)
+
         return result_text
-
-    def _resolve_working_directory(self, working_dir: str) -> Path:
-        """Resolve a working directory path, using configured PROJECTS_DIR for ~ expansion.
-
-        The system prompt tells the LLM to use the absolute PROJECTS_DIR path, so
-        most calls will already be absolute. This also handles the legacy ~/Projects
-        prefix in case the LLM still uses it.
-        """
-        if self._settings is not None:
-            for projects_dir in self._settings.projects_dirs:
-                projects_dir_str = str(projects_dir)
-                # Handle absolute path that already matches a configured projects dir
-                if working_dir.startswith(projects_dir_str):
-                    return Path(working_dir)
-            # Handle ~/Projects prefix (legacy or fallback) — resolve against first dir
-            if working_dir.startswith("~/Projects") and self._settings.projects_dirs:
-                first_dir = self._settings.projects_dirs[0]
-                suffix = working_dir[len("~/Projects") :]
-                return first_dir / suffix.lstrip("/")
-        return Path(working_dir).expanduser()
-
-    async def _start_claude_code(
-        self,
-        session: ActiveSession,
-        tool_def: ToolDefinition,
-        tool_call: ToolCallRequest,
-    ) -> str:
-        """Start a Claude Code session: spawn subprocess, begin background streaming."""
-        working_dir = tool_call.tool_input.get("working_directory", ".")
-        working_path = self._resolve_working_directory(working_dir)
-        try:
-            is_dir = working_path.is_dir()
-        except OSError as e:
-            error_msg = f"Cannot access directory {working_dir}: {e}"
-            session.buffer.push_text(
-                MessageType.ERROR,
-                {
-                    "session_id": session.id,
-                    "content": error_msg,
-                    "code": "INVALID_WORKING_DIRECTORY",
-                },
-            )
-            return error_msg
-        if not is_dir:
-            error_msg = f"Directory does not exist: {working_dir}"
-            session.buffer.push_text(
-                MessageType.ERROR,
-                {
-                    "session_id": session.id,
-                    "content": error_msg,
-                    "code": "INVALID_WORKING_DIRECTORY",
-                },
-            )
-            return error_msg
-
-        # Replace the working_directory in tool_input with the resolved absolute path
-        tool_call.tool_input["working_directory"] = str(working_path)
-
-        executor = self._get_executor(tool_def.executor, tool_def)
-        assert isinstance(executor, ClaudeCodeExecutor)
-
-        session.claude_code_executor = executor
-        session.session_type = SessionType.LONG_RUNNING
-        session.set_activity(ActivityState.RUNNING_SUBPROCESS)
-
-        # Enable interactive permissions if configured
-        effective_config = {**tool_def.executor_config.get("claude_code", {})}
-        for k, v in self._get_managed_config_overrides("claude_code").items():
-            if v not in (None, ""):
-                effective_config[k] = v
-        if effective_config.get("default_permission_mode") == "interactive":
-            session.permission_manager = PermissionManager()
-
-        # Store CC metadata for potential session restore
-        session.metadata["claude_code_session_id"] = executor.session_id
-        session.metadata["claude_code_working_directory"] = str(working_path)
-        session.metadata["claude_code_tool_name"] = tool_def.name
-        session.metadata["claude_code_parameters"] = tool_call.tool_input
-
-        # Start streaming in a background task that reads events and pushes to buffer
-        task = asyncio.create_task(self._stream_claude_code_events(session, executor, tool_def, tool_call))
-        session._claude_code_stream_task = task
-
-        return f"Claude Code session started in {working_path}"
-
-    async def _handle_permission_check(
-        self,
-        session: ActiveSession,
-        tool_name: str,
-        tool_input: dict[str, Any],
-    ) -> PermissionDecision:
-        """Check permissions for a tool use, potentially asking the user.
-
-        If the session has a :class:`PermissionManager` and no cached rule
-        covers the request, a ``PERMISSION_REQUEST`` message is pushed to the
-        buffer and the coroutine blocks until the user responds or the timeout
-        expires.
-
-        Returns the final decision (``ALLOW`` or ``DENY``).
-        """
-        pm = session.permission_manager
-        if pm is None:
-            return PermissionDecision.ALLOW
-
-        # 1. Check cached rules first
-        cached = pm.check_cached(tool_name, tool_input)
-        if cached is not None:
-            logger.debug(
-                "Permission cache hit: %s for %s (session=%s)",
-                cached.value,
-                tool_name,
-                session.id,
-            )
-            return cached
-
-        # 2. No cached rule — ask the user
-        pending = pm.create_request(tool_name, tool_input)
-        risk_level = classify_risk(tool_name, tool_input)
-        description = describe_tool_action(tool_name, tool_input)
-
-        session.set_activity(ActivityState.AWAITING_PERMISSION)
-
-        session.buffer.push_text(
-            MessageType.PERMISSION_REQUEST,
-            {
-                "session_id": session.id,
-                "request_id": pending.request_id,
-                "tool_name": tool_name,
-                "tool_input": tool_input,
-                "description": description,
-                "risk_level": risk_level,
-                "scope_options": get_scope_options(tool_name),
-            },
-        )
-
-        # 3. Wait for user response (blocks the stream reading)
-        resolved = await pm.wait_for_response(pending.request_id)
-
-        session.set_activity(ActivityState.RUNNING_SUBPROCESS)
-
-        if resolved.timed_out:
-            logger.warning(
-                "Permission request timed out for %s (session=%s, request=%s)",
-                tool_name,
-                session.id,
-                pending.request_id,
-            )
-
-        return resolved.decision if resolved.decision else PermissionDecision.DENY
-
-    async def _relay_claude_code_stream(
-        self,
-        session: ActiveSession,
-        stream: AsyncGenerator[ExecutionChunk, None],
-    ) -> None:
-        """Parse Claude Code stream-json events and push structured buffer messages.
-
-        Translates raw JSON event lines into the same message types used by the
-        RCFlow LLM pipeline (TEXT_CHUNK, TOOL_START) instead of forwarding
-        opaque TOOL_OUTPUT blobs.
-
-        When the session has a :class:`PermissionManager`, ``tool_use`` blocks
-        in ``assistant`` events are intercepted for permission approval before
-        execution proceeds.
-        """
-        async for chunk in stream:
-            line = chunk.content.strip()
-            if not line:
-                continue
-
-            try:
-                event = json.loads(line)
-            except json.JSONDecodeError:
-                # Non-JSON output (e.g. stderr leaking to stdout) — relay as text
-                session.buffer.push_text(
-                    MessageType.TEXT_CHUNK,
-                    {
-                        "session_id": session.id,
-                        "content": line,
-                        "finished": False,
-                    },
-                )
-                continue
-
-            event_type = event.get("type")
-
-            if event_type == "assistant":
-                message = event.get("message", {})
-                scan_texts: list[str] = []
-                for block in message.get("content", []):
-                    block_type = block.get("type")
-                    if block_type == "text":
-                        text_val = block["text"]
-                        session.buffer.push_text(
-                            MessageType.TEXT_CHUNK,
-                            {
-                                "session_id": session.id,
-                                "content": text_val,
-                                "finished": False,
-                            },
-                        )
-                        scan_texts.append(text_val)
-                    elif block_type == "thinking":
-                        thinking_text = block.get("thinking", "")
-                        if thinking_text:
-                            session.buffer.push_text(
-                                MessageType.THINKING,
-                                {
-                                    "session_id": session.id,
-                                    "content": thinking_text,
-                                },
-                            )
-                    elif block_type == "tool_use":
-                        tool_name = block.get("name", "unknown")
-                        tool_input = block.get("input", {})
-
-                        # Permission check for interactive sessions
-                        if session.permission_manager is not None:
-                            decision = await self._handle_permission_check(
-                                session, tool_name, tool_input
-                            )
-                            if decision == PermissionDecision.DENY:
-                                session.buffer.push_text(
-                                    MessageType.TOOL_START,
-                                    {
-                                        "session_id": session.id,
-                                        "tool_name": tool_name,
-                                        "tool_input": tool_input,
-                                        "permission_denied": True,
-                                    },
-                                )
-                                continue
-
-                        if tool_name == "TodoWrite":
-                            todos = tool_input.get("todos", [])
-                            session.update_todos(todos)
-                            session.buffer.push_text(
-                                MessageType.TODO_UPDATE,
-                                {
-                                    "session_id": session.id,
-                                    "todos": todos,
-                                },
-                            )
-                        elif tool_name == "EnterPlanMode":
-                            session.buffer.push_text(
-                                MessageType.PLAN_MODE_ASK,
-                                {"session_id": session.id},
-                            )
-                        elif tool_name == "ExitPlanMode":
-                            session.buffer.push_text(
-                                MessageType.PLAN_REVIEW_ASK,
-                                {"session_id": session.id},
-                            )
-                        else:
-                            session.buffer.push_text(
-                                MessageType.TOOL_START,
-                                {
-                                    "session_id": session.id,
-                                    "tool_name": tool_name,
-                                    "tool_input": tool_input,
-                                },
-                            )
-                        # Collect tool input values for scanning
-                        for v in tool_input.values():
-                            if isinstance(v, str):
-                                scan_texts.append(v)
-                # Fire artifact scan for this assistant message
-                if scan_texts:
-                    self._fire_text_artifact_scan(session, scan_texts)
-
-            elif event_type == "tool_result":
-                raw_content = event.get("content", "")
-                if isinstance(raw_content, list):
-                    # Content blocks format — extract text parts only
-                    parts = []
-                    for block in raw_content:
-                        if isinstance(block, dict) and block.get("type") == "text":
-                            parts.append(block.get("text", ""))
-                    content = "\n".join(parts)
-                else:
-                    content = str(raw_content)
-
-                content = _truncate_tool_output(content)
-                if content:
-                    is_error = event.get("is_error", False)
-                    session.buffer.push_text(
-                        MessageType.TOOL_OUTPUT,
-                        {
-                            "session_id": session.id,
-                            "content": content,
-                            "is_error": is_error,
-                        },
-                    )
-                    # Fire artifact scan for this tool result
-                    self._fire_text_artifact_scan(session, [content])
-
-            elif event_type == "result":
-                session.set_activity(ActivityState.IDLE)
-                result_text = event.get("result", "")
-                result_subtype = event.get("subtype", "")
-                # Extract cost and token data from Claude Code result
-                cost_usd = event.get("cost_usd") or 0.0
-                if cost_usd:
-                    session.tool_cost_usd += float(cost_usd)
-                cc_usage = event.get("usage") or {}
-                cc_in = cc_usage.get("input_tokens") or 0
-                cc_out = cc_usage.get("output_tokens") or 0
-                if cc_in or cc_out:
-                    session.tool_input_tokens += cc_in
-                    session.tool_output_tokens += cc_out
-                if cost_usd or cc_in or cc_out:
-                    if session._on_update:
-                        session._on_update()
-
-                if result_subtype == "max_turns":
-                    # Claude Code hit --max-turns limit; always notify the user
-                    summary_text = result_text or "Claude Code reached the maximum number of turns for this invocation."
-                    self._fire_summary_task(session, summary_text, push_session_end_ask=True)
-                    self._fire_task_update_task(session, summary_text)
-                elif result_text:
-                    self._fire_summary_task(session, result_text, push_session_end_ask=True)
-                    self._fire_task_update_task(session, result_text)
-                else:
-                    # Result event with no text and no subtype — still notify the user
-                    session.buffer.push_text(
-                        MessageType.SESSION_END_ASK,
-                        {"session_id": session.id},
-                    )
-
-            elif event_type == "system":
-                # Claude Code may emit system events with usage data
-                subtype = event.get("subtype", "")
-                if subtype == "usage":
-                    sys_usage = event.get("usage") or {}
-                    sys_in = sys_usage.get("input_tokens") or 0
-                    sys_out = sys_usage.get("output_tokens") or 0
-                    if sys_in or sys_out:
-                        session.tool_input_tokens += sys_in
-                        session.tool_output_tokens += sys_out
-                        if session._on_update:
-                            session._on_update()
-
-            else:
-                logger.debug("Skipping unknown Claude Code event type: %s", event_type)
-
-    async def _stream_claude_code_events(
-        self,
-        session: ActiveSession,
-        executor: ClaudeCodeExecutor,
-        tool_def: ToolDefinition,
-        tool_call: ToolCallRequest,
-    ) -> None:
-        """Background task: read Claude Code events and push to session buffer."""
-        try:
-            await self._relay_claude_code_stream(session, executor.execute_streaming(tool_def, tool_call.tool_input))
-        except Exception as e:
-            logger.exception("Claude Code streaming error in session %s", session.id)
-            session.buffer.push_text(
-                MessageType.AGENT_GROUP_END,
-                {"session_id": session.id},
-            )
-            session.buffer.push_text(
-                MessageType.ERROR,
-                {
-                    "session_id": session.id,
-                    "content": f"Claude Code error: {e}",
-                    "code": "CLAUDE_CODE_ERROR",
-                },
-            )
-            await self._end_claude_code_session(session)
-            return
-
-        # Detect unexpected exit (no result event received)
-        if not executor.got_result:
-            exit_code = executor.exit_code
-            logger.warning(
-                "Claude Code exited without result event (session=%s, exit_code=%s)",
-                session.id,
-                exit_code,
-            )
-            session.set_activity(ActivityState.IDLE)
-            session.buffer.push_text(
-                MessageType.AGENT_GROUP_END,
-                {"session_id": session.id},
-            )
-            session.buffer.push_text(
-                MessageType.ERROR,
-                {
-                    "session_id": session.id,
-                    "content": (
-                        f"Claude Code process exited unexpectedly (exit code: {exit_code}). "
-                        "This may be caused by a timeout, out-of-memory condition, or internal error. "
-                        "You can send another message to restart it."
-                    ),
-                    "code": "CLAUDE_CODE_UNEXPECTED_EXIT",
-                },
-            )
-            await executor.stop_process()
-            return
-
-        session.buffer.push_text(
-            MessageType.AGENT_GROUP_END,
-            {"session_id": session.id},
-        )
-
-        logger.info(
-            "Claude Code initial streaming finished, process kept alive (session=%s)",
-            session.id,
-        )
-
-    async def _end_claude_code_session(self, session: ActiveSession) -> None:
-        """Clean up Claude Code state when the session ends."""
-        if session.claude_code_executor is not None:
-            await session.claude_code_executor.stop_process()
-        session.claude_code_executor = None
-        session._claude_code_stream_task = None
-
-        if session.status == SessionStatus.PAUSED:
-            # Defer end/archive — user will see output on resume
-            session.complete()  # sets completed_while_paused flag
-            return
-
-        session.buffer.push_text(
-            MessageType.SESSION_END,
-            {
-                "session_id": session.id,
-                "reason": "claude_code_finished",
-            },
-        )
-        session.complete()
-        self._fire_archive_task(session.id)
-
-    # --- Codex CLI methods ---
-
-    async def _start_codex(
-        self,
-        session: ActiveSession,
-        tool_def: ToolDefinition,
-        tool_call: ToolCallRequest,
-    ) -> str:
-        """Start a Codex CLI session: spawn subprocess, begin background streaming."""
-        working_dir = tool_call.tool_input.get("working_directory", ".")
-        working_path = self._resolve_working_directory(working_dir)
-        try:
-            is_dir = working_path.is_dir()
-        except OSError as e:
-            error_msg = f"Cannot access directory {working_dir}: {e}"
-            session.buffer.push_text(
-                MessageType.ERROR,
-                {
-                    "session_id": session.id,
-                    "content": error_msg,
-                    "code": "INVALID_WORKING_DIRECTORY",
-                },
-            )
-            return error_msg
-        if not is_dir:
-            error_msg = f"Directory does not exist: {working_dir}"
-            session.buffer.push_text(
-                MessageType.ERROR,
-                {
-                    "session_id": session.id,
-                    "content": error_msg,
-                    "code": "INVALID_WORKING_DIRECTORY",
-                },
-            )
-            return error_msg
-
-        # Replace the working_directory in tool_input with the resolved absolute path
-        tool_call.tool_input["working_directory"] = str(working_path)
-
-        executor = self._get_executor(tool_def.executor, tool_def)
-        assert isinstance(executor, CodexExecutor)
-
-        session.codex_executor = executor
-        session.session_type = SessionType.LONG_RUNNING
-        session.set_activity(ActivityState.RUNNING_SUBPROCESS)
-
-        # Store metadata for potential session restore (thread_id set after first event)
-        session.metadata["codex_working_directory"] = str(working_path)
-        session.metadata["codex_tool_name"] = tool_def.name
-        session.metadata["codex_parameters"] = tool_call.tool_input
-
-        # Start streaming in a background task that reads events and pushes to buffer
-        task = asyncio.create_task(self._stream_codex_events(session, executor, tool_def, tool_call))
-        session._codex_stream_task = task
-
-        return f"Codex session started in {working_path}"
-
-    async def _relay_codex_stream(
-        self,
-        session: ActiveSession,
-        stream: AsyncGenerator[ExecutionChunk, None],
-    ) -> None:
-        """Parse Codex CLI JSONL events and push structured buffer messages.
-
-        Translates Codex event types (item.started/updated/completed,
-        turn.completed/failed) into the same message types used by the
-        RCFlow LLM pipeline.
-        """
-        # Track last emitted text for agent_message items to enable incremental updates
-        last_agent_text: dict[str, str] = {}
-        # Collect agent_message text after the last tool call for the summary
-        post_tool_text_chunks: list[str] = []
-
-        async for chunk in stream:
-            line = chunk.content.strip()
-            if not line:
-                continue
-
-            try:
-                event = json.loads(line)
-            except json.JSONDecodeError:
-                session.buffer.push_text(
-                    MessageType.TEXT_CHUNK,
-                    {
-                        "session_id": session.id,
-                        "content": line,
-                        "finished": False,
-                    },
-                )
-                continue
-
-            if not isinstance(event, dict):
-                continue
-
-            event_type = event.get("type")
-
-            # Persist thread_id once we receive it
-            if event_type == "thread.started":
-                thread_id = event.get("thread_id")
-                if thread_id and session.codex_executor:
-                    session.metadata["codex_thread_id"] = thread_id
-
-            elif event_type == "item.started":
-                item = event.get("item", {})
-                item_type = item.get("type")
-                if item_type == "command_execution":
-                    post_tool_text_chunks.clear()
-                    session.buffer.push_text(
-                        MessageType.TOOL_START,
-                        {
-                            "session_id": session.id,
-                            "tool_name": "command_execution",
-                            "tool_input": {"command": item.get("command", "")},
-                        },
-                    )
-                elif item_type == "file_change":
-                    post_tool_text_chunks.clear()
-                    session.buffer.push_text(
-                        MessageType.TOOL_START,
-                        {
-                            "session_id": session.id,
-                            "tool_name": "file_change",
-                            "tool_input": {},
-                        },
-                    )
-                elif item_type == "mcp_tool_call":
-                    post_tool_text_chunks.clear()
-                    session.buffer.push_text(
-                        MessageType.TOOL_START,
-                        {
-                            "session_id": session.id,
-                            "tool_name": f"mcp:{item.get('server', '')}:{item.get('tool', '')}",
-                            "tool_input": item.get("arguments", {}),
-                        },
-                    )
-
-            elif event_type == "item.updated":
-                item = event.get("item", {})
-                item_type = item.get("type")
-                item_id = item.get("id", "")
-                if item_type == "agent_message":
-                    # Emit only the new text since last update
-                    full_text = item.get("text", "")
-                    prev = last_agent_text.get(item_id, "")
-                    delta = full_text[len(prev) :]
-                    if delta:
-                        post_tool_text_chunks.append(delta)
-                        session.buffer.push_text(
-                            MessageType.TEXT_CHUNK,
-                            {
-                                "session_id": session.id,
-                                "content": delta,
-                                "finished": False,
-                            },
-                        )
-                    last_agent_text[item_id] = full_text
-
-            elif event_type == "item.completed":
-                item = event.get("item", {})
-                item_type = item.get("type")
-                item_id = item.get("id", "")
-                if item_type == "agent_message":
-                    # Emit any remaining delta
-                    full_text = item.get("text", "")
-                    prev = last_agent_text.get(item_id, "")
-                    delta = full_text[len(prev) :]
-                    if delta:
-                        post_tool_text_chunks.append(delta)
-                        session.buffer.push_text(
-                            MessageType.TEXT_CHUNK,
-                            {
-                                "session_id": session.id,
-                                "content": delta,
-                                "finished": False,
-                            },
-                        )
-                    last_agent_text.pop(item_id, None)
-                    # Scan the complete agent message text for artifacts
-                    if full_text:
-                        self._fire_text_artifact_scan(session, [full_text])
-                elif item_type == "command_execution":
-                    output = _truncate_tool_output(item.get("aggregated_output", ""))
-                    exit_code = item.get("exit_code")
-                    if output:
-                        session.buffer.push_text(
-                            MessageType.TOOL_OUTPUT,
-                            {
-                                "session_id": session.id,
-                                "tool_name": "command_execution",
-                                "content": output,
-                                "stream": "stdout",
-                                "is_error": exit_code is not None and exit_code != 0,
-                            },
-                        )
-                        self._fire_text_artifact_scan(session, [output])
-                elif item_type == "file_change":
-                    diff = item.get("diff", "")
-                    file_path = item.get("file_path", item.get("file", ""))
-                    content = _truncate_tool_output(diff) if diff else (f"File changed: {file_path}" if file_path else "")
-                    if content:
-                        session.buffer.push_text(
-                            MessageType.TOOL_OUTPUT,
-                            {
-                                "session_id": session.id,
-                                "tool_name": "file_change",
-                                "content": content,
-                                "stream": "stdout",
-                            },
-                        )
-                        self._fire_text_artifact_scan(session, [content])
-                elif item_type == "mcp_tool_call":
-                    output = item.get("output", item.get("result", ""))
-                    if isinstance(output, dict):
-                        output = json.dumps(output, indent=2)
-                    output = _truncate_tool_output(str(output)) if output else ""
-                    if output:
-                        session.buffer.push_text(
-                            MessageType.TOOL_OUTPUT,
-                            {
-                                "session_id": session.id,
-                                "tool_name": f"mcp:{item.get('server', '')}:{item.get('tool', '')}",
-                                "content": output,
-                                "stream": "stdout",
-                            },
-                        )
-                        self._fire_text_artifact_scan(session, [output])
-
-            elif event_type == "turn.completed":
-                session.set_activity(ActivityState.IDLE)
-                # Extract token usage from Codex turn
-                codex_usage = event.get("usage") or {}
-                codex_in = codex_usage.get("input_tokens") or 0
-                codex_out = codex_usage.get("output_tokens") or 0
-                if codex_in or codex_out:
-                    session.tool_input_tokens += codex_in
-                    session.tool_output_tokens += codex_out
-                    if session._on_update:
-                        session._on_update()
-                summary_text = "".join(post_tool_text_chunks).strip() or "Codex task completed"
-                self._fire_summary_task(session, summary_text, push_session_end_ask=True)
-                self._fire_task_update_task(session, summary_text)
-
-            elif event_type == "turn.failed":
-                error = event.get("error", {})
-                session.buffer.push_text(
-                    MessageType.ERROR,
-                    {
-                        "session_id": session.id,
-                        "content": error.get("message", "Codex turn failed"),
-                        "code": "CODEX_TURN_FAILED",
-                    },
-                )
-
-            elif event_type == "error":
-                session.buffer.push_text(
-                    MessageType.ERROR,
-                    {
-                        "session_id": session.id,
-                        "content": event.get("message", "Codex error"),
-                        "code": "CODEX_ERROR",
-                    },
-                )
-
-            else:
-                logger.debug("Skipping unknown Codex event type: %s", event_type)
-
-    async def _stream_codex_events(
-        self,
-        session: ActiveSession,
-        executor: CodexExecutor,
-        tool_def: ToolDefinition,
-        tool_call: ToolCallRequest,
-    ) -> None:
-        """Background task: read Codex CLI events and push to session buffer."""
-        try:
-            await self._relay_codex_stream(session, executor.execute_streaming(tool_def, tool_call.tool_input))
-        except Exception as e:
-            logger.exception("Codex streaming error in session %s", session.id)
-            session.buffer.push_text(
-                MessageType.AGENT_GROUP_END,
-                {"session_id": session.id},
-            )
-            session.buffer.push_text(
-                MessageType.ERROR,
-                {
-                    "session_id": session.id,
-                    "content": f"Codex error: {e}",
-                    "code": "CODEX_ERROR",
-                },
-            )
-            await self._end_codex_session(session)
-            return
-
-        await executor.stop_process()
-
-        session.buffer.push_text(
-            MessageType.AGENT_GROUP_END,
-            {"session_id": session.id},
-        )
-
-        # Codex process exits after each turn (one-shot model).
-        # Follow-up messages use restart_with_prompt (codex exec resume) to respawn.
-        logger.info(
-            "Codex initial streaming finished (session=%s)",
-            session.id,
-        )
-
-    async def _end_codex_session(self, session: ActiveSession) -> None:
-        """Clean up Codex state when the session ends."""
-        if session.codex_executor is not None:
-            await session.codex_executor.stop_process()
-        session.codex_executor = None
-        session._codex_stream_task = None
-
-        if session.status == SessionStatus.PAUSED:
-            session.complete()
-            return
-
-        session.buffer.push_text(
-            MessageType.SESSION_END,
-            {
-                "session_id": session.id,
-                "reason": "codex_finished",
-            },
-        )
-        session.complete()
-        self._fire_archive_task(session.id)
-
-    async def _forward_to_codex(self, session: ActiveSession, text: str) -> None:
-        """Forward a follow-up message to the active Codex session.
-
-        Codex CLI uses one-shot processes, so follow-ups always spawn a new
-        process with ``codex exec resume THREAD_ID``.
-        """
-        executor = session.codex_executor
-        if executor is None:
-            return
-
-        if session.status == SessionStatus.PAUSED:
-            return
-
-        session.set_activity(ActivityState.RUNNING_SUBPROCESS)
-
-        # Open a new agent group for this follow-up turn
-        codex_def = self._tool_registry.get("codex")
-        session.buffer.push_text(
-            MessageType.AGENT_GROUP_START,
-            {
-                "session_id": session.id,
-                "tool_name": "codex",
-                "display_name": codex_def.display_name if codex_def and codex_def.display_name else "Codex",
-            },
-        )
-
-        # Codex always spawns a new process for follow-ups (no persistent stdin)
-        session._codex_stream_task = asyncio.create_task(self._restart_codex_with_prompt(session, executor, text))
-
-    async def _restart_codex_with_prompt(
-        self,
-        session: ActiveSession,
-        executor: CodexExecutor,
-        prompt: str,
-    ) -> None:
-        """Spawn a new Codex resume process and stream events for a follow-up."""
-        try:
-            await self._relay_codex_stream(session, executor.restart_with_prompt(prompt))
-        except Exception as e:
-            logger.exception("Codex restart error in session %s", session.id)
-            session.buffer.push_text(
-                MessageType.AGENT_GROUP_END,
-                {"session_id": session.id},
-            )
-            session.buffer.push_text(
-                MessageType.ERROR,
-                {
-                    "session_id": session.id,
-                    "content": f"Codex error: {e}",
-                    "code": "CODEX_ERROR",
-                },
-            )
-            await self._end_codex_session(session)
-            return
-
-        await executor.stop_process()
-
-        session.buffer.push_text(
-            MessageType.AGENT_GROUP_END,
-            {"session_id": session.id},
-        )
-
-    def _fire_title_task(self, session: ActiveSession, user_text: str, assistant_text: str) -> None:
-        """Schedule a background task to generate a session title."""
-        if self._llm is None:
-            # Direct tool mode: set title from truncated user text
-            title = user_text[:50]
-            if len(user_text) > 50:
-                space_idx = title.rfind(" ")
-                if space_idx > 20:
-                    title = title[:space_idx]
-                title += "..."
-            session.title = title
-            return
-        task = asyncio.create_task(self._generate_and_set_title(session, user_text, assistant_text))
-        self._pending_title_tasks.add(task)
-        task.add_done_callback(self._pending_title_tasks.discard)
-
-    async def _generate_and_set_title(self, session: ActiveSession, user_text: str, assistant_text: str) -> None:
-        """Generate a title and assign it to the session. Never raises."""
-        assert self._llm is not None
-        try:
-            title = await self._llm.generate_title(user_text, assistant_text)
-            session.title = title
-            logger.info("Generated title for session %s: %s", session.id, title)
-        except Exception:
-            logger.exception("Failed to generate title for session %s", session.id)
-
-    # --- Task creation/update agents ---
-
-    def _fire_task_creation_task(self, session: ActiveSession, user_text: str, assistant_text: str) -> None:
-        """Schedule a background task to extract or match tasks from the session."""
-        if self._llm is None:
-            return
-        task = asyncio.create_task(self._create_tasks_from_session(session, user_text, assistant_text))
-        self._pending_task_creation_tasks.add(task)
-        task.add_done_callback(self._pending_task_creation_tasks.discard)
-
-    async def _create_tasks_from_session(
-        self, session: ActiveSession, user_text: str, assistant_text: str,
-    ) -> None:
-        """Extract or match tasks for this session. Never raises."""
-        try:
-            if self._db_session_factory is None or self._settings is None:
-                return
-
-            backend_id = self._settings.RCFLOW_BACKEND_ID
-
-            # Fetch existing non-done tasks for matching
-            async with self._db_session_factory() as db:
-                stmt = (
-                    select(TaskModel)
-                    .where(
-                        TaskModel.backend_id == backend_id,
-                        TaskModel.status.in_(["todo", "in_progress", "review"]),
-                    )
-                )
-                result = await db.execute(stmt)
-                existing = [
-                    {
-                        "task_id": str(t.id),
-                        "title": t.title,
-                        "description": t.description or "",
-                        "status": t.status,
-                    }
-                    for t in result.scalars().all()
-                ]
-
-            # Ask LLM to extract/match
-            llm_result = await self._llm.extract_or_match_tasks(user_text, assistant_text, existing)
-            new_tasks = llm_result.get("new_tasks") or []
-            attach_ids = llm_result.get("attach_task_ids") or []
-
-            attached_task_ids: list[str] = []
-            from datetime import UTC, datetime as dt
-
-            async with self._db_session_factory() as db:
-                # Ensure session row exists in DB (it may not be archived yet)
-                session_uuid = uuid.UUID(session.id)
-                existing_session = await db.get(SessionModel, session_uuid)
-                if existing_session is None:
-                    db.add(SessionModel(
-                        id=session_uuid,
-                        backend_id=backend_id,
-                        created_at=session.created_at,
-                        ended_at=session.ended_at,
-                        session_type=session.session_type.value,
-                        status=session.status.value,
-                        title=session.title,
-                        metadata_={},
-                    ))
-                    await db.flush()
-
-                # Attach existing tasks
-                for tid in attach_ids:
-                    try:
-                        task_uuid = uuid.UUID(tid)
-                    except ValueError:
-                        continue
-                    task = await db.get(TaskModel, task_uuid)
-                    if task is None:
-                        continue
-                    # Create link if not exists
-                    existing_link = await db.execute(
-                        select(TaskSessionModel).where(
-                            TaskSessionModel.task_id == task_uuid,
-                            TaskSessionModel.session_id == session_uuid,
-                        )
-                    )
-                    if existing_link.scalar_one_or_none() is None:
-                        link = TaskSessionModel(
-                            task_id=task_uuid,
-                            session_id=session_uuid,
-                        )
-                        db.add(link)
-                    # Auto-promote to in_progress if not already
-                    if task.status in ("todo", "review"):
-                        task.status = "in_progress"
-                        task.updated_at = dt.now(UTC)
-                    attached_task_ids.append(tid)
-
-                # Create new tasks
-                for new_t in new_tasks:
-                    title = (new_t.get("title") or "")[:300]
-                    if not title:
-                        continue
-                    description = new_t.get("description")
-                    now = dt.now(UTC)
-                    task = TaskModel(
-                        backend_id=backend_id,
-                        title=title,
-                        description=description,
-                        status="in_progress",
-                        source="ai",
-                        created_at=now,
-                        updated_at=now,
-                    )
-                    db.add(task)
-                    await db.flush()  # get task.id
-                    link = TaskSessionModel(
-                        task_id=task.id,
-                        session_id=session_uuid,
-                    )
-                    db.add(link)
-                    attached_task_ids.append(str(task.id))
-
-                await db.commit()
-
-                # Broadcast task updates
-                for tid in attached_task_ids:
-                    try:
-                        task_uuid = uuid.UUID(tid)
-                        task = await db.get(TaskModel, task_uuid)
-                        if task is not None:
-                            # Build task dict with session refs
-                            sess_stmt = (
-                                select(TaskSessionModel, SessionModel)
-                                .join(SessionModel, TaskSessionModel.session_id == SessionModel.id)
-                                .where(TaskSessionModel.task_id == task.id)
-                            )
-                            sess_result = await db.execute(sess_stmt)
-                            sessions_data = []
-                            for ts_row, sess_row in sess_result.all():
-                                sessions_data.append({
-                                    "session_id": str(sess_row.id),
-                                    "title": sess_row.title,
-                                    "status": sess_row.status,
-                                    "attached_at": ts_row.attached_at.isoformat() if ts_row.attached_at else "",
-                                })
-                            task_data = {
-                                "task_id": str(task.id),
-                                "title": task.title,
-                                "description": task.description,
-                                "status": task.status,
-                                "source": task.source,
-                                "created_at": task.created_at.isoformat() if task.created_at else "",
-                                "updated_at": task.updated_at.isoformat() if task.updated_at else "",
-                                "sessions": sessions_data,
-                            }
-                            self._session_manager.broadcast_task_update(task_data)
-                    except Exception:
-                        logger.exception("Failed to broadcast task update for %s", tid)
-
-            # Store on session for the update agent
-            session.metadata["attached_task_ids"] = attached_task_ids
-            logger.info(
-                "Task creation for session %s: %d attached, %d new",
-                session.id, len(attach_ids), len(new_tasks),
-            )
-
-        except Exception:
-            logger.exception("Failed to create/match tasks for session %s", session.id)
-
-    def _fire_task_update_task(self, session: ActiveSession, session_result_text: str) -> None:
-        """Schedule a background task to update tasks based on session results."""
-        if self._llm is None:
-            return
-        task_ids = session.metadata.get("attached_task_ids", [])
-        if not task_ids:
-            return
-        session.metadata["_task_update_fired"] = True
-        task = asyncio.create_task(self._update_tasks_from_session(session, session_result_text, task_ids))
-        self._pending_task_update_tasks.add(task)
-        task.add_done_callback(self._pending_task_update_tasks.discard)
-
-    def _fire_task_update_on_session_end(self, session: ActiveSession) -> None:
-        """Fire task update when a session ends, if not already fired by a tool result."""
-        if self._llm is None:
-            return
-        if session.metadata.get("_task_update_fired"):
-            return
-        result_text = self._extract_session_context(session)
-        if result_text:
-            self._fire_task_update_task(session, result_text)
-
-    @staticmethod
-    def _extract_session_context(session: ActiveSession) -> str:
-        """Extract a context summary from the session's conversation history for task evaluation."""
-        parts: list[str] = []
-        for msg in session.conversation_history:
-            role = msg.get("role", "")
-            content = msg.get("content")
-            if role not in ("user", "assistant"):
-                continue
-            if isinstance(content, str):
-                text = content
-            elif isinstance(content, list):
-                text = " ".join(
-                    b.get("text", "") for b in content
-                    if isinstance(b, dict) and b.get("type") == "text"
-                )
-            else:
-                continue
-            if text.strip():
-                parts.append(f"{role}: {text.strip()}")
-        # Limit to last ~4000 chars to avoid huge LLM calls
-        combined = "\n".join(parts)
-        if len(combined) > 4000:
-            combined = combined[-4000:]
-        return combined
-
-    async def _update_tasks_from_session(
-        self, session: ActiveSession, session_result_text: str, task_ids: list[str],
-    ) -> None:
-        """Update tasks based on session results. Never raises."""
-        from sqlite3 import OperationalError as SQLiteOperationalError
-        try:
-            if self._db_session_factory is None:
-                return
-
-            from datetime import UTC, datetime as dt
-
-            async with self._db_session_factory() as db:
-                for tid in task_ids:
-                    try:
-                        task_uuid = uuid.UUID(tid)
-                    except ValueError:
-                        continue
-
-                    task = await db.get(TaskModel, task_uuid)
-                    if task is None:
-                        continue
-
-                    # Ask LLM to evaluate
-                    result = await self._llm.evaluate_task_status(
-                        task.title, task.description, task.status, session_result_text,
-                    )
-                    new_status = result.get("status", task.status)
-                    new_description = result.get("description", task.description)
-
-                    changed = False
-                    # Validate transition and enforce AI can't set done
-                    if new_status != task.status and new_status != "done":
-                        from src.api.http import VALID_TASK_TRANSITIONS
-                        allowed = VALID_TASK_TRANSITIONS.get(task.status, set())
-                        if new_status in allowed:
-                            task.status = new_status
-                            changed = True
-                    if new_description and new_description != task.description:
-                        task.description = new_description
-                        changed = True
-
-                    if changed:
-                        task.updated_at = dt.now(UTC)
-                        await db.commit()
-
-                        # Build and broadcast
-                        sess_stmt = (
-                            select(TaskSessionModel, SessionModel)
-                            .join(SessionModel, TaskSessionModel.session_id == SessionModel.id)
-                            .where(TaskSessionModel.task_id == task.id)
-                        )
-                        sess_result = await db.execute(sess_stmt)
-                        sessions_data = []
-                        for ts_row, sess_row in sess_result.all():
-                            sessions_data.append({
-                                "session_id": str(sess_row.id),
-                                "title": sess_row.title,
-                                "status": sess_row.status,
-                                "attached_at": ts_row.attached_at.isoformat() if ts_row.attached_at else "",
-                            })
-                        task_data = {
-                            "task_id": str(task.id),
-                            "title": task.title,
-                            "description": task.description,
-                            "status": task.status,
-                            "source": task.source,
-                            "created_at": task.created_at.isoformat() if task.created_at else "",
-                            "updated_at": task.updated_at.isoformat() if task.updated_at else "",
-                            "sessions": sessions_data,
-                        }
-                        self._session_manager.broadcast_task_update(task_data)
-
-            logger.info("Task update for session %s: checked %d tasks", session.id, len(task_ids))
-
-        except (asyncio.CancelledError, SQLiteOperationalError):
-            logger.debug("Task update for session %s aborted (shutdown)", session.id)
-        except Exception:
-            logger.exception("Failed to update tasks for session %s", session.id)
-
-    def _fire_summary_task(self, session: ActiveSession, text: str, *, push_session_end_ask: bool = False) -> None:
-        """Schedule a background task to summarize Claude Code result text."""
-        if self._llm is None:
-            # No LLM — skip summary, but still push SESSION_END_ASK if requested
-            if push_session_end_ask:
-                session.buffer.push_text(
-                    MessageType.SESSION_END_ASK,
-                    {"session_id": session.id},
-                )
-            return
-        task = asyncio.create_task(self._summarize_and_push(session, text, push_session_end_ask=push_session_end_ask))
-        self._pending_summary_tasks.add(task)
-        task.add_done_callback(self._pending_summary_tasks.discard)
-
-    async def _summarize_and_push(
-        self, session: ActiveSession, text: str, *, push_session_end_ask: bool = False
-    ) -> None:
-        """Generate a TTS-friendly summary and push it to the session buffer."""
-        try:
-            summary = await self._llm.summarize(text)
-            session.buffer.push_text(
-                MessageType.SUMMARY,
-                {
-                    "session_id": session.id,
-                    "content": summary,
-                },
-            )
-        except Exception:
-            logger.exception("Failed to generate summary for session %s", session.id)
-        finally:
-            if push_session_end_ask:
-                session.buffer.push_text(
-                    MessageType.SESSION_END_ASK,
-                    {"session_id": session.id},
-                )
-
-    async def _forward_to_claude_code(self, session: ActiveSession, text: str) -> None:
-        """Forward a follow-up message to the active Claude Code subprocess.
-
-        The process normally stays alive between turns, so messages are sent
-        via stdin.  If the process has unexpectedly exited, fall back to
-        restarting it with the same ``--session-id``.
-        """
-        executor = session.claude_code_executor
-        if executor is None:
-            return
-
-        if session.status == SessionStatus.PAUSED:
-            return
-
-        session.set_activity(ActivityState.RUNNING_SUBPROCESS)
-
-        # Open a new agent group for this follow-up turn
-        cc_def = self._tool_registry.get("claude_code")
-        session.buffer.push_text(
-            MessageType.AGENT_GROUP_START,
-            {
-                "session_id": session.id,
-                "tool_name": "claude_code",
-                "display_name": cc_def.display_name if cc_def and cc_def.display_name else "Claude Code",
-            },
-        )
-
-        if executor.is_running:
-            # Process still alive — send directly via stdin
-            try:
-                await executor.send_input(text)
-            except RuntimeError:
-                logger.warning("Failed to send input to Claude Code (session=%s), restarting", session.id)
-                # Kill the old process explicitly — it may still be alive with broken stdin
-                await executor.cancel()
-                session._claude_code_stream_task = asyncio.create_task(
-                    self._restart_claude_code_with_prompt(session, executor, text)
-                )
-                return
-
-            # Read response events in background
-            session._claude_code_stream_task = asyncio.create_task(self._read_claude_code_followup(session, executor))
-        else:
-            # Process unexpectedly exited — restart with same session-id as fallback
-            session._claude_code_stream_task = asyncio.create_task(
-                self._restart_claude_code_with_prompt(session, executor, text)
-            )
-
-    async def _restart_claude_code_with_prompt(
-        self,
-        session: ActiveSession,
-        executor: ClaudeCodeExecutor,
-        prompt: str,
-    ) -> None:
-        """Restart Claude Code process and stream events for a follow-up."""
-        try:
-            await self._relay_claude_code_stream(session, executor.restart_with_prompt(prompt))
-        except Exception as e:
-            logger.exception("Claude Code restart error in session %s", session.id)
-            session.buffer.push_text(
-                MessageType.AGENT_GROUP_END,
-                {"session_id": session.id},
-            )
-            session.buffer.push_text(
-                MessageType.ERROR,
-                {
-                    "session_id": session.id,
-                    "content": f"Claude Code error: {e}",
-                    "code": "CLAUDE_CODE_ERROR",
-                },
-            )
-            await self._end_claude_code_session(session)
-            return
-
-        # Detect unexpected exit (no result event received)
-        if not executor.got_result:
-            exit_code = executor.exit_code
-            logger.warning(
-                "Claude Code (restart) exited without result event (session=%s, exit_code=%s)",
-                session.id,
-                exit_code,
-            )
-            session.set_activity(ActivityState.IDLE)
-            session.buffer.push_text(
-                MessageType.AGENT_GROUP_END,
-                {"session_id": session.id},
-            )
-            session.buffer.push_text(
-                MessageType.ERROR,
-                {
-                    "session_id": session.id,
-                    "content": (
-                        f"Claude Code process exited unexpectedly (exit code: {exit_code}). "
-                        "This may be caused by a timeout, out-of-memory condition, or internal error. "
-                        "You can send another message to restart it."
-                    ),
-                    "code": "CLAUDE_CODE_UNEXPECTED_EXIT",
-                },
-            )
-            return
-
-        session.buffer.push_text(
-            MessageType.AGENT_GROUP_END,
-            {"session_id": session.id},
-        )
-
-    async def _read_claude_code_followup(
-        self,
-        session: ActiveSession,
-        executor: ClaudeCodeExecutor,
-    ) -> None:
-        """Read follow-up events from a still-running Claude Code process."""
-        try:
-            await self._relay_claude_code_stream(session, executor.read_more_events())
-        except Exception as e:
-            logger.exception("Claude Code follow-up error in session %s", session.id)
-            session.buffer.push_text(
-                MessageType.AGENT_GROUP_END,
-                {"session_id": session.id},
-            )
-            session.buffer.push_text(
-                MessageType.ERROR,
-                {
-                    "session_id": session.id,
-                    "content": f"Claude Code error: {e}",
-                    "code": "CLAUDE_CODE_ERROR",
-                },
-            )
-            await self._end_claude_code_session(session)
-            return
-
-        # Detect unexpected exit (no result event received)
-        if not executor.got_result:
-            exit_code = executor.exit_code
-            logger.warning(
-                "Claude Code (follow-up) exited without result event (session=%s, exit_code=%s)",
-                session.id,
-                exit_code,
-            )
-            session.set_activity(ActivityState.IDLE)
-            session.buffer.push_text(
-                MessageType.AGENT_GROUP_END,
-                {"session_id": session.id},
-            )
-            session.buffer.push_text(
-                MessageType.ERROR,
-                {
-                    "session_id": session.id,
-                    "content": (
-                        f"Claude Code process exited unexpectedly (exit code: {exit_code}). "
-                        "This may be caused by a timeout, out-of-memory condition, or internal error. "
-                        "You can send another message to restart it."
-                    ),
-                    "code": "CLAUDE_CODE_UNEXPECTED_EXIT",
-                },
-            )
-            return
-
-        session.buffer.push_text(
-            MessageType.AGENT_GROUP_END,
-            {"session_id": session.id},
-        )
-
-    def _fire_log_task(
-        self,
-        *,
-        session_id: str,
-        usage: TurnUsage,
-        has_tool_calls: bool,
-        request_messages: list[dict[str, Any]],
-        response_text: str | None,
-    ) -> None:
-        """Schedule a fire-and-forget background task to log an LLM call to the database."""
-        if self._db_session_factory is None or self._llm is None:
-            return
-        task = asyncio.create_task(
-            self._log_llm_call(
-                session_id=session_id,
-                usage=usage,
-                has_tool_calls=has_tool_calls,
-                request_messages=request_messages,
-                response_text=response_text,
-            )
-        )
-        self._pending_log_tasks.add(task)
-        task.add_done_callback(self._pending_log_tasks.discard)
-
-    async def _log_llm_call(
-        self,
-        *,
-        session_id: str,
-        usage: TurnUsage,
-        has_tool_calls: bool,
-        request_messages: list[dict[str, Any]],
-        response_text: str | None,
-    ) -> None:
-        """Write a single LLM call record to the database. Never raises."""
-        assert self._db_session_factory is not None
-        try:
-            async with self._db_session_factory() as db:
-                row = LLMCall(
-                    session_id=uuid.UUID(session_id),
-                    message_id=usage.message_id,
-                    model=usage.model,
-                    input_tokens=usage.input_tokens,
-                    output_tokens=usage.output_tokens,
-                    cache_creation_input_tokens=usage.cache_creation_input_tokens,
-                    cache_read_input_tokens=usage.cache_read_input_tokens,
-                    started_at=usage.started_at,
-                    ended_at=usage.ended_at,
-                    stop_reason=usage.stop_reason,
-                    has_tool_calls=has_tool_calls,
-                    request_messages=request_messages,
-                    response_text=response_text,
-                    service_tier=usage.service_tier,
-                    inference_geo=usage.inference_geo,
-                )
-                db.add(row)
-                await db.commit()
-                logger.debug("Logged LLM call %s for session %s", usage.message_id, session_id)
-        except Exception:
-            logger.exception("Failed to log LLM call for session %s", session_id)
-
-    def _fire_archive_task(self, session_id: str) -> None:
-        """Schedule a fire-and-forget background task to archive a session to the database."""
-        # Snapshot permission rules into metadata before archiving
-        session = self._session_manager.get_session(session_id)
-        if session is not None and session.permission_manager is not None:
-            session.metadata["permission_rules"] = session.permission_manager.get_rules_snapshot()
-
-        if self._db_session_factory is None:
-            return
-        task = asyncio.create_task(self._archive_session(session_id))
-        self._pending_archive_tasks.add(task)
-        task.add_done_callback(self._pending_archive_tasks.discard)
-
-    def _fire_realtime_artifact_scan(self, session: "ActiveSession") -> None:
-        """Schedule a fire-and-forget background task to scan conversation history for artifacts."""
-        if self._artifact_scanner is None:
-            return
-        history = list(session.conversation_history)
-        task = asyncio.create_task(self._realtime_artifact_scan(session.id, history))
-        self._pending_archive_tasks.add(task)
-        task.add_done_callback(self._pending_archive_tasks.discard)
-
-    async def _realtime_artifact_scan(self, session_id: str, conversation_history: list[dict]) -> None:
-        """Extract artifacts from in-memory conversation history. Never raises."""
-        assert self._artifact_scanner is not None
-        try:
-            new_count, updated_count = await self._artifact_scanner.scan_from_history(session_id, conversation_history)
-            if new_count > 0 or updated_count > 0:
-                await self._broadcast_artifact_list()
-        except Exception:
-            logger.exception("Real-time artifact scan failed for session %s", session_id)
-
-    def _fire_text_artifact_scan(self, session: "ActiveSession", texts: list[str]) -> None:
-        """Schedule a fire-and-forget background task to scan text strings for artifacts."""
-        if self._artifact_scanner is None or not self._settings or not self._settings.ARTIFACT_AUTO_SCAN:
-            return
-        task = asyncio.create_task(self._text_artifact_scan(session.id, texts))
-        self._pending_archive_tasks.add(task)
-        task.add_done_callback(self._pending_archive_tasks.discard)
-
-    async def _text_artifact_scan(self, session_id: str, texts: list[str]) -> None:
-        """Extract artifacts from raw text strings. Never raises."""
-        assert self._artifact_scanner is not None
-        try:
-            new_count, updated_count = await self._artifact_scanner.scan_texts(session_id, texts)
-            if new_count > 0 or updated_count > 0:
-                await self._broadcast_artifact_list()
-        except Exception:
-            logger.exception("Real-time text artifact scan failed for session %s", session_id)
-
-    async def _archive_session(self, session_id: str) -> None:
-        """Archive a completed session to the database and optionally extract artifacts. Never raises."""
-        assert self._db_session_factory is not None
-        try:
-            async with self._db_session_factory() as db:
-                await self._session_manager.archive_session(session_id, db)
-
-            # Extract artifacts from session messages if auto-scan is enabled
-            if self._artifact_scanner and self._settings and self._settings.ARTIFACT_AUTO_SCAN:
-                try:
-                    new_count = await self._artifact_scanner.scan(session_id)
-                    if new_count > 0:
-                        await self._broadcast_artifact_list()
-                except Exception:
-                    logger.exception("Failed to extract artifacts from session %s", session_id)
-        except Exception:
-            logger.exception("Failed to archive session %s", session_id)
-
-    async def _broadcast_artifact_list(self) -> None:
-        """Fetch all artifacts for this backend and broadcast to connected clients."""
-        if self._db_session_factory is None or self._settings is None:
-            return
-        async with self._db_session_factory() as db:
-            stmt = (
-                select(ArtifactModel)
-                .where(ArtifactModel.backend_id == self._settings.RCFLOW_BACKEND_ID)
-                .order_by(ArtifactModel.discovered_at.desc())
-            )
-            result = await db.execute(stmt)
-            artifacts = [
-                {
-                    "artifact_id": str(a.id),
-                    "file_path": a.file_path,
-                    "file_name": a.file_name,
-                    "file_extension": a.file_extension,
-                    "file_size": a.file_size,
-                    "mime_type": a.mime_type,
-                    "discovered_at": a.discovered_at.isoformat() if a.discovered_at else "",
-                    "modified_at": a.modified_at.isoformat() if a.modified_at else "",
-                    "session_id": str(a.session_id) if a.session_id else None,
-                }
-                for a in result.scalars()
-            ]
-        self._session_manager.broadcast_artifact_list(artifacts)
-
-    # --- Inactivity reaper ---
-
-    _INACTIVITY_TIMEOUT = timedelta(hours=6)
-    _REAPER_CHECK_INTERVAL = 600  # seconds (10 minutes)
-
-    async def run_inactivity_reaper(self) -> None:
-        """Periodically end sessions that have been inactive for too long."""
-        try:
-            while True:
-                await asyncio.sleep(self._REAPER_CHECK_INTERVAL)
-                await self._reap_inactive_sessions()
-        except asyncio.CancelledError:
-            pass
-
-    async def _reap_inactive_sessions(self) -> None:
-        """End all active sessions that exceed the inactivity timeout."""
-        now = datetime.now(UTC)
-        terminal = (SessionStatus.COMPLETED, SessionStatus.FAILED, SessionStatus.CANCELLED)
-        for session in self._session_manager.list_all_sessions():
-            if session.status in terminal:
-                continue
-            if session.status == SessionStatus.PAUSED:
-                continue  # Never reap paused sessions
-            if now - session.last_activity_at > self._INACTIVITY_TIMEOUT:
-                logger.info(
-                    "Auto-ending inactive session %s (last activity: %s)",
-                    session.id,
-                    session.last_activity_at.isoformat(),
-                )
-                with contextlib.suppress(ValueError, RuntimeError):
-                    await self.end_session(session.id)
