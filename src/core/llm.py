@@ -16,11 +16,11 @@ from src.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
 
-_OPENAI_REASONING_PREFIXES = ("o1", "o3", "o4")
+_OPENAI_REASONING_PREFIXES = ("o1", "o3", "o4", "gpt-5")
 
 
 def _is_openai_reasoning_model(model: str) -> bool:
-    """Return True if *model* is an OpenAI reasoning model (o1/o3/o4 series)."""
+    """Return True if *model* is an OpenAI reasoning model (o1/o3/o4/gpt-5 series)."""
     return any(model.startswith(p) for p in _OPENAI_REASONING_PREFIXES)
 
 
@@ -108,11 +108,42 @@ class LLMClient:
             raise ValueError(msg)
 
         self._summary_model = settings.SUMMARY_MODEL or self._model
+        self._title_model = settings.TITLE_MODEL or self._model
+        self._task_model = settings.TASK_MODEL or self._model
         self._settings = settings
         self._base_system_prompt = PromptBuilder().build(
             projects_dirs=", ".join(str(d) for d in settings.projects_dirs),
             os_name=platform.system(),
         )
+
+    @property
+    def provider(self) -> str:
+        """The active LLM provider name: ``'anthropic'``, ``'bedrock'``, or ``'openai'``."""
+        return self._provider
+
+    @property
+    def supports_vision(self) -> bool:
+        """True if the active model supports image/vision attachments.
+
+        Anthropic/Bedrock: claude-3.x series and claude-[variant]-4 family.
+        OpenAI: gpt-4o, gpt-4-turbo, gpt-4-vision, gpt-4.1+ (not reasoning models).
+        """
+        model = self._model.lower()
+        if self._provider in ("anthropic", "bedrock"):
+            # claude-3.x family and claude-[name]-4 family support vision
+            return bool(re.search(r"claude-3", model) or re.search(r"claude-\w+-4", model))
+        if self._provider == "openai":
+            # Reasoning models (o1/o3/o4/gpt-5) do not support vision
+            if any(model.startswith(p) for p in _OPENAI_REASONING_PREFIXES):
+                return False
+            # gpt-4o, gpt-4-turbo, gpt-4-vision, gpt-4.1+ support vision
+            return bool(
+                "gpt-4o" in model
+                or "gpt-4-turbo" in model
+                or "vision" in model
+                or re.search(r"gpt-4[._]\d", model)
+            )
+        return False
 
     @property
     def _system_prompt(self) -> str:
@@ -465,23 +496,25 @@ class LLMClient:
     # Utility methods (title generation, summarization)
     # ------------------------------------------------------------------
 
-    async def _anthropic_create(self, system: str, content: str, max_tokens: int) -> str:
+    async def _anthropic_create(self, system: str, content: str, max_tokens: int, *, model: str | None = None) -> str:
         """Make a non-streaming Anthropic/Bedrock call and return the text."""
         assert self._anthropic_client is not None
+        use_model = model or self._summary_model
         response = await self._anthropic_client.messages.create(
-            model=self._summary_model,
+            model=use_model,
             max_tokens=max_tokens,
             system=system,
             messages=[{"role": "user", "content": content}],
         )
         return response.content[0].text.strip()
 
-    async def _openai_create(self, system: str, content: str, max_tokens: int) -> str:
+    async def _openai_create(self, system: str, content: str, max_tokens: int, *, model: str | None = None) -> str:
         """Make a non-streaming OpenAI call and return the text."""
         assert self._openai_client is not None
-        token_key = "max_completion_tokens" if _is_openai_reasoning_model(self._summary_model) else "max_tokens"
+        use_model = model or self._summary_model
+        token_key = "max_completion_tokens" if _is_openai_reasoning_model(use_model) else "max_tokens"
         response = await self._openai_client.chat.completions.create(
-            model=self._summary_model,
+            model=use_model,
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": content},
@@ -504,9 +537,9 @@ class LLMClient:
             "no punctuation at the end, no special characters. Just a few words as a title."
         )
         if self._provider == "openai":
-            title = await self._openai_create(system, content, max_tokens=30)
+            title = await self._openai_create(system, content, max_tokens=30, model=self._title_model)
         else:
-            title = await self._anthropic_create(system, content, max_tokens=30)
+            title = await self._anthropic_create(system, content, max_tokens=30, model=self._title_model)
         # Safety net: strip markdown headers and take only the first line
         title = title.split("\n")[0].lstrip("#").strip()
         return title
@@ -604,19 +637,33 @@ class LLMClient:
             f"{existing_section}"
             "Return a JSON object with two keys:\n"
             '- "new_tasks": Array of new task objects, each with "title" (max 100 chars) '
-            'and "description" (1-3 sentences). Only create new tasks for work that does NOT '
-            "match any existing task.\n"
+            'and "description" (markdown-formatted string). The description must include:\n'
+            "  1. A brief summary paragraph (1-3 sentences) of what needs to be done.\n"
+            "  2. A **Review Checklist** section with a markdown checklist (using `- [ ]` items) "
+            "specifying what reviewers should verify when the task moves to review status. "
+            "Include items like code correctness, edge cases, tests, documentation, etc. "
+            "that are specific to the task.\n\n"
+            "Example description format:\n"
+            "```\n"
+            "Refactor the authentication middleware to support JWT refresh tokens.\n\n"
+            "## Review Checklist\n"
+            "- [ ] Refresh token generation and validation logic is correct\n"
+            "- [ ] Token expiry and rotation are handled properly\n"
+            "- [ ] Existing auth tests still pass\n"
+            "- [ ] New edge cases (expired refresh token, revoked token) are covered\n"
+            "```\n\n"
+            "Only create new tasks for work that does NOT match any existing task.\n"
             '- "attach_task_ids": Array of existing task IDs (from the list above) that this '
             "session relates to.\n\n"
             "If the conversation is just a question, greeting, or doesn't imply actionable work, "
             'return: {"new_tasks": [], "attach_task_ids": []}\n\n'
-            "Return ONLY valid JSON, no markdown, no explanation."
+            "Return ONLY valid JSON, no markdown fences around the JSON itself."
         )
         try:
             if self._provider == "openai":
-                raw = await self._openai_create(system, content, max_tokens=512)
+                raw = await self._openai_create(system, content, max_tokens=1024, model=self._task_model)
             else:
-                raw = await self._anthropic_create(system, content, max_tokens=512)
+                raw = await self._anthropic_create(system, content, max_tokens=1024, model=self._task_model)
             fallback = {"new_tasks": [], "attach_task_ids": []}
             return self._parse_llm_json(raw, fallback)
         except Exception:
@@ -640,16 +687,26 @@ class LLMClient:
             "1. Whether the task status should change. Valid statuses: todo, in_progress, review\n"
             "   - 'review' means the work appears complete and needs user review\n"
             "   - You CANNOT set status to 'done' -- only users can do that\n"
-            "2. Whether the description should be updated with new context\n\n"
+            "2. Whether the description should be updated with new context.\n\n"
+            "The description MUST be markdown-formatted and include:\n"
+            "- A brief summary paragraph of what was done or needs to be done.\n"
+            "- A **Review Checklist** section (using `- [ ]` items) listing what reviewers "
+            "should verify. This checklist should be specific to the work performed — e.g., "
+            "correctness of logic, edge cases handled, tests added/passing, documentation updated, "
+            "files changed, etc.\n\n"
+            "If the task is moving to 'review', ensure the review checklist reflects the actual "
+            "work completed in this session so reviewers know exactly what to check.\n\n"
+            "If the existing description already has a review checklist, update it to reflect "
+            "the current state of the work rather than duplicating items.\n\n"
             'Return JSON with "status" and "description" keys.\n'
-            "Return ONLY valid JSON, no markdown."
+            "Return ONLY valid JSON, no markdown fences around the JSON itself."
         )
         truncated = session_result[:2000] if session_result else ""
         try:
             if self._provider == "openai":
-                raw = await self._openai_create(system, truncated, max_tokens=256)
+                raw = await self._openai_create(system, truncated, max_tokens=512, model=self._task_model)
             else:
-                raw = await self._anthropic_create(system, truncated, max_tokens=256)
+                raw = await self._anthropic_create(system, truncated, max_tokens=512, model=self._task_model)
             fallback = {"status": current_status, "description": task_description or ""}
             result = self._parse_llm_json(raw, fallback)
             # Ensure AI never sets done
