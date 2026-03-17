@@ -78,7 +78,7 @@ Key settings:
 | `RCFLOW_API_KEY` | API key for client authentication | *(required)* |
 | `LLM_PROVIDER` | `anthropic` or `bedrock` | `anthropic` |
 | `ANTHROPIC_API_KEY` | Anthropic API key (when using direct API) | |
-| `ANTHROPIC_MODEL` | Model ID | `claude-sonnet-4-20250514` |
+| `ANTHROPIC_MODEL` | Model ID | `claude-sonnet-4-6` |
 | `DATABASE_URL` | SQLAlchemy async database URL | `sqlite+aiosqlite:///./data/rcflow.db` |
 | `SSL_CERTFILE` / `SSL_KEYFILE` | TLS certificate paths (enables WSS) | |
 | `STT_PROVIDER` | Speech-to-text provider | `wispr_flow` |
