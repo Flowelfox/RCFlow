@@ -114,6 +114,7 @@ class WorkerConnection extends ChangeNotifier {
 
       ws.listSessions();
       ws.listTasks();
+      ws.listLinearIssues();
       ws.requestArtifacts();
       _fetchServerInfo();
       _fetchTokenLimits();
@@ -407,6 +408,7 @@ class WorkerConnection extends ChangeNotifier {
 
         ws.listSessions();
         ws.listTasks();
+        ws.listLinearIssues();
         _fetchServerInfo();
         _fetchTokenLimits();
 

@@ -1064,6 +1064,144 @@ class WebSocketService {
   }
 
   // ---------------------------------------------------------------------------
+  // Linear integration
+  // ---------------------------------------------------------------------------
+
+  void listLinearIssues() {
+    if (_outputChannel == null) return;
+    _outputChannel!.sink.add(jsonEncode({'type': 'list_linear_issues'}));
+  }
+
+  Future<Map<String, dynamic>> syncLinearIssues() async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url = _serverUrl!.http('/api/integrations/linear/sync');
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.postUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      request.headers.contentType = io.ContentType.json;
+      request.add(utf8.encode('{}'));
+      final response = await request.close();
+      final body =
+          await response.transform(const io.SystemEncoding().decoder).join();
+      if (response.statusCode != 200) {
+        throw Exception('Server returned ${response.statusCode}: $body');
+      }
+      return jsonDecode(body) as Map<String, dynamic>;
+    } finally {
+      client.close();
+    }
+  }
+
+  Future<Map<String, dynamic>> createLinearIssue({
+    required String title,
+    String? description,
+    int priority = 0,
+  }) async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url = _serverUrl!.http('/api/integrations/linear/issues');
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.postUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      request.headers.contentType = io.ContentType.json;
+      request.add(utf8.encode(jsonEncode({
+        'title': title,
+        if (description != null) 'description': description,
+        'priority': priority,
+      })));
+      final response = await request.close();
+      final body =
+          await response.transform(const io.SystemEncoding().decoder).join();
+      if (response.statusCode != 201) {
+        throw Exception('Server returned ${response.statusCode}: $body');
+      }
+      return jsonDecode(body) as Map<String, dynamic>;
+    } finally {
+      client.close();
+    }
+  }
+
+  Future<Map<String, dynamic>> updateLinearIssue(
+    String issueId, {
+    String? title,
+    String? description,
+    String? stateId,
+    int? priority,
+  }) async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url = _serverUrl!.http('/api/integrations/linear/issues/$issueId');
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.openUrl('PATCH', url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      request.headers.contentType = io.ContentType.json;
+      request.add(utf8.encode(jsonEncode({
+        if (title != null) 'title': title,
+        if (description != null) 'description': description,
+        if (stateId != null) 'state_id': stateId,
+        if (priority != null) 'priority': priority,
+      })));
+      final response = await request.close();
+      final body =
+          await response.transform(const io.SystemEncoding().decoder).join();
+      if (response.statusCode != 200) {
+        throw Exception('Server returned ${response.statusCode}: $body');
+      }
+      return jsonDecode(body) as Map<String, dynamic>;
+    } finally {
+      client.close();
+    }
+  }
+
+  Future<Map<String, dynamic>> linkLinearIssueToTask(
+    String issueId,
+    String taskId,
+  ) async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url =
+        _serverUrl!.http('/api/integrations/linear/issues/$issueId/link');
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.postUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      request.headers.contentType = io.ContentType.json;
+      request.add(utf8.encode(jsonEncode({'task_id': taskId})));
+      final response = await request.close();
+      final body =
+          await response.transform(const io.SystemEncoding().decoder).join();
+      if (response.statusCode != 200) {
+        throw Exception('Server returned ${response.statusCode}: $body');
+      }
+      return jsonDecode(body) as Map<String, dynamic>;
+    } finally {
+      client.close();
+    }
+  }
+
+  Future<Map<String, dynamic>> unlinkLinearIssueFromTask(
+    String issueId,
+  ) async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url =
+        _serverUrl!.http('/api/integrations/linear/issues/$issueId/link');
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.deleteUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      final response = await request.close();
+      final body =
+          await response.transform(const io.SystemEncoding().decoder).join();
+      if (response.statusCode != 200) {
+        throw Exception('Server returned ${response.statusCode}: $body');
+      }
+      return jsonDecode(body) as Map<String, dynamic>;
+    } finally {
+      client.close();
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // Artifact CRUD
   // ---------------------------------------------------------------------------
 

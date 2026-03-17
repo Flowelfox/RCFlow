@@ -198,6 +198,11 @@ class Settings(BaseSettings):
     ARTIFACT_AUTO_SCAN: bool = True
     ARTIFACT_MAX_FILE_SIZE: int = 5242880  # 5MB in bytes
 
+    # Linear integration
+    LINEAR_API_KEY: str = ""
+    LINEAR_TEAM_ID: str = ""
+    LINEAR_SYNC_ON_STARTUP: bool = False
+
     # Logging
     LOG_LEVEL: str = "INFO"
 
@@ -528,6 +533,34 @@ CONFIG_OPTIONS: list[dict[str, Any]] = [
         "type": "number",
         "group": "Artifacts",
         "description": "Maximum file size to track as artifact (5242880 = 5MB)",
+        "required": False,
+        "restart_required": False,
+    },
+    # --- Linear ---
+    {
+        "key": "LINEAR_API_KEY",
+        "label": "Linear API Key",
+        "type": "secret",
+        "group": "Linear",
+        "description": "Personal API token for Linear (create at linear.app → Settings → API)",
+        "required": False,
+        "restart_required": False,
+    },
+    {
+        "key": "LINEAR_TEAM_ID",
+        "label": "Linear Team ID",
+        "type": "string",
+        "group": "Linear",
+        "description": "ID of the Linear team to sync issues from (find in team settings URL)",
+        "required": False,
+        "restart_required": False,
+    },
+    {
+        "key": "LINEAR_SYNC_ON_STARTUP",
+        "label": "Sync Issues on Startup",
+        "type": "boolean",
+        "group": "Linear",
+        "description": "Automatically sync Linear issues when the server starts",
         "required": False,
         "restart_required": False,
     },

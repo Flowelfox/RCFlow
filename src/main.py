@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from sqlalchemy import select
 
 from src.api.http import router as http_router
+from src.api.integrations.linear import router as linear_router
 from src.core.attachment_store import AttachmentStore
 from src.api.ws.input_audio import router as input_audio_router
 from src.api.ws.input_text import router as input_text_router
@@ -146,6 +147,25 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # Start tool update checker
     update_task = asyncio.create_task(tool_manager.run_update_loop())
 
+    # Linear startup sync (non-blocking background task)
+    if settings.LINEAR_SYNC_ON_STARTUP and settings.LINEAR_API_KEY and settings.LINEAR_TEAM_ID:
+        from src.api.integrations.linear import _upsert_issues, _issue_to_dict  # noqa: PLC0415
+        from src.services.linear_service import LinearService as _LinearService, LinearServiceError as _LinearServiceError  # noqa: PLC0415
+        async def _run_startup_sync() -> None:
+            try:
+                async with _LinearService(settings.LINEAR_API_KEY) as svc:
+                    parsed = await svc.fetch_issues(settings.LINEAR_TEAM_ID)
+                async with db_session_factory() as db:
+                    upserted = await _upsert_issues(db, settings.RCFLOW_BACKEND_ID, parsed)
+                for row in upserted:
+                    session_manager.broadcast_linear_issue_update(_issue_to_dict(row))
+                logger.info("Linear startup sync: %d issues", len(upserted))
+            except _LinearServiceError as exc:
+                logger.warning("Linear startup sync failed: %s", exc)
+            except Exception as exc:
+                logger.warning("Linear startup sync unexpected error: %s", exc)
+        asyncio.create_task(_run_startup_sync())
+
     yield
 
     # Shutdown
@@ -178,6 +198,7 @@ def create_app() -> FastAPI:
     )
 
     app.include_router(http_router)
+    app.include_router(linear_router)
     app.include_router(input_text_router)
     app.include_router(input_audio_router)
     app.include_router(output_text_router)

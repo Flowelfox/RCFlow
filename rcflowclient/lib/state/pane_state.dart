@@ -24,12 +24,14 @@ class PaneNavEntry {
   final String? sessionId;
   final String? taskId;
   final String? artifactId;
+  final String? linearIssueId;
 
   const PaneNavEntry({
     required this.paneType,
     this.sessionId,
     this.taskId,
     this.artifactId,
+    this.linearIssueId,
   });
 }
 
@@ -90,6 +92,20 @@ class PaneState extends ChangeNotifier {
 
   void clearArtifactId() {
     _artifactId = null;
+    notifyListeners();
+  }
+
+  // Linear issue pane state (when pane shows a Linear issue detail view)
+  String? _linearIssueId;
+  String? get linearIssueId => _linearIssueId;
+
+  void setLinearIssueId(String? linearIssueId) {
+    _linearIssueId = linearIssueId;
+    notifyListeners();
+  }
+
+  void clearLinearIssueId() {
+    _linearIssueId = null;
     notifyListeners();
   }
 

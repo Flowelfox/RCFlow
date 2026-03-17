@@ -5,6 +5,7 @@ import 'package:flutter/widgets.dart';
 import 'dart:math';
 
 import '../models/artifact_info.dart';
+import '../models/linear_issue_info.dart';
 import '../models/session_info.dart';
 import '../models/split_tree.dart';
 import '../models/task_info.dart';
@@ -469,6 +470,114 @@ class AppState extends ChangeNotifier implements PaneHost {
     if (_paneTypes[paneId] != PaneType.artifact) return;
     _paneTypes.remove(paneId);
     _panes[paneId]?.clearArtifactId();
+    notifyListeners();
+  }
+
+  // --- Linear issue tracking ---
+  final Map<String, LinearIssueInfo> _linearIssues = {};
+
+  /// All Linear issues sorted by updatedAt descending.
+  List<LinearIssueInfo> get linearIssues {
+    final all = _linearIssues.values.toList();
+    all.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+    return all;
+  }
+
+  /// Linear issues grouped by workerId (for sidebar display).
+  Map<String, List<LinearIssueInfo>> get linearIssuesByWorker {
+    final map = <String, List<LinearIssueInfo>>{};
+    for (final config in _workerConfigs) {
+      map[config.id] = [];
+    }
+    for (final i in _linearIssues.values) {
+      map.putIfAbsent(i.workerId, () => []).add(i);
+    }
+    for (final list in map.values) {
+      list.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+    }
+    return map;
+  }
+
+  LinearIssueInfo? getLinearIssue(String issueId) => _linearIssues[issueId];
+
+  void _handleLinearIssueList(List<dynamic> list, String workerId) {
+    _linearIssues.removeWhere((_, i) => i.workerId == workerId);
+    final workerName = _workerConfigs
+        .firstWhere((w) => w.id == workerId, orElse: () => _workerConfigs.first)
+        .name;
+    for (final raw in list) {
+      final issue = LinearIssueInfo.fromJson(
+        raw as Map<String, dynamic>,
+        workerId: workerId,
+        workerName: workerName,
+      );
+      _linearIssues[issue.id] = issue;
+    }
+    notifyListeners();
+  }
+
+  void _handleLinearIssueUpdate(Map<String, dynamic> msg, String workerId) {
+    final issueId = msg['id'] as String?;
+    if (issueId == null) return;
+    final workerName = _workerConfigs
+        .firstWhere((w) => w.id == workerId, orElse: () => _workerConfigs.first)
+        .name;
+    final updated = LinearIssueInfo.fromJson(msg, workerId: workerId, workerName: workerName);
+    _linearIssues[issueId] = updated;
+    notifyListeners();
+  }
+
+  void _handleLinearIssueDeleted(Map<String, dynamic> msg) {
+    final issueId = msg['id'] as String?;
+    if (issueId == null) return;
+    _linearIssues.remove(issueId);
+
+    // Close any pane currently viewing this issue
+    for (final entry in _panes.entries.toList()) {
+      if (_paneTypes[entry.key] == PaneType.linearIssue &&
+          entry.value.linearIssueId == issueId) {
+        closeLinearIssueView(entry.key);
+      }
+    }
+    notifyListeners();
+  }
+
+  /// Show a Linear issue in the active pane (converting it in-place).
+  void openLinearIssueInPane(String issueId) {
+    if (_splitRoot != null && _panes.containsKey(_activePaneId)) {
+      activePane.pushNavHistory(_currentNavEntry(_activePaneId));
+
+      if (_paneTypes[_activePaneId] == PaneType.terminal) {
+        for (final info in _terminalSessions.values) {
+          if (info.paneId == _activePaneId) {
+            info.paneId = null;
+            break;
+          }
+        }
+      }
+      _paneTypes[_activePaneId] = PaneType.linearIssue;
+      activePane.setLinearIssueId(issueId);
+      notifyListeners();
+      return;
+    }
+
+    // No panes — create one
+    final newId = 'pane_${_nextPaneId++}';
+    final newPane = PaneState(paneId: newId, host: this)
+      ..addListener(_onPaneChanged);
+    _panes[newId] = newPane;
+    _paneTypes[newId] = PaneType.linearIssue;
+    newPane.setLinearIssueId(issueId);
+    _splitRoot = PaneLeaf(newId);
+    _activePaneId = newId;
+    notifyListeners();
+  }
+
+  /// Close a Linear issue pane (convert to chat).
+  void closeLinearIssueView(String paneId) {
+    if (_paneTypes[paneId] != PaneType.linearIssue) return;
+    _paneTypes.remove(paneId);
+    _panes[paneId]?.clearLinearIssueId();
     notifyListeners();
   }
 
@@ -1121,6 +1230,21 @@ class AppState extends ChangeNotifier implements PaneHost {
       return;
     }
 
+    // Linear issue pane: reopen if the issue still exists
+    if (record.paneType == PaneType.linearIssue && record.linearIssueId != null) {
+      if (_linearIssues.containsKey(record.linearIssueId)) {
+        if (hasNoPanes) {
+          openLinearIssueInPane(record.linearIssueId!);
+        } else {
+          splitPane(_activePaneId, SplitAxis.horizontal);
+          openLinearIssueInPane(record.linearIssueId!);
+        }
+        return;
+      }
+      reopenLastClosedPane();
+      return;
+    }
+
     // Chat pane: reopen with the session if it still exists
     if (record.sessionId != null) {
       if (hasNoPanes) {
@@ -1493,6 +1617,21 @@ class AppState extends ChangeNotifier implements PaneHost {
       return;
     }
 
+    // Linear issue messages — handled here, not forwarded to panes
+    if (type == 'linear_issue_list') {
+      final list = msg['issues'] as List<dynamic>? ?? [];
+      _handleLinearIssueList(list, workerId);
+      return;
+    }
+    if (type == 'linear_issue_update') {
+      _handleLinearIssueUpdate(msg, workerId);
+      return;
+    }
+    if (type == 'linear_issue_deleted') {
+      _handleLinearIssueDeleted(msg);
+      return;
+    }
+
     final sessionId = msg['session_id'] as String?;
     final muted = sessionId != null && _soundMutedSessions.contains(sessionId);
     if (!muted) {
@@ -1652,6 +1791,7 @@ class AppState extends ChangeNotifier implements PaneHost {
         _paneTypes.remove(paneId);
         pane.clearTaskId();
         pane.clearArtifactId();
+        pane.clearLinearIssueId();
         if (entry.sessionId != null) {
           pane.switchSession(entry.sessionId!, recordHistory: false);
         } else {
@@ -1664,7 +1804,13 @@ class AppState extends ChangeNotifier implements PaneHost {
       case PaneType.artifact:
         _paneTypes[paneId] = PaneType.artifact;
         pane.clearTaskId();
+        pane.clearLinearIssueId();
         pane.setArtifactId(entry.artifactId);
+      case PaneType.linearIssue:
+        _paneTypes[paneId] = PaneType.linearIssue;
+        pane.clearTaskId();
+        pane.clearArtifactId();
+        pane.setLinearIssueId(entry.linearIssueId);
       case PaneType.terminal:
         // Terminal back-navigation is not supported (terminals are detached)
         _paneTypes.remove(paneId);
@@ -1683,6 +1829,7 @@ class AppState extends ChangeNotifier implements PaneHost {
       sessionId: pane?.sessionId,
       taskId: pane?.taskId,
       artifactId: pane?.artifactId,
+      linearIssueId: pane?.linearIssueId,
     );
   }
 
