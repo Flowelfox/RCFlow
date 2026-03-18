@@ -173,7 +173,7 @@ class _LinearIssuePaneHeader extends StatelessWidget {
 // Content
 // ---------------------------------------------------------------------------
 
-class _LinearIssueContent extends StatelessWidget {
+class _LinearIssueContent extends StatefulWidget {
   final LinearIssueInfo issue;
   final AppState appState;
 
@@ -181,6 +181,13 @@ class _LinearIssueContent extends StatelessWidget {
     required this.issue,
     required this.appState,
   });
+
+  @override
+  State<_LinearIssueContent> createState() => _LinearIssueContentState();
+}
+
+class _LinearIssueContentState extends State<_LinearIssueContent> {
+  bool _creatingTask = false;
 
   static const _priorityColors = {
     0: Color(0xFF6B7280),
@@ -206,6 +213,9 @@ class _LinearIssueContent extends StatelessWidget {
     'completed': Color(0xFF10B981),
     'cancelled': Color(0xFF9CA3AF),
   };
+
+  LinearIssueInfo get issue => widget.issue;
+  AppState get appState => widget.appState;
 
   @override
   Widget build(BuildContext context) {
@@ -356,12 +366,24 @@ class _LinearIssueContent extends StatelessWidget {
               const SizedBox(width: 8),
               if (issue.taskId == null)
                 OutlinedButton.icon(
-                  onPressed: () => _createLinkedTask(context),
-                  icon: Icon(Icons.add_task,
-                      size: 16, color: context.appColors.accent),
-                  label: Text('Link to Task',
-                      style: TextStyle(
-                          color: context.appColors.accent, fontSize: 13)),
+                  onPressed:
+                      _creatingTask ? null : () => _createTaskFromIssue(context),
+                  icon: _creatingTask
+                      ? SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: context.appColors.accent,
+                          ),
+                        )
+                      : Icon(Icons.add_task,
+                          size: 16, color: context.appColors.accent),
+                  label: Text(
+                    _creatingTask ? 'Creating…' : 'Create Task',
+                    style: TextStyle(
+                        color: context.appColors.accent, fontSize: 13),
+                  ),
                   style: OutlinedButton.styleFrom(
                     side: BorderSide(
                         color: context.appColors.accent.withAlpha(120)),
@@ -406,16 +428,29 @@ class _LinearIssueContent extends StatelessWidget {
     );
   }
 
-  void _createLinkedTask(BuildContext context) {
-    // TODO: Show a dialog to pick or create a task to link; for now show a
-    // simple snackbar to guide the user.
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text(
-            'Open a task pane and use "Link Issue" from the task detail to connect them.'),
-        duration: Duration(seconds: 4),
-      ),
-    );
+  Future<void> _createTaskFromIssue(BuildContext context) async {
+    final worker = appState.getWorker(issue.workerId);
+    if (worker == null || !worker.isConnected) {
+      if (context.mounted) {
+        appState.addSystemMessage(
+            'No connected worker to create task on.', isError: true);
+      }
+      return;
+    }
+
+    setState(() => _creatingTask = true);
+    try {
+      await worker.ws.createTaskFromLinearIssue(issue.id);
+      // The WS broadcast from the server will update AppState automatically,
+      // so no manual state update is needed here.
+    } catch (e) {
+      if (context.mounted) {
+        appState.addSystemMessage(
+            'Failed to create task from issue: $e', isError: true);
+      }
+    } finally {
+      if (mounted) setState(() => _creatingTask = false);
+    }
   }
 
   void _unlinkTask(BuildContext context) async {

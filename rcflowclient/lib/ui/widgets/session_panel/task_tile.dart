@@ -39,6 +39,7 @@ class TaskTile extends StatelessWidget {
     final statusIcon = _statusIcons[task.status] ?? Icons.help_outline;
     final statusColor = _statusColors[task.status] ?? context.appColors.textMuted;
     final sessionCount = task.sessions.length;
+    final issueCount = state.linearIssuesForTask(task.taskId).length;
 
     final tile = GestureDetector(
       onSecondaryTapUp: (details) =>
@@ -88,22 +89,58 @@ class TaskTile extends StatelessWidget {
             style: TextStyle(
                 color: context.appColors.textMuted, fontSize: 10),
           ),
-          trailing: sessionCount > 0
-              ? Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: context.appColors.accent.withAlpha(30),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(
-                    '$sessionCount',
-                    style: TextStyle(
-                      color: context.appColors.accentLight,
-                      fontSize: 10,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
+          trailing: (sessionCount > 0 || issueCount > 0)
+              ? Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (issueCount > 0)
+                      Tooltip(
+                        message: '$issueCount linked issue${issueCount == 1 ? '' : 's'}',
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 5, vertical: 2),
+                          margin: const EdgeInsets.only(right: 4),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF8B5CF6).withAlpha(30),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.link_rounded,
+                                  size: 9,
+                                  color: const Color(0xFF8B5CF6)),
+                              const SizedBox(width: 2),
+                              Text(
+                                '$issueCount',
+                                style: const TextStyle(
+                                  color: Color(0xFF8B5CF6),
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    if (sessionCount > 0)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: context.appColors.accent.withAlpha(30),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          '$sessionCount',
+                          style: TextStyle(
+                            color: context.appColors.accentLight,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                  ],
                 )
               : null,
           dense: true,
