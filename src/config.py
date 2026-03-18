@@ -203,6 +203,9 @@ class Settings(BaseSettings):
     LINEAR_TEAM_ID: str = ""
     LINEAR_SYNC_ON_STARTUP: bool = False
 
+    # Telemetry
+    TELEMETRY_RETENTION_DAYS: int = 90
+
     # Logging
     LOG_LEVEL: str = "INFO"
 
@@ -548,10 +551,10 @@ CONFIG_OPTIONS: list[dict[str, Any]] = [
     },
     {
         "key": "LINEAR_TEAM_ID",
-        "label": "Linear Team ID",
+        "label": "Linear Team ID (optional)",
         "type": "string",
         "group": "Linear",
-        "description": "ID of the Linear team to sync issues from (find in team settings URL)",
+        "description": "ID of the Linear team to sync issues from. Leave blank to sync from all accessible teams.",
         "required": False,
         "restart_required": False,
     },

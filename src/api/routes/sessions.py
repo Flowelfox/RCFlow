@@ -54,6 +54,7 @@ async def list_sessions(
                 "tool_input_tokens": s.get("tool_input_tokens", 0),
                 "tool_output_tokens": s.get("tool_output_tokens", 0),
                 "tool_cost_usd": s.get("tool_cost_usd", 0.0),
+                "main_project_path": s.get("main_project_path"),
             }
             for s in all_sessions
         ]
@@ -73,6 +74,7 @@ async def list_sessions(
                 "tool_input_tokens": s.tool_input_tokens,
                 "tool_output_tokens": s.tool_output_tokens,
                 "tool_cost_usd": s.tool_cost_usd,
+                "main_project_path": s.main_project_path,
             }
             for s in session_manager.list_all_sessions()
         ]

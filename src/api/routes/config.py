@@ -50,7 +50,10 @@ async def server_info(request: Request) -> dict[str, Any]:
         "hostname": platform.node(),
         "backend_id": settings.RCFLOW_BACKEND_ID,
         "active_sessions": len(session_manager.list_active_sessions()),
-        "supports_attachments": llm_client.supports_vision,
+        # Text files are always accepted, so the attachment button is always
+        # available.  Fine-grained per-type support lives in attachment_capabilities.
+        "supports_attachments": True,
+        "attachment_capabilities": llm_client.attachment_capabilities,
     }
 
 
