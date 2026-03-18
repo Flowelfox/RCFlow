@@ -147,6 +147,59 @@ query GetIssue($id: String!) {
 }
 """
 
+_TEAMS_QUERY = """
+query Teams {
+  teams {
+    nodes {
+      id
+      name
+    }
+  }
+}
+"""
+
+_ALL_ISSUES_QUERY = """
+query ListAllIssues($after: String) {
+  issues(
+    first: 50
+    after: $after
+    orderBy: updatedAt
+  ) {
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+    nodes {
+      id
+      identifier
+      title
+      description
+      priority
+      url
+      createdAt
+      updatedAt
+      state {
+        name
+        type
+      }
+      assignee {
+        id
+        name
+      }
+      team {
+        id
+        name
+      }
+      labels {
+        nodes {
+          name
+        }
+      }
+    }
+  }
+}
+"""
+
 
 def _parse_issue(node: dict[str, Any]) -> dict[str, Any]:
     """Convert a raw GraphQL issue node to a normalised dict."""
@@ -234,6 +287,41 @@ class LinearService:
             raise LinearServiceError(f"Linear GraphQL error: {msgs}")
 
         return body.get("data", {})
+
+    async def fetch_teams(self) -> list[dict[str, str]]:
+        """Fetch all teams accessible to the API key.
+
+        Returns a list of dicts with ``id`` and ``name`` keys.
+        """
+        data = await self._gql(_TEAMS_QUERY)
+        nodes = data.get("teams", {}).get("nodes", [])
+        return [{"id": t["id"], "name": t["name"]} for t in nodes]
+
+    async def fetch_all_issues(self) -> list[dict[str, Any]]:
+        """Fetch all issues across all accessible teams, paginating through all pages.
+
+        Returns a list of normalised issue dicts ready for upsert into the DB.
+        """
+        issues: list[dict[str, Any]] = []
+        cursor: str | None = None
+
+        while True:
+            variables: dict[str, Any] = {}
+            if cursor:
+                variables["after"] = cursor
+
+            data = await self._gql(_ALL_ISSUES_QUERY, variables or None)
+            page = data.get("issues", {})
+            nodes = page.get("nodes", [])
+            issues.extend(_parse_issue(n) for n in nodes)
+
+            page_info = page.get("pageInfo", {})
+            if not page_info.get("hasNextPage"):
+                break
+            cursor = page_info.get("endCursor")
+
+        logger.info("Fetched %d issues from all teams", len(issues))
+        return issues
 
     async def fetch_issues(self, team_id: str) -> list[dict[str, Any]]:
         """Fetch all issues for a team, paginating through all pages.

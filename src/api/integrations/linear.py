@@ -4,6 +4,8 @@ All endpoints are under /api/integrations/linear/ and require X-API-Key authenti
 
 Endpoints
 ---------
+POST   /api/integrations/linear/test                Test an API key and return accessible teams
+GET    /api/integrations/linear/teams               List teams accessible via the configured API key
 GET    /api/integrations/linear/issues              List cached issues
 GET    /api/integrations/linear/issues/{id}         Single cached issue
 POST   /api/integrations/linear/sync                Trigger full re-sync from Linear
@@ -151,10 +153,15 @@ async def _upsert_issues(
 # Request/response models
 # ---------------------------------------------------------------------------
 
+class TestLinearConnectionRequest(BaseModel):
+    api_key: str
+
+
 class CreateIssueRequest(BaseModel):
     title: str
     description: str | None = None
     priority: int = 0
+    team_id: str | None = None  # Required when LINEAR_TEAM_ID is not configured
 
 
 class UpdateIssueRequest(BaseModel):
@@ -171,6 +178,52 @@ class LinkTaskRequest(BaseModel):
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/test",
+    summary="Test a Linear API key",
+    description=(
+        "Validates the provided Linear API key by connecting to the Linear API "
+        "and returning the list of accessible teams. Does not require an existing "
+        "key to be configured — this is used during initial setup."
+    ),
+)
+async def test_linear_connection(body: TestLinearConnectionRequest) -> dict[str, Any]:
+    """Test a Linear API key and return accessible teams.
+
+    This endpoint does not require ``LINEAR_API_KEY`` to be set in settings.
+    The key is taken directly from the request body for validation purposes.
+    """
+    svc = LinearService(api_key=body.api_key)
+    try:
+        teams = await svc.fetch_teams()
+    except LinearServiceError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    finally:
+        await svc.aclose()
+    return {"ok": True, "teams": teams}
+
+
+@router.get(
+    "/teams",
+    summary="List Linear teams",
+    description=(
+        "Returns all Linear teams accessible via the configured API key. "
+        "Requires LINEAR_API_KEY to be set."
+    ),
+)
+async def list_linear_teams(request: Request) -> dict[str, Any]:
+    """List all teams accessible via the configured Linear API key."""
+    svc = _get_linear_service(request)
+    try:
+        teams = await svc.fetch_teams()
+    except LinearServiceError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    finally:
+        await svc.aclose()
+    return {"teams": teams}
+
 
 @router.get(
     "/issues",
@@ -244,27 +297,30 @@ async def get_linear_issue(issue_id: str, request: Request) -> dict[str, Any]:
     "/sync",
     summary="Sync Linear issues",
     description=(
-        "Fetches all issues from the configured Linear team and updates the local cache. "
-        "Requires LINEAR_API_KEY and LINEAR_TEAM_ID to be set."
+        "Fetches issues from Linear and updates the local cache. "
+        "If LINEAR_TEAM_ID is set, syncs only that team. "
+        "If LINEAR_TEAM_ID is blank, syncs all teams accessible via the API key. "
+        "Requires LINEAR_API_KEY to be set."
     ),
 )
 async def sync_linear_issues(request: Request) -> dict[str, Any]:
-    """Trigger a full sync of Linear issues from the API."""
+    """Trigger a full sync of Linear issues from the API.
+
+    When ``LINEAR_TEAM_ID`` is configured only that team is synced.
+    When it is blank all issues accessible via the API key are synced.
+    """
     settings = request.app.state.settings
     session_manager = request.app.state.session_manager
     db_factory = request.app.state.db_session_factory
-
-    if not settings.LINEAR_TEAM_ID:
-        raise HTTPException(
-            status_code=422,
-            detail="LINEAR_TEAM_ID is not configured. Set it in Settings → Linear.",
-        )
 
     svc = _get_linear_service(request)
     errors: list[str] = []
 
     try:
-        parsed = await svc.fetch_issues(settings.LINEAR_TEAM_ID)
+        if settings.LINEAR_TEAM_ID:
+            parsed = await svc.fetch_issues(settings.LINEAR_TEAM_ID)
+        else:
+            parsed = await svc.fetch_all_issues()
     except LinearServiceError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     finally:
@@ -285,7 +341,11 @@ async def sync_linear_issues(request: Request) -> dict[str, Any]:
     "/issues",
     status_code=201,
     summary="Create a Linear issue",
-    description="Creates a new issue in Linear and caches it locally.",
+    description=(
+        "Creates a new issue in Linear and caches it locally. "
+        "Uses LINEAR_TEAM_ID from settings if set; otherwise ``team_id`` must be "
+        "provided in the request body."
+    ),
 )
 async def create_linear_issue(
     body: CreateIssueRequest,
@@ -296,16 +356,20 @@ async def create_linear_issue(
     session_manager = request.app.state.session_manager
     db_factory = request.app.state.db_session_factory
 
-    if not settings.LINEAR_TEAM_ID:
+    team_id = settings.LINEAR_TEAM_ID or body.team_id
+    if not team_id:
         raise HTTPException(
             status_code=422,
-            detail="LINEAR_TEAM_ID is not configured.",
+            detail=(
+                "team_id is required when LINEAR_TEAM_ID is not configured. "
+                "Pass team_id in the request body."
+            ),
         )
 
     svc = _get_linear_service(request)
     try:
         parsed = await svc.create_issue(
-            team_id=settings.LINEAR_TEAM_ID,
+            team_id=team_id,
             title=body.title,
             description=body.description,
             priority=body.priority,
@@ -422,6 +486,90 @@ async def link_issue_to_task(
     result = _issue_to_dict(issue)
     session_manager.broadcast_linear_issue_update(result)
     return result
+
+
+@router.post(
+    "/issues/{issue_id}/create-task",
+    status_code=201,
+    summary="Create an RCFlow task from a Linear issue",
+    description=(
+        "Creates a new RCFlow task populated with the Linear issue's title and description, "
+        "then atomically links the issue to the newly created task. "
+        "Returns 409 if the issue is already linked to a task."
+    ),
+)
+async def create_task_from_linear_issue(
+    issue_id: str,
+    request: Request,
+) -> dict[str, Any]:
+    """Create an RCFlow task from a cached Linear issue and link them atomically.
+
+    The new task is created with ``source='linear'``, status ``'todo'``, and its
+    title/description copied from the issue. The issue's ``task_id`` is set to the
+    new task's ID in the same database transaction. Both updates are broadcast to
+    all connected WebSocket clients.
+    """
+    settings = request.app.state.settings
+    session_manager = request.app.state.session_manager
+    db_factory = request.app.state.db_session_factory
+
+    try:
+        uid = uuid.UUID(issue_id)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid UUID format")
+
+    now = datetime.now(UTC)
+
+    async with db_factory() as db:
+        issue_stmt = select(LinearIssueModel).where(
+            LinearIssueModel.id == uid,
+            LinearIssueModel.backend_id == settings.RCFLOW_BACKEND_ID,
+        )
+        issue = (await db.execute(issue_stmt)).scalar_one_or_none()
+
+        if issue is None:
+            raise HTTPException(status_code=404, detail="Linear issue not found")
+
+        if issue.task_id is not None:
+            raise HTTPException(
+                status_code=409,
+                detail="This Linear issue is already linked to a task.",
+            )
+
+        task = TaskModel(
+            id=uuid.uuid4(),
+            backend_id=settings.RCFLOW_BACKEND_ID,
+            title=issue.title,
+            description=issue.description,
+            status="todo",
+            source="linear",
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(task)
+        await db.flush()
+
+        issue.task_id = task.id
+        await db.commit()
+        await db.refresh(task)
+        await db.refresh(issue)
+
+    task_data: dict[str, Any] = {
+        "task_id": str(task.id),
+        "title": task.title,
+        "description": task.description,
+        "status": task.status,
+        "source": task.source,
+        "created_at": task.created_at.isoformat() if task.created_at else "",
+        "updated_at": task.updated_at.isoformat() if task.updated_at else "",
+        "sessions": [],
+    }
+    issue_data = _issue_to_dict(issue)
+
+    session_manager.broadcast_task_update(task_data)
+    session_manager.broadcast_linear_issue_update(issue_data)
+
+    return {"task": task_data, "issue": issue_data}
 
 
 @router.delete(
