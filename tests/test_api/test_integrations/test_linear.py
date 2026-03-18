@@ -3,6 +3,12 @@
 Endpoints under /api/integrations/linear/ are tested here.
 The DB session factory is mocked; no real database is required.
 LinearService is mocked to avoid real HTTP calls to Linear's API.
+
+New in this revision:
+- POST /api/integrations/linear/test  — validate API key, return teams
+- GET  /api/integrations/linear/teams — list teams for configured key
+- POST /sync no longer requires LINEAR_TEAM_ID (syncs all teams when blank)
+- POST /issues accepts team_id in request body when LINEAR_TEAM_ID is blank
 """
 
 from __future__ import annotations
@@ -163,6 +169,128 @@ def linear_app(test_app: FastAPI, linear_settings: Settings) -> FastAPI:
 @pytest.fixture
 def client(linear_app: FastAPI) -> TestClient:
     return TestClient(linear_app)
+
+
+# ---------------------------------------------------------------------------
+# TestTestLinearConnection
+# ---------------------------------------------------------------------------
+
+
+class TestTestLinearConnection:
+    def test_returns_teams_on_valid_key(
+        self, client: TestClient, linear_app: FastAPI
+    ) -> None:
+        teams = [{"id": "team-1", "name": "Engineering"}]
+        mock_svc = AsyncMock()
+        mock_svc.fetch_teams = AsyncMock(return_value=teams)
+        mock_svc.aclose = AsyncMock()
+
+        with patch("src.api.integrations.linear.LinearService", return_value=mock_svc):
+            resp = client.post(
+                "/api/integrations/linear/test",
+                json={"api_key": "lin_api_test"},
+                headers=_auth_headers(),
+            )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["ok"] is True
+        assert body["teams"] == teams
+
+    def test_invalid_key_returns_502(
+        self, client: TestClient, linear_app: FastAPI
+    ) -> None:
+        from src.services.linear_service import LinearServiceError
+
+        mock_svc = AsyncMock()
+        mock_svc.fetch_teams = AsyncMock(
+            side_effect=LinearServiceError("Linear API key is invalid or expired", status_code=401)
+        )
+        mock_svc.aclose = AsyncMock()
+
+        with patch("src.api.integrations.linear.LinearService", return_value=mock_svc):
+            resp = client.post(
+                "/api/integrations/linear/test",
+                json={"api_key": "bad_key"},
+                headers=_auth_headers(),
+            )
+
+        assert resp.status_code == 502
+        assert "invalid" in resp.json()["detail"].lower()
+
+    def test_missing_api_key_body_returns_422(
+        self, client: TestClient, linear_app: FastAPI
+    ) -> None:
+        resp = client.post(
+            "/api/integrations/linear/test",
+            json={},
+            headers=_auth_headers(),
+        )
+        assert resp.status_code == 422
+
+    def test_requires_auth(self, client: TestClient) -> None:
+        resp = client.post(
+            "/api/integrations/linear/test",
+            json={"api_key": "lin_api_test"},
+        )
+        assert resp.status_code in (401, 403, 422)
+
+
+# ---------------------------------------------------------------------------
+# TestListLinearTeams
+# ---------------------------------------------------------------------------
+
+
+class TestListLinearTeams:
+    def test_returns_teams(
+        self, client: TestClient, linear_app: FastAPI
+    ) -> None:
+        teams = [
+            {"id": "team-1", "name": "Engineering"},
+            {"id": "team-2", "name": "Design"},
+        ]
+        mock_svc = AsyncMock()
+        mock_svc.fetch_teams = AsyncMock(return_value=teams)
+        mock_svc.aclose = AsyncMock()
+
+        with patch("src.api.integrations.linear._get_linear_service", return_value=mock_svc):
+            resp = client.get(
+                "/api/integrations/linear/teams", headers=_auth_headers()
+            )
+
+        assert resp.status_code == 200
+        assert resp.json()["teams"] == teams
+
+    def test_missing_api_key_returns_503(
+        self, client: TestClient, linear_app: FastAPI
+    ) -> None:
+        linear_app.state.settings = _make_linear_settings(LINEAR_API_KEY="")
+
+        resp = client.get(
+            "/api/integrations/linear/teams", headers=_auth_headers()
+        )
+
+        assert resp.status_code == 503
+
+    def test_linear_api_error_returns_502(
+        self, client: TestClient, linear_app: FastAPI
+    ) -> None:
+        from src.services.linear_service import LinearServiceError
+
+        mock_svc = AsyncMock()
+        mock_svc.fetch_teams = AsyncMock(side_effect=LinearServiceError("rate limited"))
+        mock_svc.aclose = AsyncMock()
+
+        with patch("src.api.integrations.linear._get_linear_service", return_value=mock_svc):
+            resp = client.get(
+                "/api/integrations/linear/teams", headers=_auth_headers()
+            )
+
+        assert resp.status_code == 502
+
+    def test_requires_auth(self, client: TestClient) -> None:
+        resp = client.get("/api/integrations/linear/teams")
+        assert resp.status_code in (401, 403, 422)
 
 
 # ---------------------------------------------------------------------------
@@ -420,15 +548,32 @@ class TestSyncLinearIssues:
         assert len(broadcast_calls) == 1
         assert broadcast_calls[0]["identifier"] == "ENG-1"
 
-    def test_missing_team_id_returns_422(
+    def test_sync_without_team_id_fetches_all_issues(
         self, client: TestClient, linear_app: FastAPI
     ) -> None:
-        # Override settings to have no TEAM_ID
+        """When LINEAR_TEAM_ID is blank, sync fetches all issues across all teams."""
         linear_app.state.settings = _make_linear_settings(LINEAR_TEAM_ID="")
 
-        resp = client.post("/api/integrations/linear/sync", headers=_auth_headers())
+        mock_db = AsyncMock()
+        mock_db.execute = AsyncMock(return_value=_scalar_result(None))
+        mock_db.add = MagicMock()
+        mock_db.commit = AsyncMock()
+        mock_db.refresh = AsyncMock()
+        linear_app.state.db_session_factory = _make_db_factory(mock_db)
 
-        assert resp.status_code == 422
+        mock_svc = AsyncMock()
+        mock_svc.fetch_all_issues = AsyncMock(return_value=[_parsed_issue_dict()])
+        mock_svc.aclose = AsyncMock()
+
+        with patch("src.api.integrations.linear._get_linear_service", return_value=mock_svc):
+            resp = client.post(
+                "/api/integrations/linear/sync", headers=_auth_headers()
+            )
+
+        assert resp.status_code == 200
+        assert resp.json()["synced"] == 1
+        mock_svc.fetch_all_issues.assert_called_once()
+        mock_svc.fetch_issues.assert_not_called()
 
     def test_missing_api_key_returns_503(
         self, client: TestClient, linear_app: FastAPI
@@ -517,9 +662,10 @@ class TestCreateLinearIssue:
 
         assert len(broadcast_calls) == 1
 
-    def test_missing_team_id_returns_422(
+    def test_missing_team_id_in_config_and_body_returns_422(
         self, client: TestClient, linear_app: FastAPI
     ) -> None:
+        """If LINEAR_TEAM_ID is blank and no team_id in body, return 422."""
         linear_app.state.settings = _make_linear_settings(LINEAR_TEAM_ID="")
 
         resp = client.post(
@@ -529,6 +675,34 @@ class TestCreateLinearIssue:
         )
 
         assert resp.status_code == 422
+
+    def test_creates_with_body_team_id_when_config_team_id_unset(
+        self, client: TestClient, linear_app: FastAPI
+    ) -> None:
+        """When LINEAR_TEAM_ID is blank, team_id in request body is used."""
+        linear_app.state.settings = _make_linear_settings(LINEAR_TEAM_ID="")
+
+        mock_db = AsyncMock()
+        mock_db.execute = AsyncMock(return_value=_scalar_result(None))
+        mock_db.add = MagicMock()
+        mock_db.commit = AsyncMock()
+        mock_db.refresh = AsyncMock()
+        linear_app.state.db_session_factory = _make_db_factory(mock_db)
+
+        mock_svc = AsyncMock()
+        mock_svc.create_issue = AsyncMock(return_value=_parsed_issue_dict())
+        mock_svc.aclose = AsyncMock()
+
+        with patch("src.api.integrations.linear._get_linear_service", return_value=mock_svc):
+            resp = client.post(
+                "/api/integrations/linear/issues",
+                json={"title": "Test", "team_id": "team-override-001"},
+                headers=_auth_headers(),
+            )
+
+        assert resp.status_code == 201
+        _, kwargs = mock_svc.create_issue.call_args
+        assert kwargs["team_id"] == "team-override-001"
 
     def test_missing_api_key_returns_503(
         self, client: TestClient, linear_app: FastAPI
@@ -776,6 +950,134 @@ class TestLinkIssueToTask:
         resp = client.post(
             f"/api/integrations/linear/issues/{uuid.uuid4()}/link",
             json={"task_id": str(uuid.uuid4())},
+        )
+        assert resp.status_code in (401, 403, 422)
+
+
+# ---------------------------------------------------------------------------
+# TestCreateTaskFromLinearIssue
+# ---------------------------------------------------------------------------
+
+
+class TestCreateTaskFromLinearIssue:
+    def test_creates_task_and_links_issue(
+        self, client: TestClient, linear_app: FastAPI, session_manager: SessionManager
+    ) -> None:
+        linear_app.state.session_manager = session_manager
+        issue = _make_issue_row(task_id=None)
+        mock_db = AsyncMock()
+        mock_db.execute = AsyncMock(return_value=_scalar_result(issue))
+        mock_db.add = MagicMock()
+        mock_db.flush = AsyncMock()
+        mock_db.commit = AsyncMock()
+        mock_db.refresh = AsyncMock()
+        linear_app.state.db_session_factory = _make_db_factory(mock_db)
+
+        resp = client.post(
+            f"/api/integrations/linear/issues/{issue.id}/create-task",
+            headers=_auth_headers(),
+        )
+
+        assert resp.status_code == 201
+        body = resp.json()
+        assert "task" in body
+        assert "issue" in body
+        assert body["task"]["title"] == issue.title
+        assert body["task"]["source"] == "linear"
+        assert body["task"]["status"] == "todo"
+        assert body["task"]["sessions"] == []
+
+    def test_returns_409_when_already_linked(
+        self, client: TestClient, linear_app: FastAPI
+    ) -> None:
+        task_id = uuid.UUID("00000000-0000-0000-0000-000000000099")
+        issue = _make_issue_row(task_id=task_id)
+        mock_db = AsyncMock()
+        mock_db.execute = AsyncMock(return_value=_scalar_result(issue))
+        linear_app.state.db_session_factory = _make_db_factory(mock_db)
+
+        resp = client.post(
+            f"/api/integrations/linear/issues/{issue.id}/create-task",
+            headers=_auth_headers(),
+        )
+
+        assert resp.status_code == 409
+        assert "already linked" in resp.json()["detail"]
+
+    def test_returns_404_when_issue_not_found(
+        self, client: TestClient, linear_app: FastAPI
+    ) -> None:
+        mock_db = AsyncMock()
+        mock_db.execute = AsyncMock(return_value=_scalar_result(None))
+        linear_app.state.db_session_factory = _make_db_factory(mock_db)
+
+        resp = client.post(
+            f"/api/integrations/linear/issues/{uuid.uuid4()}/create-task",
+            headers=_auth_headers(),
+        )
+
+        assert resp.status_code == 404
+
+    def test_returns_422_for_invalid_uuid(
+        self, client: TestClient, linear_app: FastAPI
+    ) -> None:
+        resp = client.post(
+            "/api/integrations/linear/issues/not-a-uuid/create-task",
+            headers=_auth_headers(),
+        )
+        assert resp.status_code == 422
+
+    def test_broadcasts_task_and_issue_updates(
+        self, client: TestClient, linear_app: FastAPI, session_manager: SessionManager
+    ) -> None:
+        linear_app.state.session_manager = session_manager
+        issue = _make_issue_row(task_id=None)
+        mock_db = AsyncMock()
+        mock_db.execute = AsyncMock(return_value=_scalar_result(issue))
+        mock_db.add = MagicMock()
+        mock_db.flush = AsyncMock()
+        mock_db.commit = AsyncMock()
+        mock_db.refresh = AsyncMock()
+        linear_app.state.db_session_factory = _make_db_factory(mock_db)
+
+        task_broadcasts: list[dict] = []
+        issue_broadcasts: list[dict] = []
+        session_manager.broadcast_task_update = task_broadcasts.append  # type: ignore[method-assign]
+        session_manager.broadcast_linear_issue_update = issue_broadcasts.append  # type: ignore[method-assign]
+
+        client.post(
+            f"/api/integrations/linear/issues/{issue.id}/create-task",
+            headers=_auth_headers(),
+        )
+
+        assert len(task_broadcasts) == 1
+        assert len(issue_broadcasts) == 1
+        assert task_broadcasts[0]["source"] == "linear"
+
+    def test_task_description_copied_from_issue(
+        self, client: TestClient, linear_app: FastAPI, session_manager: SessionManager
+    ) -> None:
+        linear_app.state.session_manager = session_manager
+        issue = _make_issue_row(task_id=None, description="Issue body text")
+        mock_db = AsyncMock()
+        mock_db.execute = AsyncMock(return_value=_scalar_result(issue))
+        mock_db.add = MagicMock()
+        mock_db.flush = AsyncMock()
+        mock_db.commit = AsyncMock()
+        mock_db.refresh = AsyncMock()
+        linear_app.state.db_session_factory = _make_db_factory(mock_db)
+
+        resp = client.post(
+            f"/api/integrations/linear/issues/{issue.id}/create-task",
+            headers=_auth_headers(),
+        )
+
+        assert resp.status_code == 201
+        assert resp.json()["task"]["description"] == "Issue body text"
+
+    def test_requires_auth(self, client: TestClient) -> None:
+        resp = client.post(
+            f"/api/integrations/linear/issues/{uuid.uuid4()}/create-task"
         )
         assert resp.status_code in (401, 403, 422)
 
