@@ -15,6 +15,7 @@ from src.api.routes import (
     config_router,
     projects_router,
     sessions_router,
+    slash_commands_router,
     tasks_router,
     telemetry_router,
     tools_router,
@@ -38,3 +39,4 @@ router.include_router(projects_router)
 router.include_router(uploads_router)
 router.include_router(worktrees_router)
 router.include_router(telemetry_router)
+router.include_router(slash_commands_router)

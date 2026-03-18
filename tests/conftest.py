@@ -54,6 +54,7 @@ def session_manager() -> SessionManager:
 @pytest.fixture
 def test_app(test_settings: Settings, tool_registry: ToolRegistry, session_manager: SessionManager) -> FastAPI:
     app = create_app()
+    app.state.settings = test_settings
     app.state.tool_registry = tool_registry
     app.state.session_manager = session_manager
     app.state.db_session_factory = None

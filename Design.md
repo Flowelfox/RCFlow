@@ -1205,6 +1205,78 @@ Key behavior:
 
 The client provides autocomplete suggestions via `GET /api/artifacts/search?q=<query>`, triggered when the user types `$` in the input area. The suggestion dropdown shows the file name on the first line and the full file path on the second line, with type-specific icons. Non-text files display a small indicator to show that only metadata (not content) will be included.
 
+### Slash Command System
+
+The input area supports a `/`-triggered command palette that combines RCFlow built-in commands and Claude Code skill commands in a single grouped dropdown.
+
+#### Trigger Rule
+
+The `/` trigger fires **only when `/` is the first character of the text field** (i.e. `triggerPos == 0`). A `/` appearing anywhere later in the text is treated as a normal character and never triggers the palette. This differs from `@`/`#`/`$` mentions, which trigger when preceded by whitespace.
+
+#### Command Sources
+
+| Source | Description |
+|--------|-------------|
+| `rcflow` | RCFlow built-in client-side commands (hardcoded) |
+| `claude_code_builtin` | Claude Code's own built-in slash commands (hardcoded) |
+| `claude_code_user` | User-level skills from `~/.claude/commands/*.md` |
+| `claude_code_project` | Project-level skills from `<projects_dir>/.claude/commands/*.md` |
+
+#### RCFlow Built-in Commands
+
+| Command | Action |
+|---------|--------|
+| `/clear` | Clear the displayed messages in the current pane (client-side only; server session is unaffected) |
+| `/new` | Start a new session (equivalent to the "New Chat" action) |
+| `/help` | Display RCFlow tips and available commands as a system message in the pane |
+| `/pause` | Pause the current active session |
+| `/resume` | Resume the current paused session |
+
+RCFlow commands are intercepted in `_send()` before the text reaches the WebSocket layer. Unknown `/foo` commands are not intercepted and fall through to `sendPrompt()`.
+
+#### Claude Code Commands
+
+Claude Code commands are only shown in the palette when the active session's executor is `claude_code` (i.e. `pane_state.isClaudeCodeSession == true`). When selected, they are sent as-is through `sendPrompt()` to the Claude Code subprocess, which handles them natively.
+
+Claude Code skill `.md` files must have a YAML frontmatter block with a `description` field:
+
+```markdown
+---
+description: Commit and push changes to remote
+allowed-tools: Bash(git add:*), Bash(git commit:*)
+---
+...
+```
+
+The backend parses the `description` field via regex at request time (no caching). Files that cannot be read or lack a description field are included with an empty description.
+
+#### Backend API
+
+**`GET /api/slash-commands?q=<query>`**
+
+Returns a unified list of all slash commands. Optionally filters by case-insensitive substring match on the command name.
+
+Response:
+```json
+{
+  "commands": [
+    {"name": "clear",       "description": "Clear chat messages in this pane", "source": "rcflow"},
+    {"name": "compact",     "description": "Compact conversation to save context", "source": "claude_code_builtin"},
+    {"name": "commit-push", "description": "Commit and push changes to remote", "source": "claude_code_user"}
+  ]
+}
+```
+
+#### Client UI
+
+The suggestion overlay renders commands in two visual groups separated by a divider and group header labels ("RCFLOW" and "CLAUDE CODE"). Commands are shown with:
+- A bolt icon (⚡) for RCFlow commands in the accent color
+- A terminal icon for Claude Code commands in muted color
+- Command name with `/` prefix (query match highlighted)
+- Description on a second line
+
+Keyboard navigation (up/down arrows), Enter/Tab to select, and Escape to dismiss work the same as the `@`/`#`/`$` mention overlays. The overlay is 360px wide with a 380px max height.
+
 ---
 
 ## Direct Tool Mode (`LLM_PROVIDER = "none"`)
