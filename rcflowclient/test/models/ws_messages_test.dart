@@ -71,6 +71,14 @@ void main() {
         DisplayMessageType.system,
         DisplayMessageType.summary,
         DisplayMessageType.sessionEndAsk,
+        DisplayMessageType.planModeAsk,
+        DisplayMessageType.planReviewAsk,
+        DisplayMessageType.permissionRequest,
+        DisplayMessageType.agentGroup,
+        DisplayMessageType.agentSessionStart,
+        DisplayMessageType.thinking,
+        DisplayMessageType.todoUpdate,
+        DisplayMessageType.pausedMaxTurns,
       ]);
     });
   });

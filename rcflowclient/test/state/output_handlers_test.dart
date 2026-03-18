@@ -47,6 +47,9 @@ class _FakePaneHost implements PaneHost {
 
   @override
   bool workerSupportsAttachments(String? workerId) => false;
+
+  @override
+  bool workerSupportsImageAttachments(String? workerId) => false;
 }
 
 void main() {

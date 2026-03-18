@@ -21,8 +21,6 @@ void main() {
     );
 
     expect(find.text('RCFlow'), findsOneWidget);
-    expect(find.text('No messages yet'), findsOneWidget);
-    expect(find.byIcon(Icons.settings_outlined), findsOneWidget);
-    expect(find.byIcon(Icons.history_rounded), findsOneWidget);
+    expect(find.text('Welcome to RCFlow'), findsOneWidget);
   });
 }
