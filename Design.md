@@ -33,6 +33,7 @@ RCFlow is a background server running on Linux or Windows that provides a WebSoc
 | Windows Terminal PTY | pywinpty (ConPTY wrapper)                   |
 | Windows Installer    | Inno Setup 6 (setup.exe builder)           |
 | Worktree Manager     | wtpython (WorktreeManager library)         |
+| Telemetry Charts     | fl_chart (Flutter line/bar charts)         |
 
 ---
 
@@ -151,11 +152,20 @@ On wide layouts (>700px), the main content area supports multiple simultaneous s
 
 **UI widgets**:
 - `SplitView` — recursively renders the split tree; leaves become `SessionPane` widgets, branches become `Row`/`Column` with `ResizableDivider`.
-- `SessionPane` — wraps `OutputDisplay` + `InputArea` with a `PaneHeader` (shown only in multi-pane mode). Tap to set as active pane.
+- `SessionPane` — wraps `OutputDisplay` + `InputArea` with a `PaneHeader` (shown only in multi-pane mode). Tap to set as active pane. Includes a resizable right-panel area with **Todo** and **Project** bookmark tabs.
 - `ResizableDivider` — draggable 6px divider with hover/drag highlight and cursor change.
 - `PaneHeader` — 32px bar with session title and close button.
+- `TodoPanel` — right-side panel showing the active session's `TodoWrite` task list.
+- `ProjectPanel` (`lib/ui/widgets/project_panel.dart`) — right-side panel with two modes:
+  - **Global** (`main_project_path == null`): prompts the user to type `@ProjectName` to attach a project.
+  - **Project** (`main_project_path != null`): shows the attached project name, its git worktrees (create / merge / remove / set-active), and a scrollable list of project artifacts fetched from `GET /api/projects/{name}/artifacts`. Both sections load in parallel and auto-refresh when `main_project_path` or `workerId` changes. Panel key: `"project"`. Icon: `folder_outlined`.
+- `StatisticsPane` (`lib/ui/widgets/statistics_pane.dart`) — full-screen pane (top-level navigation bookmark) for time-series telemetry charts and per-session summaries:
+  - **Filter bar**: zoom-level chips (`Minute` / `Hour` / `Day`) and a manual refresh button. Changing zoom resets the time window to the zoom's default duration and triggers an immediate fetch.
+  - **Charts section**: six line charts rendered via `fl_chart` — Tokens Sent, Tokens Received, Avg LLM Duration (ms), Avg Tool Duration (ms), Turn Count, Tool Call Count. Interactive tooltips on hover/tap with per-bucket value and timestamp. State managed by `StatisticsPaneState` (`lib/state/statistics_pane_state.dart`).
+  - **Session summary card** (visible when a session is selected): stat pills (total turns, tokens, avg/p95 LLM and tool latency, error rate) and a scrollable per-turn table with TTFT, LLM duration, token counts, tool call count, and interrupted flag.
+  - Data fetched from `GET /api/telemetry/timeseries` (charts) and `GET /api/telemetry/sessions/{id}/summary` (session card). Models defined in `lib/models/telemetry.dart` (`ZoomLevel`, `BucketPoint`, `TurnSummary`, `SessionTelemetrySummary`). Chart widget factored into `lib/ui/widgets/statistics_panel/telemetry_chart.dart`.
 
-**Edge cases**: Last pane close resets to home (tree always has >= 1 leaf). Same session in multiple panes receives messages independently. Reconnection re-subscribes all pane sessions. Mobile layout remains single-pane, using `activePane` with a `ChangeNotifierProvider`.
+**Edge cases**: Last pane close resets to home (tree always has >= 1 leaf). Same session in multiple panes receives messages independently. Reconnection re-subscribes all pane sessions. Mobile layout remains single-pane, using `activePane` with a `ChangeNotifierProvider`. Last pane close resets to home (tree always has >= 1 leaf). Same session in multiple panes receives messages independently. Reconnection re-subscribes all pane sessions. Mobile layout remains single-pane, using `activePane` with a `ChangeNotifierProvider`.
 
 ### Terminal Sessions (Sidebar Integration)
 
@@ -271,6 +281,10 @@ The client can connect to multiple RCFlow servers simultaneously. Each server co
 | POST   | `/api/worktrees/{name}/merge`           | Yes  | Squash-merge a worktree into its base branch and clean up. Body: `{"message", "repo_path", "into"?, "no_ff"?, "keep"?}`. |
 | DELETE | `/api/worktrees/{name}`                 | Yes  | Remove a worktree and its branch without merging. Required query param `repo_path`. |
 | PATCH  | `/api/sessions/{session_id}/worktree`   | Yes  | Set or clear the selected worktree for a session. Body: `{"path": string \| null}`. When set, Claude Code and Codex agents use this path as their working directory. Returns `{"session_id", "selected_worktree_path"}`. |
+| GET    | `/api/projects/{name}/artifacts`        | Yes  | List artifacts whose `file_path` is under the given project directory. Resolves the project name against `PROJECTS_DIR`. Returns `{"project_name", "project_path", "artifacts": [{artifact_id, file_path, file_name, file_extension, file_size, mime_type, discovered_at, modified_at, session_id}]}`. Returns 404 if the project name is not found. |
+| GET    | `/api/telemetry/summary`               | Yes  | Global lifetime telemetry summary for this backend: total token usage, average LLM/tool latencies, and top-10 most-used tools by call count. |
+| GET    | `/api/telemetry/sessions/{session_id}/summary` | Yes | Per-session telemetry: turn-by-turn breakdown (timestamps, token counts, TTFT, tool calls per turn) plus aggregate stats (avg/p95 LLM and tool latency, error rate, session duration). |
+| GET    | `/api/telemetry/timeseries`            | Yes  | Pre-aggregated time-series data. Required query params: `zoom` (`minute`/`hour`/`day`), `start`, `end` (ISO8601 UTC). Optional: `session_id` (UUID, filters to one session; omit for global rollup), `metric` (returns only that field). Returns `{zoom, start, end, session_id, last_updated_at, series: [{bucket, tokens_sent, tokens_received, avg_llm_duration_ms, avg_tool_duration_ms, turn_count, tool_call_count, error_count}]}`. |
 
 Authentication for HTTP endpoints uses the `X-API-Key` header with the same key as `RCFLOW_API_KEY`.
 
@@ -602,7 +616,10 @@ The `reason` field is optional. `"max_turns"` means Claude Code hit its configur
   "tool_input_tokens": 5000,
   "tool_output_tokens": 3000,
   "tool_cost_usd": 0.05,
-  "paused_reason": "max_turns"
+  "paused_reason": "max_turns",
+  "worktree": null,
+  "selected_worktree_path": null,
+  "main_project_path": "/home/user/Projects/RCFlow"
 }
 ```
 
@@ -682,13 +699,14 @@ Server responds with:
       "tool_output_tokens": 0,
       "tool_cost_usd": 0.0,
       "worktree": null,
-      "selected_worktree_path": null
+      "selected_worktree_path": null,
+      "main_project_path": null
     }
   ]
 }
 ```
 
-Sessions are sorted by `created_at` descending (most recent first). The list includes both in-memory active sessions and archived sessions from the database. The `title` field is `null` until auto-generated after the first LLM response. The `worktree` field is `null` for sessions that have never used a worktree tool, or a dict with `repo_path`, `last_action`, `branch?`, and `base?` for sessions that have. The `selected_worktree_path` field is `null` by default and is set via `PATCH /api/sessions/{id}/worktree`; when non-null it overrides the agent working directory for Claude Code and Codex runs in that session.
+Sessions are sorted by `created_at` descending (most recent first). The list includes both in-memory active sessions and archived sessions from the database. The `title` field is `null` until auto-generated after the first LLM response. The `worktree` field is `null` for sessions that have never used a worktree tool, or a dict with `repo_path`, `last_action`, `branch?`, and `base?` for sessions that have. The `selected_worktree_path` field is `null` by default and is set via `PATCH /api/sessions/{id}/worktree`; when non-null it overrides the agent working directory for Claude Code and Codex runs in that session. The `main_project_path` field is `null` until the user types `@ProjectName` in a message and the name resolves to a directory under `PROJECTS_DIR`; once set it persists across the session lifetime and is updated to reflect the latest `@` mention used. It is also included in `session_update` WebSocket broadcasts.
 
 ### Task Messages
 
@@ -1129,6 +1147,7 @@ Key behavior:
 - The original user text is preserved — the context is an additional content block, not a replacement.
 - The injected context block uses `cache_control: {"type": "ephemeral"}` to avoid polluting prompt caching.
 - The client-side buffer receives the original text only (no injected context).
+- **Session project attachment**: each time a message contains a valid `@ProjectName` mention, the resolved path is stored as `session.main_project_path` on the `ActiveSession` and persisted to the `sessions.main_project_path` DB column. If a message contains multiple `@` mentions, the *last* resolvable one wins (overwrites earlier ones). A session with `main_project_path = null` is treated as "Global" — no project limitation. The field is included in every `session_update` WebSocket broadcast and in the `GET /api/sessions` HTTP response.
 
 ### #Mention Tool Preference Injection
 
@@ -1900,6 +1919,73 @@ CREATE TABLE linear_issues (
 );
 CREATE INDEX ix_linear_issues_backend_id ON linear_issues(backend_id);
 CREATE INDEX ix_linear_issues_state_type ON linear_issues(state_type);
+
+-- Telemetry: one row per LLM API turn (prompt → streaming response)
+CREATE TABLE session_turns (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    session_id UUID NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    backend_id VARCHAR(36) NOT NULL DEFAULT '',
+    turn_index INTEGER NOT NULL,            -- 0-based, monotone per session
+    ts_start TIMESTAMPTZ NOT NULL,          -- user prompt received / LLM call initiated
+    ts_first_token TIMESTAMPTZ,            -- first TEXT_CHUNK or TOOL_START emitted
+    ts_end TIMESTAMPTZ,                    -- LLM streaming complete (NULL if interrupted)
+    llm_duration_ms INTEGER,               -- ts_end - ts_start in ms (NULL if interrupted)
+    input_tokens INTEGER NOT NULL DEFAULT 0,
+    output_tokens INTEGER NOT NULL DEFAULT 0,
+    cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+    cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+    model VARCHAR(255),                     -- e.g. "claude-opus-4-6"
+    provider VARCHAR(50),                   -- "anthropic", "bedrock", "openai"
+    interrupted BOOLEAN NOT NULL DEFAULT FALSE
+);
+CREATE INDEX idx_session_turns_session_id ON session_turns(session_id);
+CREATE INDEX idx_session_turns_backend_id_ts ON session_turns(backend_id, ts_start);
+
+-- Telemetry: one row per tool invocation (shell, http, worktree)
+CREATE TABLE tool_calls (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    session_id UUID NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    turn_id UUID REFERENCES session_turns(id) ON DELETE SET NULL,
+    backend_id VARCHAR(36) NOT NULL DEFAULT '',
+    turn_index INTEGER,
+    tool_call_index INTEGER NOT NULL DEFAULT 0,  -- 0-based within turn
+    tool_name VARCHAR(255) NOT NULL,
+    ts_start TIMESTAMPTZ NOT NULL,
+    ts_end TIMESTAMPTZ,
+    duration_ms INTEGER,                         -- NULL if session interrupted mid-call
+    status VARCHAR(20) NOT NULL DEFAULT 'ok',    -- 'ok', 'error', 'cancelled'
+    executor_type VARCHAR(50),                   -- 'shell', 'http', 'worktree', etc.
+    error_message TEXT
+);
+CREATE INDEX idx_tool_calls_session_id ON tool_calls(session_id);
+CREATE INDEX idx_tool_calls_backend_id_ts ON tool_calls(backend_id, ts_start);
+CREATE INDEX idx_tool_calls_tool_name ON tool_calls(backend_id, tool_name);
+
+-- Telemetry: pre-aggregated 1-minute buckets for fast time-series queries
+CREATE TABLE telemetry_minutely (
+    id BIGSERIAL PRIMARY KEY,
+    backend_id VARCHAR(36) NOT NULL,
+    bucket TIMESTAMPTZ NOT NULL,            -- truncated to minute
+    session_id UUID,                        -- NULL = global rollup across all sessions
+    tokens_sent BIGINT NOT NULL DEFAULT 0,
+    tokens_received BIGINT NOT NULL DEFAULT 0,
+    cache_creation BIGINT NOT NULL DEFAULT 0,
+    cache_read BIGINT NOT NULL DEFAULT 0,
+    llm_duration_sum_us BIGINT NOT NULL DEFAULT 0,
+    llm_duration_count INTEGER NOT NULL DEFAULT 0,
+    tool_duration_sum_us BIGINT NOT NULL DEFAULT 0,
+    tool_duration_count INTEGER NOT NULL DEFAULT 0,
+    inter_tool_gap_sum_us BIGINT NOT NULL DEFAULT 0,
+    inter_tool_gap_count INTEGER NOT NULL DEFAULT 0,
+    inter_turn_gap_sum_us BIGINT NOT NULL DEFAULT 0,
+    inter_turn_gap_count INTEGER NOT NULL DEFAULT 0,
+    turn_count INTEGER NOT NULL DEFAULT 0,
+    tool_call_count INTEGER NOT NULL DEFAULT 0,
+    error_count INTEGER NOT NULL DEFAULT 0,
+    parallel_tool_calls INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(backend_id, bucket, session_id)
+);
+CREATE INDEX idx_telemetry_minutely_lookup ON telemetry_minutely(backend_id, bucket, session_id);
 ```
 
 ---
@@ -1944,7 +2030,7 @@ All configuration is via environment variables, loaded from a `settings.json` fi
 | `ARTIFACT_MAX_FILE_SIZE`| no       | `5242880`       | Max file size in bytes for artifact content viewing (default 5 MB) |
 | `LOG_LEVEL`             | no       | `INFO`          | Logging level                        |
 | `LINEAR_API_KEY`        | no       |                 | Linear personal API token for issue sync |
-| `LINEAR_TEAM_ID`        | no       |                 | Linear team ID to scope issue queries to a specific team |
+| `LINEAR_TEAM_ID`        | no       |                 | Optional. Linear team ID to restrict syncs to a specific team. When blank, issues are synced from all teams accessible via the API key. |
 | `LINEAR_SYNC_ON_STARTUP`| no       | `false`         | Automatically sync Linear issues from API on server startup |
 
 ### Remote Configuration (Client-Side Editing)
@@ -1983,8 +2069,9 @@ RCFlow integrates with the [Linear](https://linear.app) project management API t
 
 - Issues are fetched via the **Linear GraphQL API** using a personal API token (`LINEAR_API_KEY`).
 - Synced issues are stored in the `linear_issues` table and survive server restarts.
-- The Flutter client renders a dedicated **Linear tab** in the sidebar, groups issues by state, and allows opening a full detail pane.
+- The Flutter client surfaces Linear issues **inside the Tasks tab** rather than a separate sidebar tab. Unlinked issues appear in a collapsible "Unlinked Issues" section at the bottom of the task list; linked issues appear in the task detail pane.
 - Issues can be **linked to tasks** (sets `task_id` on `LinearIssue`), enabling cross-referencing between tasks and issues.
+- The **"Create Task"** button in the `LinearIssuePane` atomically creates an RCFlow task from the issue title/description (`source: 'linear'`, `status: 'todo'`) and links them in one API call (`POST /api/integrations/linear/issues/{id}/create-task`).
 
 ### Backend Service — `LinearService`
 
@@ -1994,7 +2081,9 @@ An async HTTP client wrapper around the Linear GraphQL API. Uses `httpx.AsyncCli
 
 | Method | Description |
 |--------|-------------|
-| `fetch_issues(team_id)` | Query all issues for a team (paginated, up to 250 per page) |
+| `fetch_teams()` | Query all teams accessible to the API key |
+| `fetch_issues(team_id)` | Query all issues for a specific team (paginated) |
+| `fetch_all_issues()` | Query all issues across all accessible teams (paginated) |
 | `get_issue(linear_id)` | Fetch a single issue by its Linear ID |
 | `create_issue(team_id, title, description, priority)` | Create a new issue in Linear |
 | `update_issue(linear_id, title, description, state_id, priority)` | Update an existing issue |
@@ -2008,13 +2097,16 @@ All endpoints are under `/api/integrations/linear/` and require bearer-token aut
 
 | Method | Path | Description |
 |--------|------|-------------|
+| `POST` | `/api/integrations/linear/test` | Validate an API key and return accessible teams — no prior config required |
+| `GET`  | `/api/integrations/linear/teams` | List teams accessible via the configured `LINEAR_API_KEY` |
 | `GET`  | `/api/integrations/linear/issues` | List all cached issues for this backend |
 | `GET`  | `/api/integrations/linear/issues/{id}` | Get a single cached issue by UUID |
-| `POST` | `/api/integrations/linear/sync` | Sync issues from Linear API, upsert into DB |
-| `POST` | `/api/integrations/linear/issues` | Create an issue in Linear and cache locally |
+| `POST` | `/api/integrations/linear/sync` | Sync issues from Linear API; uses `LINEAR_TEAM_ID` if set, otherwise syncs all teams |
+| `POST` | `/api/integrations/linear/issues` | Create an issue in Linear; uses `LINEAR_TEAM_ID` or `team_id` from request body |
 | `PATCH`| `/api/integrations/linear/issues/{id}` | Update an issue (local cache + Linear API) |
 | `POST` | `/api/integrations/linear/issues/{id}/link` | Link an issue to a task (`task_id`) |
 | `DELETE`| `/api/integrations/linear/issues/{id}/link` | Unlink an issue from a task |
+| `POST` | `/api/integrations/linear/issues/{id}/create-task` | Create a new RCFlow task from the issue (title + description), link them atomically; returns `{"task": {...}, "issue": {...}}`; 409 if already linked |
 
 ### WebSocket Messages
 
@@ -2078,7 +2170,10 @@ Dart model mirroring the backend `linear_issues` table. Includes `workerId`, `pr
 
 - `_linearIssues: Map<String, LinearIssueInfo>` — all cached issues keyed by UUID.
 - `linearIssues` — sorted list (by `updatedAt` desc).
+- `linearIssuesByWorker` — issues grouped by `workerId`.
 - `getLinearIssue(id)` — lookup by UUID.
+- `linearIssuesForTask(taskId)` — all issues linked to a given task (sorted by `updatedAt` desc).
+- `unlinkedLinearIssues` — all issues with `taskId == null` (sorted by `updatedAt` desc).
 - `openLinearIssueInPane(id)` — open issue in active pane (or new pane), pushing nav history.
 - `_handleLinearIssueList/Update/Deleted` — WebSocket message handlers that update `_linearIssues`.
 
@@ -2100,21 +2195,82 @@ Full-pane detail view showing:
 - "Copy URL" button
 - "Link to Task" / "Unlink Task" button (calls backend link/unlink endpoints)
 
-#### Sidebar Tab — "Linear"
+#### Sidebar — Tasks Tab (consolidated)
 
-The sidebar `SessionListPanel` has a 4-tab layout: **Workers**, **Tasks**, **Artifacts**, **Linear**.
+The sidebar `SessionListPanel` has a **3-tab layout**: **Workers**, **Tasks**, **Artifacts**. The Linear tab has been removed; Linear issues are now surfaced within the Tasks tab.
 
-`LinearIssueListPanel` (`rcflowclient/lib/ui/widgets/session_panel/linear_issue_list_panel.dart`):
-- Search bar + state filter chips
-- Issues grouped by `stateType` with collapsible sections
-- "Sync" button calls `worker.ws.syncLinearIssues()` then `listLinearIssues()`
-- Empty and unconfigured states
+**`TaskListPanel`** (`rcflowclient/lib/ui/widgets/session_panel/task_list_panel.dart`):
+- Search bar, status filter chips, source filter chips
+- Tasks grouped by status with collapsible sections
+- **Sync button** (⟳) in the filter bar — calls `worker.ws.syncLinearIssues()` then `listLinearIssues()`
+- **"Unlinked Issues" section** at the bottom — collapsible list of `LinearIssueTile` for all issues where `taskId == null`
 
-`LinearIssueTile` (`rcflowclient/lib/ui/widgets/session_panel/linear_issue_tile.dart`):
+**`TaskTile`** (`rcflowclient/lib/ui/widgets/session_panel/task_tile.dart`):
+- Existing session count badge
+- **Linear issue count badge** (purple, shows link icon + count) when the task has linked issues
+
+**`LinearIssueTile`** (`rcflowclient/lib/ui/widgets/session_panel/linear_issue_tile.dart`):
 - Priority icon + colored state background
 - Identifier badge, title, state/time subtitle
 - Link indicator icon when `taskId` is set
 - Active/viewed highlight via pane state
+
+#### Task Detail Pane — Linked Issues
+
+`TaskPane` (`rcflowclient/lib/ui/widgets/task_pane.dart`) now includes a **"Linked Issues"** section below "Linked Sessions":
+- Lists all `LinearIssueInfo` where `taskId == task.taskId` (via `appState.linearIssuesForTask`)
+- Each issue shown as a `_LinkedIssueTile`: identifier badge, title, state name; tap → open `LinearIssuePane`
+- Right-click context menu per tile: **Open issue** / **Unlink from task** (calls `worker.ws.unlinkLinearIssueFromTask`)
+- **"Link Issue"** button opens `_LinkIssueDialog` — searchable list of unlinked issues; selecting one calls `worker.ws.linkLinearIssueToTask(issueId, taskId)`
+
+---
+
+## Telemetry Subsystem
+
+RCFlow includes a built-in three-phase telemetry pipeline that records per-turn and per-tool-call timing and token usage, aggregates raw events into minutely buckets for fast time-series queries, and enforces a configurable retention window.
+
+### Phase 1 — Raw Event Capture
+
+`TelemetryService` (`src/services/telemetry_service.py`) inserts one row per LLM turn and one row per tool call into `session_turns` and `tool_calls` respectively. The `PromptRouter` calls the service at four boundaries:
+
+| Call | When |
+|------|------|
+| `record_turn_start(session_id, turn_index?)` | Before each `stream_turn()` call in the agentic loop |
+| `record_first_token(turn)` | On the first `TextChunk` or first `ToolCallRequest` yielded by the stream |
+| `record_turn_end(turn, usage)` | On each `StreamDone` with usage |
+| `mark_turn_interrupted(turn)` | When the outer `handle_prompt` catches an exception |
+| `record_tool_start(session_id, tool_name, executor_type, turn?, tool_call_index?)` | Before `executor.execute()` |
+| `record_tool_end(tool_call, status, error?)` | After execution completes or raises |
+
+All calls are best-effort: exceptions are logged but never propagated so telemetry never disrupts the prompt pipeline.
+
+### Phase 2 — Minutely Aggregation
+
+A background task (`_run_telemetry_loop` in `main.py`) calls `aggregate_pending()` every 60 seconds. The aggregator reads all `session_turns` and `tool_calls` rows with `ts_start > watermark` and upserts into `telemetry_minutely` — one row per `(backend_id, bucket, session_id)` pair plus a global `session_id=NULL` rollup. Sums maintained per bucket: `tokens_sent`, `tokens_received`, `cache_creation`, `cache_read`, `llm_duration_sum_us`, `llm_duration_count`, `tool_duration_sum_us`, `tool_duration_count`, `turn_count`, `tool_call_count`, `error_count`, `parallel_tool_calls`. The watermark is an in-memory datetime; on restart, aggregation re-processes all completed rows (idempotent upserts prevent duplicate inflation).
+
+### Phase 3 — Retention Cleanup
+
+`cleanup_old_records()` is called once per day (~1440 aggregation ticks). It deletes rows from `session_turns`, `tool_calls`, and `telemetry_minutely` whose `ts_start` / `bucket` is older than `TELEMETRY_RETENTION_DAYS` (default 90).
+
+### Configuration
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `TELEMETRY_RETENTION_DAYS` | `90` | Days to keep raw and aggregated telemetry rows |
+
+### REST API
+
+See the [HTTP API](#http-api) table for endpoint signatures. The three endpoints are:
+
+- **`GET /api/telemetry/summary`** — global lifetime stats (tokens, latencies, top tools).
+- **`GET /api/telemetry/sessions/{session_id}/summary`** — per-turn breakdown with TTFT and aggregate p95 latencies for one session.
+- **`GET /api/telemetry/timeseries`** — bucketed series from `telemetry_minutely`, with zoom-level roll-up (`minute`/`hour`/`day`) applied on read. `avg_llm_duration_ms` and `avg_tool_duration_ms` are derived from the stored sum + count.
+
+### Flutter Client
+
+Data models: `lib/models/telemetry.dart` — `ZoomLevel` enum, `BucketPoint`, `TurnSummary`, `SessionTelemetrySummary`.
+State: `lib/state/statistics_pane_state.dart` — `StatisticsPaneState` (zoom level, time range, series data, session summary, loading/error flags).
+UI: see `StatisticsPane` under the Split View section above.
 
 ---
 
