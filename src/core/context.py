@@ -245,6 +245,20 @@ class ContextMixin:
                 return project_path
         return None
 
+    def _resolve_latest_project_path(self, mentions: list[str]) -> str | None:
+        """Return the resolved path of the *last* valid @ProjectName mention, or None.
+
+        Iterates all mentions in order so that later mentions overwrite earlier
+        ones — the final resolvable mention becomes the session's main project.
+        Returns None when no mention resolves to a real directory.
+        """
+        result: str | None = None
+        for name in mentions:
+            path = self._resolve_project_path(name)
+            if path is not None:
+                result = str(path)
+        return result
+
     # ------------------------------------------------------------------
     # File context
     # ------------------------------------------------------------------

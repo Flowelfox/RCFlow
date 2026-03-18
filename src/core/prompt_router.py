@@ -38,6 +38,7 @@ from src.executors.http import HttpExecutor
 from src.executors.shell import ShellExecutor
 from src.executors.worktree import WorktreeExecutor
 from src.services.artifact_scanner import ArtifactScanner
+from src.services.telemetry_service import InFlightTurn, TelemetryService
 from src.services.tool_manager import ToolManager
 from src.services.tool_settings import ToolSettingsManager
 from src.tools.loader import ToolDefinition
@@ -74,6 +75,7 @@ class PromptRouter(
         tool_settings: ToolSettingsManager | None = None,
         tool_manager: ToolManager | None = None,
         artifact_scanner: ArtifactScanner | None = None,
+        telemetry_service: TelemetryService | None = None,
     ) -> None:
         self._llm = llm_client
         self._session_manager = session_manager
@@ -84,6 +86,7 @@ class PromptRouter(
         self._tool_settings = tool_settings
         self._tool_manager = tool_manager
         self._artifact_scanner = artifact_scanner
+        self._telemetry = telemetry_service
         self._pending_log_tasks: set[asyncio.Task[None]] = set()
         self._pending_summary_tasks: set[asyncio.Task[None]] = set()
         self._pending_title_tasks: set[asyncio.Task[None]] = set()
@@ -361,6 +364,11 @@ class PromptRouter(
         session = self._session_manager.get_session(resolved_id)
         assert session is not None  # ensure_session guarantees this
 
+        # Ensure the sessions row exists in the DB before any telemetry inserts
+        # (session_turns and tool_calls FK-reference sessions.id, but sessions are
+        # normally only archived to the DB after completion).
+        await self._ensure_session_row_in_db(session)
+
         session.touch()
 
         # Auto-resume paused sessions when a new prompt arrives
@@ -418,6 +426,15 @@ class PromptRouter(
             # Detect @ProjectName, #ToolName, and $filename mentions, build LLM context
             mentions = self._extract_project_mentions(text)
             project_context = self._build_project_context(mentions) if mentions else None
+
+            # Track the latest @ProjectName as the session's main project.
+            # Only update when a mention resolves to a real directory so that
+            # a typo or invalid @mention never clears an existing project.
+            if mentions:
+                resolved_path = self._resolve_latest_project_path(mentions)
+                if resolved_path is not None and resolved_path != session.main_project_path:
+                    session.main_project_path = resolved_path
+                    self._session_manager.broadcast_session_update(session)
 
             tool_mentions = self._extract_tool_mentions(text)
             tool_context = self._build_tool_context(tool_mentions) if tool_mentions else None
@@ -487,6 +504,19 @@ class PromptRouter(
             # Snapshot messages before this turn (for request_messages logging)
             turn_messages_snapshot: list[dict[str, Any]] = list(session.conversation_history)
 
+            # Telemetry: track per-LLM-turn timing and token usage.
+            # _tel_turn holds the current in-flight SessionTurn row; reset after each StreamDone.
+            _tel_turn: InFlightTurn | None = None
+            _tel_turn_idx: int = 0
+            _tel_tool_idx: int = 0  # tool call index within the current LLM turn
+
+            backend_id = self._settings.RCFLOW_BACKEND_ID if self._settings else ""
+            if self._telemetry is not None:
+                _tel_turn = await self._telemetry.record_turn_start(
+                    session_id=session.id,
+                    turn_index=_tel_turn_idx,
+                )
+
             # Run the agentic loop
             try:
                 async for event in self._llm.run_agentic_loop(
@@ -505,9 +535,15 @@ class PromptRouter(
                                     "finished": False,
                                 },
                             )
+                            # Telemetry: first text chunk = first token
+                            if self._telemetry is not None and _tel_turn is not None:
+                                await self._telemetry.record_first_token(_tel_turn)
 
                         case ToolCallRequest():
                             turn_has_tool_calls = True
+                            # Telemetry: first tool_start also counts as first token
+                            if self._telemetry is not None and _tel_turn is not None:
+                                await self._telemetry.record_first_token(_tel_turn)
 
                         case StreamDone(usage=usage) if usage is not None:
                             self._fire_log_task(
@@ -524,6 +560,17 @@ class PromptRouter(
                             session.cache_read_input_tokens += usage.cache_read_input_tokens
                             if session._on_update:
                                 session._on_update()
+                            # Telemetry: close turn, open next if loop continues
+                            if self._telemetry is not None and _tel_turn is not None:
+                                await self._telemetry.record_turn_end(_tel_turn, usage)
+                                _tel_turn = None
+                                _tel_turn_idx += 1
+                                _tel_tool_idx = 0
+                                if not agent_started:
+                                    _tel_turn = await self._telemetry.record_turn_start(
+                                        session_id=session.id,
+                                        turn_index=_tel_turn_idx,
+                                    )
                             # Reset per-turn accumulators for the next turn
                             turn_text = ""
                             turn_has_tool_calls = False
@@ -575,6 +622,8 @@ class PromptRouter(
 
             except Exception as e:
                 logger.exception("Error processing prompt in session %s", session.id)
+                if self._telemetry is not None and _tel_turn is not None:
+                    await self._telemetry.mark_turn_interrupted(_tel_turn)
                 session.buffer.push_text(
                     MessageType.ERROR,
                     {
@@ -678,6 +727,15 @@ class PromptRouter(
 
         executor = self._get_executor(tool_def.executor)
 
+        # Telemetry: record start of this tool call.
+        _tel_tool_call = None
+        if self._telemetry is not None:
+            _tel_tool_call = await self._telemetry.record_tool_start(
+                session_id=session.id,
+                tool_name=tool_call.tool_name,
+                executor_type=tool_def.executor,
+            )
+
         try:
             if tool_def.get_shell_config().stream_output if tool_def.executor == "shell" else False:
                 # Streaming execution
@@ -717,7 +775,14 @@ class PromptRouter(
                     },
                 )
 
+            if self._telemetry is not None and _tel_tool_call is not None:
+                await self._telemetry.record_tool_end(_tel_tool_call, status="ok")
+
         except Exception as e:
+            if self._telemetry is not None and _tel_tool_call is not None:
+                await self._telemetry.record_tool_end(
+                    _tel_tool_call, status="error", error=str(e)
+                )
             result_text = f"Tool execution failed: {e}"
             session.buffer.push_text(
                 MessageType.ERROR,

@@ -8,8 +8,10 @@ which is collected and included into the main API router by
 from src.api.routes.artifacts import router as artifacts_router
 from src.api.routes.auth import router as auth_router
 from src.api.routes.config import router as config_router
+from src.api.routes.projects import router as projects_router
 from src.api.routes.sessions import router as sessions_router
 from src.api.routes.tasks import router as tasks_router
+from src.api.routes.telemetry import router as telemetry_router
 from src.api.routes.tools import router as tools_router
 from src.api.routes.uploads import router as uploads_router
 from src.api.routes.worktrees import router as worktrees_router
@@ -18,8 +20,10 @@ __all__ = [
     "artifacts_router",
     "auth_router",
     "config_router",
+    "projects_router",
     "sessions_router",
     "tasks_router",
+    "telemetry_router",
     "tools_router",
     "uploads_router",
     "worktrees_router",

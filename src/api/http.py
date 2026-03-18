@@ -13,8 +13,10 @@ from src.api.routes import (
     artifacts_router,
     auth_router,
     config_router,
+    projects_router,
     sessions_router,
     tasks_router,
+    telemetry_router,
     tools_router,
     uploads_router,
     worktrees_router,
@@ -32,5 +34,7 @@ router.include_router(tools_router)
 router.include_router(auth_router)
 router.include_router(tasks_router)
 router.include_router(artifacts_router)
+router.include_router(projects_router)
 router.include_router(uploads_router)
 router.include_router(worktrees_router)
+router.include_router(telemetry_router)

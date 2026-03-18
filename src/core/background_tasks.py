@@ -98,6 +98,40 @@ class BackgroundTasksMixin:
         except Exception:
             logger.exception("Failed to log LLM call for session %s", session_id)
 
+    # --- Session row pre-creation ---
+
+    async def _ensure_session_row_in_db(self, session: "ActiveSession") -> None:
+        """Create a stub sessions row in the DB if one does not already exist.
+
+        Telemetry tables (session_turns, tool_calls) reference sessions.id via a
+        foreign key. Sessions are normally archived to the DB only when they
+        complete, but telemetry events are written during the active lifetime of
+        the session. This method eagerly creates the sessions row so FK
+        constraints are satisfied from the first telemetry insert.
+
+        The archive_session path updates all fields on completion, so the stub
+        row is always superseded by the final values.
+        """
+        if self._db_session_factory is None:
+            return
+        session_uuid = uuid.UUID(session.id)
+        backend_id = self._settings.RCFLOW_BACKEND_ID if self._settings else ""
+        try:
+            async with self._db_session_factory() as db:
+                existing = await db.get(SessionModel, session_uuid)
+                if existing is None:
+                    db.add(SessionModel(
+                        id=session_uuid,
+                        backend_id=backend_id,
+                        created_at=session.created_at,
+                        session_type=session.session_type.value,
+                        status=session.status.value,
+                        metadata_=session.metadata,
+                    ))
+                    await db.commit()
+        except Exception:
+            logger.exception("Failed to pre-create session row for %s", session.id)
+
     # --- Session archiving ---
 
     def _fire_archive_task(self, session_id: str) -> None:
@@ -511,15 +545,23 @@ class BackgroundTasksMixin:
         if self._artifact_scanner is None:
             return
         history = list(session.conversation_history)
-        task = asyncio.create_task(self._realtime_artifact_scan(session.id, history))
+        project_path = Path(session.main_project_path) if session.main_project_path else None
+        task = asyncio.create_task(self._realtime_artifact_scan(session.id, history, project_path))
         self._pending_archive_tasks.add(task)
         task.add_done_callback(self._pending_archive_tasks.discard)
 
-    async def _realtime_artifact_scan(self, session_id: str, conversation_history: list[dict]) -> None:
+    async def _realtime_artifact_scan(
+        self,
+        session_id: str,
+        conversation_history: list[dict],
+        project_path: Path | None,
+    ) -> None:
         """Extract artifacts from in-memory conversation history. Never raises."""
         assert self._artifact_scanner is not None
         try:
-            new_count, updated_count = await self._artifact_scanner.scan_from_history(session_id, conversation_history)
+            new_count, updated_count = await self._artifact_scanner.scan_from_history(
+                session_id, conversation_history, project_path
+            )
             if new_count > 0 or updated_count > 0:
                 await self._broadcast_artifact_list()
         except Exception:
@@ -529,15 +571,20 @@ class BackgroundTasksMixin:
         """Schedule a fire-and-forget background task to scan text strings for artifacts."""
         if self._artifact_scanner is None or not self._settings or not self._settings.ARTIFACT_AUTO_SCAN:
             return
-        task = asyncio.create_task(self._text_artifact_scan(session.id, texts))
+        project_path = Path(session.main_project_path) if session.main_project_path else None
+        task = asyncio.create_task(self._text_artifact_scan(session.id, texts, project_path))
         self._pending_archive_tasks.add(task)
         task.add_done_callback(self._pending_archive_tasks.discard)
 
-    async def _text_artifact_scan(self, session_id: str, texts: list[str]) -> None:
+    async def _text_artifact_scan(
+        self, session_id: str, texts: list[str], project_path: Path | None
+    ) -> None:
         """Extract artifacts from raw text strings. Never raises."""
         assert self._artifact_scanner is not None
         try:
-            new_count, updated_count = await self._artifact_scanner.scan_texts(session_id, texts)
+            new_count, updated_count = await self._artifact_scanner.scan_texts(
+                session_id, texts, project_path
+            )
             if new_count > 0 or updated_count > 0:
                 await self._broadcast_artifact_list()
         except Exception:

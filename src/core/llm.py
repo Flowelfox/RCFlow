@@ -16,12 +16,8 @@ from src.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
 
-_OPENAI_REASONING_PREFIXES = ("o1", "o3", "o4", "gpt-5")
+_OPENAI_REASONING_PREFIXES = ("o1", "o3", "o4")
 
-
-def _is_openai_reasoning_model(model: str) -> bool:
-    """Return True if *model* is an OpenAI reasoning model (o1/o3/o4/gpt-5 series)."""
-    return any(model.startswith(p) for p in _OPENAI_REASONING_PREFIXES)
 
 
 @dataclass
@@ -122,26 +118,44 @@ class LLMClient:
         return self._provider
 
     @property
+    def attachment_capabilities(self) -> dict[str, bool]:
+        """Granular attachment capability flags for the active model.
+
+        ``images``      — True when the model accepts image content blocks
+                          (JPEG, PNG, GIF, WEBP).
+        ``text_files``  — Always True; text/code files are always inlined as
+                          plain text regardless of model.
+        """
+        return {
+            "images": self.supports_vision,
+            "text_files": True,
+        }
+
+    @property
     def supports_vision(self) -> bool:
         """True if the active model supports image/vision attachments.
 
         Anthropic/Bedrock: claude-3.x series and claude-[variant]-4 family.
-        OpenAI: gpt-4o, gpt-4-turbo, gpt-4-vision, gpt-4.1+ (not reasoning models).
+        OpenAI: gpt-4o, gpt-4-turbo, gpt-4-vision, gpt-4.1+, gpt-5+ are multimodal
+          and support image input. Reasoning-only models (o1/o3/o4 series) do not.
         """
         model = self._model.lower()
         if self._provider in ("anthropic", "bedrock"):
             # claude-3.x family and claude-[name]-4 family support vision
             return bool(re.search(r"claude-3", model) or re.search(r"claude-\w+-4", model))
         if self._provider == "openai":
-            # Reasoning models (o1/o3/o4/gpt-5) do not support vision
+            # Reasoning-only models (o1/o3/o4 series) do not support image input.
+            # GPT-5 and GPT-4 series are general/multimodal — do NOT exclude them here.
             if any(model.startswith(p) for p in _OPENAI_REASONING_PREFIXES):
                 return False
-            # gpt-4o, gpt-4-turbo, gpt-4-vision, gpt-4.1+ support vision
+            # gpt-4o, gpt-4-turbo, gpt-4.1+, gpt-5+ and any model with "vision" in the
+            # name all support image/vision input per the 2026-03-16 model catalog.
             return bool(
                 "gpt-4o" in model
                 or "gpt-4-turbo" in model
                 or "vision" in model
                 or re.search(r"gpt-4[._]\d", model)
+                or model.startswith("gpt-5")
             )
         return False
 
@@ -276,10 +290,9 @@ class LLMClient:
             *messages,
         ]
 
-        token_param = "max_completion_tokens" if _is_openai_reasoning_model(self._model) else "max_tokens"
         kwargs: dict[str, Any] = {
             "model": self._model,
-            token_param: 4096,
+            "max_completion_tokens": 4096,
             "messages": openai_messages,
             "stream": True,
             "stream_options": {"include_usage": True},
@@ -512,14 +525,13 @@ class LLMClient:
         """Make a non-streaming OpenAI call and return the text."""
         assert self._openai_client is not None
         use_model = model or self._summary_model
-        token_key = "max_completion_tokens" if _is_openai_reasoning_model(use_model) else "max_tokens"
         response = await self._openai_client.chat.completions.create(
             model=use_model,
+            max_completion_tokens=max_tokens,
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": content},
             ],
-            **{token_key: max_tokens},
         )
         return (response.choices[0].message.content or "").strip()
 

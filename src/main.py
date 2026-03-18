@@ -23,6 +23,7 @@ from src.db.engine import check_connection, dispose_engine, get_session_factory,
 from src.logs import setup_logging
 from src.models.db import Session as SessionModel
 from src.services.artifact_scanner import ArtifactScanner
+from src.services.telemetry_service import TelemetryService
 from src.services.tool_manager import ToolManager
 from src.services.tool_settings import ToolSettingsManager
 from src.speech.stt import create_stt_provider
@@ -113,6 +114,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         llm_client = LLMClient(settings, tool_registry)
     app.state.llm_client = llm_client
 
+    # Telemetry service
+    telemetry_service = TelemetryService(
+        db_factory=db_session_factory,
+        backend_id=settings.RCFLOW_BACKEND_ID,
+        retention_days=settings.TELEMETRY_RETENTION_DAYS,
+    )
+    app.state.telemetry_service = telemetry_service
+
     # Prompt router
     prompt_router = PromptRouter(
         llm_client,
@@ -123,6 +132,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         tool_settings,
         tool_manager,
         artifact_scanner,
+        telemetry_service,
     )
     app.state.prompt_router = prompt_router
 
@@ -147,6 +157,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # Start tool update checker
     update_task = asyncio.create_task(tool_manager.run_update_loop())
 
+    # Start telemetry aggregation (runs every 60 s) + nightly retention cleanup
+    async def _run_telemetry_loop() -> None:
+        import asyncio as _asyncio  # noqa: PLC0415
+        tick = 0
+        while True:
+            await _asyncio.sleep(60)
+            await telemetry_service.aggregate_pending()
+            tick += 1
+            if tick % 1440 == 0:  # ~once per day (1440 minutes)
+                await telemetry_service.cleanup_old_records()
+
+    telemetry_task = asyncio.create_task(_run_telemetry_loop())
+
     # Linear startup sync (non-blocking background task)
     if settings.LINEAR_SYNC_ON_STARTUP and settings.LINEAR_API_KEY and settings.LINEAR_TEAM_ID:
         from src.api.integrations.linear import _upsert_issues, _issue_to_dict  # noqa: PLC0415
@@ -169,6 +192,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     yield
 
     # Shutdown
+    telemetry_task.cancel()
     update_task.cancel()
     reaper_task.cancel()
     logger.info("Shutting down RCFlow server")

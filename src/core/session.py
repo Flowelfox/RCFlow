@@ -88,6 +88,9 @@ class ActiveSession:
         self._todos: list[dict[str, str]] = []
         # Reason why the session was paused (e.g. "max_turns"); None for manual pauses
         self.paused_reason: str | None = None
+        # The resolved absolute path of the latest @ProjectName mention in this session.
+        # None means the session is "Global" (no project attached yet).
+        self.main_project_path: str | None = None
 
     @property
     def todos(self) -> list[dict[str, str]]:
@@ -271,6 +274,7 @@ class SessionManager:
             "paused_reason": session.paused_reason,
             "worktree": session.metadata.get("worktree"),
             "selected_worktree_path": session.metadata.get("selected_worktree_path"),
+            "main_project_path": session.main_project_path,
         }
         for queue in self._update_subscribers.values():
             queue.put_nowait(update)
@@ -353,6 +357,7 @@ class SessionManager:
                 session_type=session.session_type.value,
                 status=session.status.value,
                 title=session.title,
+                main_project_path=session.main_project_path,
                 metadata_=session.metadata,
                 conversation_history=session.conversation_history or None,
                 input_tokens=session.input_tokens,
@@ -370,6 +375,7 @@ class SessionManager:
             existing.session_type = session.session_type.value
             existing.status = session.status.value
             existing.title = session.title
+            existing.main_project_path = session.main_project_path
             existing.metadata_ = session.metadata
             existing.conversation_history = session.conversation_history or None
             existing.input_tokens = session.input_tokens
@@ -441,6 +447,7 @@ class SessionManager:
         session.status = SessionStatus.ACTIVE
         session._activity_state = ActivityState.IDLE
         session._title = row.title
+        session.main_project_path = row.main_project_path
         session.metadata = dict(row.metadata_) if row.metadata_ else {}
         session.last_activity_at = datetime.now(UTC)
         # Restore token usage
@@ -520,6 +527,7 @@ class SessionManager:
                     "tool_cost_usd": s.tool_cost_usd,
                     "worktree": s.metadata.get("worktree"),
                     "selected_worktree_path": s.metadata.get("selected_worktree_path"),
+                    "main_project_path": s.main_project_path,
                 }
             )
 
@@ -551,6 +559,7 @@ class SessionManager:
                         "tool_cost_usd": row.tool_cost_usd or 0.0,
                         "worktree": archived_meta.get("worktree"),
                         "selected_worktree_path": archived_meta.get("selected_worktree_path"),
+                        "main_project_path": row.main_project_path,
                     }
                 )
 
@@ -631,6 +640,7 @@ class SessionManager:
                         session_type=session.session_type.value,
                         status=session.status.value,
                         title=session.title,
+                        main_project_path=session.main_project_path,
                         metadata_=session.metadata,
                         input_tokens=session.input_tokens,
                         output_tokens=session.output_tokens,
@@ -648,6 +658,7 @@ class SessionManager:
                     existing.session_type = session.session_type.value
                     existing.status = session.status.value
                     existing.title = session.title
+                    existing.main_project_path = session.main_project_path
                     existing.metadata_ = session.metadata
                     existing.input_tokens = session.input_tokens
                     existing.output_tokens = session.output_tokens

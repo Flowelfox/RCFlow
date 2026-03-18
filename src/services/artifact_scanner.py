@@ -18,7 +18,9 @@ logger = logging.getLogger(__name__)
 
 # Regex patterns to extract file paths from text.
 # Matches absolute paths like /home/user/file.md or ~/file.md
-# and relative paths like src/file.md, ./file.md, ../file.md
+# and relative paths like ./file.md or ../file.md.
+# Bare relative paths (e.g. src/file.md) are NOT matched; they are resolved
+# by applying the session's main_project_path prefix at resolution time.
 _FILE_PATH_RE = re.compile(
     r"""(?:^|[\s"'`({\[,;:=])"""       # boundary before path
     r"""("""
@@ -65,14 +67,30 @@ class ArtifactScanner:
         """Extract file path candidates from a text string."""
         return set(_FILE_PATH_RE.findall(text))
 
-    def _resolve_path(self, raw_path: str) -> Path | None:
-        """Resolve a raw path string to an absolute Path, or None if it doesn't exist."""
+    def _resolve_path(self, raw_path: str, project_path: Path | None = None) -> Path | None:
+        """Resolve a raw path string to an absolute Path, or None if it doesn't exist.
+
+        First tries standard resolution (absolute, expanduser, resolve against CWD).
+        If that fails and *project_path* is provided, also tries resolving the path
+        relative to the project directory.  This handles cases where tool outputs
+        contain bare or dot-relative paths (e.g. ``./Design.md``) whose CWD is
+        the project root rather than the server's working directory.
+        """
         try:
             p = Path(raw_path).expanduser().resolve()
             if p.is_file():
                 return p
         except (OSError, ValueError):
             pass
+        if project_path is not None:
+            try:
+                # Strip leading ./ or ../ to resolve relative to project root
+                relative = Path(raw_path.lstrip("/"))
+                p = (project_path / relative).resolve()
+                if p.is_file():
+                    return p
+            except (OSError, ValueError):
+                pass
         return None
 
     def _extract_paths_from_conversation(self, conversation_history: list[dict]) -> set[str]:
@@ -96,10 +114,19 @@ class ArtifactScanner:
         db: AsyncSession,
         candidate_paths: set[str],
         session_id: uuid.UUID,
+        project_path: Path | None = None,
     ) -> tuple[int, int]:
         """Resolve candidate paths, filter, and upsert artifact records.
 
-        Returns (new_count, updated_count).
+        Args:
+            db: Active database session.
+            candidate_paths: Raw path strings extracted from messages.
+            session_id: Session to associate newly discovered artifacts with.
+            project_path: Optional project root directory used as a fallback base
+                when a candidate path cannot be resolved from the server's CWD.
+
+        Returns:
+            Tuple of (new_count, updated_count).
         """
         if not candidate_paths:
             return 0, 0
@@ -118,7 +145,7 @@ class ArtifactScanner:
         existing_artifacts = {a.file_path: a for a in art_result.scalars()}
 
         for raw_path in candidate_paths:
-            file_path = self._resolve_path(raw_path)
+            file_path = self._resolve_path(raw_path, project_path)
             if file_path is None:
                 continue
 
@@ -224,7 +251,14 @@ class ArtifactScanner:
                 return 0
 
             logger.debug("Found %d candidate paths in session %s", len(candidate_paths), session_id)
-            new_count, updated_count = await self._upsert_artifacts(db, candidate_paths, session_id)
+            # Use main_project_path from the archived session row as a fallback
+            # base directory for relative path resolution.
+            project_path: Path | None = None
+            if session_row and session_row.main_project_path:
+                project_path = Path(session_row.main_project_path)
+            new_count, updated_count = await self._upsert_artifacts(
+                db, candidate_paths, session_id, project_path
+            )
 
         logger.info(
             "Artifact extraction complete for session %s: %d new, %d updated",
@@ -236,6 +270,7 @@ class ArtifactScanner:
         self,
         session_id: str | uuid.UUID,
         texts: list[str],
+        project_path: Path | None = None,
     ) -> tuple[int, int]:
         """Extract artifacts from a list of raw text strings (real-time).
 
@@ -245,6 +280,8 @@ class ArtifactScanner:
         Args:
             session_id: Session ID to associate with discovered artifacts.
             texts: Raw text strings to scan for file paths.
+            project_path: Optional project root directory used as a fallback base
+                when a candidate path cannot be resolved from the server's CWD.
 
         Returns:
             Tuple of (new_count, updated_count).
@@ -264,7 +301,9 @@ class ArtifactScanner:
         )
 
         async with self.db_session_factory() as db:
-            new_count, updated_count = await self._upsert_artifacts(db, candidate_paths, session_id)
+            new_count, updated_count = await self._upsert_artifacts(
+                db, candidate_paths, session_id, project_path
+            )
 
         if new_count > 0 or updated_count > 0:
             logger.info(
@@ -277,6 +316,7 @@ class ArtifactScanner:
         self,
         session_id: str | uuid.UUID,
         conversation_history: list[dict],
+        project_path: Path | None = None,
     ) -> tuple[int, int]:
         """Extract artifacts from in-memory conversation history (real-time).
 
@@ -286,6 +326,8 @@ class ArtifactScanner:
         Args:
             session_id: Session ID to associate with discovered artifacts.
             conversation_history: The session's in-memory conversation history.
+            project_path: Optional project root directory used as a fallback base
+                when a candidate path cannot be resolved from the server's CWD.
 
         Returns:
             Tuple of (new_count, updated_count).
@@ -303,7 +345,9 @@ class ArtifactScanner:
         )
 
         async with self.db_session_factory() as db:
-            new_count, updated_count = await self._upsert_artifacts(db, candidate_paths, session_id)
+            new_count, updated_count = await self._upsert_artifacts(
+                db, candidate_paths, session_id, project_path
+            )
 
         if new_count > 0 or updated_count > 0:
             logger.info(
