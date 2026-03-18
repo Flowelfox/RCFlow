@@ -10,6 +10,7 @@ from src.api.routes.auth import router as auth_router
 from src.api.routes.config import router as config_router
 from src.api.routes.projects import router as projects_router
 from src.api.routes.sessions import router as sessions_router
+from src.api.routes.slash_commands import router as slash_commands_router
 from src.api.routes.tasks import router as tasks_router
 from src.api.routes.telemetry import router as telemetry_router
 from src.api.routes.tools import router as tools_router
@@ -22,6 +23,7 @@ __all__ = [
     "config_router",
     "projects_router",
     "sessions_router",
+    "slash_commands_router",
     "tasks_router",
     "telemetry_router",
     "tools_router",

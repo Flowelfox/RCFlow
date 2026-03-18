@@ -10,6 +10,7 @@ import '../../models/worker_config.dart';
 import '../../state/app_state.dart';
 import '../../state/pane_state.dart';
 import '../../theme.dart';
+import '../../tips.dart';
 
 bool get _isDesktop =>
     Platform.isWindows || Platform.isLinux || Platform.isMacOS;
@@ -28,7 +29,7 @@ const List<String> _kTextOnlyExtensions = [
   'gitignore', 'env',
 ];
 
-enum _MentionType { project, tool, file }
+enum _MentionType { project, tool, file, slash }
 
 class InputArea extends StatefulWidget {
   const InputArea({super.key});
@@ -65,6 +66,7 @@ class _InputAreaState extends State<InputArea> {
   List<String> _projectSuggestions = [];
   List<Map<String, String>> _toolSuggestions = [];
   List<Map<String, String>> _fileSuggestions = [];
+  List<Map<String, String>> _slashSuggestions = [];
   int _selectedIndex = 0;
   int? _mentionStart;
   _MentionType? _mentionType;
@@ -189,12 +191,12 @@ class _InputAreaState extends State<InputArea> {
     }
     final cursor = selection.baseOffset;
 
-    // Walk backwards from cursor to find the nearest unescaped '@', '#', or '$'
+    // Walk backwards from cursor to find the nearest '@', '#', '$', or '/'
     int? triggerPos;
     String? triggerChar;
     for (var i = cursor - 1; i >= 0; i--) {
       final ch = text[i];
-      if (ch == '@' || ch == '#' || ch == '\$') {
+      if (ch == '@' || ch == '#' || ch == '\$' || ch == '/') {
         triggerPos = i;
         triggerChar = ch;
         break;
@@ -207,12 +209,20 @@ class _InputAreaState extends State<InputArea> {
       return;
     }
 
-    // Trigger char must be at start of text or preceded by whitespace
-    if (triggerPos > 0 &&
-        text[triggerPos - 1] != ' ' &&
-        text[triggerPos - 1] != '\n') {
-      _dismissOverlay();
-      return;
+    if (triggerChar == '/') {
+      // Slash only activates when it is the very first character of the input.
+      if (triggerPos != 0) {
+        _dismissOverlay();
+        return;
+      }
+    } else {
+      // '@', '#', '$': must be at position 0 or preceded by whitespace
+      if (triggerPos > 0 &&
+          text[triggerPos - 1] != ' ' &&
+          text[triggerPos - 1] != '\n') {
+        _dismissOverlay();
+        return;
+      }
     }
 
     final query = text.substring(triggerPos + 1, cursor);
@@ -226,6 +236,7 @@ class _InputAreaState extends State<InputArea> {
       '@' => _MentionType.project,
       '#' => _MentionType.tool,
       '\$' => _MentionType.file,
+      '/' => _MentionType.slash,
       _ => null,
     };
     if (_mentionType != null) _fetchSuggestions(query);
@@ -256,6 +267,7 @@ class _InputAreaState extends State<InputArea> {
           _projectSuggestions = projects.take(6).toList();
           _toolSuggestions = [];
           _fileSuggestions = [];
+          _slashSuggestions = [];
         } else if (_mentionType == _MentionType.tool) {
           final tools = await ws.fetchTools(query: query);
           if (!mounted) return;
@@ -267,6 +279,7 @@ class _InputAreaState extends State<InputArea> {
           _toolSuggestions = tools.take(6).toList();
           _projectSuggestions = [];
           _fileSuggestions = [];
+          _slashSuggestions = [];
         } else if (_mentionType == _MentionType.file) {
           final artifacts = await ws.fetchArtifactSuggestions(query: query);
           if (!mounted) return;
@@ -278,6 +291,23 @@ class _InputAreaState extends State<InputArea> {
           _fileSuggestions = artifacts.take(8).toList();
           _projectSuggestions = [];
           _toolSuggestions = [];
+          _slashSuggestions = [];
+        } else if (_mentionType == _MentionType.slash) {
+          final isCC = context.read<PaneState>().isClaudeCodeSession;
+          final all = await ws.fetchSlashCommands(query: query);
+          if (!mounted) return;
+          final filtered = isCC
+              ? all
+              : all.where((c) => c['source'] == 'rcflow').toList();
+          if (filtered.isEmpty) {
+            _showNoResults();
+            return;
+          }
+          _showingNoResults = false;
+          _slashSuggestions = filtered.take(12).toList();
+          _projectSuggestions = [];
+          _toolSuggestions = [];
+          _fileSuggestions = [];
         }
 
         _selectedIndex = 0;
@@ -307,6 +337,7 @@ class _InputAreaState extends State<InputArea> {
     if (_projectSuggestions.isEmpty &&
         _toolSuggestions.isEmpty &&
         _fileSuggestions.isEmpty &&
+        _slashSuggestions.isEmpty &&
         !_showingNoResults) {
       _removeOverlay();
       return;
@@ -325,6 +356,7 @@ class _InputAreaState extends State<InputArea> {
     _projectSuggestions = [];
     _toolSuggestions = [];
     _fileSuggestions = [];
+    _slashSuggestions = [];
     _selectedIndex = 0;
     _showingNoResults = false;
     _debounceTimer?.cancel();
@@ -341,6 +373,7 @@ class _InputAreaState extends State<InputArea> {
   int get _suggestionCount {
     if (_mentionType == _MentionType.tool) return _toolSuggestions.length;
     if (_mentionType == _MentionType.file) return _fileSuggestions.length;
+    if (_mentionType == _MentionType.slash) return _slashSuggestions.length;
     return _projectSuggestions.length;
   }
 
@@ -354,6 +387,7 @@ class _InputAreaState extends State<InputArea> {
       _MentionType.project => '@',
       _MentionType.tool => '#',
       _MentionType.file => '\$',
+      _MentionType.slash => '/',
     };
     final insertion = '$prefix$name ';
     _controller.text = '$before$insertion$after';
@@ -378,7 +412,8 @@ class _InputAreaState extends State<InputArea> {
     if (text.isEmpty && _pendingAttachments.isEmpty) return;
     if (text.isEmpty) return; // text is still required
     if (_uploadingAttachments) return;
-
+    // Intercept RCFlow built-in slash commands before sending to server.
+    if (text.startsWith('/') && _tryHandleRCFlowCommand(text)) return;
     final pane = context.read<PaneState>();
     final state = context.read<AppState>();
     context.read<AppState>().setActivePane(pane.paneId);
@@ -432,6 +467,62 @@ class _InputAreaState extends State<InputArea> {
     pane.sendPrompt(text, attachments: uploaded);
   }
 
+  /// Handles selection of a slash command from the suggestion overlay.
+  /// RCFlow commands execute locally; Claude Code commands are sent as prompts.
+  void _handleSlashSelected(String name, String source) {
+    _controller.text = '/$name';
+    _controller.selection = TextSelection.collapsed(offset: name.length + 1);
+    _dismissOverlay();
+    _send();
+  }
+
+  /// Attempts to handle a RCFlow built-in slash command. Returns true if handled.
+  bool _tryHandleRCFlowCommand(String text) {
+    final cmd = text.split(' ').first.toLowerCase();
+    switch (cmd) {
+      case '/clear':
+        context.read<PaneState>().clearMessages();
+        _controller.clear();
+        _focusNode.requestFocus();
+        return true;
+      case '/new':
+        context.read<PaneState>().startNewChat();
+        _controller.clear();
+        _focusNode.requestFocus();
+        return true;
+      case '/help':
+        _showHelp();
+        _controller.clear();
+        _focusNode.requestFocus();
+        return true;
+      case '/pause':
+        final sid = context.read<PaneState>().sessionId;
+        if (sid != null) context.read<PaneState>().pauseSession(sid);
+        _controller.clear();
+        _focusNode.requestFocus();
+        return true;
+      case '/resume':
+        final sid = context.read<PaneState>().sessionId;
+        if (sid != null) context.read<PaneState>().resumeSession(sid);
+        _controller.clear();
+        _focusNode.requestFocus();
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  void _showHelp() {
+    final appState = context.read<AppState>();
+    final paneId = context.read<PaneState>().paneId;
+    appState.addSystemMessageToPane(
+      paneId,
+      'RCFlow slash commands: /clear, /new, /help, /pause, /resume\n'
+      'Type / to browse all available commands.\n'
+      'Tip: ${getRandomTip()}',
+    );
+  }
+
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
     if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
       return KeyEventResult.ignored;
@@ -453,12 +544,18 @@ class _InputAreaState extends State<InputArea> {
       if (event.logicalKey == LogicalKeyboardKey.enter ||
           event.logicalKey == LogicalKeyboardKey.tab) {
         if (_suggestionCount > 0) {
-          final name = switch (_mentionType) {
-            _MentionType.tool => _toolSuggestions[_selectedIndex]['mention_name']!,
-            _MentionType.file => _fileSuggestions[_selectedIndex]['file_name']!,
-            _MentionType.project || null => _projectSuggestions[_selectedIndex],
-          };
-          _selectSuggestion(name);
+          if (_mentionType == _MentionType.slash) {
+            final cmd = _slashSuggestions[_selectedIndex];
+            _handleSlashSelected(cmd['name']!, cmd['source']!);
+          } else {
+            final name = switch (_mentionType) {
+              _MentionType.tool => _toolSuggestions[_selectedIndex]['mention_name']!,
+              _MentionType.file => _fileSuggestions[_selectedIndex]['file_name']!,
+              _MentionType.project || _MentionType.slash || null =>
+                _projectSuggestions[_selectedIndex],
+            };
+            _selectSuggestion(name);
+          }
           return KeyEventResult.handled;
         }
       }
@@ -472,6 +569,36 @@ class _InputAreaState extends State<InputArea> {
       }
     }
     return KeyEventResult.ignored;
+  }
+
+  Widget _buildSlashOverlayContent(String query) {
+    final children = <Widget>[];
+    String? currentGroup;
+    for (var i = 0; i < _slashSuggestions.length; i++) {
+      final cmd = _slashSuggestions[i];
+      final group = cmd['source'] == 'rcflow' ? 'RCFlow' : 'Claude Code';
+      if (group != currentGroup) {
+        if (currentGroup != null) {
+          children.add(Divider(height: 1, thickness: 1));
+        }
+        currentGroup = group;
+        children.add(_SlashGroupHeader(label: group));
+      }
+      children.add(_SlashCommandItem(
+        name: cmd['name']!,
+        description: cmd['description']!,
+        source: cmd['source']!,
+        query: query,
+        selected: i == _selectedIndex,
+        onTap: () => _handleSlashSelected(cmd['name']!, cmd['source']!),
+      ));
+    }
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxHeight: 380),
+      child: SingleChildScrollView(
+        child: Column(mainAxisSize: MainAxisSize.min, children: children),
+      ),
+    );
   }
 
   OverlayEntry _buildOverlayEntry() {
@@ -491,6 +618,7 @@ class _InputAreaState extends State<InputArea> {
           final label = switch (_mentionType) {
             _MentionType.tool => 'No tools found',
             _MentionType.file => 'No artifacts found',
+            _MentionType.slash => 'No commands found',
             _MentionType.project || null => 'No projects found',
           };
           content = Padding(
@@ -500,6 +628,9 @@ class _InputAreaState extends State<InputArea> {
               style: TextStyle(color: context.appColors.textMuted, fontSize: 13),
             ),
           );
+        } else if (_mentionType == _MentionType.slash &&
+            _slashSuggestions.isNotEmpty) {
+          content = _buildSlashOverlayContent(mentionQuery);
         } else if (_mentionType == _MentionType.file &&
             _fileSuggestions.isNotEmpty) {
           content = ConstrainedBox(
@@ -568,6 +699,7 @@ class _InputAreaState extends State<InputArea> {
         final overlayWidth = switch (_mentionType) {
           _MentionType.file => 400.0,
           _MentionType.tool => 320.0,
+          _MentionType.slash => 360.0,
           _MentionType.project || null => 280.0,
         };
 
@@ -1290,6 +1422,150 @@ class _FileMentionItem extends StatelessWidget {
           TextSpan(
             text: fileName.substring(matchIndex + query.length),
             style: TextStyle(color: context.appColors.textPrimary, fontSize: 13),
+          ),
+      ]),
+      overflow: TextOverflow.ellipsis,
+    );
+  }
+}
+
+class _SlashGroupHeader extends StatelessWidget {
+  final String label;
+
+  const _SlashGroupHeader({required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+      child: Text(
+        label.toUpperCase(),
+        style: TextStyle(
+          color: context.appColors.textMuted,
+          fontSize: 10,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 0.8,
+        ),
+      ),
+    );
+  }
+}
+
+class _SlashCommandItem extends StatelessWidget {
+  final String name;
+  final String description;
+  final String source;
+  final String query;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _SlashCommandItem({
+    required this.name,
+    required this.description,
+    required this.source,
+    required this.query,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isRCFlow = source == 'rcflow';
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        color: selected ? context.appColors.bgOverlay : Colors.transparent,
+        child: Row(
+          children: [
+            Icon(
+              isRCFlow ? Icons.electric_bolt_rounded : Icons.terminal_rounded,
+              size: 15,
+              color: isRCFlow
+                  ? context.appColors.accentLight
+                  : context.appColors.textMuted,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildHighlightedName(context),
+                  if (description.isNotEmpty)
+                    Text(
+                      description,
+                      style: TextStyle(
+                          color: context.appColors.textMuted, fontSize: 11),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHighlightedName(BuildContext context) {
+    if (query.isEmpty) {
+      return Text(
+        '/$name',
+        style: TextStyle(
+            color: context.appColors.textPrimary,
+            fontSize: 13,
+            fontWeight: FontWeight.w500),
+        overflow: TextOverflow.ellipsis,
+      );
+    }
+
+    final lowerName = name.toLowerCase();
+    final lowerQuery = query.toLowerCase();
+    final matchIndex = lowerName.indexOf(lowerQuery);
+
+    if (matchIndex < 0) {
+      return Text(
+        '/$name',
+        style: TextStyle(
+            color: context.appColors.textPrimary,
+            fontSize: 13,
+            fontWeight: FontWeight.w500),
+        overflow: TextOverflow.ellipsis,
+      );
+    }
+
+    return Text.rich(
+      TextSpan(children: [
+        TextSpan(
+          text: '/',
+          style: TextStyle(
+              color: context.appColors.textSecondary,
+              fontSize: 13,
+              fontWeight: FontWeight.w500),
+        ),
+        if (matchIndex > 0)
+          TextSpan(
+            text: name.substring(0, matchIndex),
+            style: TextStyle(
+                color: context.appColors.textPrimary,
+                fontSize: 13,
+                fontWeight: FontWeight.w500),
+          ),
+        TextSpan(
+          text: name.substring(matchIndex, matchIndex + query.length),
+          style: TextStyle(
+              color: context.appColors.accentLight,
+              fontSize: 13,
+              fontWeight: FontWeight.w600),
+        ),
+        if (matchIndex + query.length < name.length)
+          TextSpan(
+            text: name.substring(matchIndex + query.length),
+            style: TextStyle(
+                color: context.appColors.textPrimary,
+                fontSize: 13,
+                fontWeight: FontWeight.w500),
           ),
       ]),
       overflow: TextOverflow.ellipsis,

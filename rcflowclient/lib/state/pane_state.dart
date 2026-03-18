@@ -276,6 +276,9 @@ class PaneState extends ChangeNotifier {
   // Terminal statuses for sessions
   static const _terminalStatuses = {'completed', 'failed', 'cancelled'};
 
+  /// Whether the current session is driven by the Claude Code executor.
+  bool get isClaudeCodeSession => _agentToolName == 'claude_code';
+
   /// Whether the input area should allow sending messages.
   /// Sending while paused is allowed — the server auto-resumes the session.
   /// Also allowed on the home screen — auto-creates a new session on send.
@@ -466,6 +469,17 @@ class PaneState extends ChangeNotifier {
   }
 
   void refresh() => notifyListeners();
+
+  /// Clear the displayed message list for this pane (client-side only).
+  /// Does not affect the server-side session or database history.
+  void clearMessages() {
+    finalizeStream();
+    _messages.clear();
+    _todos = [];
+    _todoPanelVisible = false;
+    _pendingLocalUserMessages = 0;
+    notifyListeners();
+  }
 
   // --- Ack handling ---
 

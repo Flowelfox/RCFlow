@@ -522,6 +522,39 @@ class WebSocketService {
     }
   }
 
+  Future<List<Map<String, String>>> fetchSlashCommands({String? query}) async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final queryParams = <String, String>{};
+    if (query != null && query.isNotEmpty) queryParams['q'] = query;
+    final url = _serverUrl!.http(
+      '/api/slash-commands',
+      queryParams.isNotEmpty ? queryParams : null,
+    );
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.getUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      final response = await request.close();
+      final body =
+          await response.transform(const io.SystemEncoding().decoder).join();
+      if (response.statusCode != 200) {
+        throw Exception('Server returned ${response.statusCode}: $body');
+      }
+      final data = jsonDecode(body) as Map<String, dynamic>;
+      final commands = data['commands'] as List<dynamic>;
+      return commands.map((c) {
+        final m = c as Map<String, dynamic>;
+        return {
+          'name': m['name'] as String,
+          'description': m['description'] as String,
+          'source': m['source'] as String,
+        };
+      }).toList();
+    } finally {
+      client.close();
+    }
+  }
+
   Future<void> renameSession(String sessionId, String? title) async {
     if (_serverUrl == null) throw StateError('Not connected');
     final url = _serverUrl!.http('/api/sessions/$sessionId/title');
