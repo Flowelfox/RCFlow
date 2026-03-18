@@ -1,16 +1,40 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../../models/app_notification.dart';
+import '../../../models/linear_issue_info.dart';
 import '../../../models/task_info.dart';
 import '../../../state/app_state.dart';
 import '../../../theme.dart';
 import '../../dialogs/task_create_dialog.dart';
+import 'linear_issue_tile.dart';
 import 'task_tile.dart';
+
+/// Filters [issues] by a free-text [query], matching against title, identifier,
+/// and assignee name. Returns all issues unmodified when [query] is empty.
+///
+/// Exposed at library level so that it can be exercised in unit tests without
+/// requiring a widget environment.
+List<LinearIssueInfo> filterLinearIssuesByQuery(
+  List<LinearIssueInfo> issues,
+  String query,
+) {
+  if (query.isEmpty) return issues;
+  final q = query.toLowerCase();
+  return issues.where((i) {
+    return i.title.toLowerCase().contains(q) ||
+        i.identifier.toLowerCase().contains(q) ||
+        (i.assigneeName?.toLowerCase().contains(q) ?? false);
+  }).toList();
+}
 
 /// Task list panel for the sidebar Tasks tab.
 ///
-/// Shows all tasks grouped by status (in_progress, todo, review, done).
-/// Includes a search bar and status filter chips.
+/// Shows all tasks grouped by status (in_progress, todo, review, done), followed
+/// by a collapsible "Unlinked Issues" section for Linear issues not yet linked
+/// to any task. A sync button in the filter bar triggers a pull from Linear.
 class TaskListPanel extends StatefulWidget {
   final VoidCallback? onTaskSelected;
 
@@ -22,6 +46,10 @@ class TaskListPanel extends StatefulWidget {
 
 class _TaskListPanelState extends State<TaskListPanel> {
   final Set<String> _collapsedGroups = {'done'};
+  final Set<String> _collapsedWorkerGroups = {};
+  bool _unlinkedCollapsed = true;
+  bool _groupByWorker = false;
+  bool _syncing = false;
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
   final Set<String> _activeStatusFilters = {};
@@ -59,6 +87,7 @@ class _TaskListPanelState extends State<TaskListPanel> {
     _searchController.text = _searchQuery;
     _activeStatusFilters.addAll(settings.tasksFilterStatus);
     _activeSourceFilters.addAll(settings.tasksFilterSource);
+    _groupByWorker = settings.tasksGroupByWorker;
     final savedCollapsed = settings.tasksCollapsedGroups;
     if (savedCollapsed != null) {
       _collapsedGroups.clear();
@@ -118,6 +147,9 @@ class _TaskListPanelState extends State<TaskListPanel> {
     return filtered;
   }
 
+  List<LinearIssueInfo> _filterUnlinkedIssues(List<LinearIssueInfo> issues) =>
+      filterLinearIssuesByQuery(issues, _searchQuery);
+
   bool get _hasActiveFilters =>
       _searchQuery.isNotEmpty ||
       _activeStatusFilters.isNotEmpty ||
@@ -133,81 +165,93 @@ class _TaskListPanelState extends State<TaskListPanel> {
     _saveFilters();
   }
 
+  Future<void> _sync(BuildContext context, AppState state) async {
+    final worker = state.getWorker(state.defaultWorkerId ?? '');
+    if (worker == null) return;
+    setState(() => _syncing = true);
+    try {
+      await worker.ws.syncLinearIssues();
+      worker.ws.listLinearIssues();
+    } catch (e) {
+      if (context.mounted) {
+        state.notificationService.show(
+          level: NotificationLevel.error,
+          title: 'Linear sync failed',
+          body: _extractDetail(e),
+          duration: const Duration(seconds: 8),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _syncing = false);
+    }
+  }
+
+  /// Extracts the `detail` field from a JSON error body if present,
+  /// otherwise returns the raw exception message.
+  static String _extractDetail(Object e) {
+    final raw = e.toString();
+    final jsonStart = raw.indexOf('{');
+    if (jsonStart >= 0) {
+      try {
+        final decoded = jsonDecode(raw.substring(jsonStart)) as Map<String, dynamic>;
+        final detail = decoded['detail'] as String?;
+        if (detail != null) return detail;
+      } catch (_) {}
+    }
+    return raw;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Consumer<AppState>(
       builder: (context, state, _) {
         final tasks = state.tasks;
+        final allUnlinkedIssues = state.unlinkedLinearIssues;
 
-        if (tasks.isEmpty) {
-          return Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.task_outlined,
-                    color: context.appColors.textMuted, size: 40),
-                const SizedBox(height: 12),
-                Text('No tasks yet',
-                    style: TextStyle(
-                        color: context.appColors.textSecondary,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600)),
-                const SizedBox(height: 4),
-                Text('Create a task or let AI generate them',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                        color: context.appColors.textMuted, fontSize: 13)),
-                const SizedBox(height: 16),
-                FilledButton.icon(
-                  onPressed: () => showTaskCreateDialog(context),
-                  icon: const Icon(Icons.add, size: 18),
-                  label: const Text('New Task'),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: context.appColors.accent,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 10),
-                  ),
-                ),
-              ],
-            ),
-          );
+        if (tasks.isEmpty && allUnlinkedIssues.isEmpty) {
+          return _buildEmptyState(context, state);
         }
 
         final filtered = _filterTasks(tasks, state);
+        final filteredUnlinked = _filterUnlinkedIssues(allUnlinkedIssues);
 
-        // Group by status
-        final grouped = <String, List<TaskInfo>>{};
-        for (final status in _statusOrder) {
-          grouped[status] = [];
-        }
-        for (final t in filtered) {
-          grouped.putIfAbsent(t.status, () => []).add(t);
-        }
-
-        final sections = <Widget>[];
-        for (final status in _statusOrder) {
-          final group = grouped[status] ?? [];
-          if (group.isEmpty) continue;
-          final collapsed = _collapsedGroups.contains(status);
-          sections.add(_buildStatusGroup(
-            context, state, status, group, collapsed,
-          ));
+        // Build list items
+        final listItems = <Widget>[];
+        if (filtered.isEmpty && filteredUnlinked.isEmpty && _hasActiveFilters) {
+          listItems.add(_buildNoResults(context));
+        } else if (_groupByWorker) {
+          _buildWorkerGroupedItems(context, state, filtered, filteredUnlinked, listItems);
+        } else {
+          // Group by status (default)
+          final grouped = <String, List<TaskInfo>>{};
+          for (final status in _statusOrder) {
+            grouped[status] = [];
+          }
+          for (final t in filtered) {
+            grouped.putIfAbsent(t.status, () => []).add(t);
+          }
+          for (final status in _statusOrder) {
+            final group = grouped[status] ?? [];
+            if (group.isEmpty) continue;
+            final collapsed = _collapsedGroups.contains(status);
+            listItems.add(_buildStatusGroup(
+              context, state, status, group, collapsed,
+            ));
+          }
+          if (filteredUnlinked.isNotEmpty) {
+            listItems.add(_buildUnlinkedIssuesSection(
+                context, state, filteredUnlinked));
+          }
         }
 
         return Column(
           children: [
-            _buildFilterBar(context),
+            _buildFilterBar(context, state),
             Expanded(
-              child: filtered.isEmpty && _hasActiveFilters
-                  ? _buildNoResults(context)
-                  : ListView(
-                      padding: const EdgeInsets.symmetric(vertical: 4),
-                      children: sections,
-                    ),
+              child: ListView(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                children: listItems,
+              ),
             ),
           ],
         );
@@ -215,7 +259,45 @@ class _TaskListPanelState extends State<TaskListPanel> {
     );
   }
 
-  Widget _buildFilterBar(BuildContext context) {
+  Widget _buildEmptyState(BuildContext context, AppState state) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.task_outlined,
+              color: context.appColors.textMuted, size: 40),
+          const SizedBox(height: 12),
+          Text('No tasks yet',
+              style: TextStyle(
+                  color: context.appColors.textSecondary,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600)),
+          const SizedBox(height: 4),
+          Text('Create a task or let AI generate them',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                  color: context.appColors.textMuted, fontSize: 13)),
+          const SizedBox(height: 16),
+          FilledButton.icon(
+            onPressed: () => showTaskCreateDialog(context),
+            icon: const Icon(Icons.add, size: 18),
+            label: const Text('New Task'),
+            style: FilledButton.styleFrom(
+              backgroundColor: context.appColors.accent,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 16, vertical: 10),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFilterBar(BuildContext context, AppState state) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(10, 8, 10, 4),
       child: Column(
@@ -295,6 +377,53 @@ class _TaskListPanelState extends State<TaskListPanel> {
                     onPressed: () => showTaskCreateDialog(context),
                   ),
                 ),
+                const SizedBox(width: 2),
+                SizedBox(
+                  width: 30,
+                  height: 30,
+                  child: IconButton(
+                    padding: EdgeInsets.zero,
+                    icon: Icon(
+                      Icons.people_outlined,
+                      color: _groupByWorker
+                          ? context.appColors.accent
+                          : context.appColors.textSecondary,
+                      size: 18,
+                    ),
+                    tooltip: _groupByWorker
+                        ? 'Grouping by worker (tap to group by status)'
+                        : 'Group by worker',
+                    onPressed: () {
+                      setState(() => _groupByWorker = !_groupByWorker);
+                      Provider.of<AppState>(context, listen: false)
+                          .settings
+                          .tasksGroupByWorker = _groupByWorker;
+                    },
+                  ),
+                ),
+                if (state.anyWorkerHasLinear) ...[
+                  const SizedBox(width: 2),
+                  SizedBox(
+                    width: 30,
+                    height: 30,
+                    child: _syncing
+                        ? const Center(
+                            child: SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                          )
+                        : IconButton(
+                            padding: EdgeInsets.zero,
+                            icon: Icon(Icons.sync,
+                                color: context.appColors.textSecondary,
+                                size: 18),
+                            tooltip: 'Sync from Linear',
+                            onPressed: () => _sync(context, state),
+                          ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -398,6 +527,123 @@ class _TaskListPanelState extends State<TaskListPanel> {
     );
   }
 
+  void _buildWorkerGroupedItems(
+    BuildContext context,
+    AppState state,
+    List<TaskInfo> tasks,
+    List<LinearIssueInfo> unlinkedIssues,
+    List<Widget> out,
+  ) {
+    // Collect tasks per worker, preserving insertion order.
+    final tasksByWorker = <String, List<TaskInfo>>{};
+    for (final t in tasks) {
+      tasksByWorker.putIfAbsent(t.workerName, () => []).add(t);
+    }
+
+    // Collect unlinked issues per worker.
+    final issuesByWorker = <String, List<LinearIssueInfo>>{};
+    for (final i in unlinkedIssues) {
+      issuesByWorker.putIfAbsent(i.workerName, () => []).add(i);
+    }
+
+    // Union of all worker names, tasks first then issues-only workers.
+    final workerNames = {
+      ...tasksByWorker.keys,
+      ...issuesByWorker.keys,
+    };
+
+    for (final workerName in workerNames) {
+      final workerTasks = tasksByWorker[workerName] ?? [];
+      final workerIssues = issuesByWorker[workerName] ?? [];
+      out.add(_buildWorkerGroup(
+          context, state, workerName, workerTasks, workerIssues));
+    }
+  }
+
+  Widget _buildWorkerGroup(
+    BuildContext context,
+    AppState state,
+    String workerName,
+    List<TaskInfo> tasks,
+    List<LinearIssueInfo> unlinkedIssues,
+  ) {
+    final collapsed = _collapsedWorkerGroups.contains(workerName);
+    final totalCount = tasks.length + unlinkedIssues.length;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        InkWell(
+          onTap: () => setState(() {
+            if (collapsed) {
+              _collapsedWorkerGroups.remove(workerName);
+            } else {
+              _collapsedWorkerGroups.add(workerName);
+            }
+          }),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+            child: Row(
+              children: [
+                Icon(
+                  collapsed
+                      ? Icons.chevron_right_rounded
+                      : Icons.expand_more_rounded,
+                  color: context.appColors.textMuted,
+                  size: 18,
+                ),
+                const SizedBox(width: 4),
+                Icon(Icons.person_outline_rounded,
+                    color: context.appColors.textMuted, size: 13),
+                const SizedBox(width: 4),
+                Text(
+                  '$workerName ($totalCount)',
+                  style: TextStyle(
+                    color: context.appColors.textSecondary,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        if (!collapsed) ...[
+          ...tasks.map((t) => TaskTile(
+                task: t,
+                state: state,
+                onTaskSelected: widget.onTaskSelected,
+              )),
+          if (unlinkedIssues.isNotEmpty) ...[
+            Padding(
+              padding: const EdgeInsets.only(left: 32, top: 2, bottom: 2),
+              child: Row(
+                children: [
+                  Icon(Icons.link_off_rounded,
+                      color: context.appColors.textMuted, size: 11),
+                  const SizedBox(width: 4),
+                  Text(
+                    'Unlinked',
+                    style: TextStyle(
+                      color: context.appColors.textMuted,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            ...unlinkedIssues.map((issue) => LinearIssueTile(
+                  issue: issue,
+                  state: state,
+                  onSelected: widget.onTaskSelected,
+                )),
+          ],
+        ],
+      ],
+    );
+  }
+
   Widget _buildStatusGroup(
     BuildContext context,
     AppState state,
@@ -450,6 +696,55 @@ class _TaskListPanelState extends State<TaskListPanel> {
                 task: t,
                 state: state,
                 onTaskSelected: widget.onTaskSelected,
+              )),
+      ],
+    );
+  }
+
+  Widget _buildUnlinkedIssuesSection(
+    BuildContext context,
+    AppState state,
+    List<LinearIssueInfo> issues,
+  ) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Divider(height: 1),
+        InkWell(
+          onTap: () => setState(() => _unlinkedCollapsed = !_unlinkedCollapsed),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+            child: Row(
+              children: [
+                Icon(
+                  _unlinkedCollapsed
+                      ? Icons.chevron_right_rounded
+                      : Icons.expand_more_rounded,
+                  color: context.appColors.textMuted,
+                  size: 18,
+                ),
+                const SizedBox(width: 4),
+                Icon(Icons.link_off_rounded,
+                    color: context.appColors.textMuted, size: 13),
+                const SizedBox(width: 4),
+                Text(
+                  'Unlinked Issues (${issues.length})',
+                  style: TextStyle(
+                    color: context.appColors.textSecondary,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        if (!_unlinkedCollapsed)
+          ...issues.map((issue) => LinearIssueTile(
+                issue: issue,
+                state: state,
+                onSelected: widget.onTaskSelected,
               )),
       ],
     );
