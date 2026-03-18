@@ -3,9 +3,11 @@ import json
 import logging
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
+from sqlalchemy import select
 
 from src.api.deps import verify_ws_api_key
 from src.core.attachment_store import AttachmentStore, ResolvedAttachment
+from src.models.db import LinearIssue as LinearIssueModel
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -162,9 +164,7 @@ async def ws_input_text(
                     prompt_router.resolve_permission(pr_session_id, request_id, decision, scope, path_prefix)
                     await websocket.send_json({"type": "ack", "session_id": pr_session_id})
                 except (ValueError, RuntimeError) as e:
-                    await websocket.send_json(
-                        {"type": "error", "content": str(e), "code": "PERMISSION_RESPONSE_ERROR"}
-                    )
+                    await websocket.send_json({"type": "error", "content": str(e), "code": "PERMISSION_RESPONSE_ERROR"})
                 continue
 
             if msg_type == "question_answer":
@@ -201,9 +201,7 @@ async def ws_input_text(
                     continue
                 ir_text = message.get("text", "").strip()
                 if not ir_text:
-                    await websocket.send_json(
-                        {"type": "error", "content": "Empty response", "code": "EMPTY_RESPONSE"}
-                    )
+                    await websocket.send_json({"type": "error", "content": "Empty response", "code": "EMPTY_RESPONSE"})
                     continue
                 try:
                     await prompt_router.send_interactive_response(ir_session_id, ir_text)
@@ -211,6 +209,48 @@ async def ws_input_text(
                     await websocket.send_json(
                         {"type": "error", "content": str(e), "code": "INTERACTIVE_RESPONSE_ERROR"}
                     )
+                continue
+
+            if msg_type == "list_linear_issues":
+                import json as _json  # noqa: PLC0415
+
+                db_session_factory = websocket.app.state.db_session_factory
+                if db_session_factory is not None:
+                    settings = websocket.app.state.settings
+                    async with db_session_factory() as db:
+                        stmt = (
+                            select(LinearIssueModel)
+                            .where(LinearIssueModel.backend_id == settings.RCFLOW_BACKEND_ID)
+                            .order_by(LinearIssueModel.updated_at.desc())
+                        )
+                        result = await db.execute(stmt)
+                        issue_rows = result.scalars().all()
+                        issues_out = [
+                            {
+                                "id": str(i.id),
+                                "linear_id": i.linear_id,
+                                "identifier": i.identifier,
+                                "title": i.title,
+                                "description": i.description,
+                                "priority": i.priority,
+                                "state_name": i.state_name,
+                                "state_type": i.state_type,
+                                "assignee_id": i.assignee_id,
+                                "assignee_name": i.assignee_name,
+                                "team_id": i.team_id,
+                                "team_name": i.team_name,
+                                "url": i.url,
+                                "labels": _json.loads(i.labels or "[]"),
+                                "created_at": i.created_at.isoformat() if i.created_at else "",
+                                "updated_at": i.updated_at.isoformat() if i.updated_at else "",
+                                "synced_at": i.synced_at.isoformat() if i.synced_at else "",
+                                "task_id": str(i.task_id) if i.task_id else None,
+                            }
+                            for i in issue_rows
+                        ]
+                    await websocket.send_json({"type": "linear_issue_list", "issues": issues_out})
+                else:
+                    await websocket.send_json({"type": "linear_issue_list", "issues": []})
                 continue
 
             if msg_type != "prompt":
@@ -234,9 +274,7 @@ async def ws_input_text(
             resolved_attachments: list[ResolvedAttachment] | None = None
             raw_attachments = message.get("attachments")
             if raw_attachments and isinstance(raw_attachments, list):
-                attachment_store: AttachmentStore | None = getattr(
-                    websocket.app.state, "attachment_store", None
-                )
+                attachment_store: AttachmentStore | None = getattr(websocket.app.state, "attachment_store", None)
                 if attachment_store is not None:
                     resolved_attachments = []
                     for att in raw_attachments:

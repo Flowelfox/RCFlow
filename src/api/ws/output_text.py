@@ -10,9 +10,9 @@ from src.api.deps import verify_ws_api_key
 from src.core.prompt_router import PromptRouter
 from src.models.db import Artifact as ArtifactModel
 from src.models.db import LinearIssue as LinearIssueModel
+from src.models.db import Session as SessionModel
 from src.models.db import Task as TaskModel
 from src.models.db import TaskSession as TaskSessionModel
-from src.models.db import Session as SessionModel
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -219,22 +219,26 @@ async def ws_output_text(
                             sess_result = await db.execute(sess_stmt)
                             sess_refs = []
                             for ts_row, sess_row in sess_result.all():
-                                sess_refs.append({
-                                    "session_id": str(sess_row.id),
-                                    "title": sess_row.title,
-                                    "status": sess_row.status,
-                                    "attached_at": ts_row.attached_at.isoformat() if ts_row.attached_at else "",
-                                })
-                            tasks_out.append({
-                                "task_id": str(t.id),
-                                "title": t.title,
-                                "description": t.description,
-                                "status": t.status,
-                                "source": t.source,
-                                "created_at": t.created_at.isoformat() if t.created_at else "",
-                                "updated_at": t.updated_at.isoformat() if t.updated_at else "",
-                                "sessions": sess_refs,
-                            })
+                                sess_refs.append(
+                                    {
+                                        "session_id": str(sess_row.id),
+                                        "title": sess_row.title,
+                                        "status": sess_row.status,
+                                        "attached_at": ts_row.attached_at.isoformat() if ts_row.attached_at else "",
+                                    }
+                                )
+                            tasks_out.append(
+                                {
+                                    "task_id": str(t.id),
+                                    "title": t.title,
+                                    "description": t.description,
+                                    "status": t.status,
+                                    "source": t.source,
+                                    "created_at": t.created_at.isoformat() if t.created_at else "",
+                                    "updated_at": t.updated_at.isoformat() if t.updated_at else "",
+                                    "sessions": sess_refs,
+                                }
+                            )
                     await websocket.send_json({"type": "task_list", "tasks": tasks_out})
                 else:
                     await websocket.send_json({"type": "task_list", "tasks": []})
@@ -254,27 +258,30 @@ async def ws_output_text(
                         artifact_rows = result.scalars().all()
                         artifacts_out = []
                         for a in artifact_rows:
-                            artifacts_out.append({
-                                "artifact_id": str(a.id),
-                                "file_path": a.file_path,
-                                "file_name": a.file_name,
-                                "file_extension": a.file_extension,
-                                "file_size": a.file_size,
-                                "mime_type": a.mime_type,
-                                "discovered_at": a.discovered_at.isoformat() if a.discovered_at else "",
-                                "modified_at": a.modified_at.isoformat() if a.modified_at else "",
-                                "session_id": str(a.session_id) if a.session_id else None,
-                                "project_name": PromptRouter._resolve_artifact_project(a.file_path, projects_dirs),
-                            })
+                            artifacts_out.append(
+                                {
+                                    "artifact_id": str(a.id),
+                                    "file_path": a.file_path,
+                                    "file_name": a.file_name,
+                                    "file_extension": a.file_extension,
+                                    "file_size": a.file_size,
+                                    "mime_type": a.mime_type,
+                                    "discovered_at": a.discovered_at.isoformat() if a.discovered_at else "",
+                                    "modified_at": a.modified_at.isoformat() if a.modified_at else "",
+                                    "session_id": str(a.session_id) if a.session_id else None,
+                                    "project_name": PromptRouter._resolve_artifact_project(a.file_path, projects_dirs),
+                                }
+                            )
                     await websocket.send_json({"type": "artifact_list", "artifacts": artifacts_out})
                 else:
                     await websocket.send_json({"type": "artifact_list", "artifacts": []})
 
             elif msg_type == "list_linear_issues":
                 import json as _json  # noqa: PLC0415
-                settings = websocket.app.state.settings
+
                 db_session_factory = websocket.app.state.db_session_factory
                 if db_session_factory is not None:
+                    settings = websocket.app.state.settings
                     async with db_session_factory() as db:
                         stmt = (
                             select(LinearIssueModel)
