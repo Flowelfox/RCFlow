@@ -55,8 +55,12 @@ abstract class PaneHost {
   });
 
   /// Whether the worker for [workerId] (or the default worker) supports
-  /// image/file attachments based on its configured model.
+  /// any file attachments (text/code files are always supported).
   bool workerSupportsAttachments(String? workerId);
+
+  /// Whether the worker for [workerId] (or the default worker) supports
+  /// image attachments (JPEG, PNG, GIF, WEBP).
+  bool workerSupportsImageAttachments(String? workerId);
 }
 
 class PaneState extends ChangeNotifier {
@@ -200,6 +204,16 @@ class PaneState extends ChangeNotifier {
           (s) => s?.sessionId == _sessionId,
           orElse: () => null,
         )?.selectedWorktreePath;
+  }
+
+  /// The main project path attached to the session currently shown in this
+  /// pane via the latest @ProjectName mention, or null for Global sessions.
+  String? get currentMainProjectPath {
+    if (_sessionId == null) return null;
+    return _host.sessions.cast<SessionInfo?>().firstWhere(
+          (s) => s?.sessionId == _sessionId,
+          orElse: () => null,
+        )?.mainProjectPath;
   }
 
   // --- Back-navigation history ---
@@ -386,6 +400,15 @@ class PaneState extends ChangeNotifier {
     // Unsubscribe from the old session if no other pane still views it
     if (oldSessionId != null && oldWorkerId != null) {
       _host.requestUnsubscribe(oldSessionId, oldWorkerId);
+    }
+
+    // Auto-open the project panel when the session already has an @ProjectName
+    // attached — regardless of session state (active, paused, ended, etc.).
+    // This handles switching back to a session where the user previously used
+    // @syntax, since onProjectPathAttached only fires on the null→non-null
+    // transition and would not fire for a session that was already attached.
+    if (session?.mainProjectPath != null) {
+      _activeRightPanel = 'project';
     }
 
     notifyListeners();
@@ -725,6 +748,16 @@ class PaneState extends ChangeNotifier {
   void toggleTodoPanel() => toggleRightPanel('todo');
 
   void setTodoPanelWidth(double width) => setRightPanelWidth(width);
+
+  /// Open the Project panel if it is not already the active panel.
+  /// Called automatically when a @ProjectName mention first resolves for
+  /// the session shown in this pane.
+  void openProjectPanel() {
+    if (_activeRightPanel != 'project') {
+      _activeRightPanel = 'project';
+      notifyListeners();
+    }
+  }
 
   /// Reconstruct todo state from a history message's metadata.
   void _reconstructTodosFromHistory(Map<String, dynamic> msg) {

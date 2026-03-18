@@ -50,6 +50,7 @@ class SettingsService {
   // Expanded/collapsed state persistence keys
   static const _workersExpandedKey = 'rcflow_workers_expanded';
   static const _tasksCollapsedGroupsKey = 'rcflow_tasks_collapsed_groups';
+  static const _tasksGroupByWorkerKey = 'rcflow_tasks_group_by_worker';
   static const _artifactsExpandedWorkersKey = 'rcflow_artifacts_expanded_workers';
   static const _artifactsExpandedProjectsKey = 'rcflow_artifacts_expanded_projects';
 
@@ -330,6 +331,12 @@ class SettingsService {
       _setJsonStringList(_tasksCollapsedGroupsKey, value);
     }
   }
+
+  /// Tasks tab: whether to group tasks by worker instead of by status.
+  bool get tasksGroupByWorker =>
+      _prefs.getBool(_tasksGroupByWorkerKey) ?? false;
+  set tasksGroupByWorker(bool value) =>
+      _prefs.setBool(_tasksGroupByWorkerKey, value);
 
   /// Artifacts tab: which worker IDs are expanded. Null means "not yet set".
   List<String>? get artifactsExpandedWorkers {
