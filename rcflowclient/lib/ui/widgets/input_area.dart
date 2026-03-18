@@ -14,6 +14,20 @@ import '../../theme.dart';
 bool get _isDesktop =>
     Platform.isWindows || Platform.isLinux || Platform.isMacOS;
 
+/// Extensions allowed when the model does not support image attachments.
+/// Images (jpg, png, gif, webp) and binary formats (pdf) are excluded.
+const List<String> _kTextOnlyExtensions = [
+  'txt', 'log', 'rst', 'md', 'html', 'htm', 'css', 'csv',
+  'json', 'yaml', 'yml', 'toml', 'xml',
+  'py', 'js', 'ts', 'jsx', 'tsx', 'dart',
+  'java', 'kt', 'swift', 'go', 'rs', 'rb',
+  'c', 'cpp', 'h', 'hpp', 'cs', 'php',
+  'scss', 'less',
+  'sh', 'bash', 'zsh', 'fish', 'ps1',
+  'sql', 'graphql', 'proto',
+  'gitignore', 'env',
+];
+
 enum _MentionType { project, tool, file }
 
 class InputArea extends StatefulWidget {
@@ -57,11 +71,16 @@ class _InputAreaState extends State<InputArea> {
   Timer? _debounceTimer;
   bool _showingNoResults = false;
 
+  /// Saved reference to the AppState's focus request notifier so we can safely
+  /// remove the listener in [dispose] without accessing [context].
+  late final Listenable _focusRequestNotifier;
+
   @override
   void initState() {
     super.initState();
     _controller.addListener(_onTextChanged);
-    context.read<AppState>().inputFocusRequest.addListener(_onFocusRequest);
+    _focusRequestNotifier = context.read<AppState>().inputFocusRequest;
+    _focusRequestNotifier.addListener(_onFocusRequest);
     // Check for pending input text on next frame (e.g. from "Start Session
     // from Task" which pre-fills the input area).
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -75,7 +94,7 @@ class _InputAreaState extends State<InputArea> {
 
   @override
   void dispose() {
-    context.read<AppState>().inputFocusRequest.removeListener(_onFocusRequest);
+    _focusRequestNotifier.removeListener(_onFocusRequest);
     _debounceTimer?.cancel();
     _removeOverlay();
     _controller.dispose();
@@ -84,9 +103,15 @@ class _InputAreaState extends State<InputArea> {
   }
 
   Future<void> _pickAttachments() async {
+    final supportsImages =
+        context.read<AppState>().workerSupportsImageAttachments(
+              context.read<PaneState>().workerId,
+            );
     final result = await FilePicker.platform.pickFiles(
       allowMultiple: true,
       withData: true,
+      type: supportsImages ? FileType.any : FileType.custom,
+      allowedExtensions: supportsImages ? null : _kTextOnlyExtensions,
     );
     if (result == null || result.files.isEmpty) return;
     if (!mounted) return;

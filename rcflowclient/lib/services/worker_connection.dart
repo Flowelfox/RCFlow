@@ -26,9 +26,17 @@ class WorkerConnection extends ChangeNotifier {
   /// Operating system reported by the server (e.g. "Windows", "Linux").
   String? serverOs;
 
-  /// Whether the server's active model supports image/file attachments.
-  /// Defaults to true (optimistic) until server info is fetched.
+  /// Whether the server's active model supports any file attachments.
+  /// Text/code files are always supported, so this is always true after
+  /// the server info is fetched. Kept for backwards compatibility.
   bool supportsAttachments = true;
+
+  /// Whether the server's active model supports image attachments
+  /// (JPEG, PNG, GIF, WEBP). Defaults to true until server info is fetched.
+  bool supportsImageAttachments = true;
+
+  /// Whether this worker has a Linear API key configured.
+  bool hasLinear = false;
 
   /// Token limits from server config (0 = unlimited).
   int inputTokenLimit = 0;
@@ -56,6 +64,8 @@ class WorkerConnection extends ChangeNotifier {
   void Function(Map<String, dynamic> msg, String workerId)? onInputMessage;
   void Function(Map<String, dynamic> msg, String workerId)? onOutputMessage;
   VoidCallback? onSessionsChanged;
+  /// Fires when a session's mainProjectPath transitions from null to a real path.
+  void Function(String sessionId, String projectPath)? onProjectPathAttached;
 
   // Pending auto-load session after connect
   String? _pendingAutoLoadSessionId;
@@ -151,6 +161,7 @@ class WorkerConnection extends ChangeNotifier {
     subscribedSessions.clear();
     serverOs = null;
     supportsAttachments = true;
+    supportsImageAttachments = true;
     _terminalService?.disconnect();
     ws.disconnect();
     _inputSub?.cancel();
@@ -266,9 +277,17 @@ class WorkerConnection extends ChangeNotifier {
     final worktreeInfo =
         wtJson != null ? WorktreeInfo.fromJson(wtJson) : null;
 
+    // Parse project and worktree selection (always present in server broadcasts,
+    // but use containsKey sentinels so a missing field never clears existing data).
+    final mainProjectPathProvided = msg.containsKey('main_project_path');
+    final newMainProjectPath = msg['main_project_path'] as String?;
+    final selectedWorktreePathProvided = msg.containsKey('selected_worktree_path');
+    final newSelectedWorktreePath = msg['selected_worktree_path'] as String?;
+
     final index = sessions.indexWhere((s) => s.sessionId == sessionId);
     if (index >= 0) {
       final existing = sessions[index];
+      final prevMainProjectPath = existing.mainProjectPath;
       sessions[index] = SessionInfo(
         sessionId: sessionId,
         sessionType: sessionType ?? existing.sessionType,
@@ -289,7 +308,17 @@ class WorkerConnection extends ChangeNotifier {
         toolOutputTokens: toolOutputTokens ?? existing.toolOutputTokens,
         toolCostUsd: toolCostUsd ?? existing.toolCostUsd,
         worktreeInfo: worktreeProvided ? worktreeInfo : existing.worktreeInfo,
+        selectedWorktreePath: selectedWorktreePathProvided
+            ? newSelectedWorktreePath
+            : existing.selectedWorktreePath,
+        mainProjectPath: mainProjectPathProvided
+            ? newMainProjectPath
+            : existing.mainProjectPath,
       );
+      // Fire auto-open callback when project is first attached to this session.
+      if (newMainProjectPath != null && prevMainProjectPath == null) {
+        onProjectPathAttached?.call(sessionId, newMainProjectPath);
+      }
     } else {
       sessions.insert(
         0,
@@ -311,8 +340,14 @@ class WorkerConnection extends ChangeNotifier {
           toolOutputTokens: toolOutputTokens ?? 0,
           toolCostUsd: toolCostUsd ?? 0.0,
           worktreeInfo: worktreeInfo,
+          selectedWorktreePath: newSelectedWorktreePath,
+          mainProjectPath: newMainProjectPath,
         ),
       );
+      // Fire auto-open callback for a brand-new session that already has a project.
+      if (newMainProjectPath != null) {
+        onProjectPathAttached?.call(sessionId, newMainProjectPath);
+      }
     }
     _cacheSessions();
     onSessionsChanged?.call();
@@ -341,8 +376,30 @@ class WorkerConnection extends ChangeNotifier {
     ws.fetchServerInfo().then((info) {
       serverOs = info['os'] as String?;
       supportsAttachments = (info['supports_attachments'] as bool?) ?? true;
+      final caps = info['attachment_capabilities'] as Map<String, dynamic>?;
+      supportsImageAttachments = (caps?['images'] as bool?) ?? true;
       notifyListeners();
     }).catchError((_) {});
+  }
+
+  /// Fetch time-series telemetry buckets from the backend.
+  Future<Map<String, dynamic>> fetchTimeSeries({
+    required String zoom,
+    required DateTime start,
+    required DateTime end,
+    String? sessionId,
+  }) async {
+    return ws.fetchTimeSeries(
+      zoom: zoom,
+      start: start,
+      end: end,
+      sessionId: sessionId,
+    );
+  }
+
+  /// Fetch per-session telemetry summary from the backend.
+  Future<Map<String, dynamic>?> fetchSessionTelemetry(String sessionId) async {
+    return ws.fetchSessionTelemetry(sessionId);
   }
 
   void _fetchTokenLimits() {
@@ -354,6 +411,8 @@ class WorkerConnection extends ChangeNotifier {
           inputTokenLimit = (value is num) ? value.toInt() : int.tryParse('$value') ?? 0;
         } else if (key == 'SESSION_OUTPUT_TOKEN_LIMIT') {
           outputTokenLimit = (value is num) ? value.toInt() : int.tryParse('$value') ?? 0;
+        } else if (key == 'LINEAR_API_KEY') {
+          hasLinear = value is String && value.isNotEmpty;
         }
       }
       notifyListeners();

@@ -13,10 +13,11 @@ import 'session_panel.dart' show TerminalDragData;
 import 'session_panel/task_drag_data.dart';
 import 'artifact_pane.dart';
 import 'linear_issue_pane.dart';
+import 'statistics_pane.dart';
 import 'task_pane.dart';
 import 'terminal_pane.dart';
 import 'todo_panel.dart';
-import 'worktree_panel.dart';
+import 'project_panel.dart';
 
 /// Data carried during a session drag from the sidebar.
 class SessionDragData {
@@ -222,54 +223,52 @@ class _OutputWithRightPanelsState extends State<_OutputWithRightPanels> {
     final activePanel = pane.activeRightPanel;
     final panelWidth = pane.rightPanelWidth;
 
+    // OutputDisplay is always the first widget in the Row so its element is
+    // never remounted when the right panel is toggled. Previously it sat inside
+    // a nested Row (when a panel was open) vs. directly inside the Expanded
+    // (when no panel was open), causing Flutter to rebuild and scroll-reset it.
     return Row(
       children: [
-        // Main content
-        Expanded(
-          child: activePanel != null
-              ? Row(
-                  children: [
-                    const Expanded(child: OutputDisplay()),
-                    // Drag handle
-                    MouseRegion(
-                      cursor: SystemMouseCursors.resizeColumn,
-                      child: GestureDetector(
-                        onHorizontalDragStart: (_) =>
-                            setState(() => _dragging = true),
-                        onHorizontalDragUpdate: (details) {
-                          final newWidth =
-                              panelWidth - details.delta.dx;
-                          pane.setRightPanelWidth(newWidth);
-                        },
-                        onHorizontalDragEnd: (_) =>
-                            setState(() => _dragging = false),
-                        child: Container(
-                          width: 5,
-                          color: _dragging
-                              ? context.appColors.accent.withAlpha(80)
-                              : Colors.transparent,
-                          child: Center(
-                            child: Container(
-                              width: 1,
-                              height: double.infinity,
-                              color: context.appColors.divider,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                    // Active panel content
-                    SizedBox(
-                      width: panelWidth,
-                      child: activePanel == 'todo'
-                          ? const TodoPanel()
-                          : const WorktreePanel(),
-                    ),
-                  ],
-                )
-              : const OutputDisplay(),
-        ),
-        // Bookmark tabs column — always visible so user can open any panel
+        // Main content — stable position so OutputDisplay state is preserved.
+        const Expanded(child: OutputDisplay()),
+        // Drag handle and panel content (only when a panel is active).
+        if (activePanel != null) ...[
+          MouseRegion(
+            cursor: SystemMouseCursors.resizeColumn,
+            child: GestureDetector(
+              onHorizontalDragStart: (_) =>
+                  setState(() => _dragging = true),
+              onHorizontalDragUpdate: (details) {
+                final newWidth = panelWidth - details.delta.dx;
+                pane.setRightPanelWidth(newWidth);
+              },
+              onHorizontalDragEnd: (_) =>
+                  setState(() => _dragging = false),
+              child: Container(
+                width: 5,
+                color: _dragging
+                    ? context.appColors.accent.withAlpha(80)
+                    : Colors.transparent,
+                child: Center(
+                  child: Container(
+                    width: 1,
+                    height: double.infinity,
+                    color: context.appColors.divider,
+                  ),
+                ),
+              ),
+            ),
+          ),
+          SizedBox(
+            width: panelWidth,
+            child: switch (activePanel) {
+              'todo' => const TodoPanel(),
+              'statistics' => const StatisticsPane(),
+              _ => const ProjectPanel(),
+            },
+          ),
+        ],
+        // Bookmark tabs column — always visible so user can open any panel.
         _RightBookmarks(
           hasTodos: hasTodos,
           activePanel: activePanel,
@@ -308,12 +307,21 @@ class _RightBookmarks extends StatelessWidget {
         ),
         const SizedBox(height: 4),
         _BookmarkTab(
-          panelKey: 'worktree',
-          icon: Icons.device_hub_outlined,
-          label: 'Worktree',
+          panelKey: 'project',
+          icon: Icons.folder_outlined,
+          label: 'Project',
           activePanel: activePanel,
           iconColor: context.appColors.accent,
-          onTap: () => pane.toggleRightPanel('worktree'),
+          onTap: () => pane.toggleRightPanel('project'),
+        ),
+        const SizedBox(height: 4),
+        _BookmarkTab(
+          panelKey: 'statistics',
+          icon: Icons.bar_chart_rounded,
+          label: 'Stats',
+          activePanel: activePanel,
+          iconColor: Colors.teal,
+          onTap: () => pane.toggleRightPanel('statistics'),
         ),
       ],
     );

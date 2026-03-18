@@ -51,6 +51,10 @@ class SessionInfo {
   /// Absolute path of the worktree selected as the agent working directory,
   /// or null if no worktree is explicitly selected for this session.
   final String? selectedWorktreePath;
+  /// Absolute path of the project directory attached to this session via the
+  /// latest @ProjectName mention.  Null means the session is "Global" (no
+  /// project attached yet).
+  final String? mainProjectPath;
 
   SessionInfo({
     required this.sessionId,
@@ -70,6 +74,7 @@ class SessionInfo {
     this.toolCostUsd = 0.0,
     this.worktreeInfo,
     this.selectedWorktreePath,
+    this.mainProjectPath,
   });
 
   bool get isProcessing {
@@ -108,6 +113,7 @@ class SessionInfo {
       toolCostUsd: (json['tool_cost_usd'] as num?)?.toDouble() ?? 0.0,
       worktreeInfo: wtJson != null ? WorktreeInfo.fromJson(wtJson) : null,
       selectedWorktreePath: json['selected_worktree_path'] as String?,
+      mainProjectPath: json['main_project_path'] as String?,
     );
   }
 
@@ -129,6 +135,7 @@ class SessionInfo {
         'tool_cost_usd': toolCostUsd,
         if (worktreeInfo != null) 'worktree': worktreeInfo!.toJson(),
         if (selectedWorktreePath != null) 'selected_worktree_path': selectedWorktreePath,
+        if (mainProjectPath != null) 'main_project_path': mainProjectPath,
       };
 
   String get shortId => sessionId.length >= 8
@@ -154,6 +161,7 @@ class SessionInfo {
     // Pass Object() sentinel to explicitly clear worktreeInfo
     Object? worktreeInfo = _keep,
     String? selectedWorktreePath,
+    String? mainProjectPath,
   }) {
     return SessionInfo(
       sessionId: sessionId ?? this.sessionId,
@@ -177,6 +185,7 @@ class SessionInfo {
           ? this.worktreeInfo
           : worktreeInfo as WorktreeInfo?,
       selectedWorktreePath: selectedWorktreePath ?? this.selectedWorktreePath,
+      mainProjectPath: mainProjectPath ?? this.mainProjectPath,
     );
   }
 }

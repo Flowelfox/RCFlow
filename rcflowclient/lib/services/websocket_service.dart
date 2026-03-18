@@ -589,6 +589,56 @@ class WebSocketService {
     }
   }
 
+  /// Fetch time-series telemetry buckets.
+  Future<Map<String, dynamic>> fetchTimeSeries({
+    required String zoom,
+    required DateTime start,
+    required DateTime end,
+    String? sessionId,
+  }) async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final params = <String, String>{
+      'zoom': zoom,
+      'start': start.toUtc().toIso8601String(),
+      'end': end.toUtc().toIso8601String(),
+    };
+    if (sessionId != null) params['session_id'] = sessionId;
+    final url = _serverUrl!.http('/api/telemetry/timeseries', params);
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.getUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      final response = await request.close();
+      final body = await response.transform(const io.SystemEncoding().decoder).join();
+      if (response.statusCode != 200) {
+        throw Exception('Server returned ${response.statusCode}: $body');
+      }
+      return jsonDecode(body) as Map<String, dynamic>;
+    } finally {
+      client.close();
+    }
+  }
+
+  /// Fetch per-session telemetry summary. Returns null on 404.
+  Future<Map<String, dynamic>?> fetchSessionTelemetry(String sessionId) async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url = _serverUrl!.http('/api/telemetry/sessions/$sessionId/summary');
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.getUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      final response = await request.close();
+      if (response.statusCode == 404) return null;
+      final body = await response.transform(const io.SystemEncoding().decoder).join();
+      if (response.statusCode != 200) {
+        throw Exception('Server returned ${response.statusCode}: $body');
+      }
+      return jsonDecode(body) as Map<String, dynamic>;
+    } finally {
+      client.close();
+    }
+  }
+
   Future<Map<String, dynamic>> fetchToolStatus() async {
     if (_serverUrl == null) throw StateError('Not connected');
     final url = _serverUrl!.http('/api/tools/status');
@@ -1067,6 +1117,56 @@ class WebSocketService {
   // Linear integration
   // ---------------------------------------------------------------------------
 
+  /// Test a Linear API key and return accessible teams.
+  ///
+  /// This does not require an existing key to be configured — it is used
+  /// during initial Linear setup to validate the key and discover teams.
+  ///
+  /// Returns `{"ok": true, "teams": [{"id": "...", "name": "..."}]}`.
+  Future<Map<String, dynamic>> testLinearConnection(String apiKey) async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url = _serverUrl!.http('/api/integrations/linear/test');
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.postUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      request.headers.contentType = io.ContentType.json;
+      request.add(utf8.encode(jsonEncode({'api_key': apiKey})));
+      final response = await request.close();
+      final body =
+          await response.transform(const io.SystemEncoding().decoder).join();
+      if (response.statusCode != 200) {
+        throw Exception('Server returned ${response.statusCode}: $body');
+      }
+      return jsonDecode(body) as Map<String, dynamic>;
+    } finally {
+      client.close();
+    }
+  }
+
+  /// Fetch teams accessible via the configured Linear API key.
+  ///
+  /// Requires `LINEAR_API_KEY` to be set in the backend configuration.
+  /// Returns `{"teams": [{"id": "...", "name": "..."}]}`.
+  Future<Map<String, dynamic>> fetchLinearTeams() async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url = _serverUrl!.http('/api/integrations/linear/teams');
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.getUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      final response = await request.close();
+      final body =
+          await response.transform(const io.SystemEncoding().decoder).join();
+      if (response.statusCode != 200) {
+        throw Exception('Server returned ${response.statusCode}: $body');
+      }
+      return jsonDecode(body) as Map<String, dynamic>;
+    } finally {
+      client.close();
+    }
+  }
+
   void listLinearIssues() {
     if (_outputChannel == null) return;
     _outputChannel!.sink.add(jsonEncode({'type': 'list_linear_issues'}));
@@ -1193,6 +1293,34 @@ class WebSocketService {
       final body =
           await response.transform(const io.SystemEncoding().decoder).join();
       if (response.statusCode != 200) {
+        throw Exception('Server returned ${response.statusCode}: $body');
+      }
+      return jsonDecode(body) as Map<String, dynamic>;
+    } finally {
+      client.close();
+    }
+  }
+
+  /// Create a new RCFlow task from a cached Linear issue and link them.
+  ///
+  /// Returns `{"task": {...}, "issue": {...}}` on success (HTTP 201).
+  /// Throws if the issue is already linked (HTTP 409) or not found (HTTP 404).
+  Future<Map<String, dynamic>> createTaskFromLinearIssue(
+    String issueId,
+  ) async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url = _serverUrl!
+        .http('/api/integrations/linear/issues/$issueId/create-task');
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.postUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      request.headers.contentType = io.ContentType.json;
+      request.add(utf8.encode('{}'));
+      final response = await request.close();
+      final body =
+          await response.transform(const io.SystemEncoding().decoder).join();
+      if (response.statusCode != 201) {
         throw Exception('Server returned ${response.statusCode}: $body');
       }
       return jsonDecode(body) as Map<String, dynamic>;
@@ -1434,6 +1562,28 @@ class WebSocketService {
     final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
     try {
       final request = await client.deleteUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      final response = await request.close();
+      final body =
+          await response.transform(const io.SystemEncoding().decoder).join();
+      if (response.statusCode != 200) {
+        throw Exception('Server returned ${response.statusCode}: $body');
+      }
+      return jsonDecode(body) as Map<String, dynamic>;
+    } finally {
+      client.close();
+    }
+  }
+
+  /// List artifacts that belong to a project directory.
+  ///
+  /// [projectName] is the directory name as it appears under PROJECTS_DIR.
+  Future<Map<String, dynamic>> listProjectArtifacts(String projectName) async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url = _serverUrl!.http('/api/projects/$projectName/artifacts');
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.getUrl(url);
       request.headers.set('X-API-Key', _serverUrl!.apiKey);
       final response = await request.close();
       final body =

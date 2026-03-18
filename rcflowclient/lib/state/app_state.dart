@@ -83,6 +83,9 @@ class AppState extends ChangeNotifier implements PaneHost {
       _workers.values.where((w) => w.isConnected).length;
   int get totalWorkerCount => _workers.length;
 
+  /// True if at least one worker has a Linear API key configured.
+  bool get anyWorkerHasLinear => _workers.values.any((w) => w.hasLinear);
+
   WorkerConnection? getWorker(String workerId) => _workers[workerId];
 
   // Sessions with temporarily muted sound (during history replay after switch)
@@ -432,6 +435,35 @@ class AppState extends ChangeNotifier implements PaneHost {
     notifyListeners();
   }
 
+  // --- Project panel data cache ---
+
+  /// Cached worktree/artifact lists per `'workerId:projectPath'` key.
+  /// Populated by [ProjectPanel] after each successful fetch so that reopening
+  /// the panel shows the last-known data immediately while a fresh fetch runs.
+  final Map<
+      String,
+      ({
+        List<Map<String, dynamic>>? worktrees,
+        List<Map<String, dynamic>>? artifacts
+      })> _projectDataCache = {};
+
+  ({
+    List<Map<String, dynamic>>? worktrees,
+    List<Map<String, dynamic>>? artifacts
+  })? getProjectDataCache(String key) => _projectDataCache[key];
+
+  void setProjectDataCache(
+    String key, {
+    List<Map<String, dynamic>>? worktrees,
+    List<Map<String, dynamic>>? artifacts,
+  }) {
+    final existing = _projectDataCache[key];
+    _projectDataCache[key] = (
+      worktrees: worktrees ?? existing?.worktrees,
+      artifacts: artifacts ?? existing?.artifacts,
+    );
+  }
+
   /// Show an artifact in the active pane (converting it in-place).
   void openArtifactInPane(String artifactId) {
     if (_splitRoot != null && _panes.containsKey(_activePaneId)) {
@@ -499,6 +531,22 @@ class AppState extends ChangeNotifier implements PaneHost {
   }
 
   LinearIssueInfo? getLinearIssue(String issueId) => _linearIssues[issueId];
+
+  /// All Linear issues linked to the given task, sorted by updatedAt descending.
+  List<LinearIssueInfo> linearIssuesForTask(String taskId) {
+    final result =
+        _linearIssues.values.where((i) => i.taskId == taskId).toList();
+    result.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+    return result;
+  }
+
+  /// All Linear issues not yet linked to any task, sorted by updatedAt descending.
+  List<LinearIssueInfo> get unlinkedLinearIssues {
+    final result =
+        _linearIssues.values.where((i) => i.taskId == null).toList();
+    result.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+    return result;
+  }
 
   void _handleLinearIssueList(List<dynamic> list, String workerId) {
     _linearIssues.removeWhere((_, i) => i.workerId == workerId);
@@ -732,6 +780,11 @@ class AppState extends ChangeNotifier implements PaneHost {
     worker.onInputMessage = _handleInputMessage;
     worker.onOutputMessage = _handleOutputMessage;
     worker.onSessionsChanged = _onWorkerSessionsChanged;
+    worker.onProjectPathAttached = (sessionId, path) {
+      for (final pane in _findPanesForSession(sessionId)) {
+        pane.openProjectPanel();
+      }
+    };
     worker.addListener(_onWorkerChanged);
     worker.loadCachedSessions();
     _workers[config.id] = worker;
@@ -875,15 +928,10 @@ class AppState extends ChangeNotifier implements PaneHost {
               activePane.addSystemMessage('Connected to ${config.name}');
             }
           } catch (e) {
-            if (!hasNoPanes) {
-              activePane.addSystemMessage(
-                  'Failed to connect to ${config.name}: $e',
-                  isError: true);
-            }
             _showToast(
               level: NotificationLevel.error,
               title: 'Connection Failed',
-              body: 'Could not connect to ${config.name}',
+              body: 'Failed to connect to ${config.name}: $e',
               category: _ToastCategory.connection,
             );
           }
@@ -951,15 +999,10 @@ class AppState extends ChangeNotifier implements PaneHost {
         activePane.addSystemMessage('Connected to ${worker.config.name}');
       }
     } catch (e) {
-      if (!hasNoPanes) {
-        activePane.addSystemMessage(
-            'Failed to connect to ${worker.config.name}: $e',
-            isError: true);
-      }
       _showToast(
         level: NotificationLevel.error,
         title: 'Connection Failed',
-        body: 'Could not connect to ${worker.config.name}',
+        body: 'Failed to connect to ${worker.config.name}: $e',
         category: _ToastCategory.connection,
       );
     }
@@ -1041,6 +1084,13 @@ class AppState extends ChangeNotifier implements PaneHost {
     final id = workerId ?? defaultWorkerId;
     if (id == null) return true;
     return _workers[id]?.supportsAttachments ?? true;
+  }
+
+  @override
+  bool workerSupportsImageAttachments(String? workerId) {
+    final id = workerId ?? defaultWorkerId;
+    if (id == null) return true;
+    return _workers[id]?.supportsImageAttachments ?? true;
   }
 
   @override
@@ -1143,9 +1193,10 @@ class AppState extends ChangeNotifier implements PaneHost {
         terminalId: closedTerminalId,
         taskId: closedTaskId,
         artifactId: closedArtifactId,
+        linearIssueId: pane.linearIssueId,
       );
       // Only record if the pane had meaningful state
-      if (record.sessionId != null || record.terminalId != null || record.taskId != null || record.artifactId != null) {
+      if (record.sessionId != null || record.terminalId != null || record.taskId != null || record.artifactId != null || record.linearIssueId != null) {
         _closedPaneHistory.add(record);
         if (_closedPaneHistory.length > _maxClosedPaneHistory) {
           _closedPaneHistory.removeAt(0);
@@ -1960,6 +2011,7 @@ class _ClosedPaneRecord {
   final String? terminalId;
   final String? taskId;
   final String? artifactId;
+  final String? linearIssueId;
 
   const _ClosedPaneRecord({
     this.sessionId,
@@ -1968,5 +2020,6 @@ class _ClosedPaneRecord {
     this.terminalId,
     this.taskId,
     this.artifactId,
+    this.linearIssueId,
   });
 }
