@@ -349,6 +349,33 @@ class TestResolvePath:
         result = scanner._resolve_path(str(d))
         assert result is None
 
+    def test_dot_relative_resolves_against_project_path(self, settings: Settings, tmp_path: Path):
+        """./file.md that doesn't exist relative to CWD is resolved against project_path."""
+        # Use a name that won't accidentally exist in the server's CWD
+        f = tmp_path / "UNIQUE_TEST_DOC_XYZ.md"
+        f.write_text("# doc")
+        scanner = _make_scanner(settings)
+        result = scanner._resolve_path("./UNIQUE_TEST_DOC_XYZ.md", project_path=tmp_path)
+        assert result is not None
+        assert result == f.resolve()
+
+    def test_bare_relative_resolves_against_project_path(self, settings: Settings, tmp_path: Path):
+        """A bare filename resolves against project_path when CWD resolution fails."""
+        sub = tmp_path / "src"
+        sub.mkdir()
+        f = sub / "session.py"
+        f.write_text("# session")
+        scanner = _make_scanner(settings)
+        result = scanner._resolve_path("src/session.py", project_path=tmp_path)
+        assert result is not None
+        assert result == f.resolve()
+
+    def test_no_project_path_returns_none_for_relative(self, settings: Settings):
+        """Without project_path, a relative path that doesn't exist at CWD returns None."""
+        scanner = _make_scanner(settings)
+        result = scanner._resolve_path("./nonexistent.md")
+        assert result is None
+
 
 # ===========================================================================
 # Integration: include + exclude with real file paths

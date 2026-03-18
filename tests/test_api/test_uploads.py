@@ -17,16 +17,48 @@ from src.core.session import SessionManager, SessionType
 
 API_KEY = "test-api-key"
 
+_PNG_BYTES = (
+    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
+    b"\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02"
+    b"\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx"
+    b"\x9cc\xf8\x0f\x00\x00\x01\x01\x00\x05\x18\xd8N"
+    b"\x00\x00\x00\x00IEND\xaeB`\x82"
+)
+
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
 
 
+def _make_llm_mock(*, supports_vision: bool) -> MagicMock:
+    """Return a mock LLMClient with the given vision capability."""
+    m = MagicMock()
+    m.supports_vision = supports_vision
+    m.attachment_capabilities = {"images": supports_vision, "text_files": True}
+    return m
+
+
 @pytest.fixture
 def client_with_store(test_app: FastAPI) -> TestClient:
     """TestClient with a live AttachmentStore on app.state."""
     test_app.state.attachment_store = AttachmentStore()
+    return TestClient(test_app)
+
+
+@pytest.fixture
+def client_vision(test_app: FastAPI) -> TestClient:
+    """TestClient with AttachmentStore + vision-capable LLM mock."""
+    test_app.state.attachment_store = AttachmentStore()
+    test_app.state.llm_client = _make_llm_mock(supports_vision=True)
+    return TestClient(test_app)
+
+
+@pytest.fixture
+def client_no_vision(test_app: FastAPI) -> TestClient:
+    """TestClient with AttachmentStore + non-vision LLM mock."""
+    test_app.state.attachment_store = AttachmentStore()
+    test_app.state.llm_client = _make_llm_mock(supports_vision=False)
     return TestClient(test_app)
 
 
@@ -112,6 +144,63 @@ class TestUploadEndpoint:
         assert stored is not None
         assert stored.data == content
         assert stored.file_name == "sample.txt"
+
+
+# ---------------------------------------------------------------------------
+# Attachment capability gating
+# ---------------------------------------------------------------------------
+
+
+class TestUploadCapabilityGating:
+    """Upload endpoint should enforce model-level attachment capabilities."""
+
+    @pytest.mark.parametrize("mime", ["image/jpeg", "image/png", "image/gif", "image/webp"])
+    def test_image_rejected_when_vision_not_supported(
+        self, client_no_vision: TestClient, mime: str
+    ) -> None:
+        resp = client_no_vision.post(
+            "/api/uploads",
+            headers=_auth(),
+            files={"file": ("photo.img", BytesIO(_PNG_BYTES), mime)},
+        )
+        assert resp.status_code == 415
+        assert "image" in resp.json()["detail"].lower()
+
+    @pytest.mark.parametrize("mime", ["image/jpeg", "image/png", "image/gif", "image/webp"])
+    def test_image_accepted_when_vision_supported(
+        self, client_vision: TestClient, mime: str
+    ) -> None:
+        resp = client_vision.post(
+            "/api/uploads",
+            headers=_auth(),
+            files={"file": ("photo.img", BytesIO(_PNG_BYTES), mime)},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["is_image"] is True
+
+    def test_text_file_always_accepted_regardless_of_vision(
+        self, client_no_vision: TestClient
+    ) -> None:
+        resp = client_no_vision.post(
+            "/api/uploads",
+            headers=_auth(),
+            files={"file": ("notes.txt", BytesIO(b"hello"), "text/plain")},
+        )
+        assert resp.status_code == 200
+
+    def test_no_llm_client_skips_capability_check(
+        self, client_with_store: TestClient
+    ) -> None:
+        """When llm_client is absent from app.state, capability check is skipped."""
+        # client_with_store has no llm_client on app.state
+        if hasattr(client_with_store.app.state, "llm_client"):
+            del client_with_store.app.state.llm_client
+        resp = client_with_store.post(
+            "/api/uploads",
+            headers=_auth(),
+            files={"file": ("photo.png", BytesIO(_PNG_BYTES), "image/png")},
+        )
+        assert resp.status_code == 200
 
 
 # ---------------------------------------------------------------------------

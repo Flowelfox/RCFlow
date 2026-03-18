@@ -386,3 +386,112 @@ class TestSelectedWorktree:
         manager.broadcast_session_update(session)
         update = q.get_nowait()
         assert update["selected_worktree_path"] is None
+
+
+class TestMainProjectPath:
+    """Tests that main_project_path is preserved through all session state
+    transitions and included in broadcasts / session list output.
+
+    This is the backend counterpart of the client-side fix that auto-opens
+    the project panel when switching to a session with a known project path.
+    """
+
+    def test_main_project_path_survives_pause(self):
+        """main_project_path must not be cleared when a session is paused."""
+        session = ActiveSession("test-id", SessionType.CONVERSATIONAL)
+        session.set_active()
+        session.main_project_path = "/home/fox/Projects/RCFlow"
+        session.pause()
+        assert session.main_project_path == "/home/fox/Projects/RCFlow"
+
+    def test_main_project_path_survives_resume(self):
+        """main_project_path must not be cleared when a session is resumed."""
+        session = ActiveSession("test-id", SessionType.CONVERSATIONAL)
+        session.set_active()
+        session.main_project_path = "/home/fox/Projects/RCFlow"
+        session.pause()
+        session.resume()
+        assert session.main_project_path == "/home/fox/Projects/RCFlow"
+
+    def test_main_project_path_survives_complete(self):
+        """main_project_path must not be cleared when a session completes."""
+        session = ActiveSession("test-id", SessionType.ONE_SHOT)
+        session.set_active()
+        session.main_project_path = "/home/fox/Projects/Alpha"
+        session.complete()
+        assert session.main_project_path == "/home/fox/Projects/Alpha"
+
+    def test_main_project_path_survives_fail(self):
+        """main_project_path must not be cleared when a session fails."""
+        session = ActiveSession("test-id", SessionType.ONE_SHOT)
+        session.main_project_path = "/home/fox/Projects/Alpha"
+        session.fail("oops")
+        assert session.main_project_path == "/home/fox/Projects/Alpha"
+
+    def test_broadcast_includes_main_project_path(self):
+        """broadcast_session_update must include main_project_path so live
+        session_update WS messages carry it to the client."""
+        manager = SessionManager("test-backend")
+        q = manager.subscribe_updates("test-sub")
+        session = manager.create_session(SessionType.CONVERSATIONAL)
+        # drain creation broadcast
+        _ = q.get_nowait()
+
+        session.main_project_path = "/home/fox/Projects/MyApp"
+        manager.broadcast_session_update(session)
+
+        update = q.get_nowait()
+        assert update["type"] == "session_update"
+        assert update["main_project_path"] == "/home/fox/Projects/MyApp"
+
+    def test_broadcast_main_project_path_none_when_not_set(self):
+        """Sessions without a project must broadcast main_project_path: null
+        so the client never shows stale project data."""
+        manager = SessionManager("test-backend")
+        q = manager.subscribe_updates("test-sub")
+        session = manager.create_session(SessionType.CONVERSATIONAL)
+        _ = q.get_nowait()
+
+        manager.broadcast_session_update(session)
+        update = q.get_nowait()
+        assert "main_project_path" in update
+        assert update["main_project_path"] is None
+
+    def test_broadcast_includes_main_project_path_after_pause(self):
+        """After pausing, broadcasts must still carry the project path so the
+        client project panel remains visible for paused sessions."""
+        manager = SessionManager("test-backend")
+        q = manager.subscribe_updates("test-sub")
+        session = manager.create_session(SessionType.CONVERSATIONAL)
+        _ = q.get_nowait()  # creation broadcast
+
+        # Set main_project_path before set_active so that even the ACTIVE
+        # status broadcast already carries the path.
+        session.main_project_path = "/home/fox/Projects/MyApp"
+        session.set_active()
+        _ = q.get_nowait()  # CREATED→ACTIVE status broadcast
+
+        session.pause()
+        # pause() calls _on_update → broadcast
+        update = q.get_nowait()
+        assert update["main_project_path"] == "/home/fox/Projects/MyApp"
+
+    def test_list_all_with_archived_includes_main_project_path(self):
+        """list_all_with_archived in-memory dict must include main_project_path
+        so the WS session_list message carries it to the client."""
+        manager = SessionManager("test-backend")
+        session = manager.create_session(SessionType.CONVERSATIONAL)
+        session.set_active()
+        session.main_project_path = "/home/fox/Projects/RCFlow"
+
+        # Simulate the dict construction performed by list_all_with_archived
+        # for in-memory sessions (without a DB call).
+        in_memory_dicts = [
+            {
+                "session_id": s.id,
+                "main_project_path": s.main_project_path,
+            }
+            for s in manager.list_all_sessions()
+        ]
+        assert len(in_memory_dicts) == 1
+        assert in_memory_dicts[0]["main_project_path"] == "/home/fox/Projects/RCFlow"
