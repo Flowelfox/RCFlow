@@ -220,6 +220,45 @@ class TestResumeSession:
         assert resp.status_code in (401, 403, 422)
 
 
+class TestInterruptSubprocess:
+    def test_interrupt_active_session(self, client: TestClient, session_manager: SessionManager) -> None:
+        session = session_manager.create_session(SessionType.LONG_RUNNING)
+        session.set_active()
+
+        resp = client.post(f"/api/sessions/{session.id}/interrupt", headers=_auth_headers())
+
+        assert resp.status_code == 200
+        body: dict[str, Any] = resp.json()
+        assert body["session_id"] == session.id
+        assert body["status"] == "active"
+
+    def test_interrupt_unknown_session(self, client: TestClient) -> None:
+        resp = client.post("/api/sessions/nonexistent-id/interrupt", headers=_auth_headers())
+        assert resp.status_code == 404
+
+    def test_interrupt_paused_session(self, client: TestClient, session_manager: SessionManager) -> None:
+        session = session_manager.create_session(SessionType.CONVERSATIONAL)
+        session.set_active()
+        session.pause()
+
+        resp = client.post(f"/api/sessions/{session.id}/interrupt", headers=_auth_headers())
+        assert resp.status_code == 409
+
+    def test_interrupt_terminal_session(self, client: TestClient, session_manager: SessionManager) -> None:
+        session = session_manager.create_session(SessionType.ONE_SHOT)
+        session.complete()
+
+        resp = client.post(f"/api/sessions/{session.id}/interrupt", headers=_auth_headers())
+        assert resp.status_code == 409
+
+    def test_interrupt_requires_auth(self, client: TestClient, session_manager: SessionManager) -> None:
+        session = session_manager.create_session(SessionType.LONG_RUNNING)
+        session.set_active()
+
+        resp = client.post(f"/api/sessions/{session.id}/interrupt")
+        assert resp.status_code in (401, 403, 422)
+
+
 def _populate_session_messages(session_manager: SessionManager, n: int) -> str:
     """Create a session with `n` text_chunk messages, returning the session ID."""
     session = session_manager.create_session(SessionType.CONVERSATIONAL)
