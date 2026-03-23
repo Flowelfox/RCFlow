@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from src.models.db import Session as SessionModel
 from src.models.db import SessionTurn, ToolCall, TelemetryMinutely
 
 if TYPE_CHECKING:
@@ -69,6 +70,51 @@ class TelemetryService:
         self._aggregation_watermark: datetime | None = None
 
     # ------------------------------------------------------------------
+    # Session stub guard
+    # ------------------------------------------------------------------
+
+    async def _ensure_session_stub(self, session_id: str, ts_now: datetime) -> None:
+        """Ensure a minimal sessions row exists so FK constraints are satisfied.
+
+        session_turns and tool_calls both reference sessions.id via a FK.
+        Sessions are normally archived to the DB only after completion, but
+        telemetry rows are written during the active lifetime of the session.
+        This method pre-creates a minimal stub so the FK is satisfied from the
+        first telemetry insert.  The stub is always superseded by the full row
+        written by archive_session on session completion.
+
+        If a row already exists (the common case, created by
+        _ensure_session_row_in_db in BackgroundTasksMixin) this is a cheap
+        no-op — one PK lookup and no write.
+
+        Exceptions are logged and swallowed; callers must still handle the FK
+        failure from the subsequent insert if the stub could not be created.
+        """
+        session_uuid = uuid.UUID(session_id)
+        try:
+            async with self._db_factory() as db:
+                existing = await db.get(SessionModel, session_uuid)
+                if existing is None:
+                    db.add(SessionModel(
+                        id=session_uuid,
+                        backend_id=self._backend_id,
+                        created_at=ts_now,
+                        session_type="conversational",
+                        status="active",
+                        metadata_={},
+                    ))
+                    await db.commit()
+                    logger.debug(
+                        "TelemetryService: created session stub for %s (will be "
+                        "superseded by archive_session on completion)",
+                        session_id,
+                    )
+        except Exception:
+            logger.exception(
+                "TelemetryService: failed to ensure session stub for %s", session_id
+            )
+
+    # ------------------------------------------------------------------
     # Turn tracking
     # ------------------------------------------------------------------
 
@@ -80,12 +126,20 @@ class TelemetryService:
         """Insert a new SessionTurn row and return an in-flight handle.
 
         If *turn_index* is None, an auto-incrementing per-session index is used.
+
+        Before inserting the turn row the method calls :meth:`_ensure_session_stub`
+        so that the sessions FK-target always exists even when the normal
+        _ensure_session_row_in_db path in BackgroundTasksMixin failed silently.
         """
         if turn_index is None:
             turn_index = self._turn_counters.get(session_id, 0)
 
         ts_start = datetime.now(UTC)
         row_id = uuid.uuid4()
+
+        # Guarantee the sessions row exists before inserting the FK child row.
+        await self._ensure_session_stub(session_id, ts_start)
+
         try:
             async with self._db_factory() as db:
                 db.add(
@@ -171,9 +225,18 @@ class TelemetryService:
         turn: InFlightTurn | None = None,
         tool_call_index: int = 0,
     ) -> InFlightToolCall:
-        """Insert a new ToolCall row and return an in-flight handle."""
+        """Insert a new ToolCall row and return an in-flight handle.
+
+        Calls :meth:`_ensure_session_stub` defensively — in the normal flow a
+        sessions row was already created by :meth:`record_turn_start`, but tool
+        calls can arrive without a preceding turn (e.g. direct tool mode), so
+        the guard is applied here too.
+        """
         ts_start = datetime.now(UTC)
         row_id = uuid.uuid4()
+
+        await self._ensure_session_stub(session_id, ts_start)
+
         try:
             async with self._db_factory() as db:
                 db.add(
@@ -360,22 +423,25 @@ class TelemetryService:
             )
             db.add(row)
 
-        row.tokens_sent += tokens_sent_delta
-        row.tokens_received += tokens_received_delta
-        row.cache_creation += cache_creation_delta
-        row.cache_read += cache_read_delta
-        row.llm_duration_sum_us += llm_duration_us_delta
-        row.llm_duration_count += llm_count_delta
-        row.tool_duration_sum_us += tool_duration_us_delta
-        row.tool_duration_count += tool_count_delta
-        row.inter_tool_gap_sum_us += inter_tool_gap_us_delta
-        row.inter_tool_gap_count += inter_tool_gap_count_delta
-        row.inter_turn_gap_sum_us += inter_turn_gap_us_delta
-        row.inter_turn_gap_count += inter_turn_gap_count_delta
-        row.turn_count += turn_count_delta
-        row.tool_call_count += tool_call_count_delta
-        row.error_count += error_count_delta
-        row.parallel_tool_calls += parallel_delta
+        # Use `(field or 0) + delta` instead of `+=` because SQLAlchemy's column
+        # `default=0` is applied at INSERT flush time, not at object construction.
+        # A newly-added but unflushed row has None for all counter attributes.
+        row.tokens_sent = (row.tokens_sent or 0) + tokens_sent_delta
+        row.tokens_received = (row.tokens_received or 0) + tokens_received_delta
+        row.cache_creation = (row.cache_creation or 0) + cache_creation_delta
+        row.cache_read = (row.cache_read or 0) + cache_read_delta
+        row.llm_duration_sum_us = (row.llm_duration_sum_us or 0) + llm_duration_us_delta
+        row.llm_duration_count = (row.llm_duration_count or 0) + llm_count_delta
+        row.tool_duration_sum_us = (row.tool_duration_sum_us or 0) + tool_duration_us_delta
+        row.tool_duration_count = (row.tool_duration_count or 0) + tool_count_delta
+        row.inter_tool_gap_sum_us = (row.inter_tool_gap_sum_us or 0) + inter_tool_gap_us_delta
+        row.inter_tool_gap_count = (row.inter_tool_gap_count or 0) + inter_tool_gap_count_delta
+        row.inter_turn_gap_sum_us = (row.inter_turn_gap_sum_us or 0) + inter_turn_gap_us_delta
+        row.inter_turn_gap_count = (row.inter_turn_gap_count or 0) + inter_turn_gap_count_delta
+        row.turn_count = (row.turn_count or 0) + turn_count_delta
+        row.tool_call_count = (row.tool_call_count or 0) + tool_call_count_delta
+        row.error_count = (row.error_count or 0) + error_count_delta
+        row.parallel_tool_calls = (row.parallel_tool_calls or 0) + parallel_delta
 
     # ------------------------------------------------------------------
     # Retention cleanup
