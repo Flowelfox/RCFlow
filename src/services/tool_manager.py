@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
-from src.paths import get_managed_tools_dir
+from src.paths import get_managed_cc_plugins_dir, get_managed_tools_dir
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -404,6 +404,10 @@ class ToolManager:
         """Download and install Claude Code native binary from Anthropic GCS."""
         install_dir = self._base_dir / "claude-code"
         install_dir.mkdir(parents=True, exist_ok=True)
+        # Ensure the RCFlow-managed plugins directory exists on every install so
+        # the slash-commands endpoint can discover it on any machine without
+        # needing a prior endpoint call to create it.
+        get_managed_cc_plugins_dir()
 
         exe = ".exe" if sys.platform == "win32" else ""
         binary_name = f"claude{exe}"
@@ -571,6 +575,7 @@ class ToolManager:
         """Download Claude Code with streaming progress."""
         install_dir = self._base_dir / "claude-code"
         install_dir.mkdir(parents=True, exist_ok=True)
+        get_managed_cc_plugins_dir()  # ensure plugins dir exists on every machine
 
         exe = ".exe" if sys.platform == "win32" else ""
         binary_name = f"claude{exe}"

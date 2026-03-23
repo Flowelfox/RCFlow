@@ -9,6 +9,7 @@ from src.api.routes.artifacts import router as artifacts_router
 from src.api.routes.auth import router as auth_router
 from src.api.routes.config import router as config_router
 from src.api.routes.projects import router as projects_router
+from src.api.routes.rcflow_plugins import router as rcflow_plugins_router
 from src.api.routes.sessions import router as sessions_router
 from src.api.routes.slash_commands import router as slash_commands_router
 from src.api.routes.tasks import router as tasks_router
@@ -22,6 +23,7 @@ __all__ = [
     "auth_router",
     "config_router",
     "projects_router",
+    "rcflow_plugins_router",
     "sessions_router",
     "slash_commands_router",
     "tasks_router",

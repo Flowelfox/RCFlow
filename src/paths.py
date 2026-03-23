@@ -76,6 +76,69 @@ def get_templates_dir() -> Path:
     return Path(__file__).resolve().parent / "prompts" / "templates"
 
 
+_TOOL_DIR_MAP: dict[str, str] = {
+    "claude_code": "claude-code",
+    "codex": "codex",
+}
+
+
+def get_tool_plugins_dir(tool_name: str) -> Path:
+    """Return the plugins directory for a RCFlow-managed tool.
+
+    Args:
+        tool_name: One of ``"claude_code"`` or ``"codex"``.
+
+    Returns:
+        A :class:`~pathlib.Path` pointing to
+        ``<managed_tools_dir>/<tool_dir>/plugins/``.
+        The directory is created on first access.
+
+    Raises:
+        ValueError: If *tool_name* is not a recognised managed tool.
+    """
+    tool_dir = _TOOL_DIR_MAP.get(tool_name)
+    if tool_dir is None:
+        raise ValueError(f"Unknown tool: {tool_name!r}. Must be one of: {sorted(_TOOL_DIR_MAP)}")
+    candidate = get_managed_tools_dir() / tool_dir / "plugins"
+    try:
+        candidate.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
+    return candidate
+
+
+def get_managed_cc_plugins_dir() -> Path:
+    """Return the directory where RCFlow stores its own managed Claude Code plugins.
+
+    Each sub-directory under this path is treated as a single plugin and may
+    contain a ``commands/`` folder with ``.md`` skill files, following the same
+    format used by Claude Code's own plugin system.
+
+    Layout::
+
+        <managed_tools_dir>/claude-code/plugins/
+            my-plugin/
+                commands/
+                    do-thing.md
+            another-plugin/
+                commands/
+                    other-skill.md
+
+    Commands found here are returned with ``"source": "rcflow_plugin"`` by the
+    ``GET /api/slash-commands`` endpoint.
+
+    The directory is created on first access (mirroring :func:`get_managed_tools_dir`)
+    and is also explicitly created during managed Claude Code installation so that
+    it exists on every machine where RCFlow manages the Claude Code binary.
+    """
+    candidate = get_managed_tools_dir() / "claude-code" / "plugins"
+    try:
+        candidate.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
+    return candidate
+
+
 def get_managed_tools_dir() -> Path:
     """Return the base directory for RCFlow-managed CLI tool binaries and config.
 

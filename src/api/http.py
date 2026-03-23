@@ -14,6 +14,7 @@ from src.api.routes import (
     auth_router,
     config_router,
     projects_router,
+    rcflow_plugins_router,
     sessions_router,
     slash_commands_router,
     tasks_router,
@@ -40,3 +41,4 @@ router.include_router(uploads_router)
 router.include_router(worktrees_router)
 router.include_router(telemetry_router)
 router.include_router(slash_commands_router)
+router.include_router(rcflow_plugins_router)
