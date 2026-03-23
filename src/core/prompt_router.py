@@ -4,8 +4,8 @@ The ``PromptRouter`` class is composed from five mixin modules:
 
 - :class:`~src.core.session_lifecycle.SessionLifecycleMixin` — session
   create/cancel/end/pause/resume/restore, permissions, inactivity reaper
-- :class:`~src.core.context.ContextMixin` — @project, #tool, $file mention
-  extraction, context building, direct tool mode
+- :class:`~src.core.context.ContextMixin` — #tool, $file mention
+  extraction, project context building, direct tool mode
 - :class:`~src.core.agent_claude_code.ClaudeCodeAgentMixin` — Claude Code
   subprocess lifecycle
 - :class:`~src.core.agent_codex.CodexAgentMixin` — Codex CLI subprocess
@@ -15,7 +15,9 @@ The ``PromptRouter`` class is composed from five mixin modules:
 """
 
 import asyncio
+import json
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
@@ -309,9 +311,15 @@ class PromptRouter(
     # ------------------------------------------------------------------
 
     def _update_session_worktree_meta(
-        self, session: ActiveSession, tool_call: ToolCallRequest
+        self, session: ActiveSession, tool_call: ToolCallRequest, result: str = ""
     ) -> None:
-        """Store the most recent worktree context in session metadata and broadcast."""
+        """Store the most recent worktree context in session metadata and broadcast.
+
+        For ``action=new``, also auto-selects the newly created worktree path from
+        the tool result JSON so that a subsequent ``#ClaudeCode`` request immediately
+        uses the new worktree as its working directory without requiring an explicit
+        UI selection step.
+        """
         tool_input = tool_call.tool_input
         repo_path = tool_input.get("repo_path", "")
         action = tool_input.get("action", "")
@@ -324,11 +332,22 @@ class PromptRouter(
                     "branch": tool_input.get("branch", ""),
                     "base": tool_input.get("base", "main"),
                 }
+                # Auto-select the created worktree path so subsequent agent tool
+                # calls (e.g. #ClaudeCode) land in the new worktree immediately.
+                try:
+                    data = json.loads(result)
+                    wt_path: str = data.get("created", {}).get("path", "")
+                    if wt_path:
+                        session.metadata["selected_worktree_path"] = wt_path
+                except (json.JSONDecodeError, AttributeError, TypeError):
+                    pass
             case "merge" | "rm":
                 session.metadata["worktree"] = {
                     "repo_path": repo_path,
                     "last_action": action,
                 }
+                # Clear stale selected path when the worktree has been merged or removed.
+                session.metadata.pop("selected_worktree_path", None)
             case "list":
                 session.metadata["worktree"] = {
                     "repo_path": repo_path,
@@ -336,6 +355,61 @@ class PromptRouter(
                 }
 
         # Broadcast so the client can update the worktree panel immediately
+        if self._session_manager:
+            self._session_manager.broadcast_session_update(session)
+
+    # ------------------------------------------------------------------
+    # Project name validation
+    # ------------------------------------------------------------------
+
+    def _apply_project_name(self, session: ActiveSession, project_name: str) -> None:
+        """Resolve, validate, and apply a project_name received from the client picker.
+
+        On success: sets ``session.main_project_path``, clears any previous error,
+        and broadcasts a session_update so the client chip reflects the accepted path.
+
+        On failure: pushes an error buffer entry and sets ``session.project_name_error``
+        so the client chip shows a red error state via the next session_update.
+        """
+        resolved = self._resolve_project_path(project_name)
+        if resolved is None:
+            self._push_project_error(
+                session,
+                f'Project not found: "{project_name}". '
+                f"Check that it exists under a configured projects directory.",
+            )
+            return
+
+        if not os.access(resolved, os.R_OK | os.X_OK):
+            self._push_project_error(
+                session,
+                f'Permission denied accessing project "{project_name}" at {resolved}.',
+            )
+            return
+
+        abs_path = str(resolved)
+        if abs_path != session.main_project_path:
+            session.main_project_path = abs_path
+            session.project_name_error = None
+            if self._session_manager:
+                self._session_manager.broadcast_session_update(session)
+        elif session.project_name_error is not None:
+            # Path unchanged but error flag needs clearing
+            session.project_name_error = None
+            if self._session_manager:
+                self._session_manager.broadcast_session_update(session)
+
+    def _push_project_error(self, session: ActiveSession, message: str) -> None:
+        """Push a project validation error to the session buffer and broadcast it."""
+        session.project_name_error = message
+        session.buffer.push_text(
+            MessageType.ERROR,
+            {
+                "session_id": session.id,
+                "content": message,
+                "code": "PROJECT_ERROR",
+            },
+        )
         if self._session_manager:
             self._session_manager.broadcast_session_update(session)
 
@@ -348,6 +422,7 @@ class PromptRouter(
         text: str,
         session_id: str | None = None,
         attachments: list[ResolvedAttachment] | None = None,
+        project_name: str | None = None,
     ) -> str:
         """Handle a user prompt. Creates a new session or resumes an existing one.
 
@@ -356,6 +431,10 @@ class PromptRouter(
             session_id: Existing session UUID, or None to create a new session.
             attachments: Optional list of resolved file attachments whose content
                 will be included as multimodal content blocks sent to the LLM.
+            project_name: Folder name of the project selected in the client picker
+                (e.g. ``"RCFlow"``). Resolved to an absolute path via configured
+                ``projects_dirs``. When provided, sets ``session.main_project_path``
+                before the DB row is written so the initial INSERT already includes it.
 
         Returns:
             The session ID.
@@ -363,6 +442,11 @@ class PromptRouter(
         resolved_id = self.ensure_session(session_id)
         session = self._session_manager.get_session(resolved_id)
         assert session is not None  # ensure_session guarantees this
+
+        # Resolve and validate the project_name from the client picker BEFORE the
+        # DB row write, so the initial INSERT already contains main_project_path.
+        if project_name:
+            self._apply_project_name(session, project_name)
 
         # Ensure the sessions row exists in the DB before any telemetry inserts
         # (session_turns and tool_calls FK-reference sessions.id, but sessions are
@@ -416,6 +500,21 @@ class PromptRouter(
             await self._handle_direct_prompt(session, text)
             return session.id
 
+        # Bare agent mention: when the user sends only "#ClaudeCode" or "#Codex"
+        # (with no task description), bypass the LLM and start the agent subprocess
+        # directly so it is ready for follow-up instructions.
+        if self._is_bare_agent_mention(text):
+            session.set_active()
+            buffer_data4: dict[str, Any] = {"content": text, "role": "user"}
+            if attachments:
+                buffer_data4["attachments"] = [
+                    {"name": a.file_name, "mime_type": a.mime_type, "size": len(a.data)}
+                    for a in attachments
+                ]
+            session.buffer.push_text(MessageType.TEXT_CHUNK, buffer_data4)
+            await self._handle_direct_prompt(session, text)
+            return session.id
+
         # Serialize prompt processing per session to prevent concurrent writes
         # to conversation_history, which would break tool_use/tool_result pairing.
         async with session._prompt_lock:
@@ -423,24 +522,24 @@ class PromptRouter(
             session.set_activity(ActivityState.PROCESSING_LLM)
             self._resolve_session_end_ask(session, accepted=False)
 
-            # Detect @ProjectName, #ToolName, and $filename mentions, build LLM context
-            mentions = self._extract_project_mentions(text)
-            project_context = self._build_project_context(mentions) if mentions else None
-
-            # Track the latest @ProjectName as the session's main project.
-            # Only update when a mention resolves to a real directory so that
-            # a typo or invalid @mention never clears an existing project.
-            if mentions:
-                resolved_path = self._resolve_latest_project_path(mentions)
-                if resolved_path is not None and resolved_path != session.main_project_path:
-                    session.main_project_path = resolved_path
-                    self._session_manager.broadcast_session_update(session)
+            # Build project context from the session's confirmed project path.
+            # Injected every turn so the LLM always has the project in context,
+            # not only on the first turn where the picker selection was made.
+            project_context = (
+                self._build_project_context_from_path(session.main_project_path)
+                if session.main_project_path else None
+            )
 
             tool_mentions = self._extract_tool_mentions(text)
             tool_context = self._build_tool_context(tool_mentions) if tool_mentions else None
 
             file_refs = self._extract_file_references(text)
             file_context = await self._build_file_context(file_refs) if file_refs else None
+
+            # Active worktree context: injected when a worktree is explicitly
+            # selected for this session so the LLM knows which working directory
+            # to pass when it calls an agent tool (claude_code / codex).
+            worktree_context = self._build_active_worktree_context(session)
 
             context_blocks: list[dict[str, Any]] = []
             if project_context:
@@ -454,6 +553,10 @@ class PromptRouter(
             if file_context:
                 context_blocks.append(
                     {"type": "text", "text": file_context, "cache_control": {"type": "ephemeral"}},
+                )
+            if worktree_context:
+                context_blocks.append(
+                    {"type": "text", "text": worktree_context, "cache_control": {"type": "ephemeral"}},
                 )
 
             # Build attachment content blocks (images, text files, etc.)
@@ -807,6 +910,6 @@ class PromptRouter(
         # Track active worktree context in session metadata so clients can show
         # worktree controls.  Updated on every successful mutating worktree call.
         if tool_def is not None and tool_def.executor == "worktree":
-            self._update_session_worktree_meta(session, tool_call)
+            self._update_session_worktree_meta(session, tool_call, result_text)
 
         return result_text

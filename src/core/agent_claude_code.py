@@ -13,7 +13,12 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
+import shutil
+import sys
 from collections.abc import AsyncGenerator
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from src.core.buffer import MessageType
@@ -71,6 +76,16 @@ class ClaudeCodeAgentMixin:
             config_dir = self._tool_settings.get_config_dir("claude_code")
             config_dir.mkdir(parents=True, exist_ok=True)
             extra_env["CLAUDE_CONFIG_DIR"] = str(config_dir)
+
+        # Ensure wt (bundled with RCFlow via wtpython) is on PATH so Claude Code
+        # can call it. Fall back to adding the running Python's bin dir if wt is
+        # not already resolvable via the inherited environment.
+        if not shutil.which("wt"):
+            venv_bin = Path(sys.executable).parent
+            if (venv_bin / "wt").exists():
+                current_path = os.environ.get("PATH", "")
+                extra_env["PATH"] = f"{venv_bin}:{current_path}"
+
         return extra_env
 
     async def _start_claude_code(
@@ -81,11 +96,14 @@ class ClaudeCodeAgentMixin:
     ) -> str:
         """Start a Claude Code session: spawn subprocess, begin background streaming."""
         working_dir = tool_call.tool_input.get("working_directory", ".")
-        # Override with the session's selected worktree path when explicitly set.
-        # This ensures agent runs respect the worktree selected in the right sidebar.
+        # Priority 1: explicit worktree selection overrides everything.
+        # Priority 2: session project (from picker) used when no worktree is set.
+        # Priority 3: the LLM-chosen working_directory (default above).
         selected_wt = session.metadata.get("selected_worktree_path")
         if selected_wt:
             working_dir = selected_wt
+        elif session.main_project_path:
+            working_dir = session.main_project_path
         working_path = self._resolve_working_directory(working_dir)
         try:
             is_dir = working_path.is_dir()
@@ -139,6 +157,24 @@ class ClaudeCodeAgentMixin:
         # Start streaming in a background task that reads events and pushes to buffer
         task = asyncio.create_task(self._stream_claude_code_events(session, executor, tool_def, tool_call))
         session._claude_code_stream_task = task
+
+        # Record transient subprocess tracking fields and broadcast initial status
+        session.subprocess_started_at = datetime.now(UTC)
+        session.subprocess_current_tool = None
+        session.subprocess_type = "claude_code"
+        session.subprocess_display_name = tool_def.display_name or "Claude Code"
+        session.subprocess_working_directory = str(working_path)
+        session.buffer.push_ephemeral(
+            MessageType.SUBPROCESS_STATUS,
+            {
+                "session_id": session.id,
+                "subprocess_type": "claude_code",
+                "display_name": session.subprocess_display_name,
+                "working_directory": session.subprocess_working_directory,
+                "current_tool": None,
+                "started_at": session.subprocess_started_at.isoformat(),
+            },
+        )
 
         return f"Claude Code session started in {working_path}"
 
@@ -299,15 +335,56 @@ class ClaudeCodeAgentMixin:
                                 },
                             )
                         elif tool_name == "EnterPlanMode":
+                            session._plan_mode_event = asyncio.Event()
+                            session._plan_mode_approved = False
+                            session.set_activity(ActivityState.AWAITING_PERMISSION)
                             session.buffer.push_text(
                                 MessageType.PLAN_MODE_ASK,
                                 {"session_id": session.id},
                             )
+                            # Block stream reading until the user approves or denies.
+                            # While we wait, Claude Code's stdout pipe fills and it
+                            # cannot advance further, effectively gating the session.
+                            await session._plan_mode_event.wait()
+                            session._plan_mode_event = None
+                            session.set_activity(ActivityState.RUNNING_SUBPROCESS)
+                            if not session._plan_mode_approved:
+                                # User denied plan mode — terminate cleanly.
+                                session.buffer.push_text(
+                                    MessageType.AGENT_GROUP_END,
+                                    {"session_id": session.id},
+                                )
+                                session.buffer.push_text(
+                                    MessageType.ERROR,
+                                    {
+                                        "session_id": session.id,
+                                        "content": "Plan mode denied. The session was stopped.",
+                                        "code": "PLAN_MODE_DENIED",
+                                    },
+                                )
+                                await self._end_claude_code_session(session)
+                                return
                         elif tool_name == "ExitPlanMode":
+                            session._plan_review_event = asyncio.Event()
+                            session._plan_review_approved = False
+                            session._plan_review_feedback = None
+                            session.set_activity(ActivityState.AWAITING_PERMISSION)
                             session.buffer.push_text(
                                 MessageType.PLAN_REVIEW_ASK,
-                                {"session_id": session.id},
+                                {"session_id": session.id, "plan_input": tool_input},
                             )
+                            # Block stream reading until the user approves or provides
+                            # feedback. Claude Code is waiting for stdin after ExitPlanMode,
+                            # so the pipe is also effectively gated.
+                            await session._plan_review_event.wait()
+                            session._plan_review_event = None
+                            session.set_activity(ActivityState.RUNNING_SUBPROCESS)
+                            response_text = session._plan_review_feedback or ""
+                            session._plan_review_feedback = None
+                            # Forward user's response to Claude Code stdin:
+                            # approval text → CC proceeds; feedback → CC revises the plan.
+                            if session.claude_code_executor is not None and session.claude_code_executor.is_running:
+                                await session.claude_code_executor.send_input(response_text)
                         else:
                             session.buffer.push_text(
                                 MessageType.TOOL_START,
@@ -317,6 +394,20 @@ class ClaudeCodeAgentMixin:
                                     "tool_input": tool_input,
                                 },
                             )
+                            # Update subprocess current_tool tracking
+                            session.subprocess_current_tool = tool_name
+                            if session.subprocess_started_at is not None:
+                                session.buffer.push_ephemeral(
+                                    MessageType.SUBPROCESS_STATUS,
+                                    {
+                                        "session_id": session.id,
+                                        "subprocess_type": session.subprocess_type,
+                                        "display_name": session.subprocess_display_name,
+                                        "working_directory": session.subprocess_working_directory,
+                                        "current_tool": tool_name,
+                                        "started_at": session.subprocess_started_at.isoformat(),
+                                    },
+                                )
                         # Collect tool input values for scanning
                         for v in tool_input.values():
                             if isinstance(v, str):
@@ -350,6 +441,21 @@ class ClaudeCodeAgentMixin:
                     )
                     # Fire artifact scan for this tool result
                     self._fire_text_artifact_scan(session, [content])
+
+                # Clear current_tool after the result
+                session.subprocess_current_tool = None
+                if session.subprocess_started_at is not None:
+                    session.buffer.push_ephemeral(
+                        MessageType.SUBPROCESS_STATUS,
+                        {
+                            "session_id": session.id,
+                            "subprocess_type": session.subprocess_type,
+                            "display_name": session.subprocess_display_name,
+                            "working_directory": session.subprocess_working_directory,
+                            "current_tool": None,
+                            "started_at": session.subprocess_started_at.isoformat(),
+                        },
+                    )
 
             elif event_type == "result":
                 session.set_activity(ActivityState.IDLE)
@@ -445,6 +551,12 @@ class ClaudeCodeAgentMixin:
             await self._end_claude_code_session(session)
             return
 
+        # If the relay ended the session itself (e.g. plan mode denied), it already
+        # pushed AGENT_GROUP_END/SESSION_END and called _end_claude_code_session —
+        # nothing left to do here.
+        if session.status in (SessionStatus.COMPLETED, SessionStatus.CANCELLED, SessionStatus.FAILED):
+            return
+
         # If the session was paused during relay (e.g. max_turns), the relay already
         # pushed AGENT_GROUP_END and SESSION_PAUSED — just clean up and return.
         if session.status == SessionStatus.PAUSED:
@@ -502,6 +614,17 @@ class ClaudeCodeAgentMixin:
         session.claude_code_executor = None
         session._claude_code_stream_task = None
 
+        # Clear subprocess tracking and broadcast null status
+        session.subprocess_started_at = None
+        session.subprocess_current_tool = None
+        session.subprocess_type = None
+        session.subprocess_display_name = None
+        session.subprocess_working_directory = None
+        session.buffer.push_ephemeral(
+            MessageType.SUBPROCESS_STATUS,
+            {"session_id": session.id, "subprocess_type": None},
+        )
+
         if session.status == SessionStatus.PAUSED:
             # Defer end/archive — user will see output on resume
             session.complete()  # sets completed_while_paused flag
@@ -532,6 +655,28 @@ class ClaudeCodeAgentMixin:
             return
 
         session.set_activity(ActivityState.RUNNING_SUBPROCESS)
+
+        # Re-broadcast subprocess status so the client shows the indicator again
+        if session.subprocess_started_at is None:
+            session.subprocess_started_at = datetime.now(UTC)
+            session.subprocess_type = "claude_code"
+            cc_def_for_name = self._tool_registry.get("claude_code")
+            session.subprocess_display_name = (
+                cc_def_for_name.display_name if cc_def_for_name and cc_def_for_name.display_name else "Claude Code"
+            )
+            session.subprocess_working_directory = session.metadata.get("claude_code_working_directory", "")
+        session.subprocess_current_tool = None
+        session.buffer.push_ephemeral(
+            MessageType.SUBPROCESS_STATUS,
+            {
+                "session_id": session.id,
+                "subprocess_type": session.subprocess_type,
+                "display_name": session.subprocess_display_name,
+                "working_directory": session.subprocess_working_directory,
+                "current_tool": None,
+                "started_at": session.subprocess_started_at.isoformat(),
+            },
+        )
 
         # Open a new agent group for this follow-up turn
         cc_def = self._tool_registry.get("claude_code")
@@ -589,6 +734,10 @@ class ClaudeCodeAgentMixin:
                 },
             )
             await self._end_claude_code_session(session)
+            return
+
+        # If the relay ended the session itself (e.g. plan mode denied), already done.
+        if session.status in (SessionStatus.COMPLETED, SessionStatus.CANCELLED, SessionStatus.FAILED):
             return
 
         # If the session was paused during relay (e.g. max_turns), relay already
@@ -658,6 +807,10 @@ class ClaudeCodeAgentMixin:
                 },
             )
             await self._end_claude_code_session(session)
+            return
+
+        # If the relay ended the session itself (e.g. plan mode denied), already done.
+        if session.status in (SessionStatus.COMPLETED, SessionStatus.CANCELLED, SessionStatus.FAILED):
             return
 
         # If the session was paused during relay (e.g. max_turns), relay already

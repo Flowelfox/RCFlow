@@ -25,6 +25,7 @@ class MessageType(StrEnum):
     TODO_UPDATE = "todo_update"
     THINKING = "thinking"
     SESSION_UPDATE = "session_update"  # For broadcasting session metadata updates
+    SUBPROCESS_STATUS = "subprocess_status"  # Ephemeral — not archived to DB
 
 
 @dataclass
@@ -77,6 +78,17 @@ class SessionBuffer:
             queue.put_nowait(msg)
 
         return msg
+
+    def push_ephemeral(self, message_type: MessageType, data: dict[str, Any]) -> None:
+        """Push a message to live subscribers only — NOT archived to text_history.
+
+        Use for transient UI updates (e.g. subprocess_status) that should not
+        be replayed on reconnect or persisted to the database.
+        """
+        self._text_sequence += 1
+        msg = BufferedMessage(sequence=self._text_sequence, message_type=message_type, data=data)
+        for queue in self._text_subscribers.values():
+            queue.put_nowait(msg)
 
     def push_audio(self, data: bytes) -> AudioChunk:
         """Push an audio chunk to the buffer and notify all subscribers."""

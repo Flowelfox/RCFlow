@@ -55,6 +55,7 @@ async def list_sessions(
                 "tool_output_tokens": s.get("tool_output_tokens", 0),
                 "tool_cost_usd": s.get("tool_cost_usd", 0.0),
                 "main_project_path": s.get("main_project_path"),
+                "agent_type": s.get("agent_type"),
             }
             for s in all_sessions
         ]
@@ -75,6 +76,7 @@ async def list_sessions(
                 "tool_output_tokens": s.tool_output_tokens,
                 "tool_cost_usd": s.tool_cost_usd,
                 "main_project_path": s.main_project_path,
+                "agent_type": s.agent_type,
             }
             for s in session_manager.list_all_sessions()
         ]
@@ -304,6 +306,32 @@ async def pause_session(session_id: str, request: Request) -> dict[str, Any]:
         "session_id": session.id,
         "status": session.status.value,
         "paused_at": session.paused_at.isoformat() if session.paused_at else None,
+    }
+
+
+@router.post(
+    "/sessions/{session_id}/interrupt",
+    summary="Interrupt a running subprocess",
+    description=(
+        "Kills any active Claude Code or Codex subprocess in the session without "
+        "pausing it. The session remains ACTIVE and ready to accept new prompts "
+        "immediately after the interrupt. A null subprocess_status message is "
+        "broadcast so clients can clear their subprocess indicator."
+    ),
+    dependencies=[Depends(verify_http_api_key)],
+)
+async def interrupt_subprocess(session_id: str, request: Request) -> dict[str, Any]:
+    prompt_router: PromptRouter = request.app.state.prompt_router
+    try:
+        session = await prompt_router.interrupt_subprocess(session_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail=f"Session not found: {session_id}") from None
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from None
+    logger.info("Subprocess interrupted for session %s via HTTP API", session_id)
+    return {
+        "session_id": session.id,
+        "status": session.status.value,
     }
 
 

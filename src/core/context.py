@@ -1,9 +1,13 @@
 """Context building and direct tool mode methods for PromptRouter.
 
 Extracted from prompt_router.py to reduce file size. These methods handle
-extracting @project, #tool, and $file mentions from user text, building
-LLM context blocks, resolving file references against the artifact database,
-and parsing direct-mode ``#tool_name`` prompts.
+extracting #tool and $file mentions from user text, building LLM context
+blocks, resolving file references against the artifact database, and parsing
+direct-mode ``#tool_name`` prompts.
+
+Project context is now built from the session's ``main_project_path`` (set
+explicitly via the ``project_name`` field in the WS prompt message) rather
+than from ``@mention`` extraction.
 
 Used as a mixin class — ``PromptRouter`` inherits from
 ``ContextMixin`` to gain these methods.
@@ -90,13 +94,10 @@ class ContextMixin:
     # Mention extraction
     # ------------------------------------------------------------------
 
+    # _MENTION_RE is kept for direct tool mode (@project parsing in #tool prompts).
     _MENTION_RE = re.compile(r"(?:^|(?<=\s))@(\S+)")
     _TOOL_MENTION_RE = re.compile(r"(?:^|(?<=\s))#(\S+)")
     _FILE_REF_RE = re.compile(r"(?:^|(?<=\s))\$(\S+)")
-
-    def _extract_project_mentions(self, text: str) -> list[str]:
-        """Extract @ProjectName mentions from user text."""
-        return self._MENTION_RE.findall(text)
 
     def _extract_tool_mentions(self, text: str) -> list[str]:
         """Extract #ToolName mentions from user text."""
@@ -110,37 +111,18 @@ class ContextMixin:
     # Project context
     # ------------------------------------------------------------------
 
-    def _build_project_context(self, mentions: list[str]) -> str | None:
-        """Resolve mentions to project directories and build a context string.
+    def _build_project_context_from_path(self, abs_path: str) -> str:
+        """Build the LLM project context string from an already-resolved absolute path.
 
-        Returns None if no mentions resolve to valid directories.
+        Called every turn when ``session.main_project_path`` is set, so the LLM
+        always has the project directory in context regardless of which turn
+        the project was first selected.
         """
-        if not self._settings:
-            return None
-
-        resolved: list[tuple[str, Path]] = []
-        for name in mentions:
-            for projects_dir in self._settings.projects_dirs:
-                project_path = projects_dir / name
-                if project_path.is_dir():
-                    resolved.append((name, project_path))
-                    break
-
-        if not resolved:
-            return None
-
-        if len(resolved) == 1:
-            name, path = resolved[0]
-            return (
-                f'[Context: This message references project "{name}" '
-                f"located at {path}. All instructions in this message "
-                f"relate to this project.]"
-            )
-
-        lines = ", ".join(f'"{name}" ({path})' for name, path in resolved)
+        name = Path(abs_path).name
         return (
-            f"[Context: This message references projects: {lines}. "
-            f"All instructions in this message relate to these projects.]"
+            f'[Context: This session is working on project "{name}" '
+            f"located at {abs_path}. "
+            f"Prefer reading and writing files under this directory.]"
         )
 
     # ------------------------------------------------------------------
@@ -236,7 +218,11 @@ class ContextMixin:
         return "\n\n".join(parts)
 
     def _resolve_project_path(self, name: str) -> Path | None:
-        """Resolve a @ProjectName mention to an absolute directory path, or None."""
+        """Resolve a project folder name to an absolute directory path, or None.
+
+        Searches each configured projects_dir for a subdirectory matching ``name``.
+        Returns None when no match is found.
+        """
         if not self._settings:
             return None
         for projects_dir in self._settings.projects_dirs:
@@ -244,20 +230,6 @@ class ContextMixin:
             if project_path.is_dir():
                 return project_path
         return None
-
-    def _resolve_latest_project_path(self, mentions: list[str]) -> str | None:
-        """Return the resolved path of the *last* valid @ProjectName mention, or None.
-
-        Iterates all mentions in order so that later mentions overwrite earlier
-        ones — the final resolvable mention becomes the session's main project.
-        Returns None when no mention resolves to a real directory.
-        """
-        result: str | None = None
-        for name in mentions:
-            path = self._resolve_project_path(name)
-            if path is not None:
-                result = str(path)
-        return result
 
     # ------------------------------------------------------------------
     # File context
@@ -353,6 +325,72 @@ class ContextMixin:
         return "\n\n".join(context_parts)
 
     # ------------------------------------------------------------------
+    # Active worktree context
+    # ------------------------------------------------------------------
+
+    def _build_active_worktree_context(self, session: ActiveSession) -> str | None:
+        """Build an LLM context block describing the actively selected worktree.
+
+        Returns a directive string when ``selected_worktree_path`` is set in
+        session metadata, or ``None`` when no worktree is explicitly selected.
+        The directive instructs the LLM to pass the worktree path as
+        ``working_directory`` when it calls any agent tool (claude_code / codex).
+        """
+        selected_wt: str | None = session.metadata.get("selected_worktree_path")
+        if not selected_wt:
+            return None
+
+        wt_info: dict[str, Any] = session.metadata.get("worktree") or {}
+        branch: str = wt_info.get("branch", "")
+        repo_path: str = wt_info.get("repo_path", "")
+
+        parts: list[str] = [
+            f"[Active worktree: The user has selected a git worktree at '{selected_wt}'."
+        ]
+        if branch:
+            parts.append(f" Branch: '{branch}'.")
+        if repo_path:
+            parts.append(f" Repository: '{repo_path}'.")
+        parts.append(
+            f" When invoking any agent tool (claude_code, codex), you MUST pass"
+            f" working_directory='{selected_wt}' unless the user explicitly requests"
+            f" a different directory.]"
+        )
+        return "".join(parts)
+
+    # ------------------------------------------------------------------
+    # Bare agent mention detection
+    # ------------------------------------------------------------------
+
+    def _is_bare_agent_mention(self, text: str) -> bool:
+        """Return True when *text* is only ``#AgentTool`` (plus optional ``@Project``).
+
+        Used in normal (LLM) mode to short-circuit directly into agent
+        subprocess startup when the user types just ``#ClaudeCode`` or
+        ``#Codex`` without any task description.
+        """
+        tool_mentions = self._TOOL_MENTION_RE.findall(text)
+        if not tool_mentions:
+            return False
+
+        # Resolve the first valid tool mention
+        tool_def: ToolDefinition | None = None
+        for mention in tool_mentions:
+            candidate = self._tool_registry.get(mention)
+            if candidate is not None:
+                tool_def = candidate
+                break
+
+        if tool_def is None or tool_def.executor not in ("claude_code", "codex"):
+            return False
+
+        # Strip all #mentions and @mentions — if nothing meaningful remains,
+        # it is a bare agent mention.
+        clean = self._TOOL_MENTION_RE.sub("", text)
+        clean = self._MENTION_RE.sub("", clean).strip()
+        return clean == ""
+
+    # ------------------------------------------------------------------
     # Direct tool mode
     # ------------------------------------------------------------------
 
@@ -406,7 +444,7 @@ class ContextMixin:
         # Build tool_input based on executor type
         tool_input: dict[str, Any] = {}
         if tool_def.executor in ("claude_code", "codex"):
-            tool_input["prompt"] = display_text
+            tool_input["prompt"] = display_text or "Ready for instructions."
             if working_dir:
                 tool_input["working_directory"] = working_dir
             elif self._settings and self._settings.projects_dirs:

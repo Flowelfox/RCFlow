@@ -14,6 +14,7 @@ import asyncio
 import json
 import logging
 from collections.abc import AsyncGenerator
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -172,6 +173,24 @@ class CodexAgentMixin:
         task = asyncio.create_task(self._stream_codex_events(session, executor, tool_def, tool_call))
         session._codex_stream_task = task
 
+        # Record transient subprocess tracking fields and broadcast initial status
+        session.subprocess_started_at = datetime.now(UTC)
+        session.subprocess_current_tool = None
+        session.subprocess_type = "codex"
+        session.subprocess_display_name = tool_def.display_name or "Codex"
+        session.subprocess_working_directory = str(working_path)
+        session.buffer.push_ephemeral(
+            MessageType.SUBPROCESS_STATUS,
+            {
+                "session_id": session.id,
+                "subprocess_type": "codex",
+                "display_name": session.subprocess_display_name,
+                "working_directory": session.subprocess_working_directory,
+                "current_tool": None,
+                "started_at": session.subprocess_started_at.isoformat(),
+            },
+        )
+
         return f"Codex session started in {working_path}"
 
     async def _relay_codex_stream(
@@ -232,6 +251,19 @@ class CodexAgentMixin:
                             "tool_input": {"command": item.get("command", "")},
                         },
                     )
+                    session.subprocess_current_tool = "command_execution"
+                    if session.subprocess_started_at is not None:
+                        session.buffer.push_ephemeral(
+                            MessageType.SUBPROCESS_STATUS,
+                            {
+                                "session_id": session.id,
+                                "subprocess_type": session.subprocess_type,
+                                "display_name": session.subprocess_display_name,
+                                "working_directory": session.subprocess_working_directory,
+                                "current_tool": "command_execution",
+                                "started_at": session.subprocess_started_at.isoformat(),
+                            },
+                        )
                 elif item_type == "file_change":
                     post_tool_text_chunks.clear()
                     session.buffer.push_text(
@@ -242,16 +274,43 @@ class CodexAgentMixin:
                             "tool_input": {},
                         },
                     )
+                    session.subprocess_current_tool = "file_change"
+                    if session.subprocess_started_at is not None:
+                        session.buffer.push_ephemeral(
+                            MessageType.SUBPROCESS_STATUS,
+                            {
+                                "session_id": session.id,
+                                "subprocess_type": session.subprocess_type,
+                                "display_name": session.subprocess_display_name,
+                                "working_directory": session.subprocess_working_directory,
+                                "current_tool": "file_change",
+                                "started_at": session.subprocess_started_at.isoformat(),
+                            },
+                        )
                 elif item_type == "mcp_tool_call":
                     post_tool_text_chunks.clear()
+                    mcp_tool_name = f"mcp:{item.get('server', '')}:{item.get('tool', '')}"
                     session.buffer.push_text(
                         MessageType.TOOL_START,
                         {
                             "session_id": session.id,
-                            "tool_name": f"mcp:{item.get('server', '')}:{item.get('tool', '')}",
+                            "tool_name": mcp_tool_name,
                             "tool_input": item.get("arguments", {}),
                         },
                     )
+                    session.subprocess_current_tool = mcp_tool_name
+                    if session.subprocess_started_at is not None:
+                        session.buffer.push_ephemeral(
+                            MessageType.SUBPROCESS_STATUS,
+                            {
+                                "session_id": session.id,
+                                "subprocess_type": session.subprocess_type,
+                                "display_name": session.subprocess_display_name,
+                                "working_directory": session.subprocess_working_directory,
+                                "current_tool": mcp_tool_name,
+                                "started_at": session.subprocess_started_at.isoformat(),
+                            },
+                        )
 
             elif event_type == "item.updated":
                 item = event.get("item", {})
@@ -312,6 +371,19 @@ class CodexAgentMixin:
                             },
                         )
                         self._fire_text_artifact_scan(session, [output])
+                    session.subprocess_current_tool = None
+                    if session.subprocess_started_at is not None:
+                        session.buffer.push_ephemeral(
+                            MessageType.SUBPROCESS_STATUS,
+                            {
+                                "session_id": session.id,
+                                "subprocess_type": session.subprocess_type,
+                                "display_name": session.subprocess_display_name,
+                                "working_directory": session.subprocess_working_directory,
+                                "current_tool": None,
+                                "started_at": session.subprocess_started_at.isoformat(),
+                            },
+                        )
                 elif item_type == "file_change":
                     diff = item.get("diff", "")
                     file_path = item.get("file_path", item.get("file", ""))
@@ -330,7 +402,21 @@ class CodexAgentMixin:
                             },
                         )
                         self._fire_text_artifact_scan(session, [content])
+                    session.subprocess_current_tool = None
+                    if session.subprocess_started_at is not None:
+                        session.buffer.push_ephemeral(
+                            MessageType.SUBPROCESS_STATUS,
+                            {
+                                "session_id": session.id,
+                                "subprocess_type": session.subprocess_type,
+                                "display_name": session.subprocess_display_name,
+                                "working_directory": session.subprocess_working_directory,
+                                "current_tool": None,
+                                "started_at": session.subprocess_started_at.isoformat(),
+                            },
+                        )
                 elif item_type == "mcp_tool_call":
+                    mcp_completed_name = f"mcp:{item.get('server', '')}:{item.get('tool', '')}"
                     output = item.get("output", item.get("result", ""))
                     if isinstance(output, dict):
                         output = json.dumps(output, indent=2)
@@ -340,12 +426,25 @@ class CodexAgentMixin:
                             MessageType.TOOL_OUTPUT,
                             {
                                 "session_id": session.id,
-                                "tool_name": f"mcp:{item.get('server', '')}:{item.get('tool', '')}",
+                                "tool_name": mcp_completed_name,
                                 "content": output,
                                 "stream": "stdout",
                             },
                         )
                         self._fire_text_artifact_scan(session, [output])
+                    session.subprocess_current_tool = None
+                    if session.subprocess_started_at is not None:
+                        session.buffer.push_ephemeral(
+                            MessageType.SUBPROCESS_STATUS,
+                            {
+                                "session_id": session.id,
+                                "subprocess_type": session.subprocess_type,
+                                "display_name": session.subprocess_display_name,
+                                "working_directory": session.subprocess_working_directory,
+                                "current_tool": None,
+                                "started_at": session.subprocess_started_at.isoformat(),
+                            },
+                        )
 
             elif event_type == "turn.completed":
                 session.set_activity(ActivityState.IDLE)
@@ -434,6 +533,17 @@ class CodexAgentMixin:
         session.codex_executor = None
         session._codex_stream_task = None
 
+        # Clear subprocess tracking and broadcast null status
+        session.subprocess_started_at = None
+        session.subprocess_current_tool = None
+        session.subprocess_type = None
+        session.subprocess_display_name = None
+        session.subprocess_working_directory = None
+        session.buffer.push_ephemeral(
+            MessageType.SUBPROCESS_STATUS,
+            {"session_id": session.id, "subprocess_type": None},
+        )
+
         if session.status == SessionStatus.PAUSED:
             session.complete()
             return
@@ -462,6 +572,28 @@ class CodexAgentMixin:
             return
 
         session.set_activity(ActivityState.RUNNING_SUBPROCESS)
+
+        # Re-broadcast subprocess status so the client shows the indicator again
+        if session.subprocess_started_at is None:
+            session.subprocess_started_at = datetime.now(UTC)
+            session.subprocess_type = "codex"
+            codex_def_for_name = self._tool_registry.get("codex")
+            session.subprocess_display_name = (
+                codex_def_for_name.display_name if codex_def_for_name and codex_def_for_name.display_name else "Codex"
+            )
+            session.subprocess_working_directory = session.metadata.get("codex_working_directory", "")
+        session.subprocess_current_tool = None
+        session.buffer.push_ephemeral(
+            MessageType.SUBPROCESS_STATUS,
+            {
+                "session_id": session.id,
+                "subprocess_type": session.subprocess_type,
+                "display_name": session.subprocess_display_name,
+                "working_directory": session.subprocess_working_directory,
+                "current_tool": None,
+                "started_at": session.subprocess_started_at.isoformat(),
+            },
+        )
 
         # Open a new agent group for this follow-up turn
         codex_def = self._tool_registry.get("codex")

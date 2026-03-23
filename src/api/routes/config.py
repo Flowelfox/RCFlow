@@ -61,7 +61,8 @@ async def server_info(request: Request) -> dict[str, Any]:
     "/projects",
     summary="List project directories",
     description=(
-        "Returns directory names from all configured project directories. "
+        "Returns project entries from all configured project directories. "
+        "Each entry includes the directory ``name`` and its absolute ``path``. "
         "Optionally filters by a case-insensitive substring match on the name."
     ),
     dependencies=[Depends(verify_http_api_key)],
@@ -69,24 +70,26 @@ async def server_info(request: Request) -> dict[str, Any]:
 async def list_projects(
     request: Request,
     q: str | None = Query(None, description="Case-insensitive substring filter for project names"),
-) -> dict[str, list[str]]:
+) -> dict[str, list[dict[str, str]]]:
     settings: Settings = request.app.state.settings
-    all_names: set[str] = set()
+    # Use a dict keyed by name so duplicate names across multiple projects_dirs
+    # only appear once (first match wins, consistent with path resolution order).
+    entries: dict[str, str] = {}
 
     for projects_dir in settings.projects_dirs:
         if not projects_dir.is_dir():
             continue
         for entry in projects_dir.iterdir():
-            if entry.is_dir() and not entry.name.startswith("."):
-                all_names.add(entry.name)
+            if entry.is_dir() and not entry.name.startswith(".") and entry.name not in entries:
+                entries[entry.name] = str(entry)
 
-    names = sorted(all_names)
+    projects = sorted(entries.items(), key=lambda x: x[0])
 
     if q:
         q_lower = q.lower()
-        names = [n for n in names if q_lower in n.lower()]
+        projects = [(n, p) for n, p in projects if q_lower in n.lower()]
 
-    return {"projects": names}
+    return {"projects": [{"name": n, "path": p} for n, p in projects]}
 
 
 @router.get(

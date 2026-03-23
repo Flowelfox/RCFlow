@@ -203,11 +203,28 @@ async def ws_input_text(
                 if not ir_text:
                     await websocket.send_json({"type": "error", "content": "Empty response", "code": "EMPTY_RESPONSE"})
                     continue
+                ir_accepted = bool(message.get("accepted", True))
                 try:
-                    await prompt_router.send_interactive_response(ir_session_id, ir_text)
+                    await prompt_router.send_interactive_response(ir_session_id, ir_text, accepted=ir_accepted)
                 except (ValueError, RuntimeError) as e:
                     await websocket.send_json(
                         {"type": "error", "content": str(e), "code": "INTERACTIVE_RESPONSE_ERROR"}
+                    )
+                continue
+
+            if msg_type == "interrupt_subprocess":
+                interrupt_session_id = message.get("session_id")
+                if not interrupt_session_id:
+                    await websocket.send_json(
+                        {"type": "error", "content": "Missing session_id", "code": "MISSING_SESSION_ID"}
+                    )
+                    continue
+                try:
+                    await prompt_router.interrupt_subprocess(interrupt_session_id)
+                    await websocket.send_json({"type": "ack", "session_id": interrupt_session_id})
+                except (ValueError, RuntimeError) as e:
+                    await websocket.send_json(
+                        {"type": "error", "content": str(e), "code": "INTERRUPT_SUBPROCESS_ERROR"}
                     )
                 continue
 
@@ -269,6 +286,7 @@ async def ws_input_text(
                 continue
 
             session_id = message.get("session_id")
+            project_name: str | None = message.get("project_name") or None
 
             # Resolve optional attachments
             resolved_attachments: list[ResolvedAttachment] | None = None
@@ -305,7 +323,12 @@ async def ws_input_text(
 
             # Process prompt in the background
             task = asyncio.create_task(
-                prompt_router.handle_prompt(text, result_session_id, attachments=resolved_attachments)
+                prompt_router.handle_prompt(
+                    text,
+                    result_session_id,
+                    attachments=resolved_attachments,
+                    project_name=project_name,
+                )
             )
             background_tasks.add(task)
             task.add_done_callback(background_tasks.discard)
