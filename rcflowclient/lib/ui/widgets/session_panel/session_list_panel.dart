@@ -29,6 +29,7 @@ class _SessionListPanelState extends State<SessionListPanel>
     with SingleTickerProviderStateMixin {
   final Set<String> _expandedWorkers = {};
   bool _initialized = false;
+  bool _groupByProject = false;
   late final TabController _tabController;
   final TextEditingController _workerSearchController = TextEditingController();
   String _workerSearchQuery = '';
@@ -59,6 +60,7 @@ class _SessionListPanelState extends State<SessionListPanel>
     _workerSearchQuery = settings.workersFilterSearch;
     _workerSearchController.text = _workerSearchQuery;
     _activeStatusFilters.addAll(settings.workersFilterStatus);
+    _groupByProject = settings.workersGroupByProject;
     final savedExpanded = settings.workersExpanded;
     if (savedExpanded != null) {
       _expandedWorkers.addAll(savedExpanded);
@@ -337,6 +339,30 @@ class _SessionListPanelState extends State<SessionListPanel>
                           height: 30,
                           child: IconButton(
                             padding: EdgeInsets.zero,
+                            icon: Icon(
+                              Icons.folder_copy_outlined,
+                              color: _groupByProject
+                                  ? context.appColors.accent
+                                  : context.appColors.textSecondary,
+                              size: 16,
+                            ),
+                            tooltip: _groupByProject
+                                ? 'Grouping by project (tap to disable)'
+                                : 'Group by project',
+                            onPressed: () {
+                              setState(() => _groupByProject = !_groupByProject);
+                              Provider.of<AppState>(context, listen: false)
+                                  .settings
+                                  .workersGroupByProject = _groupByProject;
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        SizedBox(
+                          width: 30,
+                          height: 30,
+                          child: IconButton(
+                            padding: EdgeInsets.zero,
                             icon: Icon(Icons.add_rounded,
                                 color: context.appColors.textSecondary, size: 18),
                             tooltip: 'Add worker',
@@ -441,6 +467,7 @@ class _SessionListPanelState extends State<SessionListPanel>
                           sessions: sessions,
                           terminals: terminals,
                           expanded: expanded,
+                          groupByProject: _groupByProject,
                           onToggleExpand: () {
                             setState(() {
                               if (expanded) {

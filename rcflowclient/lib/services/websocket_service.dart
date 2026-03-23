@@ -125,6 +125,7 @@ class WebSocketService {
     String text,
     String? sessionId, {
     List<Map<String, dynamic>>? attachments,
+    String? projectName,
   }) {
     if (_inputChannel == null) return;
     final msg = <String, dynamic>{
@@ -133,6 +134,7 @@ class WebSocketService {
       'session_id': sessionId,
       if (attachments != null && attachments.isNotEmpty)
         'attachments': attachments,
+      if (projectName != null) 'project_name': projectName,
     };
     _inputChannel!.sink.add(jsonEncode(msg));
   }
@@ -229,12 +231,13 @@ class WebSocketService {
     _inputChannel!.sink.add(jsonEncode(msg));
   }
 
-  void sendInteractiveResponse(String sessionId, String text) {
+  void sendInteractiveResponse(String sessionId, String text, {bool accepted = true}) {
     if (_inputChannel == null) return;
     final msg = {
       'type': 'interactive_response',
       'session_id': sessionId,
       'text': text,
+      'accepted': accepted,
     };
     _inputChannel!.sink.add(jsonEncode(msg));
   }
@@ -243,6 +246,18 @@ class WebSocketService {
     if (_inputChannel == null) return;
     final msg = {
       'type': 'dismiss_session_end_ask',
+      'session_id': sessionId,
+    };
+    _inputChannel!.sink.add(jsonEncode(msg));
+  }
+
+  /// Send an interrupt_subprocess message over the input WebSocket.
+  /// Kills any running Claude Code / Codex subprocess without pausing the
+  /// session. The session remains ACTIVE and ready for new prompts.
+  void interruptSubprocess(String sessionId) {
+    if (_inputChannel == null) return;
+    final msg = {
+      'type': 'interrupt_subprocess',
       'session_id': sessionId,
     };
     _inputChannel!.sink.add(jsonEncode(msg));
@@ -424,7 +439,11 @@ class WebSocketService {
     }
   }
 
-  Future<List<String>> fetchProjects({String? query}) async {
+  /// Fetches project entries from the server.
+  ///
+  /// Returns a list of maps with ``name`` and ``path`` keys, e.g.
+  /// `[{"name": "RCFlow", "path": "/home/user/Projects/RCFlow"}]`.
+  Future<List<Map<String, String>>> fetchProjects({String? query}) async {
     if (_serverUrl == null) throw StateError('Not connected');
     final queryParams = <String, String>{};
     if (query != null && query.isNotEmpty) queryParams['q'] = query;
@@ -444,7 +463,13 @@ class WebSocketService {
       }
       final data = jsonDecode(body) as Map<String, dynamic>;
       final projects = data['projects'] as List<dynamic>;
-      return projects.cast<String>();
+      return projects
+          .cast<Map<String, dynamic>>()
+          .map((e) => {
+                'name': e['name'] as String,
+                'path': e['path'] as String,
+              })
+          .toList();
     } finally {
       client.close();
     }
@@ -555,6 +580,181 @@ class WebSocketService {
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // RCFlow-managed plugin management
+  // ---------------------------------------------------------------------------
+
+  Future<List<Map<String, dynamic>>> fetchRCFlowPlugins() async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url = _serverUrl!.http('/api/rcflow-plugins');
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.getUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      final response = await request.close();
+      final body =
+          await response.transform(const io.SystemEncoding().decoder).join();
+      if (response.statusCode != 200) {
+        throw Exception('Server returned ${response.statusCode}: $body');
+      }
+      final data = jsonDecode(body) as Map<String, dynamic>;
+      return (data['plugins'] as List<dynamic>).cast<Map<String, dynamic>>();
+    } finally {
+      client.close();
+    }
+  }
+
+  Future<Map<String, dynamic>> installRCFlowPlugin(String source,
+      {String? name}) async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url = _serverUrl!.http('/api/rcflow-plugins');
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.postUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      request.headers.contentType = io.ContentType.json;
+      final body = <String, dynamic>{'source': source};
+      if (name != null) body['name'] = name;
+      request.add(utf8.encode(jsonEncode(body)));
+      final response = await request.close();
+      final responseBody =
+          await response.transform(const io.SystemEncoding().decoder).join();
+      if (response.statusCode != 201) {
+        final detail = _extractDetail(responseBody);
+        throw Exception(detail);
+      }
+      final data = jsonDecode(responseBody) as Map<String, dynamic>;
+      return data['plugin'] as Map<String, dynamic>;
+    } finally {
+      client.close();
+    }
+  }
+
+  Future<void> uninstallRCFlowPlugin(String name) async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url = _serverUrl!.http('/api/rcflow-plugins/${Uri.encodeComponent(name)}');
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.deleteUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      final response = await request.close();
+      final body =
+          await response.transform(const io.SystemEncoding().decoder).join();
+      if (response.statusCode != 200) {
+        final detail = _extractDetail(body);
+        throw Exception(detail);
+      }
+    } finally {
+      client.close();
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Tool-scoped plugin management (canonical v2 endpoints)
+  // ---------------------------------------------------------------------------
+
+  Future<List<Map<String, dynamic>>> fetchToolPlugins(String toolName) async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url = _serverUrl!.http('/api/tools/${Uri.encodeComponent(toolName)}/plugins');
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.getUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      final response = await request.close();
+      final body =
+          await response.transform(const io.SystemEncoding().decoder).join();
+      if (response.statusCode != 200) {
+        final detail = _extractDetail(body);
+        throw Exception(detail);
+      }
+      final data = jsonDecode(body) as Map<String, dynamic>;
+      return (data['plugins'] as List<dynamic>).cast<Map<String, dynamic>>();
+    } finally {
+      client.close();
+    }
+  }
+
+  Future<Map<String, dynamic>> installToolPlugin(
+      String toolName, String source, {String? name}) async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url =
+        _serverUrl!.http('/api/tools/${Uri.encodeComponent(toolName)}/plugins');
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.postUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      request.headers.contentType = io.ContentType.json;
+      final bodyMap = <String, dynamic>{'source': source};
+      if (name != null) bodyMap['name'] = name;
+      request.add(utf8.encode(jsonEncode(bodyMap)));
+      final response = await request.close();
+      final responseBody =
+          await response.transform(const io.SystemEncoding().decoder).join();
+      if (response.statusCode != 201) {
+        final detail = _extractDetail(responseBody);
+        throw Exception(detail);
+      }
+      final data = jsonDecode(responseBody) as Map<String, dynamic>;
+      return data['plugin'] as Map<String, dynamic>;
+    } finally {
+      client.close();
+    }
+  }
+
+  Future<void> uninstallToolPlugin(String toolName, String name) async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url = _serverUrl!.http(
+        '/api/tools/${Uri.encodeComponent(toolName)}/plugins/${Uri.encodeComponent(name)}');
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.deleteUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      final response = await request.close();
+      final body =
+          await response.transform(const io.SystemEncoding().decoder).join();
+      if (response.statusCode != 200) {
+        final detail = _extractDetail(body);
+        throw Exception(detail);
+      }
+    } finally {
+      client.close();
+    }
+  }
+
+  Future<void> setToolPluginEnabled(
+      String toolName, String name, bool enabled) async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url = _serverUrl!.http(
+        '/api/tools/${Uri.encodeComponent(toolName)}/plugins/${Uri.encodeComponent(name)}');
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.openUrl('PATCH', url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      request.headers.contentType = io.ContentType.json;
+      request.add(utf8.encode(jsonEncode({'enabled': enabled})));
+      final response = await request.close();
+      final body =
+          await response.transform(const io.SystemEncoding().decoder).join();
+      if (response.statusCode != 200) {
+        final detail = _extractDetail(body);
+        throw Exception(detail);
+      }
+    } finally {
+      client.close();
+    }
+  }
+
+  /// Extracts the FastAPI ``detail`` field from a JSON error response body,
+  /// falling back to the raw body if parsing fails.
+  static String _extractDetail(String body) {
+    try {
+      final data = jsonDecode(body) as Map<String, dynamic>;
+      return data['detail'] as String? ?? body;
+    } catch (_) {
+      return body;
+    }
+  }
+
   Future<void> renameSession(String sessionId, String? title) async {
     if (_serverUrl == null) throw StateError('Not connected');
     final url = _serverUrl!.http('/api/sessions/$sessionId/title');
@@ -643,6 +843,26 @@ class WebSocketService {
       request.headers.set('X-API-Key', _serverUrl!.apiKey);
       final response = await request.close();
       final body = await response.transform(const io.SystemEncoding().decoder).join();
+      if (response.statusCode != 200) {
+        throw Exception('Server returned ${response.statusCode}: $body');
+      }
+      return jsonDecode(body) as Map<String, dynamic>;
+    } finally {
+      client.close();
+    }
+  }
+
+  /// Fetch worker-level telemetry summary (aggregated across all sessions).
+  Future<Map<String, dynamic>> fetchWorkerTelemetry() async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url = _serverUrl!.http('/api/telemetry/worker/summary');
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.getUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      final response = await request.close();
+      final body =
+          await response.transform(const io.SystemEncoding().decoder).join();
       if (response.statusCode != 200) {
         throw Exception('Server returned ${response.statusCode}: $body');
       }

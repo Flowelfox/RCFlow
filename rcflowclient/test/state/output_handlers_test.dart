@@ -1,14 +1,18 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rcflowclient/models/app_notification.dart';
 import 'package:rcflowclient/models/session_info.dart';
+import 'package:rcflowclient/models/subprocess_info.dart';
 import 'package:rcflowclient/models/ws_messages.dart';
 import 'package:rcflowclient/services/websocket_service.dart';
 import 'package:rcflowclient/state/output_handlers.dart';
 import 'package:rcflowclient/state/pane_state.dart';
 
 class _FakePaneHost implements PaneHost {
+  final bool connected_;
+  _FakePaneHost({bool connected = false}) : connected_ = connected;
+
   @override
-  bool get connected => false;
+  bool get connected => connected_;
 
   @override
   List<SessionInfo> get sessions => [];
@@ -53,6 +57,151 @@ class _FakePaneHost implements PaneHost {
 }
 
 void main() {
+  group('handleTextChunk — user message attachments', () {
+    late PaneState pane;
+
+    setUp(() {
+      pane = PaneState(paneId: 'test', host: _FakePaneHost());
+    });
+
+    test('user text_chunk without attachments creates message with null attachments', () {
+      handleTextChunk({'role': 'user', 'content': 'hello', 'session_id': 's1'}, pane);
+
+      expect(pane.messages.length, 1);
+      final msg = pane.messages.first;
+      expect(msg.type, DisplayMessageType.user);
+      expect(msg.content, 'hello');
+      expect(msg.attachments, isNull);
+    });
+
+    test('user text_chunk with attachments propagates attachment metadata', () {
+      handleTextChunk({
+        'role': 'user',
+        'content': 'see image',
+        'session_id': 's1',
+        'attachments': [
+          {'name': 'photo.png', 'mime_type': 'image/png', 'size': 1024},
+        ],
+      }, pane);
+
+      expect(pane.messages.length, 1);
+      final msg = pane.messages.first;
+      expect(msg.type, DisplayMessageType.user);
+      expect(msg.attachments, isNotNull);
+      expect(msg.attachments!.length, 1);
+      expect(msg.attachments!.first['name'], 'photo.png');
+      expect(msg.attachments!.first['mime_type'], 'image/png');
+    });
+
+    test('user text_chunk with multiple attachments preserves all entries', () {
+      handleTextChunk({
+        'role': 'user',
+        'content': 'files attached',
+        'session_id': 's1',
+        'attachments': [
+          {'name': 'a.png', 'mime_type': 'image/png', 'size': 100},
+          {'name': 'b.txt', 'mime_type': 'text/plain', 'size': 200},
+        ],
+      }, pane);
+
+      final msg = pane.messages.first;
+      expect(msg.attachments!.length, 2);
+      expect(msg.attachments![0]['name'], 'a.png');
+      expect(msg.attachments![1]['name'], 'b.txt');
+    });
+
+    test('local echo with attachments is consumed and not duplicated', () {
+      // Use a connected host so sendPrompt actually enqueues the local message.
+      final connectedPane = PaneState(paneId: 'p2', host: _FakePaneHost(connected: true));
+      // Simulate local message added by sendPrompt (with attachments already set)
+      connectedPane.sendPrompt('hello', attachments: [
+        {'id': 'att1', 'name': 'photo.png', 'mime_type': 'image/png'},
+      ]);
+      expect(connectedPane.messages.length, 1);
+      expect(connectedPane.messages.first.attachments, isNotNull);
+
+      // Server echo should be consumed, not add a duplicate
+      handleTextChunk({
+        'role': 'user',
+        'content': 'hello',
+        'session_id': 's1',
+        'attachments': [
+          {'name': 'photo.png', 'mime_type': 'image/png', 'size': 1024},
+        ],
+      }, connectedPane);
+
+      expect(connectedPane.messages.length, 1); // still only one message
+    });
+  });
+
+  group('buildTextChunkHistory — user message attachments', () {
+    test('history user message without attachments has null attachments', () {
+      final messages = <DisplayMessage>[];
+      buildTextChunkHistory(
+        {
+          'type': 'text_chunk',
+          'content': 'hello',
+          'metadata': {'role': 'user', 'content': 'hello'},
+        },
+        'sess1',
+        messages,
+      );
+
+      expect(messages.length, 1);
+      expect(messages.first.attachments, isNull);
+    });
+
+    test('history user message with attachments propagates metadata', () {
+      final messages = <DisplayMessage>[];
+      buildTextChunkHistory(
+        {
+          'type': 'text_chunk',
+          'content': 'see image',
+          'metadata': {
+            'role': 'user',
+            'content': 'see image',
+            'attachments': [
+              {'name': 'photo.png', 'mime_type': 'image/png', 'size': 1024},
+            ],
+          },
+        },
+        'sess1',
+        messages,
+      );
+
+      expect(messages.length, 1);
+      final msg = messages.first;
+      expect(msg.attachments, isNotNull);
+      expect(msg.attachments!.length, 1);
+      expect(msg.attachments!.first['name'], 'photo.png');
+      expect(msg.attachments!.first['mime_type'], 'image/png');
+    });
+
+    test('history user message with multiple attachments preserves all', () {
+      final messages = <DisplayMessage>[];
+      buildTextChunkHistory(
+        {
+          'type': 'text_chunk',
+          'content': 'two files',
+          'metadata': {
+            'role': 'user',
+            'content': 'two files',
+            'attachments': [
+              {'name': 'img.jpg', 'mime_type': 'image/jpeg', 'size': 500},
+              {'name': 'notes.md', 'mime_type': 'text/markdown', 'size': 200},
+            ],
+          },
+        },
+        'sess1',
+        messages,
+      );
+
+      expect(messages.first.attachments!.length, 2);
+      expect(messages.first.attachments![0]['name'], 'img.jpg');
+      expect(messages.first.attachments![1]['name'], 'notes.md');
+    });
+  });
+
   group('handlePermissionRequest', () {
     late PaneState pane;
 
@@ -149,6 +298,173 @@ void main() {
       final permission = group.children!.first;
       expect(permission.type, DisplayMessageType.permissionRequest);
       expect(permission.accepted, true);
+    });
+  });
+
+  group('handlePlanReviewAsk — content and deduplication', () {
+    late PaneState pane;
+
+    setUp(() {
+      pane = PaneState(paneId: 'test', host: _FakePaneHost());
+    });
+
+    test('extracts plan text from plan_input.plan field', () {
+      handlePlanReviewAsk({
+        'session_id': 's1',
+        'plan_input': {'plan': '1. Do X\n2. Do Y'},
+      }, pane);
+
+      expect(pane.messages.length, 1);
+      final msg = pane.messages.first;
+      expect(msg.type, DisplayMessageType.planReviewAsk);
+      expect(msg.content, '1. Do X\n2. Do Y');
+      expect(msg.accepted, isNull); // pending
+    });
+
+    test('falls back to plan_input.content when plan key is absent', () {
+      handlePlanReviewAsk({
+        'session_id': 's1',
+        'plan_input': {'content': 'Step A\nStep B'},
+      }, pane);
+
+      expect(pane.messages.first.content, 'Step A\nStep B');
+    });
+
+    test('empty content when plan_input is absent', () {
+      handlePlanReviewAsk({
+        'session_id': 's1',
+      }, pane);
+
+      expect(pane.messages.first.content, '');
+    });
+
+    test('deduplicates: second pending review ask is ignored', () {
+      handlePlanReviewAsk({'session_id': 's1', 'plan_input': null}, pane);
+      handlePlanReviewAsk({'session_id': 's1', 'plan_input': null}, pane);
+
+      expect(pane.messages.length, 1);
+    });
+
+    test('does not deduplicate if first is already resolved', () {
+      handlePlanReviewAsk({'session_id': 's1', 'plan_input': null}, pane);
+      // Resolve the first one
+      pane.messages.first.accepted = true;
+
+      // A second pending one should now be allowed through
+      handlePlanReviewAsk({'session_id': 's1', 'plan_input': null}, pane);
+
+      expect(pane.messages.length, 2);
+    });
+  });
+
+  group('handleSubprocessStatus', () {
+    late PaneState pane;
+
+    setUp(() {
+      pane = PaneState(paneId: 'test', host: _FakePaneHost());
+    });
+
+    test('sets runningSubprocess when subprocess_type is present', () {
+      handleSubprocessStatus({
+        'session_id': 's1',
+        'subprocess_type': 'claude_code',
+        'display_name': 'Claude Code',
+        'working_directory': '/home/user/project',
+        'started_at': DateTime.now().toIso8601String(),
+      }, pane);
+
+      expect(pane.runningSubprocess, isNotNull);
+      expect(pane.runningSubprocess!.subprocessType, 'claude_code');
+      expect(pane.runningSubprocess!.displayName, 'Claude Code');
+      expect(pane.runningSubprocess!.workingDirectory, '/home/user/project');
+    });
+
+    test('sets currentTool when present', () {
+      handleSubprocessStatus({
+        'session_id': 's1',
+        'subprocess_type': 'claude_code',
+        'display_name': 'Claude Code',
+        'working_directory': '/repo',
+        'current_tool': 'Bash',
+        'started_at': DateTime.now().toIso8601String(),
+      }, pane);
+
+      expect(pane.runningSubprocess!.currentTool, 'Bash');
+    });
+
+    test('clears runningSubprocess when subprocess_type is null', () {
+      // First set a subprocess
+      handleSubprocessStatus({
+        'session_id': 's1',
+        'subprocess_type': 'claude_code',
+        'display_name': 'Claude Code',
+        'working_directory': '/repo',
+        'started_at': DateTime.now().toIso8601String(),
+      }, pane);
+      expect(pane.runningSubprocess, isNotNull);
+
+      // Then clear it
+      handleSubprocessStatus({
+        'session_id': 's1',
+        'subprocess_type': null,
+      }, pane);
+
+      expect(pane.runningSubprocess, isNull);
+    });
+
+    test('clears runningSubprocess when subprocess_type key is absent', () {
+      handleSubprocessStatus({
+        'session_id': 's1',
+        'subprocess_type': 'claude_code',
+        'display_name': 'Claude Code',
+        'working_directory': '/repo',
+        'started_at': DateTime.now().toIso8601String(),
+      }, pane);
+
+      handleSubprocessStatus({'session_id': 's1'}, pane);
+
+      expect(pane.runningSubprocess, isNull);
+    });
+
+    test('is registered in outputHandlerRegistry', () {
+      expect(outputHandlerRegistry.containsKey('subprocess_status'), isTrue);
+    });
+  });
+
+  group('buildPlanReviewAskHistory — content extraction', () {
+    test('extracts plan text from metadata.plan_input.plan', () {
+      final messages = <DisplayMessage>[];
+      buildPlanReviewAskHistory(
+        {
+          'type': 'plan_review_ask',
+          'content': '',
+          'metadata': {
+            'plan_input': {'plan': 'Plan step 1\nPlan step 2'},
+            'accepted': true,
+          },
+        },
+        'sess1',
+        messages,
+      );
+
+      expect(messages.length, 1);
+      expect(messages.first.content, 'Plan step 1\nPlan step 2');
+      expect(messages.first.accepted, true);
+    });
+
+    test('empty content when plan_input absent in metadata', () {
+      final messages = <DisplayMessage>[];
+      buildPlanReviewAskHistory(
+        {
+          'type': 'plan_review_ask',
+          'content': '',
+          'metadata': {'accepted': true},
+        },
+        'sess1',
+        messages,
+      );
+
+      expect(messages.first.content, '');
     });
   });
 }

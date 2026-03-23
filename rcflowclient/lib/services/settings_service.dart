@@ -51,6 +51,8 @@ class SettingsService {
   static const _workersExpandedKey = 'rcflow_workers_expanded';
   static const _tasksCollapsedGroupsKey = 'rcflow_tasks_collapsed_groups';
   static const _tasksGroupByWorkerKey = 'rcflow_tasks_group_by_worker';
+  static const _workersGroupByProjectKey = 'rcflow_workers_group_by_project';
+  static const _artifactsGroupByProjectKey = 'rcflow_artifacts_group_by_project';
   static const _artifactsExpandedWorkersKey = 'rcflow_artifacts_expanded_workers';
   static const _artifactsExpandedProjectsKey = 'rcflow_artifacts_expanded_projects';
 
@@ -337,6 +339,18 @@ class SettingsService {
       _prefs.getBool(_tasksGroupByWorkerKey) ?? false;
   set tasksGroupByWorker(bool value) =>
       _prefs.setBool(_tasksGroupByWorkerKey, value);
+
+  /// Workers tab: whether to group sessions by project within each worker.
+  bool get workersGroupByProject =>
+      _prefs.getBool(_workersGroupByProjectKey) ?? false;
+  set workersGroupByProject(bool value) =>
+      _prefs.setBool(_workersGroupByProjectKey, value);
+
+  /// Artifacts tab: whether to group artifacts by project (defaults to true).
+  bool get artifactsGroupByProject =>
+      _prefs.getBool(_artifactsGroupByProjectKey) ?? true;
+  set artifactsGroupByProject(bool value) =>
+      _prefs.setBool(_artifactsGroupByProjectKey, value);
 
   /// Artifacts tab: which worker IDs are expanded. Null means "not yet set".
   List<String>? get artifactsExpandedWorkers {

@@ -13,6 +13,7 @@ import 'package:flutter/foundation.dart';
 import '../models/app_notification.dart';
 import '../models/session_info.dart';
 import '../models/split_tree.dart';
+import '../models/subprocess_info.dart';
 import '../models/todo_item.dart';
 import '../models/ws_messages.dart';
 import '../services/websocket_service.dart';
@@ -25,6 +26,12 @@ class PaneNavEntry {
   final String? taskId;
   final String? artifactId;
   final String? linearIssueId;
+  /// Tool name when [paneType] is [PaneType.workerSettings].
+  /// One of ``"claude_code"`` or ``"codex"``.
+  final String? workerSettingsTool;
+  /// Sub-section to show within the worker settings pane.
+  /// Defaults to ``"plugins"``.
+  final String? workerSettingsSection;
 
   const PaneNavEntry({
     required this.paneType,
@@ -32,6 +39,8 @@ class PaneNavEntry {
     this.taskId,
     this.artifactId,
     this.linearIssueId,
+    this.workerSettingsTool,
+    this.workerSettingsSection,
   });
 }
 
@@ -70,6 +79,23 @@ class PaneState extends ChangeNotifier {
   // Worker this pane is currently targeting
   String? _workerId;
   String? get workerId => _workerId;
+
+  // Project selected via the picker chip above the input field.
+  // Sent as project_name in every sendPrompt call. Null = no project selected.
+  String? _selectedProjectName;
+  String? get selectedProjectName => _selectedProjectName;
+
+  // Full absolute path of the locally-selected project, resolved at pick time
+  // from the server's project list. Set by setSelectedProject and cleared on
+  // session switch / goHome. Used by effectiveProjectPath to populate the
+  // Project panel before the first prompt is sent (pre-session state).
+  String? _selectedProjectPath;
+  String? get selectedProjectPath => _selectedProjectPath;
+
+  // Non-null when the backend rejected the last project_name we sent.
+  // Cleared when the backend accepts a project or when the user clears the chip.
+  String? _projectNameError;
+  String? get projectNameError => _projectNameError;
 
   // Task pane state (when pane shows a task detail view)
   String? _taskId;
@@ -113,6 +139,28 @@ class PaneState extends ChangeNotifier {
     notifyListeners();
   }
 
+  // Worker settings pane state (when pane shows managed tool plugin settings)
+  String? _workerSettingsTool;
+  String? _workerSettingsSection;
+
+  /// The managed tool whose settings are displayed (``"claude_code"`` or ``"codex"``).
+  String? get workerSettingsTool => _workerSettingsTool;
+
+  /// The settings sub-section currently shown (e.g. ``"plugins"``).
+  String? get workerSettingsSection => _workerSettingsSection;
+
+  void setWorkerSettings(String toolName, {String section = 'plugins'}) {
+    _workerSettingsTool = toolName;
+    _workerSettingsSection = section;
+    notifyListeners();
+  }
+
+  void clearWorkerSettings() {
+    _workerSettingsTool = null;
+    _workerSettingsSection = null;
+    notifyListeners();
+  }
+
   // Session state
   String? _sessionId;
   String? get sessionId => _sessionId;
@@ -127,6 +175,15 @@ class PaneState extends ChangeNotifier {
   String? _pausedReason;
   String? get pausedReason => _pausedReason;
   bool pendingAck = false;
+
+  // Running subprocess state (ephemeral — cleared on session switch / session end).
+  SubprocessInfo? _runningSubprocess;
+  SubprocessInfo? get runningSubprocess => _runningSubprocess;
+
+  void setRunningSubprocess(SubprocessInfo? info) {
+    _runningSubprocess = info;
+    notifyListeners();
+  }
 
   // Callback invoked once when a new session is created (ack received).
   void Function(String sessionId)? _onNewSessionAck;
@@ -173,7 +230,7 @@ class PaneState extends ChangeNotifier {
   List<TodoItem> get todos => _todos;
 
   // Right panel state — which panel is open (null = closed).
-  // "todo" and "worktree" are the two supported panels.
+  // Recognised keys: "todo", "project", "statistics".
   String? _activeRightPanel;
   String? get activeRightPanel => _activeRightPanel;
   double _rightPanelWidth = 260;
@@ -206,8 +263,8 @@ class PaneState extends ChangeNotifier {
         )?.selectedWorktreePath;
   }
 
-  /// The main project path attached to the session currently shown in this
-  /// pane via the latest @ProjectName mention, or null for Global sessions.
+  /// The main project path confirmed by the server for the current session,
+  /// or null when no project is attached.
   String? get currentMainProjectPath {
     if (_sessionId == null) return null;
     return _host.sessions.cast<SessionInfo?>().firstWhere(
@@ -215,6 +272,15 @@ class PaneState extends ChangeNotifier {
           orElse: () => null,
         )?.mainProjectPath;
   }
+
+  /// The effective project path for the Project panel to display.
+  ///
+  /// Prefers the server-confirmed path from the active session. Falls back to
+  /// [_selectedProjectPath] — the path resolved at pick time from the server's
+  /// project list — so the panel can show worktrees and artifacts immediately
+  /// after the user tags @ProjectName, even before the first prompt is sent.
+  String? get effectiveProjectPath =>
+      currentMainProjectPath ?? _selectedProjectPath;
 
   // --- Back-navigation history ---
   static const int _maxNavHistory = 30;
@@ -338,7 +404,12 @@ class PaneState extends ChangeNotifier {
     pendingAck = _sessionId == null; // new chat — expect ack
     notifyListeners();
 
-    _ws?.sendPrompt(text, _sessionId, attachments: attachments);
+    _ws?.sendPrompt(
+      text,
+      _sessionId,
+      attachments: attachments,
+      projectName: _selectedProjectName,
+    );
   }
 
   void switchSession(String sessionId, {bool recordHistory = true}) {
@@ -366,6 +437,7 @@ class PaneState extends ChangeNotifier {
     _sessionEnded = false;
     _sessionPaused = false;
     _pausedReason = null;
+    _runningSubprocess = null;
     _sessionId = sessionId;
 
     final session = _host.sessions.cast<SessionInfo?>().firstWhere(
@@ -405,14 +477,19 @@ class PaneState extends ChangeNotifier {
       _host.requestUnsubscribe(oldSessionId, oldWorkerId);
     }
 
-    // Auto-open the project panel when the session already has an @ProjectName
-    // attached — regardless of session state (active, paused, ended, etc.).
-    // This handles switching back to a session where the user previously used
-    // @syntax, since onProjectPathAttached only fires on the null→non-null
-    // transition and would not fire for a session that was already attached.
-    if (session?.mainProjectPath != null) {
+    // Sync the project chip with the session's confirmed project.
+    // Also auto-opens the project panel when switching to a session that
+    // already has a project attached (handles back-navigation and restore).
+    final mainPath = session?.mainProjectPath;
+    if (mainPath != null) {
+      _selectedProjectName = mainPath.split('/').last;
+      _selectedProjectPath = mainPath;
       _activeRightPanel = 'project';
+    } else {
+      _selectedProjectName = null;
+      _selectedProjectPath = null;
     }
+    _projectNameError = null;
 
     notifyListeners();
   }
@@ -429,10 +506,14 @@ class PaneState extends ChangeNotifier {
     _sessionEnded = false;
     _sessionPaused = false;
     _pausedReason = null;
+    _runningSubprocess = null;
     _pendingLocalUserMessages = 0;
     _messages.clear();
     _todos = [];
     _activeRightPanel = null;
+    _selectedProjectName = null;
+    _selectedProjectPath = null;
+    _projectNameError = null;
     _resetPagination();
 
     if (oldSessionId != null && oldWorkerId != null) {
@@ -454,6 +535,7 @@ class PaneState extends ChangeNotifier {
     _sessionEnded = false;
     _sessionPaused = false;
     _pausedReason = null;
+    _runningSubprocess = null;
     _pendingLocalUserMessages = 0;
     _pendingInputText = null;
     _messages.clear();
@@ -476,7 +558,7 @@ class PaneState extends ChangeNotifier {
     finalizeStream();
     _messages.clear();
     _todos = [];
-    _todoPanelVisible = false;
+    if (_activeRightPanel == 'todo') _activeRightPanel = null;
     _pendingLocalUserMessages = 0;
     notifyListeners();
   }
@@ -567,6 +649,16 @@ class PaneState extends ChangeNotifier {
     }
   }
 
+  Future<void> interruptSubprocess() async {
+    final sid = _sessionId;
+    if (sid == null) return;
+    try {
+      _ws?.interruptSubprocess(sid);
+    } catch (e) {
+      _addSystemMessage('Failed to interrupt subprocess: $e', isError: true);
+    }
+  }
+
   void handleSessionPaused(String? sessionId, {String? reason}) {
     if (_sessionId == sessionId) {
       finalizeStream();
@@ -637,7 +729,7 @@ class PaneState extends ChangeNotifier {
     msg.accepted = accepted;
     final sid = msg.sessionId ?? _sessionId;
     if (sid != null) {
-      _ws?.sendInteractiveResponse(sid, text);
+      _ws?.sendInteractiveResponse(sid, text, accepted: accepted);
     }
     notifyListeners();
   }
@@ -731,7 +823,7 @@ class PaneState extends ChangeNotifier {
 
   // -- Right panel management --
 
-  /// Open [panelKey] ("todo" or "worktree"), or toggle it off if already active.
+  /// Open [panelKey] ("todo", "project", or "statistics"), or toggle it off if already active.
   void toggleRightPanel(String panelKey) {
     _activeRightPanel = _activeRightPanel == panelKey ? null : panelKey;
     notifyListeners();
@@ -764,13 +856,55 @@ class PaneState extends ChangeNotifier {
   void setTodoPanelWidth(double width) => setRightPanelWidth(width);
 
   /// Open the Project panel if it is not already the active panel.
-  /// Called automatically when a @ProjectName mention first resolves for
-  /// the session shown in this pane.
   void openProjectPanel() {
     if (_activeRightPanel != 'project') {
       _activeRightPanel = 'project';
       notifyListeners();
     }
+  }
+
+  /// Called when the user picks a project in the picker chip.
+  ///
+  /// [name] is the project folder name sent to the server as `project_name`.
+  /// [path] is the full absolute path resolved from the server's project list
+  /// at pick time; when provided it is used as the pre-session [effectiveProjectPath]
+  /// so the Project panel can show worktrees and artifacts immediately.
+  ///
+  /// Opens the Project panel immediately and clears any previous error.
+  void setSelectedProject(String? name, {String? path}) {
+    _selectedProjectName = name;
+    _selectedProjectPath = path;
+    _projectNameError = null;
+    if (name != null) openProjectPanel();
+    notifyListeners();
+  }
+
+  /// Sync chip state from a confirmed server-side project path.
+  /// Called when a session_update transitions main_project_path from null→non-null
+  /// (i.e. the server has accepted and echoed back our project_name selection).
+  void syncProjectFromSession(String path) {
+    final name = path.split('/').last;
+    if (_selectedProjectName == name &&
+        _selectedProjectPath == path &&
+        _activeRightPanel == 'project') return;
+    _selectedProjectName = name;
+    _selectedProjectPath = path;
+    _activeRightPanel = 'project';
+    notifyListeners();
+  }
+
+  /// Clear the project name error flag when the backend accepts a project.
+  void clearProjectError() {
+    if (_projectNameError != null) {
+      _projectNameError = null;
+      notifyListeners();
+    }
+  }
+
+  /// Set a project name error received from the backend session_update.
+  void setProjectNameError(String error) {
+    _projectNameError = error;
+    notifyListeners();
   }
 
   /// Reconstruct todo state from a history message's metadata.

@@ -56,6 +56,14 @@ class SessionInfo {
   /// project attached yet).
   final String? mainProjectPath;
 
+  /// The managed coding agent driving this session.
+  ///
+  /// One of ``"claude_code"``, ``"codex"``, or ``null`` for pure-LLM sessions
+  /// that are handled directly by the built-in model without a managed
+  /// subprocess.  Only live (in-memory) sessions populate this field; archived
+  /// sessions always return ``null``.
+  final String? agentType;
+
   SessionInfo({
     required this.sessionId,
     required this.sessionType,
@@ -75,6 +83,7 @@ class SessionInfo {
     this.worktreeInfo,
     this.selectedWorktreePath,
     this.mainProjectPath,
+    this.agentType,
   });
 
   bool get isProcessing {
@@ -114,6 +123,7 @@ class SessionInfo {
       worktreeInfo: wtJson != null ? WorktreeInfo.fromJson(wtJson) : null,
       selectedWorktreePath: json['selected_worktree_path'] as String?,
       mainProjectPath: json['main_project_path'] as String?,
+      agentType: json['agent_type'] as String?,
     );
   }
 
@@ -136,6 +146,7 @@ class SessionInfo {
         if (worktreeInfo != null) 'worktree': worktreeInfo!.toJson(),
         if (selectedWorktreePath != null) 'selected_worktree_path': selectedWorktreePath,
         if (mainProjectPath != null) 'main_project_path': mainProjectPath,
+        if (agentType != null) 'agent_type': agentType,
       };
 
   String get shortId => sessionId.length >= 8
@@ -162,6 +173,8 @@ class SessionInfo {
     Object? worktreeInfo = _keep,
     String? selectedWorktreePath,
     String? mainProjectPath,
+    // Pass Object() sentinel to explicitly clear agentType
+    Object? agentType = _keep,
   }) {
     return SessionInfo(
       sessionId: sessionId ?? this.sessionId,
@@ -186,6 +199,9 @@ class SessionInfo {
           : worktreeInfo as WorktreeInfo?,
       selectedWorktreePath: selectedWorktreePath ?? this.selectedWorktreePath,
       mainProjectPath: mainProjectPath ?? this.mainProjectPath,
+      agentType: identical(agentType, _keep)
+          ? this.agentType
+          : agentType as String?,
     );
   }
 }

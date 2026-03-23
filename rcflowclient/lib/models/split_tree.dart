@@ -5,7 +5,7 @@
 library;
 
 /// Type of content a pane displays.
-enum PaneType { chat, terminal, task, artifact, linearIssue }
+enum PaneType { chat, terminal, task, artifact, linearIssue, workerSettings }
 
 enum SplitAxis { horizontal, vertical }
 

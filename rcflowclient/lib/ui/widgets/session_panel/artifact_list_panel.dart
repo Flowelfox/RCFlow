@@ -22,6 +22,7 @@ class ArtifactListPanel extends StatefulWidget {
 class _ArtifactListPanelState extends State<ArtifactListPanel> {
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
+  bool _groupByProject = true;
   final Set<String> _expandedWorkers = {};
   final Set<String> _expandedProjects = {};
   bool _initialized = false;
@@ -33,6 +34,7 @@ class _ArtifactListPanelState extends State<ArtifactListPanel> {
         Provider.of<AppState>(context, listen: false).settings;
     _searchQuery = settings.artifactsFilterSearch;
     _searchController.text = _searchQuery;
+    _groupByProject = settings.artifactsGroupByProject;
     final savedWorkers = settings.artifactsExpandedWorkers;
     final savedProjects = settings.artifactsExpandedProjects;
     if (savedWorkers != null) {
@@ -207,37 +209,55 @@ class _ArtifactListPanelState extends State<ArtifactListPanel> {
             return a.toLowerCase().compareTo(b.toLowerCase());
           });
 
-        for (final projectName in projectNames) {
-          final projectArtifacts = projectMap[projectName]!;
-          final pKey = _projectKey(workerId, projectName);
-          final projectExpanded = _expandedProjects.contains(pKey);
+        if (_groupByProject) {
+          for (final projectName in projectNames) {
+            final projectArtifacts = projectMap[projectName]!;
+            final pKey = _projectKey(workerId, projectName);
+            final projectExpanded = _expandedProjects.contains(pKey);
 
-          children.add(_ProjectHeader(
-            projectName: projectName,
-            artifactCount: projectArtifacts.length,
-            expanded: projectExpanded,
-            indented: hasMultipleWorkers,
-            onToggle: () {
-              setState(() {
-                if (projectExpanded) {
-                  _expandedProjects.remove(pKey);
-                } else {
-                  _expandedProjects.add(pKey);
-                }
-              });
-              _saveExpandedState();
-            },
-          ));
+            children.add(_ProjectHeader(
+              projectName: projectName,
+              artifactCount: projectArtifacts.length,
+              expanded: projectExpanded,
+              indented: hasMultipleWorkers,
+              onToggle: () {
+                setState(() {
+                  if (projectExpanded) {
+                    _expandedProjects.remove(pKey);
+                  } else {
+                    _expandedProjects.add(pKey);
+                  }
+                });
+                _saveExpandedState();
+              },
+            ));
 
-          if (projectExpanded) {
-            for (final artifact in projectArtifacts) {
-              children.add(_ArtifactTile(
-                artifact: artifact,
-                state: state,
-                onArtifactSelected: widget.onArtifactSelected,
-                indented: hasMultipleWorkers,
-              ));
+            if (projectExpanded) {
+              for (final artifact in projectArtifacts) {
+                children.add(_ArtifactTile(
+                  artifact: artifact,
+                  state: state,
+                  onArtifactSelected: widget.onArtifactSelected,
+                  indented: hasMultipleWorkers,
+                ));
+              }
             }
+          }
+        } else {
+          // Flat mode: all artifacts under this worker shown without project headers
+          final allArtifacts = projectNames
+              .expand((p) => projectMap[p]!)
+              .toList()
+            ..sort((a, b) =>
+                (b.discoveredAt ?? DateTime(2000))
+                    .compareTo(a.discoveredAt ?? DateTime(2000)));
+          for (final artifact in allArtifacts) {
+            children.add(_ArtifactTile(
+              artifact: artifact,
+              state: state,
+              onArtifactSelected: widget.onArtifactSelected,
+              indented: hasMultipleWorkers,
+            ));
           }
         }
       }
@@ -321,6 +341,30 @@ class _ArtifactListPanelState extends State<ArtifactListPanel> {
                     borderRadius: BorderRadius.circular(8),
                   ),
                 ),
+              ),
+            ),
+            const SizedBox(width: 6),
+            SizedBox(
+              width: 30,
+              height: 30,
+              child: IconButton(
+                padding: EdgeInsets.zero,
+                icon: Icon(
+                  Icons.folder_copy_outlined,
+                  color: _groupByProject
+                      ? context.appColors.accent
+                      : context.appColors.textSecondary,
+                  size: 16,
+                ),
+                tooltip: _groupByProject
+                    ? 'Grouping by project (tap to disable)'
+                    : 'Group by project',
+                onPressed: () {
+                  setState(() => _groupByProject = !_groupByProject);
+                  Provider.of<AppState>(context, listen: false)
+                      .settings
+                      .artifactsGroupByProject = _groupByProject;
+                },
               ),
             ),
           ],

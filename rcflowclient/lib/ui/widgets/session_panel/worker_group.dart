@@ -9,16 +9,18 @@ import '../../../theme.dart';
 import '../../dialogs/worker_edit_dialog.dart';
 import '../session_pane.dart';
 import '../terminal_pane.dart';
+import '../worker_stats_pane.dart';
 import 'helpers.dart';
 import 'session_leading_icon.dart';
 import 'terminal_session_tile.dart';
 
-class WorkerGroup extends StatelessWidget {
+class WorkerGroup extends StatefulWidget {
   final WorkerConfig config;
   final WorkerConnection? worker;
   final List<SessionInfo> sessions;
   final List<TerminalSessionInfo> terminals;
   final bool expanded;
+  final bool groupByProject;
   final VoidCallback onToggleExpand;
   final void Function(String sessionId) onSessionTap;
   final AppState state;
@@ -35,7 +37,27 @@ class WorkerGroup extends StatelessWidget {
     required this.onSessionTap,
     required this.state,
     required this.onSessionSelected,
+    this.groupByProject = false,
   });
+
+  @override
+  State<WorkerGroup> createState() => _WorkerGroupState();
+}
+
+class _WorkerGroupState extends State<WorkerGroup> {
+  /// Project names that are collapsed when groupByProject is active.
+  final Set<String> _collapsedProjects = {};
+
+  WorkerConfig get config => widget.config;
+  WorkerConnection? get worker => widget.worker;
+  List<SessionInfo> get sessions => widget.sessions;
+  List<TerminalSessionInfo> get terminals => widget.terminals;
+  bool get expanded => widget.expanded;
+  bool get groupByProject => widget.groupByProject;
+  VoidCallback get onToggleExpand => widget.onToggleExpand;
+  void Function(String) get onSessionTap => widget.onSessionTap;
+  AppState get state => widget.state;
+  VoidCallback? get onSessionSelected => widget.onSessionSelected;
 
   @override
   Widget build(BuildContext context) {
@@ -52,103 +74,116 @@ class WorkerGroup extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         // Header
-        GestureDetector(
-          onSecondaryTapUp: (details) =>
-              _showWorkerContextMenu(context, details.globalPosition),
-          child: InkWell(
-            onTap: onToggleExpand,
-            child: Padding(
-              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-              child: Row(
-                children: [
-                  Icon(
-                    expanded
-                        ? Icons.expand_more_rounded
-                        : Icons.chevron_right_rounded,
-                    color: context.appColors.textSecondary,
-                    size: 18,
-                  ),
-                  SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      '${config.name} (${sessions.length + terminals.length})',
-                      style: TextStyle(
-                        color: context.appColors.textPrimary,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
+        LayoutBuilder(
+          builder: (context, constraints) {
+            // At narrow sidebar widths, collapse the refresh + terminal buttons
+            // into the right-click context menu to prevent the worker name text
+            // from being squeezed into an unreadable sliver.
+            final isNarrow = constraints.maxWidth < 200;
+            return GestureDetector(
+              onSecondaryTapUp: (details) =>
+                  _showWorkerContextMenu(context, details.globalPosition),
+              child: InkWell(
+                onTap: onToggleExpand,
+                child: Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                  child: Row(
+                    children: [
+                      Icon(
+                        expanded
+                            ? Icons.expand_more_rounded
+                            : Icons.chevron_right_rounded,
+                        color: context.appColors.textSecondary,
+                        size: 18,
                       ),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  if (isConnected) ...[
-                    SizedBox(
-                      width: 24,
-                      height: 24,
-                      child: IconButton(
-                        padding: EdgeInsets.zero,
-                        icon: Icon(Icons.refresh_rounded,
-                            color: context.appColors.textSecondary, size: 14),
-                        onPressed: () => worker?.refreshSessions(),
-                        tooltip: 'Refresh sessions',
-                        constraints: const BoxConstraints(
-                            maxWidth: 24, maxHeight: 24),
+                      SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          '${config.name} (${sessions.length + terminals.length})',
+                          style: TextStyle(
+                            color: context.appColors.textPrimary,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
-                    ),
-                    SizedBox(
-                      width: 24,
-                      height: 24,
-                      child: IconButton(
-                        padding: EdgeInsets.zero,
-                        icon: Icon(Icons.terminal_rounded,
-                            color: context.appColors.textSecondary, size: 14),
-                        onPressed: () {
-                          state.openTerminal(config.id);
-                          onSessionSelected?.call();
-                        },
-                        tooltip: 'Open terminal',
-                        constraints: const BoxConstraints(
-                            maxWidth: 24, maxHeight: 24),
-                      ),
-                    ),
-                    SizedBox(
-                      width: 24,
-                      height: 24,
-                      child: IconButton(
-                        padding: EdgeInsets.zero,
-                        icon: Icon(Icons.add_rounded,
-                            color: context.appColors.textSecondary, size: 14),
-                        onPressed: () {
-                          final pane = state.ensureChatPane();
-                          pane.setTargetWorker(config.id);
-                          pane.startNewChat();
-                          onSessionSelected?.call();
-                        },
-                        tooltip: 'New session',
-                        constraints: const BoxConstraints(
-                            maxWidth: 24, maxHeight: 24),
-                      ),
-                    ),
-                  ],
-                  const SizedBox(width: 4),
-                  Container(
-                    width: 8,
-                    height: 8,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: statusColor,
-                      boxShadow: [
-                        BoxShadow(
-                          color: statusColor.withAlpha(80),
-                          blurRadius: 4,
-                          spreadRadius: 1,
+                      if (isConnected) ...[
+                        if (!isNarrow) ...[
+                          SizedBox(
+                            width: 24,
+                            height: 24,
+                            child: IconButton(
+                              padding: EdgeInsets.zero,
+                              icon: Icon(Icons.refresh_rounded,
+                                  color: context.appColors.textSecondary,
+                                  size: 14),
+                              onPressed: () => worker?.refreshSessions(),
+                              tooltip: 'Refresh sessions',
+                              constraints: const BoxConstraints(
+                                  maxWidth: 24, maxHeight: 24),
+                            ),
+                          ),
+                          SizedBox(
+                            width: 24,
+                            height: 24,
+                            child: IconButton(
+                              padding: EdgeInsets.zero,
+                              icon: Icon(Icons.terminal_rounded,
+                                  color: context.appColors.textSecondary,
+                                  size: 14),
+                              onPressed: () {
+                                state.openTerminal(config.id);
+                                onSessionSelected?.call();
+                              },
+                              tooltip: 'Open terminal',
+                              constraints: const BoxConstraints(
+                                  maxWidth: 24, maxHeight: 24),
+                            ),
+                          ),
+                        ],
+                        SizedBox(
+                          width: 24,
+                          height: 24,
+                          child: IconButton(
+                            padding: EdgeInsets.zero,
+                            icon: Icon(Icons.add_rounded,
+                                color: context.appColors.textSecondary,
+                                size: 14),
+                            onPressed: () {
+                              final pane = state.ensureChatPane();
+                              pane.setTargetWorker(config.id);
+                              pane.startNewChat();
+                              onSessionSelected?.call();
+                            },
+                            tooltip: 'New session',
+                            constraints: const BoxConstraints(
+                                maxWidth: 24, maxHeight: 24),
+                          ),
                         ),
                       ],
-                    ),
+                      const SizedBox(width: 4),
+                      Container(
+                        width: 8,
+                        height: 8,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: statusColor,
+                          boxShadow: [
+                            BoxShadow(
+                              color: statusColor.withAlpha(80),
+                              blurRadius: 4,
+                              spreadRadius: 1,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
-                ],
+                ),
               ),
-            ),
-          ),
+            );
+          },
         ),
         // Merged sessions and terminals, sorted by date
         if (expanded)
@@ -166,6 +201,10 @@ class WorkerGroup extends StatelessWidget {
   }
 
   List<Widget> _buildMergedSessionList(BuildContext context, bool isConnected) {
+    if (groupByProject) {
+      return _buildProjectGroupedSessionList(context, isConnected);
+    }
+
     final entries = <({DateTime time, bool isTerminal, dynamic data})>[];
     for (final s in sessions) {
       entries.add((
@@ -198,7 +237,125 @@ class WorkerGroup extends StatelessWidget {
     }).toList();
   }
 
-  Widget _buildSessionTile(BuildContext context, SessionInfo s, bool isConnected) {
+  /// Builds session list grouped by project when [groupByProject] is true.
+  /// Terminals are shown at the top (ungrouped). Sessions are organized into
+  /// collapsible project sub-categories below.
+  List<Widget> _buildProjectGroupedSessionList(
+      BuildContext context, bool isConnected) {
+    final result = <Widget>[];
+
+    // Terminals first, sorted by date
+    final sortedTerminals = [...terminals]
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    for (final t in sortedTerminals) {
+      result.add(TerminalSessionTile(
+        info: t,
+        state: state,
+        isConnected: isConnected,
+        onSessionSelected: onSessionSelected,
+      ));
+    }
+
+    // Group sessions by project name (last path segment of mainProjectPath)
+    final byProject = <String?, List<SessionInfo>>{};
+    for (final s in sessions) {
+      final projectName = s.mainProjectPath != null
+          ? s.mainProjectPath!.split('/').where((p) => p.isNotEmpty).lastOrNull
+          : null;
+      byProject.putIfAbsent(projectName, () => []).add(s);
+    }
+
+    // Sort project names: named projects alphabetically, null ("Other") last
+    final projectNames = byProject.keys.toList()
+      ..sort((a, b) {
+        if (a == null && b == null) return 0;
+        if (a == null) return 1;
+        if (b == null) return -1;
+        return a.toLowerCase().compareTo(b.toLowerCase());
+      });
+
+    for (final projectName in projectNames) {
+      final projectSessions = byProject[projectName]!
+        ..sort((a, b) =>
+            (b.createdAt ?? DateTime(2000)).compareTo(
+                a.createdAt ?? DateTime(2000)));
+      final collapseKey = projectName ?? '\x00other';
+      final collapsed = _collapsedProjects.contains(collapseKey);
+
+      result.add(_buildProjectSubHeader(
+        context,
+        projectName: projectName,
+        count: projectSessions.length,
+        collapsed: collapsed,
+        onToggle: () => setState(() {
+          if (collapsed) {
+            _collapsedProjects.remove(collapseKey);
+          } else {
+            _collapsedProjects.add(collapseKey);
+          }
+        }),
+      ));
+
+      if (!collapsed) {
+        for (final s in projectSessions) {
+          result.add(_buildSessionTile(context, s, isConnected,
+              extraIndent: true));
+        }
+      }
+    }
+
+    return result;
+  }
+
+  Widget _buildProjectSubHeader(
+    BuildContext context, {
+    required String? projectName,
+    required int count,
+    required bool collapsed,
+    required VoidCallback onToggle,
+  }) {
+    return InkWell(
+      onTap: onToggle,
+      child: Padding(
+        padding: const EdgeInsets.only(left: 20, right: 16, top: 4, bottom: 4),
+        child: Row(
+          children: [
+            Icon(
+              collapsed
+                  ? Icons.chevron_right_rounded
+                  : Icons.expand_more_rounded,
+              color: context.appColors.textMuted,
+              size: 14,
+            ),
+            const SizedBox(width: 4),
+            Icon(
+              projectName != null
+                  ? Icons.folder_outlined
+                  : Icons.folder_off_outlined,
+              color: context.appColors.textMuted,
+              size: 12,
+            ),
+            const SizedBox(width: 4),
+            Expanded(
+              child: Text(
+                '${projectName ?? 'Other'} ($count)',
+                style: TextStyle(
+                  color: context.appColors.textSecondary,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0.4,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSessionTile(BuildContext context, SessionInfo s, bool isConnected,
+      {bool extraIndent = false}) {
     final isActiveSession =
         !state.hasNoPanes && s.sessionId == state.activePane.sessionId;
     final isViewedByAnyPane = state.isSessionViewed(s.sessionId);
@@ -213,116 +370,135 @@ class WorkerGroup extends StatelessWidget {
           context, details.globalPosition, state, s),
       child: Opacity(
         opacity: dimmed ? 0.5 : 1.0,
-        child: Container(
-          decoration: BoxDecoration(
-            color: isActiveSession
-                ? context.appColors.accent.withAlpha(25)
-                : isViewedByAnyPane
-                    ? context.appColors.accent.withAlpha(12)
-                    : null,
-            border: isActiveSession
-                ? Border(
-                    left: BorderSide(color: context.appColors.accent, width: 3))
-                : isViewedByAnyPane
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            // At narrow sidebar widths show only the primary action button so
+            // the session title text is not squeezed against the trailing row.
+            // Secondary actions remain reachable via the right-click context menu.
+            final isNarrow = constraints.maxWidth < 180;
+            return Container(
+              decoration: BoxDecoration(
+                color: isActiveSession
+                    ? context.appColors.accent.withAlpha(25)
+                    : isViewedByAnyPane
+                        ? context.appColors.accent.withAlpha(12)
+                        : null,
+                border: isActiveSession
                     ? Border(
-                        left: BorderSide(
-                            color: context.appColors.accent.withAlpha(80), width: 2))
-                    : null,
-          ),
-          child: ListTile(
-          leading: SessionLeadingIcon(session: s),
-          title: Text(
-            s.title ?? s.shortId,
-            style: TextStyle(
-              color: isActiveSession ? context.appColors.accentLight : context.appColors.textPrimary,
-              fontSize: 12,
-              fontWeight:
-                  isActiveSession ? FontWeight.w600 : FontWeight.w400,
-              fontFamily: s.title != null ? null : 'monospace',
-            ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-          subtitle: _buildSubtitle(context, s),
-          trailing: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (state.isSessionAttachedToTask(s.sessionId))
-                Padding(
-                  padding: const EdgeInsets.only(right: 2),
-                  child: Icon(Icons.link_rounded,
-                      color: context.appColors.accent.withAlpha(120), size: 14),
+                        left:
+                            BorderSide(color: context.appColors.accent, width: 3))
+                    : isViewedByAnyPane
+                        ? Border(
+                            left: BorderSide(
+                                color: context.appColors.accent.withAlpha(80),
+                                width: 2))
+                        : null,
+              ),
+              child: ListTile(
+                leading: SessionLeadingIcon(session: s),
+                title: Text(
+                  s.title ?? s.shortId,
+                  style: TextStyle(
+                    color: isActiveSession
+                        ? context.appColors.accentLight
+                        : context.appColors.textPrimary,
+                    fontSize: 12,
+                    fontWeight:
+                        isActiveSession ? FontWeight.w600 : FontWeight.w400,
+                    fontFamily: s.title != null ? null : 'monospace',
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
-              if (isTerminalStatus(s.status))
-                SizedBox(
-                  width: 26,
-                  height: 26,
-                  child: IconButton(
-                    padding: EdgeInsets.zero,
-                    icon: Icon(Icons.restore_rounded,
-                        color: context.appColors.accentLight, size: 16),
-                    tooltip: 'Restore session',
-                    onPressed: dimmed
-                        ? null
-                        : () => state.restoreSessionDirect(
-                            s.sessionId, s.workerId),
-                  ),
-                )
-              else ...[
-                if (s.status == 'paused')
-                  SizedBox(
-                    width: 26,
-                    height: 26,
-                    child: IconButton(
-                      padding: EdgeInsets.zero,
-                      icon: Icon(Icons.play_arrow_rounded,
-                          color: context.appColors.accentLight, size: 16),
-                      tooltip: 'Resume session',
-                      onPressed: dimmed
-                          ? null
-                          : () => state.resumeSessionDirect(
-                              s.sessionId, s.workerId),
-                    ),
-                  )
-                else
-                  SizedBox(
-                    width: 26,
-                    height: 26,
-                    child: IconButton(
-                      padding: EdgeInsets.zero,
-                      icon: Icon(Icons.pause_rounded,
-                          color: context.appColors.textSecondary, size: 16),
-                      tooltip: 'Pause session',
-                      onPressed: dimmed
-                          ? null
-                          : () => state.pauseSessionDirect(
-                              s.sessionId, s.workerId),
-                    ),
-                  ),
-                SizedBox(
-                  width: 26,
-                  height: 26,
-                  child: IconButton(
-                    padding: EdgeInsets.zero,
-                    icon: Icon(Icons.stop_circle_outlined,
-                        color: context.appColors.errorText, size: 16),
-                    tooltip: 'End session',
-                    onPressed: dimmed
-                        ? null
-                        : () => _confirmCancelSession(
-                            context, state, s),
-                  ),
+                subtitle: _buildSubtitle(context, s),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (!isNarrow && state.isSessionAttachedToTask(s.sessionId))
+                      Padding(
+                        padding: const EdgeInsets.only(right: 2),
+                        child: Icon(Icons.link_rounded,
+                            color: context.appColors.accent.withAlpha(120),
+                            size: 14),
+                      ),
+                    if (isTerminalStatus(s.status))
+                      SizedBox(
+                        width: 26,
+                        height: 26,
+                        child: IconButton(
+                          padding: EdgeInsets.zero,
+                          icon: Icon(Icons.restore_rounded,
+                              color: context.appColors.accentLight, size: 16),
+                          tooltip: 'Restore session',
+                          onPressed: dimmed
+                              ? null
+                              : () => state.restoreSessionDirect(
+                                  s.sessionId, s.workerId),
+                        ),
+                      )
+                    else ...[
+                      // At narrow widths keep only the primary action (play/pause).
+                      // Stop is always shown; use right-click to access the other.
+                      if (!isNarrow) ...[
+                        if (s.status == 'paused')
+                          SizedBox(
+                            width: 26,
+                            height: 26,
+                            child: IconButton(
+                              padding: EdgeInsets.zero,
+                              icon: Icon(Icons.play_arrow_rounded,
+                                  color: context.appColors.accentLight,
+                                  size: 16),
+                              tooltip: 'Resume session',
+                              onPressed: dimmed
+                                  ? null
+                                  : () => state.resumeSessionDirect(
+                                      s.sessionId, s.workerId),
+                            ),
+                          )
+                        else
+                          SizedBox(
+                            width: 26,
+                            height: 26,
+                            child: IconButton(
+                              padding: EdgeInsets.zero,
+                              icon: Icon(Icons.pause_rounded,
+                                  color: context.appColors.textSecondary,
+                                  size: 16),
+                              tooltip: 'Pause session',
+                              onPressed: dimmed
+                                  ? null
+                                  : () => state.pauseSessionDirect(
+                                      s.sessionId, s.workerId),
+                            ),
+                          ),
+                      ],
+                      SizedBox(
+                        width: 26,
+                        height: 26,
+                        child: IconButton(
+                          padding: EdgeInsets.zero,
+                          icon: Icon(Icons.stop_circle_outlined,
+                              color: context.appColors.errorText, size: 16),
+                          tooltip: 'End session',
+                          onPressed: dimmed
+                              ? null
+                              : () =>
+                                  _confirmCancelSession(context, state, s),
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
-              ],
-            ],
-          ),
-          dense: true,
-          visualDensity: const VisualDensity(vertical: -4),
-          contentPadding: const EdgeInsets.only(left: 36, right: 8),
-          onTap: () => onSessionTap(s.sessionId),
-          onLongPress: () =>
-              _showRenameDialog(context, state, s),
-        ),
+                dense: true,
+                visualDensity: const VisualDensity(vertical: -4),
+                contentPadding:
+                    EdgeInsets.only(left: extraIndent ? 48 : 36, right: 8),
+                onTap: () => onSessionTap(s.sessionId),
+                onLongPress: () => _showRenameDialog(context, state, s),
+              ),
+            );
+          },
         ),
       ),
     );
@@ -384,27 +560,15 @@ class WorkerGroup extends StatelessWidget {
           }()
         : null;
 
-    final totalIn = s.totalInputTokens;
-    final totalOut = s.totalOutputTokens;
-    final hasTokens = totalIn > 0 || totalOut > 0;
-
-    if (!hasTokens) {
-      return Text(
-        dateStr ?? '',
-        style: TextStyle(color: context.appColors.textMuted, fontSize: 10),
-      );
-    }
-
-    final inLimit = worker?.inputTokenLimit ?? 0;
-    final outLimit = worker?.outputTokenLimit ?? 0;
-    final inStr = inLimit > 0
-        ? '${formatTokens(totalIn)}/${formatTokens(inLimit)}'
-        : formatTokens(totalIn);
-    final outStr = outLimit > 0
-        ? '${formatTokens(totalOut)}/${formatTokens(outLimit)}'
-        : formatTokens(totalOut);
+    final projectName = s.mainProjectPath != null
+        ? s.mainProjectPath!.split('/').where((p) => p.isNotEmpty).lastOrNull
+        : null;
 
     final mutedStyle = TextStyle(color: context.appColors.textMuted, fontSize: 10);
+
+    if (projectName == null) {
+      return Text(dateStr ?? '', style: mutedStyle);
+    }
 
     return Row(
       children: [
@@ -415,9 +579,15 @@ class WorkerGroup extends StatelessWidget {
             child: Text('\u00B7', style: mutedStyle),
           ),
         ],
-        Icon(Icons.token_outlined, size: 9, color: context.appColors.textMuted),
+        Icon(Icons.folder_outlined, size: 9, color: context.appColors.textMuted),
         const SizedBox(width: 2),
-        Text('$inStr in \u00B7 $outStr out', style: mutedStyle),
+        Flexible(
+          child: Text(
+            projectName,
+            style: mutedStyle,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
       ],
     );
   }
@@ -462,6 +632,18 @@ class WorkerGroup extends StatelessWidget {
               ],
             ),
           ),
+        if (isConnected)
+          PopupMenuItem(
+            value: 'stats',
+            child: Row(
+              children: [
+                Icon(Icons.bar_chart_rounded, color: Colors.teal, size: 18),
+                SizedBox(width: 8),
+                Text('Stats',
+                    style: TextStyle(color: context.appColors.textPrimary)),
+              ],
+            ),
+          ),
         PopupMenuItem(
           value: 'edit',
           child: Row(
@@ -497,6 +679,14 @@ class WorkerGroup extends StatelessWidget {
           state.connectWorker(config.id);
         case 'disconnect':
           state.disconnectWorker(config.id);
+        case 'stats':
+          if (worker != null) {
+            await showWorkerStatsDialog(
+              context,
+              worker: worker!,
+              workerName: config.name,
+            );
+          }
         case 'edit':
           final updated = await showWorkerEditDialog(context,
               existing: config, worker: worker);

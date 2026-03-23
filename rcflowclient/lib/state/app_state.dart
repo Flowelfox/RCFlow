@@ -629,6 +629,45 @@ class AppState extends ChangeNotifier implements PaneHost {
     notifyListeners();
   }
 
+  /// Show the worker settings pane for [toolName] in the active pane.
+  void openWorkerSettingsInPane(String toolName, {String section = 'plugins'}) {
+    if (_splitRoot != null && _panes.containsKey(_activePaneId)) {
+      activePane.pushNavHistory(_currentNavEntry(_activePaneId));
+
+      if (_paneTypes[_activePaneId] == PaneType.terminal) {
+        for (final info in _terminalSessions.values) {
+          if (info.paneId == _activePaneId) {
+            info.paneId = null;
+            break;
+          }
+        }
+      }
+      _paneTypes[_activePaneId] = PaneType.workerSettings;
+      activePane.setWorkerSettings(toolName, section: section);
+      notifyListeners();
+      return;
+    }
+
+    // No panes — create one
+    final newId = 'pane_${_nextPaneId++}';
+    final newPane = PaneState(paneId: newId, host: this)
+      ..addListener(_onPaneChanged);
+    _panes[newId] = newPane;
+    _paneTypes[newId] = PaneType.workerSettings;
+    newPane.setWorkerSettings(toolName, section: section);
+    _splitRoot = PaneLeaf(newId);
+    _activePaneId = newId;
+    notifyListeners();
+  }
+
+  /// Close a worker settings pane (convert to chat).
+  void closeWorkerSettingsView(String paneId) {
+    if (_paneTypes[paneId] != PaneType.workerSettings) return;
+    _paneTypes.remove(paneId);
+    _panes[paneId]?.clearWorkerSettings();
+    notifyListeners();
+  }
+
   /// Show a task in the active pane (converting it in-place).
   void openTaskInPane(String taskId) {
     if (_splitRoot != null && _panes.containsKey(_activePaneId)) {
@@ -782,7 +821,17 @@ class AppState extends ChangeNotifier implements PaneHost {
     worker.onSessionsChanged = _onWorkerSessionsChanged;
     worker.onProjectPathAttached = (sessionId, path) {
       for (final pane in _findPanesForSession(sessionId)) {
-        pane.openProjectPanel();
+        pane.syncProjectFromSession(path);
+      }
+    };
+    worker.onProjectNameError = (sessionId, error) {
+      for (final pane in _findPanesForSession(sessionId)) {
+        pane.setProjectNameError(error);
+      }
+    };
+    worker.onProjectNameErrorCleared = (sessionId) {
+      for (final pane in _findPanesForSession(sessionId)) {
+        pane.clearProjectError();
       }
     };
     worker.addListener(_onWorkerChanged);
@@ -1862,6 +1911,17 @@ class AppState extends ChangeNotifier implements PaneHost {
         pane.clearTaskId();
         pane.clearArtifactId();
         pane.setLinearIssueId(entry.linearIssueId);
+      case PaneType.workerSettings:
+        _paneTypes[paneId] = PaneType.workerSettings;
+        pane.clearTaskId();
+        pane.clearArtifactId();
+        pane.clearLinearIssueId();
+        if (entry.workerSettingsTool != null) {
+          pane.setWorkerSettings(
+            entry.workerSettingsTool!,
+            section: entry.workerSettingsSection ?? 'plugins',
+          );
+        }
       case PaneType.terminal:
         // Terminal back-navigation is not supported (terminals are detached)
         _paneTypes.remove(paneId);
@@ -1881,6 +1941,8 @@ class AppState extends ChangeNotifier implements PaneHost {
       taskId: pane?.taskId,
       artifactId: pane?.artifactId,
       linearIssueId: pane?.linearIssueId,
+      workerSettingsTool: pane?.workerSettingsTool,
+      workerSettingsSection: pane?.workerSettingsSection,
     );
   }
 
