@@ -171,6 +171,8 @@ async def ws_output_text(
                             "tool_output_tokens": s.get("tool_output_tokens", 0),
                             "tool_cost_usd": s.get("tool_cost_usd", 0.0),
                             "worktree": s.get("worktree"),
+                            "main_project_path": s.get("main_project_path"),
+                            "selected_worktree_path": s.get("selected_worktree_path"),
                         }
                         for s in all_sessions
                     ]
@@ -191,6 +193,8 @@ async def ws_output_text(
                             "tool_output_tokens": s.tool_output_tokens,
                             "tool_cost_usd": s.tool_cost_usd,
                             "worktree": s.metadata.get("worktree"),
+                            "main_project_path": s.main_project_path,
+                            "selected_worktree_path": s.metadata.get("selected_worktree_path"),
                         }
                         for s in session_manager.list_all_sessions()
                     ]

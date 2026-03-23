@@ -26,7 +26,7 @@ from src.core.permissions import (
     PermissionManager,
     PermissionScope,
 )
-from src.core.session import ActiveSession, SessionStatus, SessionType
+from src.core.session import ActivityState, ActiveSession, SessionStatus, SessionType
 from src.executors.claude_code import ClaudeCodeExecutor
 from src.executors.codex import CodexExecutor
 from src.models.db import TaskSession as TaskSessionModel
@@ -130,6 +130,21 @@ class SessionLifecycleMixin:
         # Auto-deny any pending permission requests
         if session.permission_manager is not None:
             session.permission_manager.cancel_all_pending()
+
+        # Auto-deny any pending plan mode approval gate
+        if session._plan_mode_event is not None and not session._plan_mode_event.is_set():
+            session._plan_mode_approved = False
+            session._plan_mode_event.set()
+
+        # Auto-deny any pending plan review gate
+        if session._plan_review_event is not None and not session._plan_review_event.is_set():
+            session._plan_review_approved = False
+            session._plan_review_feedback = None
+            session._plan_review_event.set()
+
+        # Clear subprocess tracking fields
+        session.subprocess_started_at = None
+        session.subprocess_current_tool = None
 
         # Close any open agent group before ending the session
         if had_claude_code or had_codex:
@@ -293,16 +308,27 @@ class SessionLifecycleMixin:
                 msg.data["accepted"] = accepted
                 break
 
-    async def send_interactive_response(self, session_id: str, text: str) -> None:
+    async def send_interactive_response(
+        self, session_id: str, text: str, *, accepted: bool = True
+    ) -> None:
         """Send an interactive response directly to Claude Code's stdin.
 
-        Used for answering AskUserQuestion prompts, plan mode approval, and
-        other mid-turn interactions.  Unlike :meth:`handle_prompt`, this does
-        **not** open a new agent group or create a new reading task — the
-        original streaming task picks up the follow-on events.
+        Used for answering AskUserQuestion prompts, plan mode approval, plan
+        review approval/feedback, and other mid-turn interactions.  Unlike
+        :meth:`handle_prompt`, this does **not** open a new agent group or
+        create a new reading task — the original streaming task picks up the
+        follow-on events.
 
         Falls back to :meth:`handle_prompt` when there is no active Claude
         Code process (e.g. the process exited while the user was answering).
+
+        Args:
+            session_id: The session to respond to.
+            text: The response text to deliver.
+            accepted: For plan review responses — ``True`` means the user
+                approved the plan; ``False`` means the user provided feedback
+                for the plan to be revised.  Ignored for non-plan-review
+                interactions.
 
         Raises:
             ValueError: If the session does not exist.
@@ -310,6 +336,33 @@ class SessionLifecycleMixin:
         session = self._session_manager.get_session(session_id)
         if session is None:
             raise ValueError(f"Session not found: {session_id}")
+
+        # If the session is blocked awaiting plan mode approval, resolve that first
+        # without touching Claude Code's stdin (EnterPlanMode is an internal tool
+        # that Claude Code auto-handles; the gate is on the RCFlow relay side).
+        if session._plan_mode_event is not None and not session._plan_mode_event.is_set():
+            approved = text.strip().lower() not in ("no", "n", "deny")
+            session._plan_mode_approved = approved
+            # Persist the decision in the buffer so history replay shows resolved state.
+            for msg in reversed(session.buffer.text_history):
+                if msg.message_type == MessageType.PLAN_MODE_ASK and "accepted" not in msg.data:
+                    msg.data["accepted"] = approved
+                    break
+            session._plan_mode_event.set()
+            return
+
+        # If the session is blocked awaiting plan review approval, resolve that gate.
+        # The relay will forward the response text to Claude Code's stdin.
+        if session._plan_review_event is not None and not session._plan_review_event.is_set():
+            session._plan_review_approved = accepted
+            session._plan_review_feedback = text
+            # Persist the decision in the buffer so history replay shows resolved state.
+            for msg in reversed(session.buffer.text_history):
+                if msg.message_type == MessageType.PLAN_REVIEW_ASK and "accepted" not in msg.data:
+                    msg.data["accepted"] = accepted
+                    break
+            session._plan_review_event.set()
+            return
 
         executor = session.claude_code_executor
         if executor is not None and executor.is_running:
@@ -368,6 +421,21 @@ class SessionLifecycleMixin:
         if session.permission_manager is not None:
             session.permission_manager.cancel_all_pending()
 
+        # Auto-deny any pending plan mode approval gate
+        if session._plan_mode_event is not None and not session._plan_mode_event.is_set():
+            session._plan_mode_approved = False
+            session._plan_mode_event.set()
+
+        # Auto-deny any pending plan review gate
+        if session._plan_review_event is not None and not session._plan_review_event.is_set():
+            session._plan_review_approved = False
+            session._plan_review_feedback = None
+            session._plan_review_event.set()
+
+        # Clear subprocess tracking fields
+        session.subprocess_started_at = None
+        session.subprocess_current_tool = None
+
         session.pause()
 
         # Close any open agent group
@@ -389,11 +457,96 @@ class SessionLifecycleMixin:
         logger.info("Paused session %s (agent_interrupted=%s)", session_id, had_agent)
         return session
 
+    async def interrupt_subprocess(self, session_id: str) -> ActiveSession:
+        """Kill any running subprocess without pausing the session.
+
+        Unlike :meth:`pause_session`, the session remains ``ACTIVE`` after
+        this call and is immediately ready to accept new prompts.  The
+        subprocess is killed and its background stream task is cancelled,
+        but no ``SESSION_PAUSED`` message is emitted.
+
+        A null ``subprocess_status`` message is broadcast so the client can
+        clear its subprocess indicator.
+
+        Returns the session after interruption.
+
+        Raises:
+            ValueError: If the session does not exist.
+            RuntimeError: If the session is in a terminal or paused state.
+        """
+        session = self._session_manager.get_session(session_id)
+        if session is None:
+            raise ValueError(f"Session not found: {session_id}")
+
+        terminal_states = (SessionStatus.COMPLETED, SessionStatus.FAILED, SessionStatus.CANCELLED)
+        if session.status in terminal_states:
+            raise RuntimeError(f"Session is in terminal state: {session.status.value}")
+        if session.status == SessionStatus.PAUSED:
+            raise RuntimeError("Cannot interrupt subprocess of a paused session")
+
+        had_claude_code = session.claude_code_executor is not None
+        if session.claude_code_executor is not None:
+            await session.claude_code_executor.cancel()
+            session.claude_code_executor = None
+
+        if session._claude_code_stream_task is not None and not session._claude_code_stream_task.done():
+            session._claude_code_stream_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await session._claude_code_stream_task
+        session._claude_code_stream_task = None
+
+        had_codex = session.codex_executor is not None
+        if session.codex_executor is not None:
+            await session.codex_executor.cancel()
+            session.codex_executor = None
+
+        if session._codex_stream_task is not None and not session._codex_stream_task.done():
+            session._codex_stream_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await session._codex_stream_task
+        session._codex_stream_task = None
+
+        # Close any open agent group
+        if had_claude_code or had_codex:
+            session.buffer.push_text(
+                MessageType.AGENT_GROUP_END,
+                {"session_id": session.id},
+            )
+            session.buffer.push_text(
+                MessageType.TEXT_CHUNK,
+                {"session_id": session.id, "content": "[Subprocess interrupted by user]\n"},
+            )
+
+        # Clear subprocess tracking fields
+        session.subprocess_started_at = None
+        session.subprocess_current_tool = None
+
+        # Broadcast null subprocess_status so the client clears its indicator
+        session.buffer.push_ephemeral(
+            MessageType.SUBPROCESS_STATUS,
+            {"session_id": session.id, "subprocess_type": None},
+        )
+
+        session.set_activity(ActivityState.IDLE)
+
+        logger.info(
+            "Interrupted subprocess for session %s (claude_code=%s, codex=%s)",
+            session_id, had_claude_code, had_codex,
+        )
+        return session
+
     async def resume_session(self, session_id: str) -> ActiveSession:
         """Resume a paused session.
 
         The client can subscribe to the session's output channel to receive
         all buffered messages produced while paused, then send new prompts.
+
+        If the session had a Claude Code or Codex executor before it was
+        paused (executor was torn down by :meth:`pause_session` but the
+        session metadata still holds the session/thread IDs), this method
+        reconstructs a ready-to-restart executor so that the next call to
+        :meth:`~src.core.prompt_router.PromptRouter.handle_prompt` correctly
+        routes to the agent rather than the outer LLM.
 
         Returns the resumed session.
 
@@ -418,6 +571,63 @@ class SessionLifecycleMixin:
                 await self._end_codex_session(session)
             else:
                 await self._end_claude_code_session(session)
+            logger.info("Resumed session %s", session_id)
+            return session
+
+        # Reconstruct the Claude Code executor if this session had one before
+        # it was paused.  pause_session() kills the subprocess and sets
+        # claude_code_executor = None, but preserves the metadata keys that
+        # identify the prior Claude Code session.  Without reconstruction the
+        # next handle_prompt() call would see executor=None and route the
+        # message to the outer LLM instead of Claude Code.
+        if session.claude_code_executor is None:
+            cc_session_id = session.metadata.get("claude_code_session_id")
+            cc_tool_name = session.metadata.get("claude_code_tool_name")
+            if cc_session_id and cc_tool_name:
+                tool_def = self._tool_registry.get(cc_tool_name)
+                if tool_def is not None and tool_def.executor == "claude_code":
+                    binary_path = "claude"
+                    config = tool_def.get_claude_code_config()
+                    binary_path = config.binary_path
+                    if self._tool_manager:
+                        resolved = self._tool_manager.get_binary_path("claude_code")
+                        if resolved:
+                            binary_path = resolved
+                    executor = ClaudeCodeExecutor(
+                        binary_path=binary_path,
+                        session_id=cc_session_id,
+                        extra_env=self._build_claude_code_extra_env(),
+                        config_overrides=self._get_managed_config_overrides("claude_code"),
+                    )
+                    executor._tool_def = tool_def
+                    cc_params = session.metadata.get("claude_code_parameters", {})
+                    executor._last_parameters = cc_params
+                    session.claude_code_executor = executor
+
+        # Reconstruct the Codex executor if this session had one before pause.
+        if session.codex_executor is None:
+            codex_thread_id = session.metadata.get("codex_thread_id")
+            codex_tool_name = session.metadata.get("codex_tool_name")
+            if codex_thread_id and codex_tool_name:
+                tool_def = self._tool_registry.get(codex_tool_name)
+                if tool_def is not None and tool_def.executor == "codex":
+                    binary_path = "codex"
+                    config = tool_def.get_codex_config()
+                    binary_path = config.binary_path
+                    if self._tool_manager:
+                        resolved = self._tool_manager.get_binary_path("codex")
+                        if resolved:
+                            binary_path = resolved
+                    codex_executor = CodexExecutor(
+                        binary_path=binary_path,
+                        thread_id=codex_thread_id,
+                        extra_env=self._build_codex_extra_env(),
+                        config_overrides=self._get_managed_config_overrides("codex"),
+                    )
+                    codex_executor._tool_def = tool_def
+                    codex_params = session.metadata.get("codex_parameters", {})
+                    codex_executor._last_parameters = codex_params
+                    session.codex_executor = codex_executor
 
         logger.info("Resumed session %s", session_id)
         return session

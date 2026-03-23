@@ -75,6 +75,18 @@ class ActiveSession:
         self._prompt_lock: asyncio.Lock = asyncio.Lock()
         # Interactive permission approval manager (None = bypass/auto mode)
         self.permission_manager: PermissionManager | None = None
+        # Plan mode approval gate — set when EnterPlanMode is intercepted.
+        # The relay task awaits this event before continuing the stream.
+        # None means no approval is pending.
+        self._plan_mode_event: asyncio.Event | None = None
+        self._plan_mode_approved: bool = False
+        # Plan review gate — set when ExitPlanMode is intercepted.
+        # The relay blocks here until the user approves or provides feedback.
+        # None means no plan review is pending.
+        self._plan_review_event: asyncio.Event | None = None
+        self._plan_review_approved: bool = False
+        # The text the user sent in response to the plan review (approval text or feedback).
+        self._plan_review_feedback: str | None = None
         # Token usage accumulators (running totals across all turns)
         self.input_tokens: int = 0
         self.output_tokens: int = 0
@@ -88,9 +100,34 @@ class ActiveSession:
         self._todos: list[dict[str, str]] = []
         # Reason why the session was paused (e.g. "max_turns"); None for manual pauses
         self.paused_reason: str | None = None
-        # The resolved absolute path of the latest @ProjectName mention in this session.
+        # The resolved absolute path of the project attached to this session.
+        # Set from the project_name field in the WS prompt message.
         # None means the session is "Global" (no project attached yet).
         self.main_project_path: str | None = None
+        # Transient error set when the client sends an invalid project_name.
+        # Cleared on the next successful project resolution. Not persisted to DB.
+        self.project_name_error: str | None = None
+        # Transient subprocess tracking — updated while a subprocess is running.
+        # Not persisted to DB; always None after session restore.
+        self.subprocess_started_at: datetime | None = None
+        self.subprocess_current_tool: str | None = None
+        self.subprocess_type: str | None = None
+        self.subprocess_display_name: str | None = None
+        self.subprocess_working_directory: str | None = None
+
+    @property
+    def agent_type(self) -> str | None:
+        """Return the managed agent type driving this session, or None for pure-LLM sessions.
+
+        Returns ``"claude_code"`` when a Claude Code executor is attached,
+        ``"codex"`` when a Codex executor is attached, and ``None`` for sessions
+        that are handled directly by the built-in LLM without a managed subprocess.
+        """
+        if self.claude_code_executor is not None:
+            return "claude_code"
+        if self.codex_executor is not None:
+            return "codex"
+        return None
 
     @property
     def todos(self) -> list[dict[str, str]]:
@@ -275,6 +312,8 @@ class SessionManager:
             "worktree": session.metadata.get("worktree"),
             "selected_worktree_path": session.metadata.get("selected_worktree_path"),
             "main_project_path": session.main_project_path,
+            "project_name_error": session.project_name_error,
+            "agent_type": session.agent_type,
         }
         for queue in self._update_subscribers.values():
             queue.put_nowait(update)
@@ -528,6 +567,7 @@ class SessionManager:
                     "worktree": s.metadata.get("worktree"),
                     "selected_worktree_path": s.metadata.get("selected_worktree_path"),
                     "main_project_path": s.main_project_path,
+                    "agent_type": s.agent_type,
                 }
             )
 
@@ -560,6 +600,7 @@ class SessionManager:
                         "worktree": archived_meta.get("worktree"),
                         "selected_worktree_path": archived_meta.get("selected_worktree_path"),
                         "main_project_path": row.main_project_path,
+                        "agent_type": None,
                     }
                 )
 
