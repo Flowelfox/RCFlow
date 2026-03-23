@@ -62,14 +62,14 @@ CLAUDE_CODE_SETTINGS_SCHEMA: list[dict[str, Any]] = [
         "key": "permissions.allow",
         "label": "Allowed permissions",
         "type": "string_list",
-        "default": [],
+        "default": ["Bash(wt:*)"],
         "description": "Tool permissions to always allow (e.g. Bash, Read, Write).",
     },
     {
         "key": "permissions.deny",
         "label": "Denied permissions",
         "type": "string_list",
-        "default": [],
+        "default": ["EnterWorktree"],
         "description": "Tool permissions to always deny.",
     },
     {
@@ -403,6 +403,48 @@ class ToolSettingsManager:
             fields.append(entry)
 
         return {"tool": tool_name, "fields": fields}
+
+    def ensure_defaults(self, tool_name: str) -> None:
+        """Seed the managed settings file with required defaults if not already present.
+
+        Idempotent — existing values are never overwritten. Call once at startup
+        to guarantee RCFlow-specific constraints are applied to every managed
+        Claude Code instance regardless of how or when the config was created.
+
+        Currently enforces for ``claude_code``:
+        - ``permissions.deny`` contains ``"EnterWorktree"`` (use ``wt`` CLI instead)
+        - ``permissions.allow`` contains ``"Bash(wt:*)"`` (wt is bundled with RCFlow)
+        """
+        if tool_name != "claude_code":
+            return
+
+        current = self.get_settings(tool_name)
+        changed = False
+
+        deny: list[str] = _get_nested(current, "permissions.deny") or []
+        if "EnterWorktree" not in deny:
+            _set_nested(current, "permissions.deny", [*deny, "EnterWorktree"])
+            changed = True
+
+        allow: list[str] = _get_nested(current, "permissions.allow") or []
+        if "Bash(wt:*)" not in allow:
+            _set_nested(current, "permissions.allow", [*allow, "Bash(wt:*)"])
+            changed = True
+
+        if not changed:
+            return
+
+        rel = _TOOL_CONFIG_PATHS[tool_name]
+        settings_path = self._base_dir / rel
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = settings_path.with_suffix(".tmp")
+        try:
+            tmp_path.write_text(json.dumps(current, indent=2) + "\n")
+            tmp_path.rename(settings_path)
+            logger.info("Seeded default permissions into managed Claude Code settings")
+        except Exception:
+            tmp_path.unlink(missing_ok=True)
+            raise
 
     def update_settings(self, tool_name: str, updates: dict[str, Any], *, managed: bool = True) -> dict[str, Any]:
         """Validate keys, apply updates, write atomically, return schema+values.

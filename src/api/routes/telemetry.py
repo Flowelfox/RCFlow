@@ -6,6 +6,10 @@ GET /api/telemetry/summary
     Global summary for this backend: lifetime token totals, average response times,
     most-used tools.
 
+GET /api/telemetry/worker/summary
+    Worker-level aggregate stats across all sessions: turn/token/tool totals,
+    avg/p95 latency, error rate, session count, and top tools.
+
 GET /api/telemetry/sessions/{session_id}/summary
     Per-session turn table and aggregate stats (avg/p95 latency, error rate, etc.).
 
@@ -126,6 +130,109 @@ async def get_global_summary(
         "total_cache_creation_tokens": int(total_cache_creation or 0),
         "total_cache_read_tokens": int(total_cache_read or 0),
         "avg_llm_duration_ms": avg_llm_ms,
+        "top_tools": top_tools,
+    }
+
+
+# ------------------------------------------------------------------
+# GET /api/telemetry/worker/summary
+# ------------------------------------------------------------------
+
+@router.get(
+    "/worker/summary",
+    summary="Worker-level telemetry summary",
+    description=(
+        "Returns aggregate statistics across all sessions for this backend/worker: "
+        "session count, turn/token/tool totals, avg and p95 LLM and tool latency, "
+        "error rate, and the ten most-used tools."
+    ),
+    response_model=dict[str, Any],
+)
+async def get_worker_summary(
+    request: Request,
+    db: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    """Return worker-level aggregated telemetry across all sessions."""
+    backend_id = _backend_id(request)
+
+    # Count distinct sessions
+    session_count_stmt = select(func.count(func.distinct(SessionTurn.session_id))).where(
+        SessionTurn.backend_id == backend_id,
+    )
+    session_count: int = (await db.execute(session_count_stmt)).scalar_one() or 0
+
+    # Token/turn totals from completed, non-interrupted turns
+    token_stmt = select(
+        func.sum(SessionTurn.input_tokens),
+        func.sum(SessionTurn.output_tokens),
+        func.sum(SessionTurn.cache_creation_tokens),
+        func.sum(SessionTurn.cache_read_tokens),
+        func.count(SessionTurn.id),
+    ).where(
+        SessionTurn.backend_id == backend_id,
+        SessionTurn.ts_end.is_not(None),
+        SessionTurn.interrupted.is_(False),
+    )
+    token_row = (await db.execute(token_stmt)).one()
+    total_input, total_output, total_cache_creation, total_cache_read, turn_count = token_row
+
+    # LLM duration for avg + p95
+    llm_dur_stmt = select(SessionTurn.llm_duration_ms).where(
+        SessionTurn.backend_id == backend_id,
+        SessionTurn.llm_duration_ms.is_not(None),
+        SessionTurn.interrupted.is_(False),
+    )
+    llm_durations = [r[0] for r in (await db.execute(llm_dur_stmt)).all()]
+    avg_llm_ms = round(sum(llm_durations) / len(llm_durations), 2) if llm_durations else None
+    p95_llm_ms = _p95_ms(llm_durations)
+
+    # Tool stats
+    tool_stmt = select(ToolCall).where(
+        ToolCall.backend_id == backend_id,
+        ToolCall.ts_end.is_not(None),
+    )
+    tool_calls = (await db.execute(tool_stmt)).scalars().all()
+    tool_durations = [tc.duration_ms for tc in tool_calls if tc.duration_ms is not None]
+    error_count = sum(1 for tc in tool_calls if tc.status == "error")
+    avg_tool_ms = round(sum(tool_durations) / len(tool_durations), 2) if tool_durations else None
+    p95_tool_ms = _p95_ms(tool_durations)
+    error_rate = round(error_count / len(tool_calls), 4) if tool_calls else 0.0
+
+    # Top tools
+    top_tools_stmt = (
+        select(
+            ToolCall.tool_name,
+            func.count(ToolCall.id),
+            func.avg(ToolCall.duration_ms),
+        )
+        .where(ToolCall.backend_id == backend_id, ToolCall.ts_end.is_not(None))
+        .group_by(ToolCall.tool_name)
+        .order_by(func.count(ToolCall.id).desc())
+        .limit(10)
+    )
+    top_tools = [
+        {
+            "tool_name": r[0],
+            "call_count": r[1],
+            "avg_duration_ms": round(float(r[2]), 2) if r[2] is not None else None,
+        }
+        for r in (await db.execute(top_tools_stmt)).all()
+    ]
+
+    return {
+        "worker_id": backend_id,
+        "session_count": session_count,
+        "turn_count": turn_count or 0,
+        "total_input_tokens": int(total_input or 0),
+        "total_output_tokens": int(total_output or 0),
+        "total_cache_creation_tokens": int(total_cache_creation or 0),
+        "total_cache_read_tokens": int(total_cache_read or 0),
+        "total_tool_calls": len(tool_calls),
+        "avg_llm_duration_ms": avg_llm_ms,
+        "p95_llm_duration_ms": p95_llm_ms,
+        "avg_tool_duration_ms": avg_tool_ms,
+        "p95_tool_duration_ms": p95_tool_ms,
+        "error_rate": error_rate,
         "top_tools": top_tools,
     }
 

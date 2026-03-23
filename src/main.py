@@ -86,6 +86,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     # Tool settings (per-tool isolated config)
     tool_settings = ToolSettingsManager()
+    tool_settings.ensure_defaults("claude_code")
     app.state.tool_settings = tool_settings
 
     # Artifact scanner
