@@ -157,13 +157,18 @@ On wide layouts (>700px), the main content area supports multiple simultaneous s
 - `PaneHeader` — 32px bar with session title and close button.
 - `TodoPanel` — right-side panel showing the active session's `TodoWrite` task list.
 - `ProjectPanel` (`lib/ui/widgets/project_panel.dart`) — right-side panel with two modes:
-  - **Global** (`main_project_path == null`): prompts the user to type `@ProjectName` to attach a project.
-  - **Project** (`main_project_path != null`): shows the attached project name, its git worktrees (create / merge / remove / set-active), and a scrollable list of project artifacts fetched from `GET /api/projects/{name}/artifacts`. Both sections load in parallel and auto-refresh when `main_project_path` or `workerId` changes. Panel key: `"project"`. Icon: `folder_outlined`.
-- `StatisticsPane` (`lib/ui/widgets/statistics_pane.dart`) — full-screen pane (top-level navigation bookmark) for time-series telemetry charts and per-session summaries:
+  - **Global** (`main_project_path == null`): prompts the user to attach a project via the `@ProjectName` picker chip above the input field.
+  - **Project** (`main_project_path != null`): shows the attached project name, its git worktrees (create / merge / remove / set-active), and a scrollable list of project artifacts fetched from `GET /api/projects/{name}/artifacts`. Both sections load in parallel and auto-refresh when `main_project_path` or `workerId` changes. Sections are **collapsible** (chevron toggle) and **reorderable** (up/down arrows in each section header). Panel key: `"project"`. Icon: `folder_outlined`.
+- **Project chip** (`_ProjectChip` in `lib/ui/widgets/input_area.dart`) — displayed above the message input field when a project is attached. Styled like the Worker chip. Shows the folder name and an × to clear. Turns red with a tooltip when `project_name_error` is set. Users attach a project by typing `@ProjectName` in the input — when they confirm (via overlay selection, Space, or Enter after a complete name), the `@name` text is erased and the chip is populated instead.
+- `StatisticsPane` (`lib/ui/widgets/statistics_pane.dart`) — right-panel bookmark within a session pane for time-series telemetry charts and per-session summaries:
   - **Filter bar**: zoom-level chips (`Minute` / `Hour` / `Day`) and a manual refresh button. Changing zoom resets the time window to the zoom's default duration and triggers an immediate fetch.
   - **Charts section**: six line charts rendered via `fl_chart` — Tokens Sent, Tokens Received, Avg LLM Duration (ms), Avg Tool Duration (ms), Turn Count, Tool Call Count. Interactive tooltips on hover/tap with per-bucket value and timestamp. State managed by `StatisticsPaneState` (`lib/state/statistics_pane_state.dart`).
   - **Session summary card** (visible when a session is selected): stat pills (total turns, tokens, avg/p95 LLM and tool latency, error rate) and a scrollable per-turn table with TTFT, LLM duration, token counts, tool call count, and interrupted flag.
   - Data fetched from `GET /api/telemetry/timeseries` (charts) and `GET /api/telemetry/sessions/{id}/summary` (session card). Models defined in `lib/models/telemetry.dart` (`ZoomLevel`, `BucketPoint`, `TurnSummary`, `SessionTelemetrySummary`). Chart widget factored into `lib/ui/widgets/statistics_panel/telemetry_chart.dart`.
+- `WorkerStatsPane` (`lib/ui/widgets/worker_stats_pane.dart`) — worker-level aggregate statistics shown as a full-screen dialog (opened via right-click → Stats on a worker header):
+  - Same time-series charts and zoom controls as `StatisticsPane`, using the global rollup timeseries (no `session_id` filter).
+  - **Worker summary card**: stat pills for session count, total turns, in/out tokens, tool calls, avg/p95 LLM latency, avg tool latency, and error rate. Top-tools table shows the ten most-called tools with average duration.
+  - Data fetched from `GET /api/telemetry/timeseries` (no session_id) and `GET /api/telemetry/worker/summary`. Model: `WorkerTelemetrySummary` in `lib/models/telemetry.dart`. Self-contained widget — takes a `WorkerConnection` directly, no `PaneState` dependency.
 
 **Edge cases**: Last pane close resets to home (tree always has >= 1 leaf). Same session in multiple panes receives messages independently. Reconnection re-subscribes all pane sessions. Mobile layout remains single-pane, using `activePane` with a `ChangeNotifierProvider`. Last pane close resets to home (tree always has >= 1 leaf). Same session in multiple panes receives messages independently. Reconnection re-subscribes all pane sessions. Mobile layout remains single-pane, using `activePane` with a `ChangeNotifierProvider`.
 
@@ -253,6 +258,7 @@ The client can connect to multiple RCFlow servers simultaneously. Each server co
 | POST   | `/api/sessions/{session_id}/cancel`     | Yes  | Cancel a running session (kills subprocess)      |
 | POST   | `/api/sessions/{session_id}/end`        | Yes  | Gracefully end a session (user-confirmed completion) |
 | POST   | `/api/sessions/{session_id}/pause`      | Yes  | Pause an active session. Kills any running Claude Code subprocess. New prompts rejected until resumed. |
+| POST   | `/api/sessions/{session_id}/interrupt`  | Yes  | Kill any running subprocess without pausing the session. Session stays ACTIVE and immediately accepts new prompts. Broadcasts a null `subprocess_status` ephemeral message. |
 | POST   | `/api/sessions/{session_id}/resume`     | Yes  | Resume a paused session. Client can subscribe to receive all buffered output. |
 | POST   | `/api/sessions/{session_id}/restore`    | Yes  | Restore an archived (completed/failed/cancelled) session back to active state. Rebuilds conversation history, buffer, and Claude Code executor state. |
 | PATCH  | `/api/sessions/{session_id}/title`      | Yes  | Set or clear a session title (max 200 chars). Body: `{"title": "..."}` or `{"title": null}`. |
@@ -283,6 +289,7 @@ The client can connect to multiple RCFlow servers simultaneously. Each server co
 | PATCH  | `/api/sessions/{session_id}/worktree`   | Yes  | Set or clear the selected worktree for a session. Body: `{"path": string \| null}`. When set, Claude Code and Codex agents use this path as their working directory. Returns `{"session_id", "selected_worktree_path"}`. |
 | GET    | `/api/projects/{name}/artifacts`        | Yes  | List artifacts whose `file_path` is under the given project directory. Resolves the project name against `PROJECTS_DIR`. Returns `{"project_name", "project_path", "artifacts": [{artifact_id, file_path, file_name, file_extension, file_size, mime_type, discovered_at, modified_at, session_id}]}`. Returns 404 if the project name is not found. |
 | GET    | `/api/telemetry/summary`               | Yes  | Global lifetime telemetry summary for this backend: total token usage, average LLM/tool latencies, and top-10 most-used tools by call count. |
+| GET    | `/api/telemetry/worker/summary`        | Yes  | Worker-level aggregate stats across all sessions: session count, turn/token/tool totals, avg/p95 LLM and tool latency, error rate, top-10 tools. Used by the worker stats dialog. |
 | GET    | `/api/telemetry/sessions/{session_id}/summary` | Yes | Per-session telemetry: turn-by-turn breakdown (timestamps, token counts, TTFT, tool calls per turn) plus aggregate stats (avg/p95 LLM and tool latency, error rate, session duration). |
 | GET    | `/api/telemetry/timeseries`            | Yes  | Pre-aggregated time-series data. Required query params: `zoom` (`minute`/`hour`/`day`), `start`, `end` (ISO8601 UTC). Optional: `session_id` (UUID, filters to one session; omit for global rollup), `metric` (returns only that field). Returns `{zoom, start, end, session_id, last_updated_at, series: [{bucket, tokens_sent, tokens_received, avg_llm_duration_ms, avg_tool_duration_ms, turn_count, tool_call_count, error_count}]}`. |
 
@@ -338,6 +345,7 @@ The server resolves each `attachment_id` from the `AttachmentStore`, builds mult
 
 - `session_id`: `null` to create a new session, or an existing session ID to send a follow-up prompt to a conversational or long-running session.
 - `attachments`: Optional list. Each entry must have `id` (from `POST /api/uploads`) and `name`/`mime_type` for display. Entries with missing or expired IDs are silently skipped.
+- `project_name`: Optional folder name (not a full path) of the project to attach to this session. The backend resolves it via `PROJECTS_DIR` and sets `session.main_project_path`. On failure (project not found or unreadable) the backend pushes an `error` message with code `PROJECT_ERROR` and broadcasts a `session_update` with a non-null `project_name_error`. The client sends this field from the project chip (not from `@mention` text).
 
 End a session (user-confirmed completion):
 
@@ -400,9 +408,12 @@ Send a mid-turn interactive response (plan mode approval, question answers, etc.
 {
   "type": "interactive_response",
   "session_id": "uuid",
-  "text": "yes"
+  "text": "yes",
+  "accepted": true
 }
 ```
+
+The `accepted` field is optional (defaults to `true`) and is used for plan review responses: `true` = approve the plan, `false` = provide feedback for revision. It is ignored for all other interactive response types (question answers, plan mode approval).
 
 Respond to a permission request (allow/deny a tool use):
 
@@ -562,6 +573,20 @@ Emitted when Claude Code produces `thinking` content blocks in `assistant` event
 
 ```json
 {
+  "type": "subprocess_status",
+  "session_id": "uuid",
+  "subprocess_type": "claude_code",
+  "display_name": "Claude Code",
+  "working_directory": "/home/user/project",
+  "current_tool": "Bash",
+  "started_at": "2026-03-20T12:00:00+00:00"
+}
+```
+
+`subprocess_status` is **ephemeral** — it is broadcast to live subscribers only and is never archived to `text_history` or replayed on reconnect. It signals that a subprocess (Claude Code or Codex) has started, updated its active tool, or finished. When the subprocess ends, a null-type variant is sent: `{"type": "subprocess_status", "session_id": "uuid", "subprocess_type": null}`. The client uses this to show/hide the subprocess status bar. `current_tool` is optional and may be absent or `null`.
+
+```json
+{
   "type": "session_paused",
   "session_id": "uuid",
   "paused_at": "2025-01-15T10:30:00+00:00",
@@ -593,12 +618,23 @@ The `reason` field is optional. `"max_turns"` means Claude Code hit its configur
 }
 ```
 
+The relay blocks the Claude Code stream while this message is pending. The client must send an `interactive_response` with `text: "yes"` (allow) or `text: "no"` (deny). On denial the session is ended with a `PLAN_MODE_DENIED` error. The message gains an `"accepted": true/false` field once resolved.
+
 ```json
 {
   "type": "plan_review_ask",
-  "session_id": "uuid"
+  "session_id": "uuid",
+  "plan_input": {"plan": "1. Step one\n2. Step two"}
 }
 ```
+
+`plan_input` contains the raw `input` dict from Claude Code's `ExitPlanMode` tool call. The `plan` key (or `content` as fallback) holds the plan text to display.
+
+The relay blocks the Claude Code stream while this message is pending. The client must send an `interactive_response` with an `accepted` field:
+- `accepted: true` — the user approves the plan. The relay forwards the text to Claude Code's stdin and execution proceeds.
+- `accepted: false` — the user provides feedback. The relay forwards the feedback text to Claude Code's stdin; Claude Code revises the plan and will call `ExitPlanMode` again.
+
+The message gains an `"accepted": true/false` field once resolved. Session cancel or pause auto-denies the pending gate.
 
 ```json
 {
@@ -619,17 +655,23 @@ The `reason` field is optional. `"max_turns"` means Claude Code hit its configur
   "paused_reason": "max_turns",
   "worktree": null,
   "selected_worktree_path": null,
-  "main_project_path": "/home/user/Projects/RCFlow"
+  "main_project_path": "/home/user/Projects/RCFlow",
+  "project_name_error": null,
+  "agent_type": "claude_code"
 }
 ```
 
 The `paused_reason` field is only present when `status == "paused"`. `"max_turns"` means the session was automatically paused because Claude Code reached its `--max-turns` limit. `null` (absent) means a manual pause.
+
+The `agent_type` field identifies the managed coding agent driving the session: `"claude_code"`, `"codex"`, or `null` for pure-LLM sessions. Only live (in-memory) sessions populate this field; archived sessions always return `null`. The client uses this to determine which tool to open when the user invokes `/plugins`.
 
 Token usage fields are included in every `session_update` broadcast:
 - `input_tokens` / `output_tokens`: Tokens used by the global LLM pipeline (Anthropic/Bedrock/OpenAI).
 - `cache_creation_input_tokens` / `cache_read_input_tokens`: Anthropic prompt caching breakdown.
 - `tool_input_tokens` / `tool_output_tokens`: Tokens used by agent tool sessions (Claude Code, Codex).
 - `tool_cost_usd`: Cumulative cost reported by Claude Code (`cost_usd` from result events).
+
+**Project name error field** (`project_name_error`): transient string field set when the backend cannot resolve or access the project folder sent via the WS prompt `project_name` field. Cleared on the next successful resolution. The client renders the project chip in error state (red, with tooltip) when this field is non-null. The field is NOT persisted to the database.
 
 ### Output Audio Protocol
 
@@ -666,6 +708,8 @@ Clients control which sessions they receive output for by sending subscribe/unsu
 ```
 
 When subscribing to an existing session, the server sends the **full buffered history** for that session, then continues with live streaming. This allows pause/resume and session switching without data loss.
+
+**Ephemeral messages** are broadcast to live subscribers only via `SessionBuffer.push_ephemeral()`. They are never appended to `text_history` and are never replayed on reconnect. The sequence counter is still incremented so ordering is preserved for live subscribers. `subprocess_status` is the only current ephemeral message type.
 
 **Session metadata updates** (title, status, activity state, and token usage) are automatically streamed to all connected `/ws/output/text` clients without explicit subscription. When any session's title, status, activity state, or token counts change, a `session_update` message is broadcast to all output clients. This enables real-time updates of the session list and token usage display in the client UI without polling.
 
@@ -953,6 +997,13 @@ Text and audio streams are produced at different rates. Text chunks arrive as th
   are rejected. PAUSED sessions are exempt from inactivity reaping.
   Resume via POST /api/sessions/{id}/resume.
 
+  A running subprocess can be killed WITHOUT pausing the session via
+  POST /api/sessions/{id}/interrupt. Unlike pause, the session
+  remains ACTIVE and immediately accepts new prompts. The subprocess
+  executor and stream task are cancelled, AGENT_GROUP_END is pushed,
+  and a null subprocess_status ephemeral message is broadcast so the
+  client clears its subprocess indicator.
+
   ARCHIVED sessions (COMPLETED/FAILED/CANCELLED that have been
   written to the database) can be RESTORED back to ACTIVE via
   POST /api/sessions/{id}/restore or the restore_session WebSocket
@@ -1218,9 +1269,11 @@ The `/` trigger fires **only when `/` is the first character of the text field**
 | Source | Description |
 |--------|-------------|
 | `rcflow` | RCFlow built-in client-side commands (hardcoded) |
-| `claude_code_builtin` | Claude Code's own built-in slash commands (hardcoded) |
+| `claude_code_builtin` | Claude Code's own built-in slash commands — descriptions sourced live from Claude via `claude -p`, cached on disk; hard-coded fallback used when the binary is unavailable |
 | `claude_code_user` | User-level skills from `~/.claude/commands/*.md` |
 | `claude_code_project` | Project-level skills from `<projects_dir>/.claude/commands/*.md` |
+| `claude_code_plugin` | Commands contributed by installed and enabled Claude Code plugins (see below) |
+| `rcflow_plugin` | Commands from RCFlow-managed plugins in `<managed_tools_dir>/claude-code/plugins/` (see below) |
 
 #### RCFlow Built-in Commands
 
@@ -1231,12 +1284,89 @@ The `/` trigger fires **only when `/` is the first character of the text field**
 | `/help` | Display RCFlow tips and available commands as a system message in the pane |
 | `/pause` | Pause the current active session |
 | `/resume` | Resume the current paused session |
+| `/plugins` | Open plugin settings for the active coding agent (see below) |
 
 RCFlow commands are intercepted in `_send()` before the text reaches the WebSocket layer. Unknown `/foo` commands are not intercepted and fall through to `sendPrompt()`.
+
+#### /plugins Command
+
+`/plugins` is an RCFlow built-in that navigates the active pane to the **Worker Settings** pane for the current session's coding agent. If the session has an `agentType` (e.g. `"claude_code"` or `"codex"`), that tool is used; otherwise `"claude_code"` is the default. The `WorkerSettingsPane` widget shows the `"plugins"` section where the user can install, uninstall, enable, and disable plugins interactively.
+
+This replaces the old subcommand-based text interface (`/plugins list`, `/plugins install`, `/plugins remove`). The handler is `_dispatchPluginsCommand()` in `input_area.dart`.
+
+#### Plugin Management API
+
+RCFlow uses two API layers:
+
+1. **Canonical (v2)** — tool-scoped endpoints under `/api/tools/{tool_name}/plugins`
+2. **Deprecated aliases** — the old `/api/rcflow-plugins` routes, preserved for backwards compatibility; they carry an `X-RCFlow-Deprecated` response header
+
+Only `claude_code` is fully supported for plugin operations. `codex` is a known tool name but returns 422 (not yet supported) for all operations.
+
+##### Canonical Endpoints
+
+**`GET /api/tools/{tool_name}/plugins`** — list plugins for a managed tool.
+
+Response:
+```json
+{
+  "plugins": [
+    {
+      "name": "my-plugin",
+      "description": "Does things",
+      "commands": [{"name": "do-thing", "description": "Do the thing"}],
+      "path": "/abs/path",
+      "enabled": true
+    }
+  ]
+}
+```
+
+**`POST /api/tools/{tool_name}/plugins`** — install a plugin. Body: `{"source": "<git-url-or-local-path>", "name": "<optional>"}`.
+
+- If source is an existing local directory, it is copied via `shutil.copytree`.
+- Otherwise, `git clone --depth 1 <source> <dest>` is run (requires `git` on PATH; returns 503 if absent).
+- Returns 201 with `{"plugin": {...}}`, 409 if name already exists, 504 on clone timeout.
+
+**`DELETE /api/tools/{tool_name}/plugins/{name}`** — uninstall by name (removes the directory). Returns 200 on success, 404 if not found.
+
+**`PATCH /api/tools/{tool_name}/plugins/{name}`** — enable or disable a plugin. Body: `{"enabled": bool}`. Returns 200. Disabled state is persisted to `plugins_state.json` inside the tool's plugins directory.
+
+##### Plugin State Persistence
+
+A `PluginStateManager` class (in `src/api/routes/rcflow_plugins.py`) handles reading and writing `plugins_state.json` atomically. This file lives at `<tool_plugins_dir>/plugins_state.json` and contains an object with a `"disabled"` key (list of disabled plugin names):
+
+```json
+{"disabled": ["old-plugin"]}
+```
+
+Disabled plugins are excluded from the slash command palette. The `plugins_state.json` file is separate from Claude Code's own `settings.json` to avoid polluting the user's Claude Code configuration.
+
+##### Deprecated Aliases
+
+| Old Endpoint | Maps To |
+|---|---|
+| `GET /api/rcflow-plugins` | `GET /api/tools/claude_code/plugins` |
+| `POST /api/rcflow-plugins` | `POST /api/tools/claude_code/plugins` |
+| `DELETE /api/rcflow-plugins/{name}` | `DELETE /api/tools/claude_code/plugins/{name}` |
+
+All return `X-RCFlow-Deprecated: true` in the response headers.
+
+Client methods: `fetchToolPlugins()`, `installToolPlugin()`, `uninstallToolPlugin()`, `setToolPluginEnabled()` on `WebSocketService`.
 
 #### Claude Code Commands
 
 Claude Code commands are only shown in the palette when the active session's executor is `claude_code` (i.e. `pane_state.isClaudeCodeSession == true`). When selected, they are sent as-is through `sendPrompt()` to the Claude Code subprocess, which handles them natively.
+
+The following are registered as `claude_code_builtin`: `help`, `clear`, `compact`, `cost`, `resume`, `init`, `bug`, `pr-comments`, `permissions`, `doctor`, `vim`, `btw`.
+
+Descriptions for `claude_code_builtin` commands are obtained by invoking `claude -p --no-session-persistence --output-format text --max-budget-usd 0.05` with a prompt that asks Claude to output a JSON object mapping command names to descriptions. The result is cached to disk (`<managed_tools_dir>/cc_builtins_cache.json`) keyed by the installed Claude Code version string so that the one-time API call is not repeated unless the binary is updated. A hard-coded fallback list is used when the binary is absent, the subprocess times out, or the response cannot be parsed.
+
+Resolution order for `claude_code_builtin` descriptions:
+1. In-process memory cache (populated after the first resolution within a server process).
+2. On-disk cache (`cc_builtins_cache.json`) if the cached Claude Code version matches the installed version.
+3. Live fetch via `claude -p` (one API call per new Claude Code version).
+4. Hard-coded fallback.
 
 Claude Code skill `.md` files must have a YAML frontmatter block with a `description` field:
 
@@ -1250,6 +1380,40 @@ allowed-tools: Bash(git add:*), Bash(git commit:*)
 
 The backend parses the `description` field via regex at request time (no caching). Files that cannot be read or lack a description field are included with an empty description.
 
+#### Claude Code Plugin Commands
+
+Claude Code supports installable plugins (managed via `claude install`). Each plugin is cached under `~/.claude/plugins/cache/<marketplace>/<plugin-name>/<version>/` and can contribute slash commands by placing `.md` files in a `commands/` subdirectory of the plugin root.
+
+Enumeration logic:
+1. Read `~/.claude/settings.json` → `enabledPlugins` map (`{ "name@marketplace": true/false }`) — only plugins with value `true` are included.
+2. Read `~/.claude/plugins/installed_plugins.json` → `plugins` map — resolves each plugin key to its `installPath` on disk. When multiple versions exist, the last entry (most recently installed) is used.
+3. For each enabled plugin, enumerate `<installPath>/commands/*.md` using `_parse_plugin_command`.
+4. Files whose YAML frontmatter contains `hide-from-slash-command-tool: "true"` are excluded — Claude Code uses this field to suppress internal helper commands (e.g., loop-control scripts) from the autocomplete palette.
+5. Description values are stripped of surrounding quotes so both `description: My skill` and `description: "My skill"` render identically.
+6. Command names are deduplicated across plugins (first occurrence wins, plugins sorted alphabetically by key).
+
+Plugin commands are returned with `"source": "claude_code_plugin"` and an additional `"plugin"` field containing the short plugin name (the portion of the key before the `@` separator). In the client UI they are shown in a dedicated **"Plugins"** group, separate from the **"Claude Code"** group used for built-in and user/project commands.
+
+#### RCFlow-Managed Plugin Commands
+
+RCFlow maintains its own plugin directory at `<managed_tools_dir>/claude-code/plugins/` (e.g. `~/.local/share/rcflow/tools/claude-code/plugins/` on Linux, `%LOCALAPPDATA%/rcflow/tools/claude-code/plugins/` on Windows). This is separate from the user's global Claude Code plugin registry (`~/.claude/plugins/`) and is intended for plugins curated or deployed by RCFlow itself.
+
+Each subdirectory under this path is a plugin. A plugin contributes slash commands by placing `.md` files inside a `commands/` subfolder:
+
+```
+<managed_tools_dir>/claude-code/plugins/
+    my-plugin/
+        commands/
+            do-thing.md
+    another-plugin/
+        commands/
+            other-skill.md
+```
+
+The same `.md` frontmatter format applies (`description`, `hide-from-slash-command-tool`). Commands are returned with `"source": "rcflow_plugin"` and a `"plugin"` field set to the plugin directory name.
+
+**Lifecycle:** The plugins directory is created automatically during managed Claude Code installation (`ToolManager._install_claude_code` and `_install_claude_code_streaming`) via `get_managed_cc_plugins_dir()`, so it exists on every machine where RCFlow manages the Claude Code binary — not just the machine where the endpoint was first called. It is also created on first access if the directory is missing.
+
 #### Backend API
 
 **`GET /api/slash-commands?q=<query>`**
@@ -1262,16 +1426,18 @@ Response:
   "commands": [
     {"name": "clear",       "description": "Clear chat messages in this pane", "source": "rcflow"},
     {"name": "compact",     "description": "Compact conversation to save context", "source": "claude_code_builtin"},
-    {"name": "commit-push", "description": "Commit and push changes to remote", "source": "claude_code_user"}
+    {"name": "commit-push", "description": "Commit and push changes to remote", "source": "claude_code_user"},
+    {"name": "code-review", "description": "Code review a pull request", "source": "claude_code_plugin", "plugin": "code-review"},
+    {"name": "do-thing",    "description": "Do the thing",               "source": "rcflow_plugin",      "plugin": "my-plugin"}
   ]
 }
 ```
 
 #### Client UI
 
-The suggestion overlay renders commands in two visual groups separated by a divider and group header labels ("RCFLOW" and "CLAUDE CODE"). Commands are shown with:
+The suggestion overlay renders commands in three visual groups separated by dividers and group header labels ("RCFLOW", "CLAUDE CODE", "PLUGINS"). Both `claude_code_plugin` and `rcflow_plugin` commands appear under "PLUGINS". Commands are shown with:
 - A bolt icon (⚡) for RCFlow commands in the accent color
-- A terminal icon for Claude Code commands in muted color
+- A terminal icon for Claude Code and plugin commands in muted color
 - Command name with `/` prefix (query match highlighted)
 - Description on a second line
 
@@ -1467,6 +1633,12 @@ Each file defines one tool. Drop a `.json` file into `tools/` to register a new 
 
 The `claude_code` executor manages a Claude Code CLI subprocess with bidirectional stream-json communication. It enables delegating complex coding tasks to Claude Code while streaming output back to the client in real time.
 
+**Working directory priority:** The Claude Code executor selects the working directory with the following precedence:
+1. `working_directory` from the tool call input (LLM-specified).
+2. `session.metadata["selected_worktree_path"]` — the active worktree path for the session.
+3. `session.main_project_path` — the project folder attached via the project chip (new fallback).
+4. `"."` (current directory) as final fallback.
+
 **Working directory validation:** Before spawning the subprocess, the prompt router validates that the specified `working_directory` exists on disk. If it does not, the tool returns an error message to the LLM instead of starting a session. The system prompt also instructs the LLM to verify directory existence via `shell_exec` before calling `claude_code`, and to resolve project names to `~/Projects/<project_name>`.
 
 **How it works:**
@@ -1628,6 +1800,14 @@ RCFlow maintains isolated settings files for managed CLI tool instances so they 
 | Codex        | `codex/config/codex.json`                         | `CODEX_HOME`           |
 
 When launching tool subprocesses, `PromptRouter` injects the appropriate environment variable pointing to the tool's isolated config directory. This ensures RCFlow-managed instances use their own settings.
+
+**Startup defaults seeding:** At server startup, `ToolSettingsManager.ensure_defaults("claude_code")` is called in `main.py` immediately after the settings manager is created. It idempotently seeds the managed `settings.json` with two RCFlow-specific constraints if they are not already present:
+- `permissions.deny: ["EnterWorktree"]` — blocks the built-in `EnterWorktree` tool; `wt` CLI must be used instead to avoid isolated sub-sessions that reset permission state.
+- `permissions.allow: ["Bash(wt:*)"]` — pre-approves the `wt` CLI, which is bundled with RCFlow as a `wtpython` dependency and available in the RCFlow venv.
+
+Existing user values are never overwritten — the method only appends the missing entries.
+
+**`wt` PATH injection:** `_build_claude_code_extra_env()` checks whether `wt` is already resolvable on `PATH`. If not, it prepends `Path(sys.executable).parent` (the RCFlow venv's `bin/` directory) to the subprocess `PATH` so that the bundled `wt` binary is always available inside Claude Code sessions.
 
 **API endpoints:**
 
@@ -2253,6 +2433,31 @@ Dart model mirroring the backend `linear_issues` table. Includes `workerId`, `pr
 
 `PaneType` enum includes `linearIssue`. `PaneState` has a `linearIssueId` field. `SessionPane` dispatches to `LinearIssuePane` when `paneType == PaneType.linearIssue`.
 
+#### Pane — `PaneType.workerSettings`
+
+`PaneType` enum includes `workerSettings`. `PaneState` has `workerSettingsTool` (`String?`) and `workerSettingsSection` (`String?`) fields, plus `setWorkerSettings(toolName, {section})` and `clearWorkerSettings()` methods. `SessionPane` dispatches to `WorkerSettingsPane` when `paneType == PaneType.workerSettings`.
+
+`AppState` provides:
+- `openWorkerSettingsInPane(String toolName, {String section = 'plugins'})` — converts the active pane to `workerSettings` (pushing current view to nav history), or creates a new pane when none exist.
+- `closeWorkerSettingsView(String paneId)` — reverts the pane to chat mode.
+
+`PaneNavEntry` includes `workerSettingsTool` and `workerSettingsSection` fields so that back-navigation correctly restores the settings view.
+
+#### `WorkerSettingsPane`
+
+`rcflowclient/lib/ui/widgets/worker_settings_pane.dart`
+
+Full-pane plugin management UI for a managed coding agent tool. Layout:
+- **Header** (32 px): back button (when nav history exists), active-pane dot, extension icon, title (`"<Tool> — Plugins"`), split/close buttons.
+- **Install bar**: text field for plugin path/URL + "Install" button. Inline error on failure.
+- **Plugin list**: `ListView` of `_PluginTile` entries. Each tile shows:
+  - Plugin name + "disabled" badge when disabled
+  - Command chips (`/name` in accent color) for all contributed commands
+  - Enable/disable `Switch`
+  - Delete icon (with confirmation dialog)
+
+Data is fetched from `WebSocketService.fetchToolPlugins(toolName)` on load. Mutations call `installToolPlugin`, `uninstallToolPlugin`, and `setToolPluginEnabled`, then reload.
+
 #### `LinearIssuePane`
 
 `rcflowclient/lib/ui/widgets/linear_issue_pane.dart`
@@ -2335,14 +2540,15 @@ A background task (`_run_telemetry_loop` in `main.py`) calls `aggregate_pending(
 See the [HTTP API](#http-api) table for endpoint signatures. The three endpoints are:
 
 - **`GET /api/telemetry/summary`** — global lifetime stats (tokens, latencies, top tools).
+- **`GET /api/telemetry/worker/summary`** — same scope as global summary but richer: adds `session_count`, `total_tool_calls`, `p95_llm_duration_ms`, `avg_tool_duration_ms`, `p95_tool_duration_ms`, `error_rate`. Used by the worker stats dialog.
 - **`GET /api/telemetry/sessions/{session_id}/summary`** — per-turn breakdown with TTFT and aggregate p95 latencies for one session.
 - **`GET /api/telemetry/timeseries`** — bucketed series from `telemetry_minutely`, with zoom-level roll-up (`minute`/`hour`/`day`) applied on read. `avg_llm_duration_ms` and `avg_tool_duration_ms` are derived from the stored sum + count.
 
 ### Flutter Client
 
-Data models: `lib/models/telemetry.dart` — `ZoomLevel` enum, `BucketPoint`, `TurnSummary`, `SessionTelemetrySummary`.
+Data models: `lib/models/telemetry.dart` — `ZoomLevel` enum, `BucketPoint`, `TurnSummary`, `SessionTelemetrySummary`, `WorkerTelemetrySummary`.
 State: `lib/state/statistics_pane_state.dart` — `StatisticsPaneState` (zoom level, time range, series data, session summary, loading/error flags).
-UI: see `StatisticsPane` under the Split View section above.
+UI: see `StatisticsPane` and `WorkerStatsPane` under the Split View section above.
 
 ---
 
