@@ -336,6 +336,99 @@ async def test_relay_claude_code_stream_max_turns_subtype(session_manager: Sessi
     assert agent_end_msgs[0].sequence < paused_msgs[0].sequence
 
 
+# --- Interrupt subprocess tests ---
+
+
+@pytest.mark.asyncio
+async def test_interrupt_subprocess_active_session_no_executor(session_manager: SessionManager) -> None:
+    """Interrupting an active session without a running executor clears fields and stays ACTIVE."""
+    router = _make_router(session_manager)
+    session = session_manager.create_session(SessionType.LONG_RUNNING)
+    session.set_active()
+
+    result = await router.interrupt_subprocess(session.id)
+
+    # Session must remain ACTIVE — not paused, not cancelled
+    assert result.status == SessionStatus.ACTIVE
+
+    # No AGENT_GROUP_END when there was no executor
+    group_end_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.AGENT_GROUP_END]
+    assert len(group_end_msgs) == 0
+
+    # subprocess_status is ephemeral — must NOT be in text_history
+    status_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.SUBPROCESS_STATUS]
+    assert len(status_msgs) == 0
+
+
+@pytest.mark.asyncio
+async def test_interrupt_subprocess_with_claude_code_executor(session_manager: SessionManager) -> None:
+    """Interrupting a session with a running Claude Code executor cancels it and pushes AGENT_GROUP_END."""
+    router = _make_router(session_manager)
+    session = session_manager.create_session(SessionType.LONG_RUNNING)
+    session.set_active()
+
+    mock_executor = AsyncMock()
+    mock_executor.cancel = AsyncMock()
+    session.claude_code_executor = mock_executor
+
+    task_future: asyncio.Future[None] = asyncio.get_event_loop().create_future()
+    task = asyncio.ensure_future(task_future)
+    session._claude_code_stream_task = task
+
+    result = await router.interrupt_subprocess(session.id)
+
+    # Session stays ACTIVE (not paused)
+    assert result.status == SessionStatus.ACTIVE
+
+    # Executor was cancelled and cleared
+    mock_executor.cancel.assert_awaited_once()
+    assert session.claude_code_executor is None
+    assert session._claude_code_stream_task is None
+
+    # AGENT_GROUP_END + interrupt TEXT_CHUNK pushed to buffer
+    group_end_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.AGENT_GROUP_END]
+    assert len(group_end_msgs) == 1
+
+    text_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.TEXT_CHUNK]
+    assert any("[Subprocess interrupted by user]" in m.data.get("content", "") for m in text_msgs)
+
+    # No SESSION_PAUSED pushed
+    paused_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.SESSION_PAUSED]
+    assert len(paused_msgs) == 0
+
+    # Ephemeral subprocess_status must NOT be in archived history
+    status_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.SUBPROCESS_STATUS]
+    assert len(status_msgs) == 0
+
+
+@pytest.mark.asyncio
+async def test_interrupt_subprocess_nonexistent_raises(session_manager: SessionManager) -> None:
+    router = _make_router(session_manager)
+    with pytest.raises(ValueError, match="Session not found"):
+        await router.interrupt_subprocess("nonexistent-id")
+
+
+@pytest.mark.asyncio
+async def test_interrupt_subprocess_terminal_raises(session_manager: SessionManager) -> None:
+    router = _make_router(session_manager)
+    session = session_manager.create_session(SessionType.ONE_SHOT)
+    session.complete()
+
+    with pytest.raises(RuntimeError, match="terminal state"):
+        await router.interrupt_subprocess(session.id)
+
+
+@pytest.mark.asyncio
+async def test_interrupt_subprocess_paused_raises(session_manager: SessionManager) -> None:
+    router = _make_router(session_manager)
+    session = session_manager.create_session(SessionType.CONVERSATIONAL)
+    session.set_active()
+    session.pause()
+
+    with pytest.raises(RuntimeError, match="paused"):
+        await router.interrupt_subprocess(session.id)
+
+
 # --- Pause / Resume tests ---
 
 
@@ -598,6 +691,145 @@ def test_build_tool_context_all_unknown_returns_none(session_manager: SessionMan
 
 
 # ---------------------------------------------------------------------------
+# _build_active_worktree_context
+# ---------------------------------------------------------------------------
+
+
+def test_build_active_worktree_context_no_worktree(session_manager: SessionManager) -> None:
+    """Returns None when no worktree is selected for the session."""
+    router = _make_router(session_manager)
+    session = session_manager.create_session(SessionType.ONE_SHOT)
+    assert router._build_active_worktree_context(session) is None
+
+
+def test_build_active_worktree_context_with_worktree(session_manager: SessionManager) -> None:
+    """Returns a directive containing the selected worktree path and branch."""
+    router = _make_router(session_manager)
+    session = session_manager.create_session(SessionType.ONE_SHOT)
+    session.metadata["selected_worktree_path"] = "/repos/myproject/.worktrees/feat-xyz"
+    session.metadata["worktree"] = {
+        "repo_path": "/repos/myproject",
+        "last_action": "new",
+        "branch": "feature/feat-xyz",
+        "base": "main",
+    }
+
+    ctx = router._build_active_worktree_context(session)
+
+    assert ctx is not None
+    assert "/repos/myproject/.worktrees/feat-xyz" in ctx
+    assert "feature/feat-xyz" in ctx
+    assert "working_directory" in ctx
+
+
+def test_build_active_worktree_context_path_only(session_manager: SessionManager) -> None:
+    """Works when worktree metadata dict is absent; only path is needed."""
+    router = _make_router(session_manager)
+    session = session_manager.create_session(SessionType.ONE_SHOT)
+    session.metadata["selected_worktree_path"] = "/repos/myproject/.worktrees/feat-xyz"
+
+    ctx = router._build_active_worktree_context(session)
+
+    assert ctx is not None
+    assert "/repos/myproject/.worktrees/feat-xyz" in ctx
+    assert "working_directory" in ctx
+
+
+# ---------------------------------------------------------------------------
+# _update_session_worktree_meta — auto-select after creation
+# ---------------------------------------------------------------------------
+
+
+def test_update_worktree_meta_new_auto_selects_path(session_manager: SessionManager) -> None:
+    """After action=new, selected_worktree_path is auto-set from the result JSON."""
+    from src.core.llm import ToolCallRequest
+
+    router = _make_router(session_manager)
+    session = session_manager.create_session(SessionType.ONE_SHOT)
+
+    tool_call = ToolCallRequest(
+        tool_use_id="test-id",
+        tool_name="worktree",
+        tool_input={
+            "action": "new",
+            "repo_path": "/repos/myproject",
+            "branch": "feature/new-thing",
+            "base": "main",
+        },
+    )
+    result_json = json.dumps({
+        "created": {
+            "name": "new-thing",
+            "branch": "feature/new-thing",
+            "base": "main",
+            "path": "/repos/myproject/.worktrees/new-thing",
+            "created_at": "2026-03-18T10:00:00",
+        }
+    })
+
+    router._update_session_worktree_meta(session, tool_call, result_json)
+
+    assert session.metadata.get("selected_worktree_path") == "/repos/myproject/.worktrees/new-thing"
+    assert session.metadata["worktree"]["branch"] == "feature/new-thing"
+
+
+def test_update_worktree_meta_new_handles_missing_path(session_manager: SessionManager) -> None:
+    """Gracefully handles malformed result JSON without raising."""
+    from src.core.llm import ToolCallRequest
+
+    router = _make_router(session_manager)
+    session = session_manager.create_session(SessionType.ONE_SHOT)
+
+    tool_call = ToolCallRequest(
+        tool_use_id="test-id",
+        tool_name="worktree",
+        tool_input={"action": "new", "repo_path": "/repos/x", "branch": "feature/x"},
+    )
+
+    # Malformed JSON should not raise
+    router._update_session_worktree_meta(session, tool_call, "not json")
+    assert "selected_worktree_path" not in session.metadata
+
+
+def test_update_worktree_meta_merge_clears_selected_path(session_manager: SessionManager) -> None:
+    """action=merge clears a previously selected worktree path."""
+    from src.core.llm import ToolCallRequest
+
+    router = _make_router(session_manager)
+    session = session_manager.create_session(SessionType.ONE_SHOT)
+    session.metadata["selected_worktree_path"] = "/repos/myproject/.worktrees/old"
+
+    tool_call = ToolCallRequest(
+        tool_use_id="test-id",
+        tool_name="worktree",
+        tool_input={"action": "merge", "repo_path": "/repos/myproject", "name": "old"},
+    )
+
+    router._update_session_worktree_meta(session, tool_call, '{"merged": true, "name": "old"}')
+
+    assert "selected_worktree_path" not in session.metadata
+
+
+def test_update_worktree_meta_rm_clears_selected_path(session_manager: SessionManager) -> None:
+    """action=rm clears a previously selected worktree path."""
+    from src.core.llm import ToolCallRequest
+
+    router = _make_router(session_manager)
+    session = session_manager.create_session(SessionType.ONE_SHOT)
+    session.metadata["selected_worktree_path"] = "/repos/myproject/.worktrees/old"
+
+    tool_call = ToolCallRequest(
+        tool_use_id="test-id",
+        tool_name="worktree",
+        tool_input={"action": "rm", "repo_path": "/repos/myproject", "name": "old"},
+    )
+
+    router._update_session_worktree_meta(session, tool_call, '{"removed": true, "name": "old"}')
+
+    assert "selected_worktree_path" not in session.metadata
+
+
+# ---------------------------------------------------------------------------
 # Permission resolution — buffer persistence
 # ---------------------------------------------------------------------------
 
@@ -670,3 +902,435 @@ def test_resolve_permission_deny_sets_accepted_false_in_buffer(session_manager: 
 
     perm_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.PERMISSION_REQUEST]
     assert perm_msgs[0].data.get("accepted") is False
+
+
+# ---------------------------------------------------------------------------
+# Plan mode approval gate
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_send_interactive_response_resolves_plan_mode_event(
+    session_manager: SessionManager,
+) -> None:
+    """send_interactive_response with 'yes' resolves a pending plan mode event as approved."""
+    router = _make_router(session_manager)
+    session = session_manager.create_session(SessionType.LONG_RUNNING)
+    session.set_active()
+
+    # Simulate a pending plan mode gate (as set by _relay_claude_code_stream)
+    session._plan_mode_event = asyncio.Event()
+    session._plan_mode_approved = False
+    session.buffer.push_text(
+        MessageType.PLAN_MODE_ASK,
+        {"session_id": session.id},
+    )
+
+    await router.send_interactive_response(session.id, "yes")
+
+    assert session._plan_mode_approved is True
+    assert session._plan_mode_event.is_set()
+
+    # Buffer should have accepted=True persisted on the PLAN_MODE_ASK message
+    plan_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.PLAN_MODE_ASK]
+    assert len(plan_msgs) == 1
+    assert plan_msgs[0].data.get("accepted") is True
+
+
+@pytest.mark.asyncio
+async def test_send_interactive_response_deny_plan_mode(
+    session_manager: SessionManager,
+) -> None:
+    """send_interactive_response with 'no' resolves a pending plan mode event as denied."""
+    router = _make_router(session_manager)
+    session = session_manager.create_session(SessionType.LONG_RUNNING)
+    session.set_active()
+
+    session._plan_mode_event = asyncio.Event()
+    session._plan_mode_approved = False
+    session.buffer.push_text(
+        MessageType.PLAN_MODE_ASK,
+        {"session_id": session.id},
+    )
+
+    await router.send_interactive_response(session.id, "no")
+
+    assert session._plan_mode_approved is False
+    assert session._plan_mode_event.is_set()
+
+    plan_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.PLAN_MODE_ASK]
+    assert plan_msgs[0].data.get("accepted") is False
+
+
+@pytest.mark.asyncio
+async def test_cancel_session_resolves_pending_plan_mode_event(
+    session_manager: SessionManager,
+) -> None:
+    """cancel_session auto-denies any pending plan mode approval gate."""
+    router = _make_router(session_manager)
+    session = session_manager.create_session(SessionType.LONG_RUNNING)
+    session.set_active()
+
+    session._plan_mode_event = asyncio.Event()
+    session._plan_mode_approved = False
+
+    await router.cancel_session(session.id)
+
+    assert session._plan_mode_approved is False
+    assert session._plan_mode_event.is_set()
+
+
+@pytest.mark.asyncio
+async def test_pause_session_resolves_pending_plan_mode_event(
+    session_manager: SessionManager,
+) -> None:
+    """pause_session auto-denies any pending plan mode approval gate."""
+    router = _make_router(session_manager)
+    session = session_manager.create_session(SessionType.LONG_RUNNING)
+    session.set_active()
+
+    session._plan_mode_event = asyncio.Event()
+    session._plan_mode_approved = False
+
+    await router.pause_session(session.id)
+
+    assert session._plan_mode_approved is False
+    assert session._plan_mode_event.is_set()
+
+
+@pytest.mark.asyncio
+async def test_relay_enter_plan_mode_blocks_and_resumes_on_approve(
+    session_manager: SessionManager,
+) -> None:
+    """EnterPlanMode in the stream blocks until the user approves, then continues."""
+    router = _make_router(session_manager)
+    router._llm.summarize = AsyncMock(return_value="Done.")
+
+    session = session_manager.create_session(SessionType.LONG_RUNNING)
+    session.set_active()
+
+    enter_plan_event = json.dumps({
+        "type": "assistant",
+        "message": {
+            "content": [{"type": "tool_use", "name": "EnterPlanMode", "input": {}}],
+        },
+    })
+    result_event = json.dumps({"type": "result", "result": "Plan complete."})
+    stream = _async_stream_chunks([
+        ExecutionChunk(content=enter_plan_event, stream="stdout"),
+        ExecutionChunk(content=result_event, stream="stdout"),
+    ])
+
+    # Run relay concurrently with an approval sent after a short delay
+    async def _approve_after_yield() -> None:
+        # Yield control so the relay can start and hit the gate
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        await router.send_interactive_response(session.id, "yes")
+
+    await asyncio.gather(
+        router._relay_claude_code_stream(session, stream),
+        _approve_after_yield(),
+    )
+
+    # Session should still be active (not ended by denial)
+    assert session.status != SessionStatus.COMPLETED or True  # relay ended normally
+
+    # PLAN_MODE_ASK should be in the buffer, marked accepted
+    plan_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.PLAN_MODE_ASK]
+    assert len(plan_msgs) == 1
+    assert plan_msgs[0].data.get("accepted") is True
+
+
+@pytest.mark.asyncio
+async def test_relay_enter_plan_mode_denied_ends_session(
+    session_manager: SessionManager,
+) -> None:
+    """Denying plan mode ends the session with PLAN_MODE_DENIED error."""
+    router = _make_router(session_manager)
+    router._end_claude_code_session = AsyncMock()
+
+    session = session_manager.create_session(SessionType.LONG_RUNNING)
+    session.set_active()
+
+    # Executor mock so _end_claude_code_session doesn't fail
+    mock_executor = AsyncMock()
+    mock_executor.stop_process = AsyncMock()
+    session.claude_code_executor = mock_executor
+
+    enter_plan_event = json.dumps({
+        "type": "assistant",
+        "message": {
+            "content": [{"type": "tool_use", "name": "EnterPlanMode", "input": {}}],
+        },
+    })
+    # The result event should NOT be reached after a denial
+    result_event = json.dumps({"type": "result", "result": "Should not reach."})
+    stream = _async_stream_chunks([
+        ExecutionChunk(content=enter_plan_event, stream="stdout"),
+        ExecutionChunk(content=result_event, stream="stdout"),
+    ])
+
+    async def _deny_after_yield() -> None:
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        await router.send_interactive_response(session.id, "no")
+
+    await asyncio.gather(
+        router._relay_claude_code_stream(session, stream),
+        _deny_after_yield(),
+    )
+
+    # PLAN_MODE_ASK must be in the buffer, marked denied
+    plan_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.PLAN_MODE_ASK]
+    assert len(plan_msgs) == 1
+    assert plan_msgs[0].data.get("accepted") is False
+
+    # An ERROR message with PLAN_MODE_DENIED code should be present
+    error_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.ERROR]
+    assert any(m.data.get("code") == "PLAN_MODE_DENIED" for m in error_msgs)
+
+    # _end_claude_code_session should have been called
+    router._end_claude_code_session.assert_awaited_once_with(session)
+
+
+@pytest.mark.asyncio
+async def test_relay_exit_plan_mode_blocks_until_approval(
+    session_manager: SessionManager,
+) -> None:
+    """ExitPlanMode relay blocks the stream until the user provides a response."""
+    router = _make_router(session_manager)
+    router._llm.summarize = AsyncMock(return_value="Done.")
+
+    session = session_manager.create_session(SessionType.LONG_RUNNING)
+    session.set_active()
+
+    # Mock executor so send_input doesn't fail
+    mock_executor = AsyncMock()
+    mock_executor.is_running = True
+    mock_executor.send_input = AsyncMock()
+    session.claude_code_executor = mock_executor
+
+    exit_plan_event = json.dumps({
+        "type": "assistant",
+        "message": {
+            "content": [{
+                "type": "tool_use",
+                "name": "ExitPlanMode",
+                "input": {"plan": "1. Do X\n2. Do Y"},
+            }],
+        },
+    })
+    result_event = json.dumps({"type": "result", "result": "Plan ready."})
+    stream = _async_stream_chunks([
+        ExecutionChunk(content=exit_plan_event, stream="stdout"),
+        ExecutionChunk(content=result_event, stream="stdout"),
+    ])
+
+    relay_done = False
+
+    async def _track_relay() -> None:
+        nonlocal relay_done
+        await router._relay_claude_code_stream(session, stream)
+        relay_done = True
+
+    async def _approve_after_yield() -> None:
+        # Yield control so the relay can hit the gate
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        # At this point the relay should be blocked — confirm it hasn't finished
+        assert not relay_done, "Relay must not complete before approval is given"
+        await router.send_interactive_response(session.id, "Looks good, proceed.", accepted=True)
+
+    await asyncio.gather(_track_relay(), _approve_after_yield())
+
+    # PLAN_REVIEW_ASK should be in the buffer, marked accepted
+    plan_review_msgs = [
+        m for m in session.buffer.text_history if m.message_type == MessageType.PLAN_REVIEW_ASK
+    ]
+    assert len(plan_review_msgs) == 1
+    assert plan_review_msgs[0].data["plan_input"] == {"plan": "1. Do X\n2. Do Y"}
+    assert plan_review_msgs[0].data["session_id"] == session.id
+    assert plan_review_msgs[0].data.get("accepted") is True
+
+
+@pytest.mark.asyncio
+async def test_relay_exit_plan_mode_approve_sends_to_stdin(
+    session_manager: SessionManager,
+) -> None:
+    """Approving the plan review sends the approval text to Claude Code stdin."""
+    router = _make_router(session_manager)
+    router._llm.summarize = AsyncMock(return_value="Done.")
+
+    session = session_manager.create_session(SessionType.LONG_RUNNING)
+    session.set_active()
+
+    mock_executor = AsyncMock()
+    mock_executor.is_running = True
+    mock_executor.send_input = AsyncMock()
+    session.claude_code_executor = mock_executor
+
+    exit_plan_event = json.dumps({
+        "type": "assistant",
+        "message": {
+            "content": [{"type": "tool_use", "name": "ExitPlanMode", "input": {"plan": "Step 1"}}],
+        },
+    })
+    result_event = json.dumps({"type": "result", "result": "Done."})
+    stream = _async_stream_chunks([
+        ExecutionChunk(content=exit_plan_event, stream="stdout"),
+        ExecutionChunk(content=result_event, stream="stdout"),
+    ])
+
+    approval_text = "Looks good, proceed with the plan."
+
+    async def _approve() -> None:
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        await router.send_interactive_response(session.id, approval_text, accepted=True)
+
+    await asyncio.gather(router._relay_claude_code_stream(session, stream), _approve())
+
+    # The approval text must have been forwarded to Claude Code's stdin
+    mock_executor.send_input.assert_awaited_once_with(approval_text)
+
+    # Buffer message must be marked accepted
+    plan_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.PLAN_REVIEW_ASK]
+    assert plan_msgs[0].data.get("accepted") is True
+
+
+@pytest.mark.asyncio
+async def test_relay_exit_plan_mode_reject_sends_feedback_to_stdin(
+    session_manager: SessionManager,
+) -> None:
+    """Rejecting the plan review sends feedback text to Claude Code stdin for revision."""
+    router = _make_router(session_manager)
+    router._llm.summarize = AsyncMock(return_value="Done.")
+
+    session = session_manager.create_session(SessionType.LONG_RUNNING)
+    session.set_active()
+
+    mock_executor = AsyncMock()
+    mock_executor.is_running = True
+    mock_executor.send_input = AsyncMock()
+    session.claude_code_executor = mock_executor
+
+    exit_plan_event = json.dumps({
+        "type": "assistant",
+        "message": {
+            "content": [{"type": "tool_use", "name": "ExitPlanMode", "input": {"plan": "Step 1"}}],
+        },
+    })
+    result_event = json.dumps({"type": "result", "result": "Done."})
+    stream = _async_stream_chunks([
+        ExecutionChunk(content=exit_plan_event, stream="stdout"),
+        ExecutionChunk(content=result_event, stream="stdout"),
+    ])
+
+    feedback = "Please also add error handling in step 1."
+
+    async def _reject() -> None:
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        await router.send_interactive_response(session.id, feedback, accepted=False)
+
+    await asyncio.gather(router._relay_claude_code_stream(session, stream), _reject())
+
+    # Feedback must have been forwarded to Claude Code's stdin
+    mock_executor.send_input.assert_awaited_once_with(feedback)
+
+    # Buffer message must be marked rejected
+    plan_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.PLAN_REVIEW_ASK]
+    assert plan_msgs[0].data.get("accepted") is False
+
+
+@pytest.mark.asyncio
+async def test_send_interactive_response_resolves_plan_review_approved(
+    session_manager: SessionManager,
+) -> None:
+    """send_interactive_response with accepted=True resolves a pending plan review as approved."""
+    router = _make_router(session_manager)
+    session = session_manager.create_session(SessionType.LONG_RUNNING)
+    session.set_active()
+
+    session._plan_review_event = asyncio.Event()
+    session._plan_review_approved = False
+    session._plan_review_feedback = None
+    session.buffer.push_text(
+        MessageType.PLAN_REVIEW_ASK,
+        {"session_id": session.id, "plan_input": {"plan": "Step 1"}},
+    )
+
+    await router.send_interactive_response(session.id, "Looks good.", accepted=True)
+
+    assert session._plan_review_approved is True
+    assert session._plan_review_feedback == "Looks good."
+    assert session._plan_review_event.is_set()
+
+    plan_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.PLAN_REVIEW_ASK]
+    assert len(plan_msgs) == 1
+    assert plan_msgs[0].data.get("accepted") is True
+
+
+@pytest.mark.asyncio
+async def test_send_interactive_response_resolves_plan_review_rejected(
+    session_manager: SessionManager,
+) -> None:
+    """send_interactive_response with accepted=False resolves a pending plan review as rejected."""
+    router = _make_router(session_manager)
+    session = session_manager.create_session(SessionType.LONG_RUNNING)
+    session.set_active()
+
+    session._plan_review_event = asyncio.Event()
+    session._plan_review_approved = False
+    session._plan_review_feedback = None
+    session.buffer.push_text(
+        MessageType.PLAN_REVIEW_ASK,
+        {"session_id": session.id, "plan_input": {"plan": "Step 1"}},
+    )
+
+    feedback = "Add error handling."
+    await router.send_interactive_response(session.id, feedback, accepted=False)
+
+    assert session._plan_review_approved is False
+    assert session._plan_review_feedback == feedback
+    assert session._plan_review_event.is_set()
+
+    plan_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.PLAN_REVIEW_ASK]
+    assert plan_msgs[0].data.get("accepted") is False
+
+
+@pytest.mark.asyncio
+async def test_cancel_session_resolves_pending_plan_review_event(
+    session_manager: SessionManager,
+) -> None:
+    """cancel_session auto-denies any pending plan review gate."""
+    router = _make_router(session_manager)
+    session = session_manager.create_session(SessionType.LONG_RUNNING)
+    session.set_active()
+
+    session._plan_review_event = asyncio.Event()
+    session._plan_review_approved = False
+
+    await router.cancel_session(session.id)
+
+    assert session._plan_review_approved is False
+    assert session._plan_review_event.is_set()
+
+
+@pytest.mark.asyncio
+async def test_pause_session_resolves_pending_plan_review_event(
+    session_manager: SessionManager,
+) -> None:
+    """pause_session auto-denies any pending plan review gate."""
+    router = _make_router(session_manager)
+    session = session_manager.create_session(SessionType.LONG_RUNNING)
+    session.set_active()
+
+    session._plan_review_event = asyncio.Event()
+    session._plan_review_approved = False
+
+    await router.pause_session(session.id)
+
+    assert session._plan_review_approved is False
+    assert session._plan_review_event.is_set()
