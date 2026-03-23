@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:provider/provider.dart';
 
 import '../../../models/ws_messages.dart';
 import '../../../state/pane_state.dart';
 import '../../../theme.dart';
+import '../../utils/link_utils.dart';
 
 class PlanReviewAskCard extends StatefulWidget {
   final DisplayMessage message;
@@ -62,6 +64,41 @@ class _PlanReviewAskCardState extends State<PlanReviewAskCard> {
             ),
           ],
         ),
+        if (widget.message.content.isNotEmpty) ...[
+          SizedBox(height: 10),
+          Container(
+            width: double.infinity,
+            padding: EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: context.appColors.bgOverlay,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: MarkdownBody(
+              data: widget.message.content,
+              shrinkWrap: true,
+              onTapLink: openLinkOnCtrlClick,
+              styleSheet: MarkdownStyleSheet(
+                p: TextStyle(
+                  color: context.appColors.textPrimary,
+                  fontSize: 13,
+                  height: 1.45,
+                ),
+                code: TextStyle(
+                  color: context.appColors.textPrimary,
+                  backgroundColor:
+                      context.appColors.toolBg.withValues(alpha: 0.6),
+                  fontSize: 12,
+                  fontFamily: 'monospace',
+                ),
+                codeblockDecoration: BoxDecoration(
+                  color: context.appColors.toolBg,
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                codeblockPadding: EdgeInsets.all(8),
+              ),
+            ),
+          ),
+        ],
         SizedBox(height: 12),
         if (_editing) ...[
           TextField(

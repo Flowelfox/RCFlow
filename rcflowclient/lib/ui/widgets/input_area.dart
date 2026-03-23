@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
+import '../../models/subprocess_info.dart';
 import '../../models/worker_config.dart';
 import '../../state/app_state.dart';
 import '../../state/pane_state.dart';
@@ -63,7 +64,8 @@ class _InputAreaState extends State<InputArea> {
 
   // Mention overlay state
   OverlayEntry? _overlayEntry;
-  List<String> _projectSuggestions = [];
+  // Each entry has 'name' and 'path' keys from the server's project list.
+  List<Map<String, String>> _projectSuggestions = [];
   List<Map<String, String>> _toolSuggestions = [];
   List<Map<String, String>> _fileSuggestions = [];
   List<Map<String, String>> _slashSuggestions = [];
@@ -179,7 +181,52 @@ class _InputAreaState extends State<InputArea> {
   void _onTextChanged() {
     final has = _controller.text.trim().isNotEmpty;
     if (has != _hasText) setState(() => _hasText = has);
+
+    // Snapshot project mention state before _checkForMention potentially dismisses it
+    final prevMentionStart = _mentionStart;
+    final prevMentionType = _mentionType;
+    final prevSuggestions = List<Map<String, String>>.from(_projectSuggestions);
+
     _checkForMention();
+
+    // Space-trigger: if a project @mention was active and just got dismissed by
+    // typing a space or newline, confirm it as a project chip if the name matches.
+    if (prevMentionType == _MentionType.project &&
+        _mentionStart == null &&
+        prevMentionStart != null) {
+      final text = _controller.text;
+      final cursor = _controller.selection.baseOffset;
+      if (cursor > 0 && cursor <= text.length) {
+        final triggerChar = text[cursor - 1];
+        if (triggerChar == ' ' || triggerChar == '\n') {
+          final typedName = text.substring(prevMentionStart + 1, cursor - 1);
+          if (typedName.isNotEmpty) {
+            final match = prevSuggestions.firstWhere(
+              (s) => s['name']!.toLowerCase() == typedName.toLowerCase(),
+              orElse: () => {},
+            );
+            if (match.isNotEmpty) {
+              _confirmProjectMention(match['name']!, prevMentionStart, cursor,
+                  path: match['path']);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  /// Confirms a project mention: removes `@name[trigger]` from the text field
+  /// and populates the project chip in PaneState.
+  ///
+  /// [path] is the full absolute path resolved from the server's project list.
+  /// When provided, the Project panel can show worktrees/artifacts immediately
+  /// without waiting for the first prompt to be sent.
+  void _confirmProjectMention(String name, int start, int end, {String? path}) {
+    final text = _controller.text;
+    _controller.text = text.substring(0, start) + text.substring(end);
+    _controller.selection = TextSelection.collapsed(offset: start);
+    _dismissOverlay();
+    context.read<PaneState>().setSelectedProject(name, path: path);
   }
 
   void _checkForMention() {
@@ -353,7 +400,7 @@ class _InputAreaState extends State<InputArea> {
   void _dismissOverlay() {
     _mentionStart = null;
     _mentionType = null;
-    _projectSuggestions = [];
+    _projectSuggestions = <Map<String, String>>[];
     _toolSuggestions = [];
     _fileSuggestions = [];
     _slashSuggestions = [];
@@ -377,17 +424,23 @@ class _InputAreaState extends State<InputArea> {
     return _projectSuggestions.length;
   }
 
-  void _selectSuggestion(String name) {
+  void _selectSuggestion(String name, {String? path}) {
     if (_mentionStart == null || _mentionType == null) return;
+    // Project mentions go to the chip instead of inserting into the text field
+    if (_mentionType == _MentionType.project) {
+      _confirmProjectMention(name, _mentionStart!, _controller.selection.baseOffset,
+          path: path);
+      return;
+    }
     final text = _controller.text;
     final cursor = _controller.selection.baseOffset;
     final before = text.substring(0, _mentionStart!);
     final after = text.substring(cursor);
     final prefix = switch (_mentionType!) {
-      _MentionType.project => '@',
       _MentionType.tool => '#',
       _MentionType.file => '\$',
       _MentionType.slash => '/',
+      _MentionType.project => '@', // unreachable but satisfies exhaustiveness
     };
     final insertion = '$prefix$name ';
     _controller.text = '$before$insertion$after';
@@ -507,6 +560,11 @@ class _InputAreaState extends State<InputArea> {
         _controller.clear();
         _focusNode.requestFocus();
         return true;
+      case '/plugins':
+        _dispatchPluginsCommand();
+        _controller.clear();
+        _focusNode.requestFocus();
+        return true;
       default:
         return false;
     }
@@ -517,10 +575,34 @@ class _InputAreaState extends State<InputArea> {
     final paneId = context.read<PaneState>().paneId;
     appState.addSystemMessageToPane(
       paneId,
-      'RCFlow slash commands: /clear, /new, /help, /pause, /resume\n'
+      'RCFlow slash commands: /clear, /new, /help, /pause, /resume, /plugins\n'
+      '/plugins — open plugin settings for the active coding agent\n'
       'Type / to browse all available commands.\n'
       'Tip: ${getRandomTip()}',
     );
+  }
+
+  /// Dispatches the /plugins command by navigating to the worker settings pane
+  /// for the active session's coding agent (or ``claude_code`` as default).
+  void _dispatchPluginsCommand() {
+    final appState = context.read<AppState>();
+    final paneState = context.read<PaneState>();
+
+    // Determine the agent type from the currently viewed session, if any.
+    final sessionId = paneState.sessionId;
+    String toolName = 'claude_code'; // default
+    if (sessionId != null) {
+      final session = appState.sessions
+          .cast<dynamic>()
+          .firstWhere(
+            (s) => s?.sessionId == sessionId,
+            orElse: () => null,
+          );
+      final agentType = session?.agentType as String?;
+      if (agentType != null) toolName = agentType;
+    }
+
+    appState.openWorkerSettingsInPane(toolName);
   }
 
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
@@ -547,12 +629,15 @@ class _InputAreaState extends State<InputArea> {
           if (_mentionType == _MentionType.slash) {
             final cmd = _slashSuggestions[_selectedIndex];
             _handleSlashSelected(cmd['name']!, cmd['source']!);
+          } else if (_mentionType == _MentionType.project) {
+            final item = _projectSuggestions[_selectedIndex];
+            _selectSuggestion(item['name']!, path: item['path']);
           } else {
             final name = switch (_mentionType) {
               _MentionType.tool => _toolSuggestions[_selectedIndex]['mention_name']!,
               _MentionType.file => _fileSuggestions[_selectedIndex]['file_name']!,
               _MentionType.project || _MentionType.slash || null =>
-                _projectSuggestions[_selectedIndex],
+                _projectSuggestions[_selectedIndex]['name']!,
             };
             _selectSuggestion(name);
           }
@@ -564,6 +649,21 @@ class _InputAreaState extends State<InputArea> {
     if (event.logicalKey == LogicalKeyboardKey.enter) {
       final shift = HardwareKeyboard.instance.isShiftPressed;
       if (!shift) {
+        // Enter-trigger: confirm a project @mention that has no overlay open
+        if (_mentionType == _MentionType.project && _mentionStart != null) {
+          final text = _controller.text;
+          final cursor = _controller.selection.baseOffset;
+          final typedName = text.substring(_mentionStart! + 1, cursor);
+          if (typedName.isNotEmpty) {
+            final match = _projectSuggestions.firstWhere(
+              (s) => s['name']!.toLowerCase() == typedName.toLowerCase(),
+              orElse: () => {},
+            );
+            _confirmProjectMention(typedName, _mentionStart!, cursor,
+                path: match['path']);
+            return KeyEventResult.handled;
+          }
+        }
         _send(); // unawaited — intentional
         return KeyEventResult.handled;
       }
@@ -576,7 +676,11 @@ class _InputAreaState extends State<InputArea> {
     String? currentGroup;
     for (var i = 0; i < _slashSuggestions.length; i++) {
       final cmd = _slashSuggestions[i];
-      final group = cmd['source'] == 'rcflow' ? 'RCFlow' : 'Claude Code';
+      final group = cmd['source'] == 'rcflow'
+          ? 'RCFlow'
+          : cmd['source'] == 'claude_code_plugin'
+              ? 'Plugins'
+              : 'Claude Code';
       if (group != currentGroup) {
         if (currentGroup != null) {
           children.add(Divider(height: 1, thickness: 1));
@@ -683,13 +787,15 @@ class _InputAreaState extends State<InputArea> {
               shrinkWrap: true,
               itemCount: _projectSuggestions.length,
               itemBuilder: (context, index) {
-                final name = _projectSuggestions[index];
+                final item = _projectSuggestions[index];
+                final name = item['name']!;
+                final path = item['path'];
                 final selected = index == _selectedIndex;
                 return _MentionItem(
                   name: name,
                   query: mentionQuery,
                   selected: selected,
-                  onTap: () => _selectSuggestion(name),
+                  onTap: () => _selectSuggestion(name, path: path),
                 );
               },
             ),
@@ -790,6 +896,16 @@ class _InputAreaState extends State<InputArea> {
     final selectedWorkerName = _resolveWorkerName(
         paneWorkerId, state.defaultWorkerId, connectedWorkers);
 
+    // Project chip
+    final selectedProject =
+        context.select<PaneState, String?>((s) => s.selectedProjectName);
+    final projectNameError =
+        context.select<PaneState, String?>((s) => s.projectNameError);
+
+    // Subprocess status bar
+    final runningSubprocess = context.select<PaneState, SubprocessInfo?>(
+        (s) => s.runningSubprocess);
+
     final String hintText;
     final IconData? prefixIcon;
     if (sessionEnded) {
@@ -854,6 +970,15 @@ class _InputAreaState extends State<InputArea> {
                   },
                 ),
               ),
+            if (selectedProject != null)
+              Padding(
+                padding: const EdgeInsets.only(left: 4, bottom: 6),
+                child: _ProjectChip(
+                  name: selectedProject,
+                  error: projectNameError,
+                  onClear: () => context.read<PaneState>().setSelectedProject(null),
+                ),
+              ),
             // Pending attachment chips
             if (_pendingAttachments.isNotEmpty)
               Padding(
@@ -881,6 +1006,14 @@ class _InputAreaState extends State<InputArea> {
                         ),
                       ),
                   ],
+                ),
+              ),
+            if (runningSubprocess != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: _SubprocessStatusBar(
+                  subprocess: runningSubprocess,
+                  onKill: () => context.read<PaneState>().interruptSubprocess(),
                 ),
               ),
             Row(
@@ -956,41 +1089,66 @@ class _InputAreaState extends State<InputArea> {
             const SizedBox(width: 2),
             Expanded(child: textField),
             SizedBox(width: 8),
-            AnimatedContainer(
-              duration: Duration(milliseconds: 200),
-              width: 46,
-              height: 46,
-              child: Material(
-                color: (_hasText || _pendingAttachments.isNotEmpty) && canSend
-                    ? context.appColors.accent
-                    : context.appColors.bgElevated,
-                shape: CircleBorder(),
-                clipBehavior: Clip.antiAlias,
-                child: InkWell(
-                  onTap: (_hasText || _pendingAttachments.isNotEmpty) && canSend
-                      ? () => _send() // unawaited — intentional
-                      : null,
-                  child: Center(
-                    child: _uploadingAttachments
-                        ? SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.white,
+            if (sessionEnded && sessionId != null)
+              Tooltip(
+                message: 'Restore session',
+                child: SizedBox(
+                  width: 46,
+                  height: 46,
+                  child: Material(
+                    color: context.appColors.accent,
+                    shape: CircleBorder(),
+                    clipBehavior: Clip.antiAlias,
+                    child: InkWell(
+                      onTap: () =>
+                          context.read<PaneState>().restoreSession(sessionId),
+                      child: const Center(
+                        child: Icon(
+                          Icons.restore_rounded,
+                          color: Colors.white,
+                          size: 22,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              )
+            else
+              AnimatedContainer(
+                duration: Duration(milliseconds: 200),
+                width: 46,
+                height: 46,
+                child: Material(
+                  color: (_hasText || _pendingAttachments.isNotEmpty) && canSend
+                      ? context.appColors.accent
+                      : context.appColors.bgElevated,
+                  shape: CircleBorder(),
+                  clipBehavior: Clip.antiAlias,
+                  child: InkWell(
+                    onTap: (_hasText || _pendingAttachments.isNotEmpty) && canSend
+                        ? () => _send() // unawaited — intentional
+                        : null,
+                    child: Center(
+                      child: _uploadingAttachments
+                          ? SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : Icon(
+                              Icons.arrow_upward_rounded,
+                              color: (_hasText || _pendingAttachments.isNotEmpty) && canSend
+                                  ? Colors.white
+                                  : context.appColors.textMuted,
+                              size: 22,
                             ),
-                          )
-                        : Icon(
-                            Icons.arrow_upward_rounded,
-                            color: (_hasText || _pendingAttachments.isNotEmpty) && canSend
-                                ? Colors.white
-                                : context.appColors.textMuted,
-                            size: 22,
-                          ),
+                    ),
                   ),
                 ),
               ),
-            ),
           ],
         ),
           ],
@@ -1125,6 +1283,73 @@ class _WorkerChip extends StatelessWidget {
                 style: TextStyle(color: context.appColors.textSecondary, fontSize: 12)),
             SizedBox(width: 4),
             Icon(Icons.arrow_drop_down, size: 16, color: context.appColors.textMuted),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ProjectChip extends StatelessWidget {
+  final String name;
+  final String? error;
+  final VoidCallback onClear;
+
+  const _ProjectChip({
+    required this.name,
+    this.error,
+    required this.onClear,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final hasError = error != null;
+    return Tooltip(
+      message: error ?? '',
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(
+          color: hasError
+              ? context.appColors.errorBg
+              : context.appColors.bgElevated,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: hasError
+                ? context.appColors.errorText.withValues(alpha: 0.5)
+                : context.appColors.divider,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              hasError ? Icons.error_outline_rounded : Icons.folder_rounded,
+              size: 14,
+              color: hasError
+                  ? context.appColors.errorText
+                  : context.appColors.textMuted,
+            ),
+            const SizedBox(width: 6),
+            Text(
+              name,
+              style: TextStyle(
+                color: hasError
+                    ? context.appColors.errorText
+                    : context.appColors.textSecondary,
+                fontSize: 12,
+              ),
+            ),
+            const SizedBox(width: 4),
+            GestureDetector(
+              onTap: onClear,
+              child: Icon(
+                Icons.close_rounded,
+                size: 13,
+                color: hasError
+                    ? context.appColors.errorText
+                    : context.appColors.textMuted,
+              ),
+            ),
           ],
         ),
       ),
@@ -1425,6 +1650,133 @@ class _FileMentionItem extends StatelessWidget {
           ),
       ]),
       overflow: TextOverflow.ellipsis,
+    );
+  }
+}
+
+/// A slim bar shown above the input row when a subprocess (Claude Code, Codex,
+/// etc.) is running. Displays the subprocess name, working directory, current
+/// tool, and a kill button.
+class _SubprocessStatusBar extends StatefulWidget {
+  final SubprocessInfo subprocess;
+  final VoidCallback onKill;
+
+  const _SubprocessStatusBar({
+    required this.subprocess,
+    required this.onKill,
+  });
+
+  @override
+  State<_SubprocessStatusBar> createState() => _SubprocessStatusBarState();
+}
+
+class _SubprocessStatusBarState extends State<_SubprocessStatusBar> {
+  bool _killing = false;
+
+  void _onKill() {
+    setState(() => _killing = true);
+    widget.onKill();
+    // Reset after a short timeout in case the server doesn't respond
+    Future.delayed(const Duration(seconds: 5), () {
+      if (mounted) setState(() => _killing = false);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final sub = widget.subprocess;
+    final dirName = sub.workingDirectory.isNotEmpty
+        ? sub.workingDirectory.split('/').last
+        : '';
+    final label = sub.currentTool != null
+        ? '${sub.displayName} · ${sub.currentTool}'
+        : sub.displayName;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: context.appColors.bgElevated,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: context.appColors.divider),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            width: 10,
+            height: 10,
+            child: CircularProgressIndicator(
+              strokeWidth: 1.5,
+              color: context.appColors.accentLight,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  label,
+                  style: TextStyle(
+                    color: context.appColors.textPrimary,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+                if (dirName.isNotEmpty)
+                  Text(
+                    dirName,
+                    style: TextStyle(
+                      color: context.appColors.textMuted,
+                      fontSize: 11,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Tooltip(
+            message: 'Kill subprocess',
+            child: GestureDetector(
+              onTap: _killing ? null : _onKill,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: _killing
+                      ? context.appColors.bgElevated
+                      : context.appColors.errorBg,
+                  borderRadius: BorderRadius.circular(5),
+                  border: Border.all(
+                    color: _killing
+                        ? context.appColors.divider
+                        : context.appColors.errorText.withValues(alpha: 0.4),
+                  ),
+                ),
+                child: _killing
+                    ? SizedBox(
+                        width: 10,
+                        height: 10,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 1.5,
+                          color: context.appColors.textMuted,
+                        ),
+                      )
+                    : Text(
+                        'Kill',
+                        style: TextStyle(
+                          color: context.appColors.errorText,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

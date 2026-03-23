@@ -123,6 +123,63 @@ class TurnSummary {
   }
 }
 
+/// Aggregate statistics for a worker across all its sessions.
+class WorkerTelemetrySummary {
+  final String workerId;
+  final int sessionCount;
+  final int turnCount;
+  final int totalInputTokens;
+  final int totalOutputTokens;
+  final int totalCacheCreationTokens;
+  final int totalCacheReadTokens;
+  final int totalToolCalls;
+  final double? avgLlmDurationMs;
+  final double? p95LlmDurationMs;
+  final double? avgToolDurationMs;
+  final double? p95ToolDurationMs;
+  final double errorRate;
+  final List<Map<String, dynamic>> topTools;
+
+  const WorkerTelemetrySummary({
+    required this.workerId,
+    required this.sessionCount,
+    required this.turnCount,
+    required this.totalInputTokens,
+    required this.totalOutputTokens,
+    required this.totalCacheCreationTokens,
+    required this.totalCacheReadTokens,
+    required this.totalToolCalls,
+    this.avgLlmDurationMs,
+    this.p95LlmDurationMs,
+    this.avgToolDurationMs,
+    this.p95ToolDurationMs,
+    required this.errorRate,
+    required this.topTools,
+  });
+
+  factory WorkerTelemetrySummary.fromJson(Map<String, dynamic> json) {
+    final rawTools = (json['top_tools'] as List<dynamic>?) ?? [];
+    return WorkerTelemetrySummary(
+      workerId: json['worker_id'] as String,
+      sessionCount: (json['session_count'] as num?)?.toInt() ?? 0,
+      turnCount: (json['turn_count'] as num?)?.toInt() ?? 0,
+      totalInputTokens: (json['total_input_tokens'] as num?)?.toInt() ?? 0,
+      totalOutputTokens: (json['total_output_tokens'] as num?)?.toInt() ?? 0,
+      totalCacheCreationTokens:
+          (json['total_cache_creation_tokens'] as num?)?.toInt() ?? 0,
+      totalCacheReadTokens:
+          (json['total_cache_read_tokens'] as num?)?.toInt() ?? 0,
+      totalToolCalls: (json['total_tool_calls'] as num?)?.toInt() ?? 0,
+      avgLlmDurationMs: (json['avg_llm_duration_ms'] as num?)?.toDouble(),
+      p95LlmDurationMs: (json['p95_llm_duration_ms'] as num?)?.toDouble(),
+      avgToolDurationMs: (json['avg_tool_duration_ms'] as num?)?.toDouble(),
+      p95ToolDurationMs: (json['p95_tool_duration_ms'] as num?)?.toDouble(),
+      errorRate: (json['error_rate'] as num?)?.toDouble() ?? 0.0,
+      topTools: rawTools.whereType<Map<String, dynamic>>().toList(),
+    );
+  }
+}
+
 /// Aggregate statistics for a single session.
 class SessionTelemetrySummary {
   final String sessionId;

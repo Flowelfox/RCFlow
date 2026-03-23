@@ -64,8 +64,15 @@ class WorkerConnection extends ChangeNotifier {
   void Function(Map<String, dynamic> msg, String workerId)? onInputMessage;
   void Function(Map<String, dynamic> msg, String workerId)? onOutputMessage;
   VoidCallback? onSessionsChanged;
-  /// Fires when a session's mainProjectPath transitions from null to a real path.
+  /// Fires when a session's mainProjectPath transitions from null to a real path,
+  /// or changes to a different path. Used to sync the project chip in PaneState.
   void Function(String sessionId, String projectPath)? onProjectPathAttached;
+
+  /// Fires when the backend rejects a project_name with a validation error.
+  void Function(String sessionId, String error)? onProjectNameError;
+
+  /// Fires when a previously errored project is accepted (error cleared).
+  void Function(String sessionId)? onProjectNameErrorCleared;
 
   // Pending auto-load session after connect
   String? _pendingAutoLoadSessionId;
@@ -284,6 +291,10 @@ class WorkerConnection extends ChangeNotifier {
     final selectedWorktreePathProvided = msg.containsKey('selected_worktree_path');
     final newSelectedWorktreePath = msg['selected_worktree_path'] as String?;
 
+    // Project name error — non-null when backend rejected the last project_name.
+    final projectNameErrorProvided = msg.containsKey('project_name_error');
+    final newProjectNameError = msg['project_name_error'] as String?;
+
     final index = sessions.indexWhere((s) => s.sessionId == sessionId);
     if (index >= 0) {
       final existing = sessions[index];
@@ -315,8 +326,9 @@ class WorkerConnection extends ChangeNotifier {
             ? newMainProjectPath
             : existing.mainProjectPath,
       );
-      // Fire auto-open callback when project is first attached to this session.
-      if (newMainProjectPath != null && prevMainProjectPath == null) {
+      // Fire callback when project path is attached or changes.
+      if (newMainProjectPath != null &&
+          newMainProjectPath != prevMainProjectPath) {
         onProjectPathAttached?.call(sessionId, newMainProjectPath);
       }
     } else {
@@ -344,9 +356,18 @@ class WorkerConnection extends ChangeNotifier {
           mainProjectPath: newMainProjectPath,
         ),
       );
-      // Fire auto-open callback for a brand-new session that already has a project.
+      // Fire callback for a brand-new session that already has a project.
       if (newMainProjectPath != null) {
         onProjectPathAttached?.call(sessionId, newMainProjectPath);
+      }
+    }
+
+    // Handle project name error/clear from the server.
+    if (projectNameErrorProvided) {
+      if (newProjectNameError != null) {
+        onProjectNameError?.call(sessionId, newProjectNameError);
+      } else {
+        onProjectNameErrorCleared?.call(sessionId);
       }
     }
     _cacheSessions();
@@ -395,6 +416,11 @@ class WorkerConnection extends ChangeNotifier {
       end: end,
       sessionId: sessionId,
     );
+  }
+
+  /// Fetch worker-level telemetry summary from the backend.
+  Future<Map<String, dynamic>> fetchWorkerTelemetry() async {
+    return ws.fetchWorkerTelemetry();
   }
 
   /// Fetch per-session telemetry summary from the backend.

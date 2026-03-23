@@ -29,7 +29,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> with WindowListener {
   static const _defaultFraction = 0.15;
   static const _maxFraction = 0.50;
-  static const _minPixels = 150.0;
+  static const _minPixels = 180.0;
 
   double _sidebarFraction = _defaultFraction;
 

@@ -31,6 +31,13 @@ class _ProjectPanelState extends State<ProjectPanel> {
   /// Cache key: reloads when the project path or workerId changes.
   String? _lastFetchedKey;
 
+  // Section order and collapse state
+  final List<String> _sectionOrder = ['worktrees', 'artifacts'];
+  final Map<String, bool> _sectionCollapsed = {
+    'worktrees': false,
+    'artifacts': false,
+  };
+
   // ---------------------------------------------------------------------------
   // Data fetching
   // ---------------------------------------------------------------------------
@@ -244,21 +251,29 @@ class _ProjectPanelState extends State<ProjectPanel> {
   Widget build(BuildContext context) {
     final pane = context.watch<PaneState>();
     final appState = context.watch<AppState>();
-    final mainProjectPath = pane.currentMainProjectPath;
-    final workerId = pane.workerId;
+    final mainProjectPath = pane.effectiveProjectPath;
+    final workerId = pane.workerId ?? appState.defaultWorkerId;
     final sessionId = pane.sessionId;
     final selectedWorktreePath = pane.currentSelectedWorktreePath;
 
-    // Auto-refresh when project path or worker changes.
-    if (mainProjectPath != null && workerId != null) {
-      final key = '$workerId:$mainProjectPath';
-      if (key != _lastFetchedKey && !_loadingWorktrees && !_loadingArtifacts) {
-        _lastFetchedKey = key;
+    // Guard: no worker connected yet
+    if (workerId == null) {
+      return _buildGlobalState(context, pane);
+    }
+
+    // Auto-refresh when project path, worker, OR worktree operation changes.
+    final worktreeLastAction = pane.currentWorktreeInfo?.lastAction;
+    if (mainProjectPath != null) {
+      final fetchKey =
+          '$workerId:$mainProjectPath:${worktreeLastAction ?? ''}';
+      final cacheKey = '$workerId:$mainProjectPath';
+      if (fetchKey != _lastFetchedKey &&
+          !_loadingWorktrees &&
+          !_loadingArtifacts) {
+        _lastFetchedKey = fetchKey;
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (!mounted) return;
-          // Pre-populate from cache so cached data shows immediately while the
-          // background refresh runs (avoids blank panel on reopen).
-          final cached = appState.getProjectDataCache(key);
+          final cached = appState.getProjectDataCache(cacheKey);
           if (cached != null) {
             setState(() {
               _worktrees ??= cached.worktrees;
@@ -271,7 +286,7 @@ class _ProjectPanelState extends State<ProjectPanel> {
     }
 
     // Global mode — no project attached yet.
-    if (mainProjectPath == null || workerId == null) {
+    if (mainProjectPath == null) {
       return _buildGlobalState(context, pane);
     }
 
@@ -285,31 +300,74 @@ class _ProjectPanelState extends State<ProjectPanel> {
           // Header
           _buildHeader(context, pane, projectName, appState, workerId,
               mainProjectPath),
-          // Worktrees section
-          _buildSectionTitle(
-            context,
-            icon: Icons.device_hub_outlined,
-            label: 'Worktrees',
-            trailing: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _SmallIconBtn(
-                  icon: Icons.refresh,
-                  tooltip: 'Refresh',
-                  onTap: (_loadingWorktrees || _loadingArtifacts)
-                      ? null
-                      : () => _refresh(appState, workerId, mainProjectPath),
-                ),
-                _SmallIconBtn(
-                  icon: Icons.add,
-                  tooltip: 'New worktree',
-                  onTap: _loadingWorktrees
-                      ? null
-                      : () => _create(appState, workerId, mainProjectPath),
-                ),
-              ],
+          // Sections — collapsible and reorderable
+          Expanded(
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  for (int i = 0; i < _sectionOrder.length; i++)
+                    _buildSection(
+                      context,
+                      sectionId: _sectionOrder[i],
+                      index: i,
+                      appState: appState,
+                      workerId: workerId,
+                      mainProjectPath: mainProjectPath,
+                      selectedWorktreePath: selectedWorktreePath,
+                      sessionId: sessionId,
+                    ),
+                ],
+              ),
             ),
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSection(
+    BuildContext context, {
+    required String sectionId,
+    required int index,
+    required AppState appState,
+    required String workerId,
+    required String mainProjectPath,
+    required String? selectedWorktreePath,
+    required String? sessionId,
+  }) {
+    final collapsed = _sectionCollapsed[sectionId] ?? false;
+    final IconData icon;
+    final String label;
+    Widget? trailing;
+    Widget body;
+
+    if (sectionId == 'worktrees') {
+      icon = Icons.device_hub_outlined;
+      label = 'Worktrees';
+      trailing = Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _SmallIconBtn(
+            icon: Icons.refresh,
+            tooltip: 'Refresh',
+            onTap: (_loadingWorktrees || _loadingArtifacts)
+                ? null
+                : () => _refresh(appState, workerId, mainProjectPath),
+          ),
+          _SmallIconBtn(
+            icon: Icons.add,
+            tooltip: 'New worktree',
+            onTap: _loadingWorktrees
+                ? null
+                : () => _create(appState, workerId, mainProjectPath),
+          ),
+        ],
+      );
+      body = Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
           if (selectedWorktreePath != null)
             _buildActiveWorktreeBar(
                 context, appState, workerId, sessionId, selectedWorktreePath),
@@ -318,17 +376,111 @@ class _ProjectPanelState extends State<ProjectPanel> {
             child: _buildWorktreeList(context, appState, workerId,
                 mainProjectPath, selectedWorktreePath, sessionId),
           ),
-          Divider(height: 1, color: context.appColors.divider),
-          // Artifacts section
-          _buildSectionTitle(
-            context,
-            icon: Icons.insert_drive_file_outlined,
-            label: 'Artifacts',
-          ),
-          Expanded(
-            child: _buildArtifactList(context),
-          ),
         ],
+      );
+    } else {
+      icon = Icons.insert_drive_file_outlined;
+      label = 'Artifacts';
+      trailing = null;
+      body = SizedBox(
+        height: 200,
+        child: _buildArtifactList(context),
+      );
+    }
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _buildCollapsibleSectionHeader(
+          context,
+          icon: icon,
+          label: label,
+          sectionId: sectionId,
+          index: index,
+          trailing: trailing,
+        ),
+        AnimatedSize(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeInOut,
+          child: collapsed ? const SizedBox.shrink() : body,
+        ),
+        Divider(height: 1, color: context.appColors.divider),
+      ],
+    );
+  }
+
+  Widget _buildCollapsibleSectionHeader(
+    BuildContext context, {
+    required IconData icon,
+    required String label,
+    required String sectionId,
+    required int index,
+    Widget? trailing,
+  }) {
+    final collapsed = _sectionCollapsed[sectionId] ?? false;
+    final isFirst = index == 0;
+    final isLast = index == _sectionOrder.length - 1;
+
+    return GestureDetector(
+      onTap: () =>
+          setState(() => _sectionCollapsed[sectionId] = !collapsed),
+      child: Container(
+        height: 28,
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        decoration: BoxDecoration(
+          color: context.appColors.accent.withAlpha(8),
+          border:
+              Border(bottom: BorderSide(color: context.appColors.divider)),
+        ),
+        child: Row(
+          children: [
+            AnimatedRotation(
+              turns: collapsed ? -0.25 : 0,
+              duration: const Duration(milliseconds: 150),
+              child: Icon(Icons.expand_more,
+                  size: 14, color: context.appColors.textMuted),
+            ),
+            const SizedBox(width: 4),
+            Icon(icon, size: 12, color: context.appColors.textMuted),
+            const SizedBox(width: 5),
+            Text(
+              label,
+              style: TextStyle(
+                color: context.appColors.textMuted,
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.5,
+              ),
+            ),
+            const Spacer(),
+            if (trailing != null) trailing,
+            _SmallIconBtn(
+              icon: Icons.arrow_upward,
+              tooltip: 'Move section up',
+              iconSize: 12,
+              onTap: isFirst
+                  ? null
+                  : () => setState(() {
+                        final tmp = _sectionOrder[index - 1];
+                        _sectionOrder[index - 1] = _sectionOrder[index];
+                        _sectionOrder[index] = tmp;
+                      }),
+            ),
+            _SmallIconBtn(
+              icon: Icons.arrow_downward,
+              tooltip: 'Move section down',
+              iconSize: 12,
+              onTap: isLast
+                  ? null
+                  : () => setState(() {
+                        final tmp = _sectionOrder[index + 1];
+                        _sectionOrder[index + 1] = _sectionOrder[index];
+                        _sectionOrder[index] = tmp;
+                      }),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -363,35 +515,6 @@ class _ProjectPanelState extends State<ProjectPanel> {
             tooltip: 'Hide',
             onTap: () => pane.toggleRightPanel('project'),
           ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSectionTitle(BuildContext context,
-      {required IconData icon, required String label, Widget? trailing}) {
-    return Container(
-      height: 28,
-      padding: const EdgeInsets.symmetric(horizontal: 10),
-      decoration: BoxDecoration(
-        color: context.appColors.accent.withAlpha(8),
-        border: Border(bottom: BorderSide(color: context.appColors.divider)),
-      ),
-      child: Row(
-        children: [
-          Icon(icon, size: 12, color: context.appColors.textMuted),
-          const SizedBox(width: 5),
-          Text(
-            label,
-            style: TextStyle(
-              color: context.appColors.textMuted,
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              letterSpacing: 0.5,
-            ),
-          ),
-          const Spacer(),
-          if (trailing != null) trailing,
         ],
       ),
     );
@@ -683,28 +806,12 @@ class _ProjectPanelState extends State<ProjectPanel> {
                       ),
                     ),
                     const SizedBox(height: 8),
-                    RichText(
+                    Text(
+                      'Type @ProjectName in the input field to attach a project. Worktrees and artifacts will appear here.',
                       textAlign: TextAlign.center,
-                      text: TextSpan(
-                        style: TextStyle(
-                          color: context.appColors.textMuted,
-                          fontSize: 12,
-                        ),
-                        children: [
-                          const TextSpan(text: 'Type '),
-                          TextSpan(
-                            text: '@ProjectName',
-                            style: TextStyle(
-                              color: context.appColors.accent,
-                              fontWeight: FontWeight.w600,
-                              fontFamily: 'monospace',
-                            ),
-                          ),
-                          const TextSpan(
-                            text:
-                                ' in your message to attach a project. Worktrees and artifacts will appear here.',
-                          ),
-                        ],
+                      style: TextStyle(
+                        color: context.appColors.textMuted,
+                        fontSize: 12,
                       ),
                     ),
                   ],

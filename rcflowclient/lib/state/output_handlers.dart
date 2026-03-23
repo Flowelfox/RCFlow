@@ -11,6 +11,7 @@
 ///    in [messageRenderers] (see `message_bubble.dart`).
 library;
 
+import '../models/subprocess_info.dart';
 import '../models/todo_item.dart';
 import '../models/ws_messages.dart';
 import 'pane_state.dart';
@@ -29,11 +30,14 @@ void handleTextChunk(Map<String, dynamic> msg, PaneState pane) {
     // Skip server echo if the message was already added locally by sendPrompt.
     // Uses content-based matching to be robust against counter desync.
     if (pane.consumeLocalUserMessage(content)) return;
+    final rawAtts = msg['attachments'] as List<dynamic>?;
+    final attachments = rawAtts?.cast<Map<String, dynamic>>();
     pane.addDisplayMessage(DisplayMessage(
       type: DisplayMessageType.user,
       content: content,
       sessionId: msg['session_id'] as String?,
       finished: true,
+      attachments: attachments,
     ));
     return;
   }
@@ -105,10 +109,20 @@ void handlePlanModeAsk(Map<String, dynamic> msg, PaneState pane) {
 
 void handlePlanReviewAsk(Map<String, dynamic> msg, PaneState pane) {
   pane.finalizeStream();
+  // Deduplicate: skip if there is already a pending (unresolved) plan review.
+  if (pane.messages.any(
+      (m) => m.type == DisplayMessageType.planReviewAsk && m.accepted == null)) {
+    return;
+  }
+  final planInput = msg['plan_input'] as Map<String, dynamic>?;
+  final planContent = planInput?['plan'] as String? ??
+      planInput?['content'] as String? ??
+      '';
   pane.addDisplayMessage(DisplayMessage(
     type: DisplayMessageType.planReviewAsk,
     sessionId: msg['session_id'] as String?,
     accepted: msg['accepted'] as bool?,
+    content: planContent,
   ));
 }
 
@@ -199,8 +213,19 @@ void handleAgentGroupEnd(Map<String, dynamic> msg, PaneState pane) {
   pane.endAgentGroup();
 }
 
+void handleSubprocessStatus(Map<String, dynamic> msg, PaneState pane) {
+  final subprocessType = msg['subprocess_type'] as String?;
+  if (subprocessType == null) {
+    // null type means subprocess stopped — clear the indicator
+    pane.setRunningSubprocess(null);
+  } else {
+    pane.setRunningSubprocess(SubprocessInfo.fromJson(msg));
+  }
+}
+
 void handleSessionPaused(Map<String, dynamic> msg, PaneState pane) {
   pane.finalizeStream();
+  pane.setRunningSubprocess(null);
   final pausedId = msg['session_id'] as String?;
   final reason = msg['reason'] as String?;
   pane.handleSessionPaused(pausedId, reason: reason);
@@ -214,6 +239,7 @@ void handleSessionPaused(Map<String, dynamic> msg, PaneState pane) {
 }
 
 void handleSessionResumed(Map<String, dynamic> msg, PaneState pane) {
+  pane.setRunningSubprocess(null);
   final resumedId = msg['session_id'] as String?;
   pane.handleSessionResumed(resumedId);
 }
@@ -225,6 +251,7 @@ void handleSessionRestored(Map<String, dynamic> msg, PaneState pane) {
 
 void handleSessionEnd(Map<String, dynamic> msg, PaneState pane) {
   pane.finalizeStream();
+  pane.setRunningSubprocess(null);
   for (final m in pane.messages) {
     if (m.type == DisplayMessageType.sessionEndAsk && m.accepted == null) {
       m.accepted = true;
@@ -259,6 +286,7 @@ final Map<String, OutputHandler> outputHandlerRegistry = {
   'plan_mode_ask': handlePlanModeAsk,
   'plan_review_ask': handlePlanReviewAsk,
   'permission_request': handlePermissionRequest,
+  'subprocess_status': handleSubprocessStatus,
 };
 
 // ---------------------------------------------------------------------------
@@ -279,11 +307,14 @@ void buildTextChunkHistory(Map<String, dynamic> msg, String sessionId,
   final metadata = msg['metadata'] as Map<String, dynamic>? ?? {};
 
   if (metadata['role'] == 'user') {
+    final rawAtts = metadata['attachments'] as List<dynamic>?;
+    final attachments = rawAtts?.cast<Map<String, dynamic>>();
     messages.add(DisplayMessage(
       type: DisplayMessageType.user,
       content: content,
       sessionId: sessionId,
       finished: true,
+      attachments: attachments,
     ));
   } else {
     if (messages.isNotEmpty &&
@@ -435,10 +466,15 @@ void buildPlanModeAskHistory(Map<String, dynamic> msg, String sessionId,
 void buildPlanReviewAskHistory(Map<String, dynamic> msg, String sessionId,
     List<DisplayMessage> messages) {
   final metadata = msg['metadata'] as Map<String, dynamic>? ?? {};
+  final planInput = metadata['plan_input'] as Map<String, dynamic>?;
+  final planContent = planInput?['plan'] as String? ??
+      planInput?['content'] as String? ??
+      '';
   messages.add(DisplayMessage(
     type: DisplayMessageType.planReviewAsk,
     sessionId: sessionId,
     accepted: metadata['accepted'] as bool? ?? true,
+    content: planContent,
   ));
 }
 

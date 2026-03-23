@@ -18,6 +18,7 @@ import 'task_pane.dart';
 import 'terminal_pane.dart';
 import 'todo_panel.dart';
 import 'project_panel.dart';
+import 'worker_settings_pane.dart';
 
 /// Data carried during a session drag from the sidebar.
 class SessionDragData {
@@ -121,6 +122,7 @@ class _SessionPaneState extends State<SessionPane> {
           final isTaskPane = paneType == PaneType.task;
           final isArtifactPane = paneType == PaneType.artifact;
           final isLinearIssuePane = paneType == PaneType.linearIssue;
+          final isWorkerSettingsPane = paneType == PaneType.workerSettings;
           final terminalInfo = isTerminalPane
               ? appState.getTerminalPaneInfo(widget.pane.paneId)
               : null;
@@ -178,7 +180,12 @@ class _SessionPaneState extends State<SessionPane> {
                                       paneId: widget.pane.paneId,
                                       pane: widget.pane,
                                     )
-                                  : Column(
+                                  : isWorkerSettingsPane
+                                      ? WorkerSettingsPane(
+                                          paneId: widget.pane.paneId,
+                                          pane: widget.pane,
+                                        )
+                                      : Column(
                               children: [
                                 const PaneHeader(),
                                 Expanded(
