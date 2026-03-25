@@ -11,8 +11,6 @@ from pydantic import BaseModel
 from src.api.deps import verify_http_api_key
 from src.config import CONFIGURABLE_KEYS, Settings, get_config_schema, update_settings_file
 from src.core.llm import LLMClient
-from src.speech.stt import create_stt_provider
-from src.speech.tts import create_tts_provider
 
 if TYPE_CHECKING:
     from src.core.session import SessionManager
@@ -98,7 +96,7 @@ async def list_projects(
     description=(
         "Returns all configurable server options with their current values, types, "
         "and available choices. Secret values (API keys) are masked. Options are "
-        "grouped into logical sections (LLM, STT, TTS, Executors, Paths, Logging)."
+        "grouped into logical sections (LLM, Executors, Paths, Logging)."
     ),
     dependencies=[Depends(verify_http_api_key)],
 )
@@ -124,7 +122,7 @@ class UpdateConfigRequest(BaseModel):
     description=(
         "Accepts partial config updates. Validates keys against the configurable "
         "set, persists changes to settings.json, reloads settings, and hot-reloads "
-        "affected components (LLM client, STT/TTS providers). Returns the updated "
+        "affected components (LLM client). Returns the updated "
         "config schema."
     ),
     dependencies=[Depends(verify_http_api_key)],
@@ -161,8 +159,8 @@ async def update_config(body: UpdateConfigRequest, request: Request) -> dict[str
 def _reload_components(request: Request, settings: Settings) -> None:
     """Hot-reload server components that depend on settings.
 
-    Recreates the LLM client, STT provider, and TTS provider from the new
-    settings and patches the prompt router to use the new LLM client.
+    Recreates the LLM client from the new settings and patches the prompt
+    router to use it.
     """
     tool_registry = request.app.state.tool_registry
 
@@ -173,9 +171,6 @@ def _reload_components(request: Request, settings: Settings) -> None:
     prompt_router = request.app.state.prompt_router
     prompt_router._llm = new_llm
     prompt_router._settings = settings
-
-    request.app.state.stt_provider = create_stt_provider(settings.STT_PROVIDER, settings.STT_API_KEY)
-    request.app.state.tts_provider = create_tts_provider(settings.TTS_PROVIDER, settings.TTS_API_KEY)
 
     if old_llm is not None:
         asyncio.get_event_loop().create_task(old_llm.close())

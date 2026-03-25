@@ -32,9 +32,6 @@ def test_settings() -> Settings:
         LLM_PROVIDER="anthropic",
         ANTHROPIC_API_KEY="test-anthropic-key",
         ANTHROPIC_MODEL="claude-sonnet-4-6",
-        STT_PROVIDER="wispr_flow",
-        STT_API_KEY="test-stt-key",
-        TTS_PROVIDER="none",
         TOOLS_DIR=Path(__file__).parent.parent / "tools",
     )
 

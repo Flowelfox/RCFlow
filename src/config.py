@@ -156,14 +156,6 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL: str = "gpt-5.4"
 
-    # STT (Speech-to-Text)
-    STT_PROVIDER: str = "wispr_flow"
-    STT_API_KEY: str = ""
-
-    # TTS (Text-to-Speech)
-    TTS_PROVIDER: str = "none"
-    TTS_API_KEY: str = ""
-
     # Projects (comma-separated list of directories)
     PROJECTS_DIR: str = "~/Projects"
 
@@ -396,51 +388,6 @@ CONFIG_OPTIONS: list[dict[str, Any]] = [
         "required": False,
         "restart_required": False,
         "visible_when": {"key": "LLM_PROVIDER", "value_not": "none"},
-    },
-    # --- STT ---
-    {
-        "key": "STT_PROVIDER",
-        "label": "STT Provider",
-        "type": "select",
-        "options": [
-            {"value": "wispr_flow", "label": "Wispr Flow"},
-        ],
-        "group": "STT",
-        "description": "Speech-to-text provider",
-        "required": True,
-        "restart_required": True,
-    },
-    {
-        "key": "STT_API_KEY",
-        "label": "STT API Key",
-        "type": "secret",
-        "group": "STT",
-        "description": "API key for the STT provider",
-        "required": False,
-        "restart_required": True,
-    },
-    # --- TTS ---
-    {
-        "key": "TTS_PROVIDER",
-        "label": "TTS Provider",
-        "type": "select",
-        "options": [
-            {"value": "none", "label": "None"},
-        ],
-        "group": "TTS",
-        "description": "Text-to-speech provider",
-        "required": True,
-        "restart_required": True,
-    },
-    {
-        "key": "TTS_API_KEY",
-        "label": "TTS API Key",
-        "type": "secret",
-        "group": "TTS",
-        "description": "API key for the TTS provider",
-        "required": False,
-        "restart_required": True,
-        "visible_when": {"key": "TTS_PROVIDER", "value_not": "none"},
     },
     # --- Codex ---
     {

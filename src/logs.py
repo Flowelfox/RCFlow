@@ -44,15 +44,6 @@ class MultiLineExceptionFormatter(logging.Formatter):
         return main_message
 
 
-class HandshakeFilter(logging.Filter):
-    """Suppress noisy WebSocket handshake failure errors."""
-
-    def filter(self, record: logging.LogRecord) -> bool:
-        if record.levelno == logging.ERROR and "opening handshake failed" in record.msg:
-            return False
-        return True
-
-
 def setup_logging(settings: Settings) -> None:
     level = settings.LOG_LEVEL.upper()
 
@@ -136,12 +127,6 @@ def setup_logging(settings: Settings) -> None:
                 "level": "INFO",
                 "propagate": False,
             },
-            "websockets": {
-                "handlers": ["console", "app_file", "err_file"],
-                "level": "WARNING",
-                "propagate": False,
-                "filters": ["handshake_filter"],
-            },
             "httpx": {
                 "handlers": ["console", "app_file", "err_file"],
                 "level": "WARNING",
@@ -157,9 +142,6 @@ def setup_logging(settings: Settings) -> None:
                 "level": "WARNING",
                 "propagate": False,
             },
-        },
-        "filters": {
-            "handshake_filter": {"()": "src.logs.HandshakeFilter"},
         },
     }
     logging.config.dictConfig(config)

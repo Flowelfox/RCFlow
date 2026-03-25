@@ -13,13 +13,6 @@ class TestSessionBuffer:
         assert msg.message_type == MessageType.TEXT_CHUNK
         assert buffer.text_history == [msg]
 
-    def test_push_audio(self):
-        buffer = SessionBuffer("test-session")
-        chunk = buffer.push_audio(b"\x00\x01\x02")
-        assert chunk.sequence == 1
-        assert chunk.data == b"\x00\x01\x02"
-        assert buffer.audio_history == [chunk]
-
     @pytest.mark.asyncio
     async def test_text_subscriber_receives_history_and_live(self):
         buffer = SessionBuffer("test-session")
@@ -50,12 +43,10 @@ class TestSessionBuffer:
     def test_close_signals_all_subscribers(self):
         buffer = SessionBuffer("test-session")
         q1 = buffer.subscribe_text("sub-1")
-        q2 = buffer.subscribe_audio("sub-2")
 
         buffer.close()
 
         assert q1.get_nowait() is None
-        assert q2.get_nowait() is None
 
     @pytest.mark.asyncio
     async def test_push_ephemeral_notifies_subscribers_but_not_history(self):

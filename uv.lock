@@ -1622,7 +1622,7 @@ wheels = [
 
 [[package]]
 name = "rcflow"
-version = "0.27.0"
+version = "0.30.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
@@ -1640,7 +1640,6 @@ dependencies = [
     { name = "rust-just" },
     { name = "sqlalchemy", extra = ["asyncio"] },
     { name = "uvicorn", extra = ["standard"] },
-    { name = "websockets" },
     { name = "wtpython" },
 ]
 
@@ -1697,7 +1696,6 @@ requires-dist = [
     { name = "rust-just", extras = ["dev"], specifier = ">=1.46.0" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.30" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30.0" },
-    { name = "websockets", specifier = ">=13.0" },
     { name = "wtpython", git = "https://github.com/Flowelfox/worktree-manager-python" },
 ]
 provides-extras = ["postgres", "bundle", "tray", "dev"]

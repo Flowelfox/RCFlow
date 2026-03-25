@@ -9,6 +9,7 @@
 #   --prefix /path      Install directory (default: /opt/rcflow)
 #   --user username      Service user (default: rcflow)
 #   --port N             Server port (default: 53890)
+#   --owner-user name    Main Linux user whose ~/Projects to access (default: $SUDO_USER)
 #   --no-service         Skip systemd service setup
 #   --unattended         Non-interactive mode (use all defaults)
 # ============================================================================
@@ -20,6 +21,7 @@ set -euo pipefail
 INSTALL_PREFIX="/opt/rcflow"
 SERVICE_USER="rcflow"
 RCFLOW_PORT="53890"
+OWNER_USER="${SUDO_USER:-}"
 SETUP_SERVICE=true
 UNATTENDED=false
 
@@ -27,11 +29,12 @@ UNATTENDED=false
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --prefix)   INSTALL_PREFIX="$2"; shift 2 ;;
-        --user)     SERVICE_USER="$2"; shift 2 ;;
-        --port)     RCFLOW_PORT="$2"; shift 2 ;;
-        --no-service) SETUP_SERVICE=false; shift ;;
-        --unattended) UNATTENDED=true; shift ;;
+        --prefix)      INSTALL_PREFIX="$2"; shift 2 ;;
+        --user)        SERVICE_USER="$2"; shift 2 ;;
+        --port)        RCFLOW_PORT="$2"; shift 2 ;;
+        --owner-user)  OWNER_USER="$2"; shift 2 ;;
+        --no-service)  SETUP_SERVICE=false; shift ;;
+        --unattended)  UNATTENDED=true; shift ;;
         -h|--help)
             head -15 "$0" | tail -13
             exit 0
@@ -124,12 +127,14 @@ if ! $UPGRADING; then
     prompt_value "Install directory" "$INSTALL_PREFIX" INSTALL_PREFIX
     prompt_value "Service user" "$SERVICE_USER" SERVICE_USER
     prompt_value "Server port" "$RCFLOW_PORT" RCFLOW_PORT
+    prompt_value "Owner user (whose ~/Projects to access, blank to skip)" "$OWNER_USER" OWNER_USER
     echo ""
 fi
 
 info "Install directory: ${INSTALL_PREFIX}"
 info "Service user:      ${SERVICE_USER}"
 info "Server port:       ${RCFLOW_PORT}"
+info "Owner user:        ${OWNER_USER:-<none>}"
 echo ""
 
 # ── Stop existing service ───────────────────────────────────────────────────
@@ -148,6 +153,25 @@ if ! id "$SERVICE_USER" &>/dev/null; then
     ok "User created"
 else
     ok "User '${SERVICE_USER}' already exists"
+fi
+
+# ── Grant access to owner user's home directory ──────────────────────────────
+
+if [[ -n "$OWNER_USER" ]]; then
+    if id "$OWNER_USER" &>/dev/null; then
+        info "Granting ${SERVICE_USER} access to /home/${OWNER_USER}/Projects..."
+        usermod -aG "$OWNER_USER" "$SERVICE_USER"
+        chmod 710 "/home/$OWNER_USER"
+        if [[ -d "/home/$OWNER_USER/Projects" ]]; then
+            chmod 750 "/home/$OWNER_USER/Projects"
+        else
+            warn "/home/$OWNER_USER/Projects does not exist — skipping chmod on Projects"
+        fi
+        ok "Group '${OWNER_USER}' membership and directory permissions set"
+    else
+        warn "Owner user '${OWNER_USER}' not found — skipping home directory access setup"
+        OWNER_USER=""
+    fi
 fi
 
 # ── Create install directory ────────────────────────────────────────────────
@@ -217,6 +241,12 @@ if [[ ! -f "$INSTALL_PREFIX/settings.json" ]]; then
 
     API_KEY=$(generate_api_key)
 
+    if [[ -n "$OWNER_USER" ]]; then
+        PROJECTS_DIR_VALUE="/home/$OWNER_USER/Projects"
+    else
+        PROJECTS_DIR_VALUE="~/Projects"
+    fi
+
     cat > "$INSTALL_PREFIX/settings.json" <<JSONEOF
 {
   "RCFLOW_HOST": "0.0.0.0",
@@ -235,7 +265,7 @@ if [[ ! -f "$INSTALL_PREFIX/settings.json" ]]; then
   "STT_API_KEY": "",
   "TTS_PROVIDER": "none",
   "TTS_API_KEY": "",
-  "PROJECTS_DIR": "~/Projects",
+  "PROJECTS_DIR": "${PROJECTS_DIR_VALUE}",
   "TOOLS_DIR": "${INSTALL_PREFIX}/tools",
   "TOOL_AUTO_UPDATE": "true",
   "TOOL_UPDATE_INTERVAL_HOURS": "6",
@@ -292,7 +322,7 @@ RestartSec=5
 # Security hardening
 NoNewPrivileges=true
 ProtectSystem=strict
-ProtectHome=read-only
+ProtectHome=no
 ReadWritePaths=${INSTALL_PREFIX}/data ${INSTALL_PREFIX}/logs ${INSTALL_PREFIX}/certs ${INSTALL_PREFIX}/managed-tools
 PrivateTmp=true
 
