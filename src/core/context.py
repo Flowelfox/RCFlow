@@ -354,7 +354,21 @@ class ContextMixin:
         parts.append(
             f" When invoking any agent tool (claude_code, codex), you MUST pass"
             f" working_directory='{selected_wt}' unless the user explicitly requests"
-            f" a different directory.]"
+            f" a different directory."
+        )
+        parts.append(
+            f" IMPORTANT — merge direction disambiguation:"
+            f" The worktree tool's action=\"merge\" merges the worktree branch INTO main"
+            f" (i.e. finishing the feature branch) and then deletes the worktree."
+            f" It does NOT update the worktree from main."
+            f" When the user says anything like \"pull main into worktree\","
+            f" \"merge main into worktree\", \"update worktree from main\","
+            f" \"sync worktree with main\", or similar phrasing where the direction"
+            f" is main → worktree, you MUST NOT call the worktree tool."
+            f" Instead, invoke the agent tool (claude_code) with"
+            f" working_directory='{selected_wt}' and instruct it to run the appropriate"
+            f" git command (e.g. git pull origin main, or git merge main) from within"
+            f" the worktree directory.]"
         )
         return "".join(parts)
 

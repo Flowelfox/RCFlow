@@ -11,8 +11,7 @@ import '../../theme.dart';
 /// to use @syntax to attach a project.
 ///
 /// **Project mode** (@ProjectName has been used): shows the attached project
-/// name, its git worktrees (create / merge / remove), and a list of artifacts
-/// discovered under that project directory.
+/// name and its git worktrees (create / merge / remove).
 class ProjectPanel extends StatefulWidget {
   const ProjectPanel({super.key});
 
@@ -22,20 +21,16 @@ class ProjectPanel extends StatefulWidget {
 
 class _ProjectPanelState extends State<ProjectPanel> {
   List<Map<String, dynamic>>? _worktrees;
-  List<Map<String, dynamic>>? _artifacts;
   bool _loadingWorktrees = false;
-  bool _loadingArtifacts = false;
   String? _worktreesError;
-  String? _artifactsError;
 
   /// Cache key: reloads when the project path or workerId changes.
   String? _lastFetchedKey;
 
   // Section order and collapse state
-  final List<String> _sectionOrder = ['worktrees', 'artifacts'];
+  final List<String> _sectionOrder = ['worktrees'];
   final Map<String, bool> _sectionCollapsed = {
     'worktrees': false,
-    'artifacts': false,
   };
 
   // ---------------------------------------------------------------------------
@@ -51,9 +46,7 @@ class _ProjectPanelState extends State<ProjectPanel> {
     if (mounted) {
       setState(() {
         if (_worktrees == null) _loadingWorktrees = true;
-        if (_artifacts == null) _loadingArtifacts = true;
         _worktreesError = null;
-        _artifactsError = null;
       });
     }
 
@@ -62,66 +55,42 @@ class _ProjectPanelState extends State<ProjectPanel> {
       if (mounted) {
         setState(() {
           _loadingWorktrees = false;
-          _loadingArtifacts = false;
         });
       }
       return;
     }
 
-    final projectName = projectPath.split('/').last;
-
-    // Local captures so we can persist to cache even if the widget is
+    // Local capture so we can persist to cache even if the widget is
     // disposed before the fetch completes (mounted check would block it).
     List<Map<String, dynamic>>? fetchedWorktrees;
-    List<Map<String, dynamic>>? fetchedArtifacts;
 
-    // Fetch worktrees and artifacts in parallel
-    await Future.wait([
-      worker.ws.listWorktrees(projectPath).then((result) {
-        fetchedWorktrees = (result['worktrees'] as List<dynamic>? ?? [])
-            .cast<Map<String, dynamic>>();
-        if (mounted) {
-          setState(() {
-            _worktrees = fetchedWorktrees;
-            _loadingWorktrees = false;
-          });
-        }
-      }).catchError((e) {
-        if (mounted) {
-          setState(() {
-            _worktreesError = e.toString();
-            _loadingWorktrees = false;
-          });
-        }
-      }),
-      worker.ws.listProjectArtifacts(projectName).then((result) {
-        fetchedArtifacts = (result['artifacts'] as List<dynamic>? ?? [])
-            .cast<Map<String, dynamic>>();
-        if (mounted) {
-          setState(() {
-            _artifacts = fetchedArtifacts;
-            _loadingArtifacts = false;
-          });
-        }
-      }).catchError((e) {
-        if (mounted) {
-          setState(() {
-            _artifactsError = e.toString();
-            _loadingArtifacts = false;
-          });
-        }
-      }),
-    ]);
+    try {
+      final result = await worker.ws.listWorktrees(projectPath);
+      fetchedWorktrees = (result['worktrees'] as List<dynamic>? ?? [])
+          .cast<Map<String, dynamic>>();
+      if (mounted) {
+        setState(() {
+          _worktrees = fetchedWorktrees;
+          _loadingWorktrees = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _worktreesError = e.toString();
+          _loadingWorktrees = false;
+        });
+      }
+    }
 
     // Always persist freshly fetched data to cache — even when the widget
     // was disposed during the fetch — so the next open shows data immediately
     // without a loading spinner.  Uses the appState parameter directly to
     // avoid needing a BuildContext after an await.
-    if (fetchedWorktrees != null || fetchedArtifacts != null) {
+    if (fetchedWorktrees != null) {
       appState.setProjectDataCache(
         '$workerId:$projectPath',
         worktrees: fetchedWorktrees,
-        artifacts: fetchedArtifacts,
       );
     }
   }
@@ -267,9 +236,7 @@ class _ProjectPanelState extends State<ProjectPanel> {
       final fetchKey =
           '$workerId:$mainProjectPath:${worktreeLastAction ?? ''}';
       final cacheKey = '$workerId:$mainProjectPath';
-      if (fetchKey != _lastFetchedKey &&
-          !_loadingWorktrees &&
-          !_loadingArtifacts) {
+      if (fetchKey != _lastFetchedKey && !_loadingWorktrees) {
         _lastFetchedKey = fetchKey;
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (!mounted) return;
@@ -277,7 +244,6 @@ class _ProjectPanelState extends State<ProjectPanel> {
           if (cached != null) {
             setState(() {
               _worktrees ??= cached.worktrees;
-              _artifacts ??= cached.artifacts;
             });
           }
           _refresh(appState, workerId, mainProjectPath);
@@ -306,11 +272,10 @@ class _ProjectPanelState extends State<ProjectPanel> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  for (int i = 0; i < _sectionOrder.length; i++)
+                  for (final sectionId in _sectionOrder)
                     _buildSection(
                       context,
-                      sectionId: _sectionOrder[i],
-                      index: i,
+                      sectionId: sectionId,
                       appState: appState,
                       workerId: workerId,
                       mainProjectPath: mainProjectPath,
@@ -329,7 +294,6 @@ class _ProjectPanelState extends State<ProjectPanel> {
   Widget _buildSection(
     BuildContext context, {
     required String sectionId,
-    required int index,
     required AppState appState,
     required String workerId,
     required String mainProjectPath,
@@ -337,56 +301,41 @@ class _ProjectPanelState extends State<ProjectPanel> {
     required String? sessionId,
   }) {
     final collapsed = _sectionCollapsed[sectionId] ?? false;
-    final IconData icon;
-    final String label;
-    Widget? trailing;
-    Widget body;
-
-    if (sectionId == 'worktrees') {
-      icon = Icons.device_hub_outlined;
-      label = 'Worktrees';
-      trailing = Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _SmallIconBtn(
-            icon: Icons.refresh,
-            tooltip: 'Refresh',
-            onTap: (_loadingWorktrees || _loadingArtifacts)
-                ? null
-                : () => _refresh(appState, workerId, mainProjectPath),
-          ),
-          _SmallIconBtn(
-            icon: Icons.add,
-            tooltip: 'New worktree',
-            onTap: _loadingWorktrees
-                ? null
-                : () => _create(appState, workerId, mainProjectPath),
-          ),
-        ],
-      );
-      body = Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (selectedWorktreePath != null)
-            _buildActiveWorktreeBar(
-                context, appState, workerId, sessionId, selectedWorktreePath),
-          SizedBox(
-            height: 160,
-            child: _buildWorktreeList(context, appState, workerId,
-                mainProjectPath, selectedWorktreePath, sessionId),
-          ),
-        ],
-      );
-    } else {
-      icon = Icons.insert_drive_file_outlined;
-      label = 'Artifacts';
-      trailing = null;
-      body = SizedBox(
-        height: 200,
-        child: _buildArtifactList(context),
-      );
-    }
+    const IconData icon = Icons.device_hub_outlined;
+    const String label = 'Worktrees';
+    final Widget trailing = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _SmallIconBtn(
+          icon: Icons.refresh,
+          tooltip: 'Refresh',
+          onTap: _loadingWorktrees
+              ? null
+              : () => _refresh(appState, workerId, mainProjectPath),
+        ),
+        _SmallIconBtn(
+          icon: Icons.add,
+          tooltip: 'New worktree',
+          onTap: _loadingWorktrees
+              ? null
+              : () => _create(appState, workerId, mainProjectPath),
+        ),
+      ],
+    );
+    final Widget body = Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (selectedWorktreePath != null)
+          _buildActiveWorktreeBar(
+              context, appState, workerId, sessionId, selectedWorktreePath),
+        SizedBox(
+          height: 160,
+          child: _buildWorktreeList(context, appState, workerId,
+              mainProjectPath, selectedWorktreePath, sessionId),
+        ),
+      ],
+    );
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -397,7 +346,6 @@ class _ProjectPanelState extends State<ProjectPanel> {
           icon: icon,
           label: label,
           sectionId: sectionId,
-          index: index,
           trailing: trailing,
         ),
         AnimatedSize(
@@ -415,12 +363,9 @@ class _ProjectPanelState extends State<ProjectPanel> {
     required IconData icon,
     required String label,
     required String sectionId,
-    required int index,
     Widget? trailing,
   }) {
     final collapsed = _sectionCollapsed[sectionId] ?? false;
-    final isFirst = index == 0;
-    final isLast = index == _sectionOrder.length - 1;
 
     return GestureDetector(
       onTap: () =>
@@ -455,30 +400,6 @@ class _ProjectPanelState extends State<ProjectPanel> {
             ),
             const Spacer(),
             if (trailing != null) trailing,
-            _SmallIconBtn(
-              icon: Icons.arrow_upward,
-              tooltip: 'Move section up',
-              iconSize: 12,
-              onTap: isFirst
-                  ? null
-                  : () => setState(() {
-                        final tmp = _sectionOrder[index - 1];
-                        _sectionOrder[index - 1] = _sectionOrder[index];
-                        _sectionOrder[index] = tmp;
-                      }),
-            ),
-            _SmallIconBtn(
-              icon: Icons.arrow_downward,
-              tooltip: 'Move section down',
-              iconSize: 12,
-              onTap: isLast
-                  ? null
-                  : () => setState(() {
-                        final tmp = _sectionOrder[index + 1];
-                        _sectionOrder[index + 1] = _sectionOrder[index];
-                        _sectionOrder[index] = tmp;
-                      }),
-            ),
           ],
         ),
       ),
@@ -676,75 +597,6 @@ class _ProjectPanelState extends State<ProjectPanel> {
     );
   }
 
-  Widget _buildArtifactList(BuildContext context) {
-    if (_loadingArtifacts) {
-      return Align(
-        alignment: Alignment.topCenter,
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: LinearProgressIndicator(
-            backgroundColor: context.appColors.bgElevated,
-          ),
-        ),
-      );
-    }
-    if (_artifactsError != null) {
-      return Padding(
-        padding: const EdgeInsets.all(12),
-        child: Text(_artifactsError!,
-            style: TextStyle(
-                color: context.appColors.errorText, fontSize: 11)),
-      );
-    }
-    if (_artifacts == null || _artifacts!.isEmpty) {
-      return Center(
-        child: Text(
-          _artifacts == null ? 'Not loaded' : 'No artifacts',
-          style: TextStyle(
-              color: context.appColors.textMuted, fontSize: 11),
-        ),
-      );
-    }
-    return ListView.builder(
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      itemCount: _artifacts!.length,
-      itemBuilder: (context, i) {
-        final a = _artifacts![i];
-        final name = a['file_name'] as String? ?? '';
-        final ext = a['file_extension'] as String? ?? '';
-        final mime = a['mime_type'] as String? ?? '';
-        final size = a['file_size'] as int? ?? 0;
-        return Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-          child: Row(
-            children: [
-              Icon(_fileIcon(ext, mime),
-                  size: 13, color: context.appColors.textMuted),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(name,
-                        style: TextStyle(
-                            color: context.appColors.textPrimary,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w500),
-                        overflow: TextOverflow.ellipsis),
-                    Text(_formatSize(size),
-                        style: TextStyle(
-                            color: context.appColors.textMuted,
-                            fontSize: 10)),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
   // ---------------------------------------------------------------------------
   // Global (no project) state
   // ---------------------------------------------------------------------------
@@ -807,7 +659,7 @@ class _ProjectPanelState extends State<ProjectPanel> {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      'Type @ProjectName in the input field to attach a project. Worktrees and artifacts will appear here.',
+                      'Type @ProjectName in the input field to attach a project. Worktrees will appear here.',
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         color: context.appColors.textMuted,
@@ -942,44 +794,6 @@ class _ProjectPanelState extends State<ProjectPanel> {
     return result ?? false;
   }
 
-  // ---------------------------------------------------------------------------
-  // Helpers
-  // ---------------------------------------------------------------------------
-
-  IconData _fileIcon(String ext, String mime) {
-    if (mime.startsWith('image/')) return Icons.image_outlined;
-    if (mime.startsWith('video/')) return Icons.videocam_outlined;
-    if (mime.startsWith('audio/')) return Icons.audiotrack_outlined;
-    switch (ext.toLowerCase()) {
-      case '.py':
-        return Icons.code;
-      case '.dart':
-        return Icons.code;
-      case '.js':
-      case '.ts':
-      case '.jsx':
-      case '.tsx':
-        return Icons.code;
-      case '.json':
-      case '.yaml':
-      case '.yml':
-      case '.toml':
-        return Icons.data_object_outlined;
-      case '.md':
-      case '.txt':
-        return Icons.description_outlined;
-      case '.pdf':
-        return Icons.picture_as_pdf_outlined;
-      default:
-        return Icons.insert_drive_file_outlined;
-    }
-  }
-
-  String _formatSize(int bytes) {
-    if (bytes < 1024) return '$bytes B';
-    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
-    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
-  }
 }
 
 // ---------------------------------------------------------------------------

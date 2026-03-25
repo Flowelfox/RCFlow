@@ -74,6 +74,7 @@ SessionInfo _session(
   String id,
   String status, {
   String? mainProjectPath,
+  String? selectedWorktreePath,
 }) =>
     SessionInfo(
       sessionId: id,
@@ -81,6 +82,7 @@ SessionInfo _session(
       status: status,
       workerId: 'worker1',
       mainProjectPath: mainProjectPath,
+      selectedWorktreePath: selectedWorktreePath,
     );
 
 // ---------------------------------------------------------------------------
@@ -456,6 +458,79 @@ void main() {
       pane.addListener(() => notified++);
       pane.clearWorkerSettings();
       expect(notified, 1);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Active worktree display on pane switch
+  // ---------------------------------------------------------------------------
+
+  group('PaneState.currentSelectedWorktreePath — active worktree', () {
+    test('returns worktree path for session with a selected worktree', () {
+      final pane = PaneState(
+        paneId: 'p1',
+        host: _StubPaneHost([
+          _session('s1', 'active',
+              mainProjectPath: '/home/user/Projects/MyApp',
+              selectedWorktreePath: '/home/user/Projects/MyApp/.worktrees/feat-login'),
+        ]),
+      );
+
+      pane.switchSession('s1');
+
+      expect(pane.currentSelectedWorktreePath,
+          '/home/user/Projects/MyApp/.worktrees/feat-login');
+    });
+
+    test('returns null for session without a selected worktree', () {
+      final pane = PaneState(
+        paneId: 'p1',
+        host: _StubPaneHost([
+          _session('s1', 'active',
+              mainProjectPath: '/home/user/Projects/MyApp'),
+        ]),
+      );
+
+      pane.switchSession('s1');
+
+      expect(pane.currentSelectedWorktreePath, isNull);
+    });
+
+    test('updates when switching between sessions with different worktrees', () {
+      final pane = PaneState(
+        paneId: 'p1',
+        host: _StubPaneHost([
+          _session('s1', 'active',
+              mainProjectPath: '/home/user/Projects/MyApp',
+              selectedWorktreePath: '/home/user/Projects/MyApp/.worktrees/feat-a'),
+          _session('s2', 'active',
+              mainProjectPath: '/home/user/Projects/MyApp',
+              selectedWorktreePath: '/home/user/Projects/MyApp/.worktrees/feat-b'),
+          _session('s3', 'active',
+              mainProjectPath: '/home/user/Projects/MyApp'),
+        ]),
+      );
+
+      pane.switchSession('s1');
+      expect(pane.currentSelectedWorktreePath,
+          '/home/user/Projects/MyApp/.worktrees/feat-a');
+
+      pane.switchSession('s2');
+      expect(pane.currentSelectedWorktreePath,
+          '/home/user/Projects/MyApp/.worktrees/feat-b');
+
+      pane.switchSession('s3');
+      expect(pane.currentSelectedWorktreePath, isNull,
+          reason: 's3 has no worktree — should return null');
+    });
+
+    test('returns null when no session is active', () {
+      final pane = PaneState(
+        paneId: 'p1',
+        host: _StubPaneHost([]),
+      );
+
+      expect(pane.currentSelectedWorktreePath, isNull);
     });
   });
 }

@@ -126,8 +126,13 @@ class BackgroundTasksMixin:
                         created_at=session.created_at,
                         session_type=session.session_type.value,
                         status=session.status.value,
+                        main_project_path=session.main_project_path,
                         metadata_=session.metadata,
                     ))
+                    await db.commit()
+                elif existing.main_project_path != session.main_project_path:
+                    # Update main_project_path if it was set after the initial stub write.
+                    existing.main_project_path = session.main_project_path
                     await db.commit()
         except Exception:
             logger.exception("Failed to pre-create session row for %s", session.id)
@@ -184,7 +189,7 @@ class BackgroundTasksMixin:
     async def _summarize_and_push(
         self, session: ActiveSession, text: str, *, push_session_end_ask: bool = False
     ) -> None:
-        """Generate a TTS-friendly summary and push it to the session buffer."""
+        """Generate a concise summary and push it to the session buffer."""
         try:
             summary = await self._llm.summarize(text)
             session.buffer.push_text(

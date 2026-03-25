@@ -30,6 +30,7 @@ class SessionStatus(StrEnum):
     ACTIVE = "active"
     EXECUTING = "executing"
     PAUSED = "paused"
+    INTERRUPTED = "interrupted"  # killed by a backend restart; can be resumed
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
@@ -215,6 +216,25 @@ class ActiveSession:
         if self._on_update:
             self._on_update()
 
+    def interrupt(self) -> None:
+        """Mark the session as interrupted by a backend restart.
+
+        Unlike complete/cancel, does NOT set ended_at (the session is open for
+        resumption) and does NOT close the buffer.  The ``INTERRUPTED`` status
+        signals to clients that the session can be restored.
+        """
+        terminal = (SessionStatus.COMPLETED, SessionStatus.FAILED, SessionStatus.CANCELLED)
+        if self.status in terminal:
+            return  # already terminal — leave it alone
+        was_paused = self.status == SessionStatus.PAUSED
+        self.status = SessionStatus.INTERRUPTED
+        self._activity_state = ActivityState.IDLE
+        self.metadata["restart_interrupted"] = True
+        if was_paused:
+            self.metadata["was_paused_before_restart"] = True
+        if self._on_update:
+            self._on_update()
+
     def pause(self, reason: str | None = None) -> None:
         """Pause the session. Any running subprocess is killed; new prompts are rejected.
 
@@ -247,9 +267,12 @@ class ActiveSession:
             self._on_update()
 
     def restore(self) -> None:
-        """Restore a session from a terminal state back to ACTIVE."""
-        terminal = (SessionStatus.COMPLETED, SessionStatus.FAILED, SessionStatus.CANCELLED)
-        if self.status not in terminal:
+        """Restore a session from a terminal or interrupted state back to ACTIVE."""
+        restorable = (
+            SessionStatus.COMPLETED, SessionStatus.FAILED,
+            SessionStatus.CANCELLED, SessionStatus.INTERRUPTED,
+        )
+        if self.status not in restorable:
             raise RuntimeError(f"Cannot restore session in state: {self.status.value}")
         self.status = SessionStatus.ACTIVE
         self._activity_state = ActivityState.IDLE
@@ -473,8 +496,8 @@ class SessionManager:
         if row is None:
             raise ValueError(f"Session not found in database: {session_id}")
 
-        terminal_statuses = ("completed", "failed", "cancelled")
-        if row.status not in terminal_statuses:
+        restorable_statuses = ("completed", "failed", "cancelled", "interrupted")
+        if row.status not in restorable_statuses:
             raise RuntimeError(f"Cannot restore session in state: {row.status}")
 
         session_type = SessionType(row.session_type)
@@ -488,6 +511,9 @@ class SessionManager:
         session._title = row.title
         session.main_project_path = row.main_project_path
         session.metadata = dict(row.metadata_) if row.metadata_ else {}
+        # Reset the task-update-fired flag so that ending the restored session
+        # triggers a fresh LLM task evaluation rather than being suppressed.
+        session.metadata.pop("_task_update_fired", None)
         session.last_activity_at = datetime.now(UTC)
         # Restore token usage
         session.input_tokens = row.input_tokens or 0
@@ -620,6 +646,24 @@ class SessionManager:
         for session_id in to_archive:
             await self.archive_session(session_id, db)
 
+    async def persist_session_metadata(self, session: "ActiveSession", db: AsyncSession) -> None:
+        """Write the session's current metadata and main_project_path to the DB.
+
+        Called after mid-session mutations (e.g. worktree selection, project change)
+        to make the change durable before archival so it survives backend restarts.
+        Only updates the existing stub row — the full archive write at session end
+        supersedes this with the complete record.
+        """
+        try:
+            session_uuid = uuid.UUID(session.id)
+            row = await db.get(SessionModel, session_uuid)
+            if row is not None:
+                row.metadata_ = dict(session.metadata)
+                row.main_project_path = session.main_project_path
+                await db.commit()
+        except Exception:
+            logger.warning("Failed to persist metadata for session %s", session.id, exc_info=True)
+
     def complete_all_active(self) -> int:
         """Mark all non-terminal sessions as completed for graceful shutdown.
 
@@ -633,6 +677,25 @@ class SessionManager:
                 if session.status == SessionStatus.PAUSED:
                     session.status = SessionStatus.ACTIVE
                 session.complete()
+                count += 1
+        return count
+
+    def interrupt_all_active(self) -> int:
+        """Mark all non-terminal sessions as INTERRUPTED for graceful shutdown.
+
+        Preferred over complete_all_active during shutdown because INTERRUPTED
+        sessions can be restored by the client after the backend restarts.
+        Unlike complete(), does not set ended_at so clients know resumption is
+        possible.  Returns the number of sessions affected.
+        """
+        terminal = (
+            SessionStatus.COMPLETED, SessionStatus.FAILED,
+            SessionStatus.CANCELLED, SessionStatus.INTERRUPTED,
+        )
+        count = 0
+        for session in self._sessions.values():
+            if session.status not in terminal:
+                session.interrupt()
                 count += 1
         return count
 

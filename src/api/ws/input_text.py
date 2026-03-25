@@ -287,6 +287,7 @@ async def ws_input_text(
 
             session_id = message.get("session_id")
             project_name: str | None = message.get("project_name") or None
+            selected_worktree_path: str | None = message.get("selected_worktree_path") or None
 
             # Resolve optional attachments
             resolved_attachments: list[ResolvedAttachment] | None = None
@@ -328,6 +329,7 @@ async def ws_input_text(
                     result_session_id,
                     attachments=resolved_attachments,
                     project_name=project_name,
+                    selected_worktree_path=selected_worktree_path,
                 )
             )
             background_tasks.add(task)

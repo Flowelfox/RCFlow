@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 
 from src.api.deps import verify_http_api_key
+from src.core.buffer import MessageType
 from src.models.db import Session as SessionModel
 from src.models.db import SessionMessage as SessionMessageModel
 
@@ -509,7 +510,29 @@ async def set_session_worktree(
     else:
         session.metadata.pop("selected_worktree_path", None)
 
+    # If a Claude Code subprocess is already running, the new path cannot take
+    # effect until the next invocation.  Push a brief info message so the user
+    # knows the selection is queued rather than silently ignored.
+    if session.claude_code_executor is not None and path is not None:
+        session.buffer.push_text(
+            MessageType.TEXT_CHUNK,
+            {
+                "session_id": session.id,
+                "content": f"Worktree selection updated to `{path}`. "
+                           "This will take effect on the next Claude Code invocation.",
+                "role": "system",
+            },
+        )
+
     session_manager.broadcast_session_update(session)
+
+    # Persist the metadata change immediately so the selection survives a
+    # backend restart before the session is fully archived.
+    db_session_factory = request.app.state.db_session_factory
+    if db_session_factory is not None:
+        async with db_session_factory() as db:
+            await session_manager.persist_session_metadata(session, db)
+
     logger.info(
         "Session %s selected_worktree_path set to %r via HTTP API", session_id, path
     )
