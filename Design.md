@@ -2,7 +2,7 @@
 
 ## Overview
 
-RCFlow is a background server running on Linux or Windows that provides a WebSocket-based interface for executing actions on the host machine via natural language prompts. Users connect from client applications (Android and Windows desktop), send text or voice prompts, and the server uses an LLM (Anthropic Messages API, AWS Bedrock, or OpenAI Chat Completions API) to interpret those prompts into tool calls. Tools are pluggable and defined via JSON files. Results — both text and audio — stream back to the client in real time.
+RCFlow is a background server running on Linux or Windows that provides a WebSocket-based interface for executing actions on the host machine via natural language prompts. Users connect from client applications (Android and Windows desktop), send text prompts, and the server uses an LLM (Anthropic Messages API, AWS Bedrock, or OpenAI Chat Completions API) to interpret those prompts into tool calls. Tools are pluggable and defined via JSON files. Results stream back to the client in real time.
 
 ## Technology Stack
 
@@ -14,9 +14,6 @@ RCFlow is a background server running on Linux or Windows that provides a WebSoc
 | ORM                  | SQLAlchemy 2.0 (async)        |
 | Database             | SQLite (default) or PostgreSQL |
 | LLM                  | Anthropic Messages API, AWS Bedrock, or OpenAI Chat Completions API |
-| STT                  | Pluggable (Wispr Flow default)|
-| TTS                  | Pluggable (provider TBD)      |
-| Audio Format         | Opus/OGG                      |
 | Prompt Templates     | Jinja2                        |
 | Linting / Formatting | Ruff                          |
 | Type Checking        | ty                            |
@@ -25,7 +22,7 @@ RCFlow is a background server running on Linux or Windows that provides a WebSoc
 | OS                   | Linux, Windows                |
 | Client Platforms     | Android, Windows (desktop)    |
 | Android Keep-Alive   | flutter_foreground_task       |
-| Audio Playback       | audioplayers                  |
+| Notification Sounds  | audioplayers (local WAV files) |
 | File Picker          | file_picker (Windows custom sounds) |
 | Bundling             | PyInstaller (self-contained distributable) |
 | Windows GUI          | tkinter (server control window)            |
@@ -45,60 +42,43 @@ RCFlow is a background server running on Linux or Windows that provides a WebSoc
 ┌─────────────────┐
 │  Mobile Client   │
 │  (or any client) │
-└────┬───┬───┬───┬┘
-     │   │   │   │
-     │   │   │   └──────────────────────────────────┐
-     │   │   └───────────────────────┐              │
-     │   └──────────────┐            │              │
-     ▼                  ▼            ▼              ▼
-┌──────────┐   ┌──────────┐  ┌───────────┐  ┌───────────┐
-│/ws/input │   │/ws/input │  │/ws/output │  │/ws/output │
-│  /text   │   │  /audio  │  │  /text    │  │  /audio   │
-└────┬─────┘   └────┬─────┘  └─────▲─────┘  └─────▲─────┘
-     │              │              │              │
-     │              ▼              │              │
-     │      ┌──────────────┐      │              │
-     │      │  Wispr Flow  │      │              │
-     │      │  STT Service │      │              │
-     │      └──────┬───────┘      │              │
-     │             │               │              │
-     ▼             ▼               │              │
-┌─────────────────────────┐       │              │
-│     Prompt Router       │       │              │
-│  (text from either      │       │              │
-│   input channel)        │       │              │
-└────────────┬────────────┘       │              │
-             ▼                    │              │
-┌─────────────────────────┐       │              │
-│   LLM Provider          │       │              │
-│   (Anthropic API,       │       │              │
-│    AWS Bedrock, or      │       │              │
-│    OpenAI)              │       │              │
-│   + Tool Definitions    │       │              │
-└────────────┬────────────┘       │              │
-             │                    │              │
-             ▼                    │              │
-┌─────────────────────────┐       │              │
-│   Tool Executor         │       │              │
-│  ┌───────────────────┐  │       │              │
-│  │ Shell Executor    │  │       │              │
-│  │ HTTP API Executor │  │       │              │
-│  │ Claude Code Exec. │  │       │              │
-│  └───────────────────┘  │       │              │
-└────────────┬────────────┘       │              │
-             │                    │              │
-             ▼                    │              │
-┌─────────────────────────┐       │              │
-│   Session Manager       │───────┘              │
-│   (buffer, history,     │                      │
-│    subscribe/unsub)     │                      │
-└────────────┬────────────┘                      │
-             │                                   │
-             ▼                                   │
-┌─────────────────────────┐                      │
-│   TTS Service           │──────────────────────┘
-│   (pluggable provider)  │
+└────┬──────────┬──┘
+     │          │
+     ▼          ▼
+┌──────────┐  ┌───────────┐
+│/ws/input │  │/ws/output │
+│  /text   │  │  /text    │
+└────┬─────┘  └─────▲─────┘
+     │               │
+     ▼               │
+┌─────────────────────────┐
+│     Prompt Router       │
 └────────────┬────────────┘
+             ▼
+┌─────────────────────────┐
+│   LLM Provider          │
+│   (Anthropic API,       │
+│    AWS Bedrock, or      │
+│    OpenAI)              │
+│   + Tool Definitions    │
+└────────────┬────────────┘
+             │
+             ▼
+┌─────────────────────────┐
+│   Tool Executor         │
+│  ┌───────────────────┐  │
+│  │ Shell Executor    │  │
+│  │ HTTP API Executor │  │
+│  │ Claude Code Exec. │  │
+│  └───────────────────┘  │
+└────────────┬────────────┘
+             │
+             ▼
+┌─────────────────────────┐
+│   Session Manager       │───────┐
+│   (buffer, history,     │       │
+│    subscribe/unsub)     │       ▼
+└────────────┬────────────┘  /ws/output/text
              │
              ▼
 ┌─────────────────────────┐
@@ -110,23 +90,21 @@ RCFlow is a background server running on Linux or Windows that provides a WebSoc
 ### Request Lifecycle
 
 ```
-1. Client connects to /ws/input/text or /ws/input/audio
-2. If audio → RCFlow forwards to Wispr Flow STT → receives transcribed text
-3. (Optional) Client uploads files via POST /api/uploads → receives attachment_id(s)
-4. Text prompt (+ optional attachment IDs) is routed to the Prompt Router
-5. Prompt Router creates or resumes a Session; resolves attachment IDs from AttachmentStore
-6. Prompt + attachment content blocks + tool definitions + session context sent to LLM provider
+1. Client connects to /ws/input/text
+2. (Optional) Client uploads files via POST /api/uploads → receives attachment_id(s)
+3. Text prompt (+ optional attachment IDs) is routed to the Prompt Router
+4. Prompt Router creates or resumes a Session; resolves attachment IDs from AttachmentStore
+5. Prompt + attachment content blocks + tool definitions + session context sent to LLM provider
    (Anthropic API, AWS Bedrock, or OpenAI, streaming)
-7. LLM responds with text and/or tool_use blocks
-8. For each tool_use → Tool Executor runs the tool (shell command or HTTP API call)
-9. Tool output fed back to LLM for further reasoning (agentic loop)
-10. All LLM text output streams to /ws/output/text chunk-by-chunk
-11. All LLM text output also sent to TTS → audio streams to /ws/output/audio
-12. When the LLM finishes (no more tool calls), the session remains active.
+6. LLM responds with text and/or tool_use blocks
+7. For each tool_use → Tool Executor runs the tool (shell command or HTTP API call)
+8. Tool output fed back to LLM for further reasoning (agentic loop)
+9. All LLM text output streams to /ws/output/text chunk-by-chunk
+10. When the LLM finishes (no more tool calls), the session remains active.
     If the LLM included [SessionEndAsk], the server pushes a session_end_ask
     message; the client shows a confirmation card. The session only ends
     when the user explicitly confirms or sends POST /api/sessions/{id}/end.
-13. Completed sessions are archived from memory to the database
+11. Completed sessions are archived from memory to the database
 ```
 
 ### Flutter Client — Multi-Platform
@@ -160,6 +138,7 @@ On wide layouts (>700px), the main content area supports multiple simultaneous s
   - **Global** (`main_project_path == null`): prompts the user to attach a project via the `@ProjectName` picker chip above the input field.
   - **Project** (`main_project_path != null`): shows the attached project name, its git worktrees (create / merge / remove / set-active), and a scrollable list of project artifacts fetched from `GET /api/projects/{name}/artifacts`. Both sections load in parallel and auto-refresh when `main_project_path` or `workerId` changes. Sections are **collapsible** (chevron toggle) and **reorderable** (up/down arrows in each section header). Panel key: `"project"`. Icon: `folder_outlined`.
 - **Project chip** (`_ProjectChip` in `lib/ui/widgets/input_area.dart`) — displayed above the message input field when a project is attached. Styled like the Worker chip. Shows the folder name and an × to clear. Turns red with a tooltip when `project_name_error` is set. Users attach a project by typing `@ProjectName` in the input — when they confirm (via overlay selection, Space, or Enter after a complete name), the `@name` text is erased and the chip is populated instead.
+- **Worktree chip** (`_WorktreeChip` in `lib/ui/widgets/input_area.dart`) — displayed below the project chip, only when `session_id == null` (new chat) and a project is selected. Allows the user to pre-select an active worktree before sending the first message. Shows a "Worktree ▾" button when nothing is selected, or the selected worktree name with an accent color and an × to clear. Tapping opens a `showMenu` dropdown that lists all available worktrees for the selected project (fetched lazily via `GET /api/projects/{name}/worktrees`, cached per `workerId:projectPath`). Includes a "No worktree (default)" option to clear the selection. The selected path is stored as `PaneState._pendingWorktreePath` and sent as `selected_worktree_path` in the first `prompt` WS message; it is cleared when the project chip is cleared or when a new chat starts.
 - `StatisticsPane` (`lib/ui/widgets/statistics_pane.dart`) — right-panel bookmark within a session pane for time-series telemetry charts and per-session summaries:
   - **Filter bar**: zoom-level chips (`Minute` / `Hour` / `Day`) and a manual refresh button. Changing zoom resets the time window to the zoom's default duration and triggers an immediate fetch.
   - **Charts section**: six line charts rendered via `fl_chart` — Tokens Sent, Tokens Received, Avg LLM Duration (ms), Avg Tool Duration (ms), Turn Count, Tool Call Count. Interactive tooltips on hover/tap with per-bucket value and timestamp. State managed by `StatisticsPaneState` (`lib/state/statistics_pane_state.dart`).
@@ -263,7 +242,7 @@ The client can connect to multiple RCFlow servers simultaneously. Each server co
 | POST   | `/api/sessions/{session_id}/restore`    | Yes  | Restore an archived (completed/failed/cancelled) session back to active state. Rebuilds conversation history, buffer, and Claude Code executor state. |
 | PATCH  | `/api/sessions/{session_id}/title`      | Yes  | Set or clear a session title (max 200 chars). Body: `{"title": "..."}` or `{"title": null}`. |
 | GET    | `/api/config`                           | Yes  | Get server configuration schema with current values. Secret values are masked. Options grouped by section. |
-| PATCH  | `/api/config`                           | Yes  | Update server configuration. Body: `{"updates": {"KEY": "value", ...}}`. Persists to `settings.json`, reloads settings, and hot-reloads LLM/STT/TTS components. Returns updated schema. |
+| PATCH  | `/api/config`                           | Yes  | Update server configuration. Body: `{"updates": {"KEY": "value", ...}}`. Persists to `settings.json`, reloads settings, and hot-reloads LLM client. Returns updated schema. |
 | GET    | `/api/tools/status`                     | Yes  | Get installation status, versions, and update availability for managed CLI tools (Claude Code, Codex). |
 | POST   | `/api/tools/update`                     | Yes  | Check for and install updates to RCFlow-managed CLI tools. Only updates tools managed by RCFlow (not user-installed ones). |
 | GET    | `/api/tools/{tool_name}/settings`       | Yes  | Get per-tool settings schema and current values for a managed CLI tool. |
@@ -304,9 +283,7 @@ Authentication for HTTP endpoints uses the `X-API-Key` header with the same key 
 | Endpoint            | Direction       | Format         | Purpose                                      |
 |---------------------|-----------------|----------------|----------------------------------------------|
 | `/ws/input/text`    | Client → Server | JSON           | User sends natural language prompts           |
-| `/ws/input/audio`   | Client → Server | Binary (PCM)   | User sends voice audio for STT               |
 | `/ws/output/text`   | Server → Client | JSON           | Streaming text responses chunk-by-chunk       |
-| `/ws/output/audio`  | Server → Client | Binary (Opus)  | Streaming TTS audio responses                |
 
 ### Authentication
 
@@ -346,6 +323,7 @@ The server resolves each `attachment_id` from the `AttachmentStore`, builds mult
 - `session_id`: `null` to create a new session, or an existing session ID to send a follow-up prompt to a conversational or long-running session.
 - `attachments`: Optional list. Each entry must have `id` (from `POST /api/uploads`) and `name`/`mime_type` for display. Entries with missing or expired IDs are silently skipped.
 - `project_name`: Optional folder name (not a full path) of the project to attach to this session. The backend resolves it via `PROJECTS_DIR` and sets `session.main_project_path`. On failure (project not found or unreadable) the backend pushes an `error` message with code `PROJECT_ERROR` and broadcasts a `session_update` with a non-null `project_name_error`. The client sends this field from the project chip (not from `@mention` text).
+- `selected_worktree_path`: Optional absolute path of a worktree pre-selected by the client **before the first message is sent**. Applied to `session.metadata["selected_worktree_path"]` only when the session does not already have a worktree selection (i.e., idempotent and non-clobbering). Subsequent worktree changes must use `PATCH /api/sessions/{id}/worktree`. The client sends this field from the worktree chip (visible only when `session_id == null` and a project is selected).
 
 End a session (user-confirmed completion):
 
@@ -434,16 +412,6 @@ The `decision` field is `"allow"` or `"deny"`. The `scope` field determines how 
 - `"tool_path"` — applies to this tool for files under `path_prefix` (file tools only)
 - `"all_session"` — applies to ALL tools for the rest of the session
 
-### Input Audio Protocol
-
-Client sends audio following the Wispr Flow format:
-
-1. Initial auth/config message (JSON)
-2. Sequential audio chunks (base64-encoded 16-bit PCM, 16kHz, mono)
-3. Commit message to signal end of utterance
-
-The server handles the full Wispr Flow protocol internally.
-
 ### Output Text Protocol
 
 Server sends JSON messages:
@@ -514,7 +482,7 @@ Large tool outputs are truncated to 100,000 characters server-side before delive
 {
   "type": "summary",
   "session_id": "uuid",
-  "content": "A short TTS-friendly summary of the Claude Code result."
+  "content": "A short summary of the Claude Code result."
 }
 ```
 
@@ -940,26 +908,6 @@ The `ArtifactScanner` service extracts file paths from session messages and trac
 
 ---
 
-## Timing Synchronization (Text ↔ Audio)
-
-### The Problem
-
-Text and audio streams are produced at different rates. Text chunks arrive as the LLM generates tokens (fast), while audio chunks arrive after TTS processing (slower, with latency). A client displaying text and playing audio simultaneously will see them drift out of sync.
-
-### Solutions
-
-1. **Sequence-based correlation**: Both text and audio messages carry `sequence` numbers. The client can use these to correlate which audio corresponds to which text chunk and pace display accordingly.
-
-2. **Timestamp-based sync**: Each output message includes a `timestamp_ms` field (milliseconds since session start). The client uses this as a shared timeline.
-
-3. **Text pacing**: Instead of displaying text instantly, the client buffers text and reveals it in sync with audio playback progress. The audio stream drives the display rate.
-
-4. **Independent streams (simplest)**: Accept that text and audio are not perfectly synced. Text appears first, audio follows. Many voice assistant UIs work this way.
-
-**Recommended approach for v1**: Start with option 4 (independent streams) with sequence numbers for loose correlation. Move to timestamp-based sync in a later version if needed.
-
----
-
 ## Session Management
 
 ### Session Lifecycle
@@ -985,6 +933,13 @@ Text and audio streams are produced at different rates. Text chunks arrive as th
                   │  ▼
             ACTIVE / EXECUTING
 
+           ┌─────────────┐   restore   ┌────────────┐
+           │ INTERRUPTED │────────────►│   ACTIVE   │
+           └─────────────┘             └────────────┘
+             ▲
+    backend restart
+    (graceful or crash)
+
   All sessions remain ACTIVE until the user explicitly ends them
   (POST /api/sessions/{id}/end or end_session WebSocket message),
   the underlying process exits, the session is cancelled via
@@ -1004,8 +959,8 @@ Text and audio streams are produced at different rates. Text chunks arrive as th
   and a null subprocess_status ephemeral message is broadcast so the
   client clears its subprocess indicator.
 
-  ARCHIVED sessions (COMPLETED/FAILED/CANCELLED that have been
-  written to the database) can be RESTORED back to ACTIVE via
+  ARCHIVED sessions (COMPLETED/FAILED/CANCELLED/INTERRUPTED that have
+  been written to the database) can be RESTORED back to ACTIVE via
   POST /api/sessions/{id}/restore or the restore_session WebSocket
   message. Restoring loads conversation history and buffer from the
   DB, removes the DB row, and re-creates the in-memory session.
@@ -1050,7 +1005,9 @@ The tool JSON definition specifies which type a tool uses (see Tool Definitions 
 - **Paused sessions**: Remain in memory like active sessions. Any running Claude Code or Codex subprocess is killed on pause. Not reaped by inactivity timer. Archived only after being resumed and reaching a terminal state.
 - **Completed sessions**: Automatically archived to the database when a session reaches a terminal state (completed, failed, or cancelled). The prompt router fires a background task after each `session.complete()`, `session.fail()`, or `session.cancel()` call. Stores: session ID, timestamps, all prompts, all LLM responses, tool calls, tool outputs, metadata, `conversation_history` (the raw LLM message list for restoration), and token usage totals (`input_tokens`, `output_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens`, `tool_input_tokens`, `tool_output_tokens`, `tool_cost_usd`).
 - **Restored sessions**: Archived sessions can be restored back to active state via `POST /api/sessions/{id}/restore` or the `restore_session` WebSocket message. The session's conversation history, buffer messages, and metadata are loaded from the DB. For Claude Code sessions, the CC `session_id`, `working_directory`, tool name, and parameters are stored in `metadata_` during archiving and used to reconstruct the executor on restore. The first message sent to a restored CC session triggers a `restart_with_prompt` using the stored `--session-id`, allowing Claude Code to resume its internal conversation context.
-- **On server restart**: Active sessions are lost. Archived sessions remain queryable via `GET /api/sessions` and `GET /api/sessions/{session_id}/messages`, and can be restored.
+- **Interrupted sessions**: On an unexpected backend crash or SIGKILL, in-flight sessions that were still active in the DB are marked `INTERRUPTED` at next startup rather than `FAILED`. `INTERRUPTED` is a non-terminal status: `ended_at` is left unset, the session DB row retains its conversation history and metadata (including `selected_worktree_path`), and the client can restore the session via the normal restore flow. The `metadata_["restart_interrupted"]` flag is set so clients can show a visual indicator. Tasks attached to interrupted sessions remain in their current state until the session is resumed and ends normally.
+- **On graceful shutdown**: Active sessions are marked `COMPLETED` as before (state is preserved cleanly).
+- **On server crash/restart**: Sessions that were active at crash time are marked `INTERRUPTED` (not `FAILED`). Clients can restore them. Archived sessions remain queryable via `GET /api/sessions` and `GET /api/sessions/{session_id}/messages`.
 - **Session listing**: `GET /api/sessions` and the WebSocket `list_sessions` command both merge in-memory sessions with archived sessions from the database (excluding duplicates), sorted by `created_at` descending. Each session entry includes a `created_at` ISO 8601 timestamp and `title`. Archived sessions are filtered by `backend_id` so each backend instance only sees its own sessions.
 
 ### Session Todos
@@ -1634,10 +1591,12 @@ Each file defines one tool. Drop a `.json` file into `tools/` to register a new 
 The `claude_code` executor manages a Claude Code CLI subprocess with bidirectional stream-json communication. It enables delegating complex coding tasks to Claude Code while streaming output back to the client in real time.
 
 **Working directory priority:** The Claude Code executor selects the working directory with the following precedence:
-1. `working_directory` from the tool call input (LLM-specified).
-2. `session.metadata["selected_worktree_path"]` — the active worktree path for the session.
-3. `session.main_project_path` — the project folder attached via the project chip (new fallback).
+1. `session.metadata["selected_worktree_path"]` — the active worktree path (set via `PATCH /api/sessions/{id}/worktree`, the `attach` worktree action, auto-selected after `new`, or pre-selected by the client in the first `prompt` WS message via `selected_worktree_path`).
+2. `session.main_project_path` — the project folder attached via the project chip.
+3. `working_directory` from the tool call input (LLM-specified).
 4. `"."` (current directory) as final fallback.
+
+**Worktree selection persistence:** `selected_worktree_path` is stored in `session.metadata` and is written to the DB both by the initial `_ensure_session_row_in_db` stub write (on the first prompt) and immediately when set via `PATCH /api/sessions/{id}/worktree` (via `SessionManager.persist_session_metadata`). This ensures the selected worktree survives backend restarts. When the client pre-selects a worktree before the first message (via the worktree chip), `handle_prompt` applies the path to `session.metadata["selected_worktree_path"]` before `_ensure_session_row_in_db`, so the initial DB stub row already contains the selection.
 
 **Working directory validation:** Before spawning the subprocess, the prompt router validates that the specified `working_directory` exists on disk. If it does not, the tool returns an error message to the LLM instead of starting a session. The system prompt also instructs the LLM to verify directory existence via `shell_exec` before calling `claude_code`, and to resolve project names to `~/Projects/<project_name>`.
 
@@ -1651,7 +1610,7 @@ The `claude_code` executor manages a Claude Code CLI subprocess with bidirection
 6. The session enters "Claude Code mode" — subsequent user messages bypass the outer LLM and route directly to the Claude Code subprocess via stdin.
 7. The process stays alive between turns. Follow-up messages are sent via stdin and responses are read from stdout. If the process unexpectedly crashes, RCFlow restarts it with the same `--session-id` as a fallback.
 
-**Result summarization:** When Claude Code emits a `result` event (turn complete), the prompt router fires a background task that sends the result text to a fast model (configured via `SUMMARY_MODEL`) to produce a 2-3 sentence TTS-friendly summary. The summary is pushed to the session buffer as a `summary` message type, arriving after the `text_chunk(finished=true)` for the result. Summary failures are logged but never break the session. A `session_end_ask` message is also pushed immediately after the result to ask the user whether they want to end the session or continue chatting.
+**Result summarization:** When Claude Code emits a `result` event (turn complete), the prompt router fires a background task that sends the result text to a fast model (configured via `SUMMARY_MODEL`) to produce a 2-3 sentence summary. The summary is pushed to the session buffer as a `summary` message type, arriving after the `text_chunk(finished=true)` for the result, and displayed in the client UI as a summary bubble. Summary failures are logged but never break the session. A `session_end_ask` message is also pushed immediately after the result to ask the user whether they want to end the session or continue chatting.
 
 **Environment:** The `CLAUDECODE` and `CLAUDE_AVAILABLE_MODELS` environment variables are removed from the subprocess environment to allow nesting.
 
@@ -1914,10 +1873,13 @@ A single `worktree` tool definition (display name **Worktree**) covers all opera
 |---------------|----------------------------------------------|-----------------------------------------------------|
 | `new`         | Create a new worktree on a new branch        | `branch`, `base` (default `"main"`), `repo_path`   |
 | `list`        | List all active worktrees for a repository   | `repo_path`                                         |
+| `attach`      | Select an existing worktree as the session's active working directory | `repo_path`, `name` or `path` (one required) |
 | `merge`       | Squash-merge a worktree branch and clean up  | `name`, `message`, `repo_path`                      |
 | `rm`          | Remove a worktree and its branch             | `name`, `repo_path`                                 |
 
-All four actions share `repo_path` (required) and live in a single `tools/worktree.json`.
+All five actions share `repo_path` (required) and live in a single `tools/worktree.json`.
+
+`attach` validates that a matching worktree exists, then sets `session.metadata["selected_worktree_path"]` via the prompt router's `_update_session_worktree_meta` hook — the same path that Claude Code and Codex agents use as their `cwd`. Unlike `new`, `attach` never creates anything; it is a pure selection operation.
 
 ### Configuration (`WorktreeExecutorConfig`)
 
@@ -1945,85 +1907,6 @@ The `merge` action always passes `auto_commit_changes=True` to `WorktreeManager.
 ### HTTP API
 
 The worktree HTTP routes (`src/api/routes/worktrees.py`) provide the same operations over REST for the Flutter client. See the HTTP API table above for endpoint details.
-
----
-
-## STT Integration (Pluggable)
-
-### Interface
-
-STT is abstracted behind a provider interface, same pattern as TTS. The server does not depend on a specific STT service.
-
-```
-Protocol:
-  Input:  streaming audio chunks (binary)
-  Output: transcribed text (partial and final results)
-
-Provider interface:
-  - connect()
-  - transcribe(audio_chunks: AsyncIterator[bytes]) -> AsyncIterator[TranscriptionResult]
-  - close()
-
-TranscriptionResult:
-  - text: str
-  - is_final: bool
-```
-
-The STT provider is configured via environment variable `STT_PROVIDER`.
-
-### Wispr Flow Provider (default)
-
-```
-Mobile Client                  RCFlow Server              Wispr Flow
-     │                              │                          │
-     │── audio chunks ─────────────►│                          │
-     │   (via /ws/input/audio)      │── auth message ────────►│
-     │                              │── audio chunks ────────►│
-     │                              │── commit ──────────────►│
-     │                              │                          │
-     │                              │◄── transcription ────────│
-     │                              │    (text result)         │
-     │                              │                          │
-     │                              │── route text to ────►[Prompt Router]
-     │                              │   LLM pipeline           │
-```
-
-#### Wispr Flow Connection Details
-
-- **URL**: `wss://platform-api.wisprflow.ai/api/v1/dash/ws?api_key=Bearer%20<KEY>`
-- **Audio format**: Base64-encoded 16-bit PCM, 16kHz, mono, ~1 second chunks
-- **Protocol**: auth message → sequential append messages → commit message
-- **Response**: JSON with `status: "text"` and `final: true/false`
-- **Optimization**: Binary mode available via MessagePack serialization
-
----
-
-## TTS Integration (Pluggable)
-
-### Interface
-
-TTS is abstracted behind a provider interface. The server does not depend on a specific TTS service.
-
-```
-Protocol:
-  Input:  text string (or streaming text chunks)
-  Output: streaming Opus/OGG audio frames
-
-Provider interface:
-  - connect()
-  - synthesize(text: str) -> AsyncIterator[bytes]
-  - close()
-```
-
-### Provider Selection
-
-The TTS provider is configured via environment variable. Candidate providers (to be evaluated):
-
-- **ElevenLabs** — WebSocket streaming, high quality voices, native Opus support
-- **OpenAI TTS** — HTTP streaming, simple integration, Opus support
-- **Cartesia** — WebSocket streaming, ultra-low latency, designed for real-time
-
-The chosen provider will be implemented behind the pluggable interface.
 
 ---
 
@@ -2263,14 +2146,10 @@ All configuration is via environment variables, loaded from a `settings.json` fi
 | `AWS_SECRET_ACCESS_KEY` | no       |                 | AWS secret access key (optional if using IAM roles/instance profiles) |
 | `OPENAI_API_KEY`        | cond.    |                 | OpenAI API key (required when `LLM_PROVIDER=openai`) |
 | `OPENAI_MODEL`          | no       | `gpt-5.4`       | OpenAI model ID (e.g. gpt-5.4, gpt-4.1, o3) |
-| `STT_PROVIDER`          | no       | `wispr_flow`    | STT provider name                    |
-| `STT_API_KEY`           | yes      |                 | STT provider API key (Wispr Flow)    |
-| `TTS_PROVIDER`          | no       | `none`          | TTS provider name                    |
-| `TTS_API_KEY`           | no       |                 | TTS provider API key                 |
 | `PROJECTS_DIR`          | no       | `~/Projects`    | Comma-separated list of project directories (used in system prompt, path resolution, and `/api/projects` endpoint) |
 | `TOOLS_DIR`             | no       | `./tools`       | Path to tool definitions directory   |
 | `CODEX_API_KEY`         | no       |                 | OpenAI API key for Codex CLI         |
-| `SUMMARY_MODEL`         | no       | _(main model)_  | Model for TTS-friendly summaries. When blank, falls back to the main model. |
+| `SUMMARY_MODEL`         | no       | _(main model)_  | Model for session summaries. When blank, falls back to the main model. |
 | `TITLE_MODEL`           | no       | _(main model)_  | Model for session title generation. When blank, falls back to the main model. |
 | `TASK_MODEL`            | no       | _(main model)_  | Model for task extraction and status evaluation. When blank, falls back to the main model. |
 | `GLOBAL_PROMPT`         | no       |                 | Custom instructions appended to the system prompt for every session |
@@ -2298,16 +2177,16 @@ The server exposes `GET /api/config` and `PATCH /api/config` endpoints that allo
 | `type`             | string | `"string"`, `"textarea"`, `"select"`, `"boolean"`, or `"secret"` |
 | `value`            | any    | Current value (masked for secrets — last 4 chars)   |
 | `options`          | list   | Available choices (for `select` type only)          |
-| `group`            | string | Grouping category (LLM, STT, TTS, Executors, etc.) |
+| `group`            | string | Grouping category (LLM, Prompt, Claude Code, Codex, Paths, Session Limits, Logging, Linear, etc.) |
 | `description`      | string | Help text                                          |
 | `required`         | bool   | Whether the field is required                      |
 | `restart_required` | bool   | Whether changing requires a server restart          |
 
-**Configurable groups**: LLM, Prompt, STT, TTS, Claude Code, Codex, Paths, Session Limits, Logging, Linear. Groups are rendered as collapsible sections in the client UI.
+**Configurable groups**: LLM, Prompt, Claude Code, Codex, Paths, Session Limits, Logging, Linear. Groups are rendered as collapsible sections in the client UI.
 
 **Excluded from remote config** (for security): `RCFLOW_API_KEY`, `RCFLOW_HOST`, `RCFLOW_PORT`, `SSL_CERTFILE`, `SSL_KEYFILE`, `DATABASE_URL`.
 
-**Hot-reload**: When config is updated via `PATCH /api/config`, the server persists changes to `settings.json` and recreates the LLM client, STT provider, and TTS provider with the new settings. The old LLM client is gracefully closed.
+**Hot-reload**: When config is updated via `PATCH /api/config`, the server persists changes to `settings.json` and recreates the LLM client with the new settings. The old LLM client is gracefully closed.
 
 **Client UI**: The Flutter client shows a "Settings" button on each connected worker card. Tapping it opens a dialog (desktop) or bottom sheet (mobile) that renders a dynamic form based on the server's config schema. Fields are grouped by section and rendered as text fields, multi-line text areas, dropdowns, switches, or password fields depending on type.
 
@@ -2586,9 +2465,7 @@ RCFlow/
 │   │   ├── ws/
 │   │   │   ├── __init__.py
 │   │   │   ├── input_text.py    # /ws/input/text handler
-│   │   │   ├── input_audio.py   # /ws/input/audio handler
-│   │   │   ├── output_text.py   # /ws/output/text handler
-│   │   │   └── output_audio.py  # /ws/output/audio handler
+│   │   │   └── output_text.py   # /ws/output/text handler
 │   │   └── integrations/
 │   │       ├── __init__.py
 │   │       └── linear.py        # /api/integrations/linear/ endpoints
@@ -2617,18 +2494,6 @@ RCFlow/
 │   │   ├── __init__.py
 │   │   ├── tool_manager.py      # Auto-install/update for Claude Code & Codex CLIs
 │   │   └── linear_service.py    # Linear GraphQL API client
-│   │
-│   ├── speech/
-│   │   ├── __init__.py
-│   │   ├── stt/
-│   │   │   ├── __init__.py
-│   │   │   ├── base.py          # Abstract STT provider interface
-│   │   │   └── wispr_flow.py    # Wispr Flow STT provider
-│   │   └── tts/
-│   │       ├── __init__.py
-│   │       ├── base.py          # TTS provider interface
-│   │       └── providers/       # TTS provider implementations
-│   │           └── __init__.py
 │   │
 │   ├── prompts/
 │   │   ├── __init__.py          # Exports PromptBuilder
@@ -2661,9 +2526,7 @@ RCFlow/
 │   ├── test_api/
 │   │   └── test_ws/
 │   │       ├── test_input_text.py
-│   │       ├── test_input_audio.py
-│   │       ├── test_output_text.py
-│   │       └── test_output_audio.py
+│   │       └── test_output_text.py
 │   ├── test_core/
 │   │   ├── test_session.py
 │   │   ├── test_prompt_router.py
@@ -2678,10 +2541,6 @@ RCFlow/
 │   │   └── test_tool_manager.py
 │   ├── test_prompts/
 │   │   └── test_builder.py
-│   ├── test_speech/
-│   │   ├── test_stt/
-│   │   │   └── test_wispr_flow.py
-│   │   └── test_tts/
 │   └── test_tools/
 │       ├── test_loader.py
 │       └── test_registry.py

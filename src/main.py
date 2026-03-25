@@ -2,7 +2,6 @@ import asyncio
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
 
 from fastapi import FastAPI
 from sqlalchemy import select
@@ -10,9 +9,7 @@ from sqlalchemy import select
 from src.api.http import router as http_router
 from src.api.integrations.linear import router as linear_router
 from src.core.attachment_store import AttachmentStore
-from src.api.ws.input_audio import router as input_audio_router
 from src.api.ws.input_text import router as input_text_router
-from src.api.ws.output_audio import router as output_audio_router
 from src.api.ws.output_text import router as output_text_router
 from src.api.ws.terminal import router as terminal_router
 from src.config import get_settings
@@ -26,8 +23,6 @@ from src.services.artifact_scanner import ArtifactScanner
 from src.services.telemetry_service import TelemetryService
 from src.services.tool_manager import ToolManager
 from src.services.tool_settings import ToolSettingsManager
-from src.speech.stt import create_stt_provider
-from src.speech.tts import create_tts_provider
 from src.terminal.manager import TerminalSessionManager
 from src.tools.registry import ToolRegistry
 
@@ -51,11 +46,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         raise
     logger.info("Database engine initialized")
 
-    # Mark stale non-terminal sessions as failed (leftover from previous shutdown)
+    # Mark stale non-terminal sessions as interrupted (leftover from previous shutdown).
+    # INTERRUPTED — not failed — because the sessions can be restored by the client.
     # Only affect sessions owned by this backend instance.
     db_factory = get_session_factory()
     async with db_factory() as db:
-        stale_statuses = ("created", "active", "executing", "paused")
+        stale_statuses = ("created", "active", "executing", "paused", "interrupted")
         stale_rows = (
             await db.execute(
                 select(SessionModel).where(
@@ -65,13 +61,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             )
         ).scalars().all()
         for row in stale_rows:
-            row.status = "failed"
-            row.ended_at = datetime.now(UTC)
+            was_paused = row.status == "paused"
+            row.status = "interrupted"
+            # Do NOT set ended_at — interrupted sessions are open for restoration.
             meta = row.metadata_ or {}
-            row.metadata_ = {**meta, "error": "Server restarted while session was active"}
+            row.metadata_ = {
+                **meta,
+                "restart_interrupted": True,
+                **({"was_paused_before_restart": True} if was_paused else {}),
+            }
         if stale_rows:
             await db.commit()
-            logger.info("Marked %d stale sessions as failed after restart", len(stale_rows))
+            logger.info(
+                "Marked %d stale session(s) as interrupted after restart", len(stale_rows)
+            )
 
     # Settings
     app.state.settings = settings
@@ -136,14 +139,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         telemetry_service,
     )
     app.state.prompt_router = prompt_router
-
-    # STT provider
-    stt_provider = create_stt_provider(settings.STT_PROVIDER, settings.STT_API_KEY)
-    app.state.stt_provider = stt_provider
-
-    # TTS provider
-    tts_provider = create_tts_provider(settings.TTS_PROVIDER, settings.TTS_API_KEY)
-    app.state.tts_provider = tts_provider
 
     logger.info(
         "RCFlow ready — listening on %s:%d (backend_id=%s)",
@@ -225,9 +220,7 @@ def create_app() -> FastAPI:
     app.include_router(http_router)
     app.include_router(linear_router)
     app.include_router(input_text_router)
-    app.include_router(input_audio_router)
     app.include_router(output_text_router)
-    app.include_router(output_audio_router)
     app.include_router(terminal_router)
 
     return app

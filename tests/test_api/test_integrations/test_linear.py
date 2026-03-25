@@ -52,9 +52,6 @@ def _make_linear_settings(**overrides: Any) -> Settings:
         LLM_PROVIDER="anthropic",
         ANTHROPIC_API_KEY="test-key",
         ANTHROPIC_MODEL="claude-sonnet-4-20250514",
-        STT_PROVIDER="wispr_flow",
-        STT_API_KEY="test-stt-key",
-        TTS_PROVIDER="none",
         LINEAR_API_KEY="lin_api_test_key",
         LINEAR_TEAM_ID="team-abc123",
     )

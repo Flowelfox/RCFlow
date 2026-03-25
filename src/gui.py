@@ -239,6 +239,13 @@ class RCFlowGUI:
             self._set_status(f"Error: Cannot bind {host}:{port} \u2014 {exc}", error=True)
             return
 
+        # Persist user-entered host/port to settings.json so they survive restarts.
+        # WSS_ENABLED is already persisted by _on_wss_toggle, but host/port have no
+        # equivalent event handler, so we save them here at the moment of commitment.
+        from src.config import update_settings_file  # noqa: PLC0415
+
+        update_settings_file({"RCFLOW_HOST": host, "RCFLOW_PORT": str(port)})
+
         # Build environment with overridden host/port and WSS setting
         env = os.environ.copy()
         env["RCFLOW_HOST"] = host
