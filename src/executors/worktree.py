@@ -3,10 +3,11 @@
 A single ``worktree`` tool definition covers all operations.  Dispatch is keyed
 on the ``action`` parameter supplied at call time:
 
-- ``action=new``   → WorktreeManager.new()
-- ``action=list``  → WorktreeManager.list()
-- ``action=merge`` → WorktreeManager.merge()
-- ``action=rm``    → WorktreeManager.rm()
+- ``action=new``    → WorktreeManager.new()
+- ``action=list``   → WorktreeManager.list()
+- ``action=attach`` → select an existing worktree by name or path
+- ``action=merge``  → WorktreeManager.merge()
+- ``action=rm``     → WorktreeManager.rm()
 
 All WorktreeManager calls use blocking subprocess I/O and are therefore wrapped
 with ``asyncio.to_thread`` so they don't block the event loop.
@@ -45,7 +46,7 @@ logger = logging.getLogger(__name__)
 # Helpers
 # ---------------------------------------------------------------------------
 
-_VALID_ACTIONS: frozenset[str] = frozenset({"new", "list", "merge", "rm"})
+_VALID_ACTIONS: frozenset[str] = frozenset({"new", "list", "attach", "merge", "rm"})
 
 
 def _worktree_to_dict(wt: Any) -> dict[str, Any]:
@@ -89,6 +90,38 @@ def _run_rm(manager: WorktreeManager, params: dict[str, Any]) -> str:
     name: str = params["name"]
     manager.rm(name=name, force=True)
     return json.dumps({"removed": True, "name": name}, indent=2)
+
+
+def _run_attach(manager: WorktreeManager, params: dict[str, Any]) -> str:
+    """Locate an existing worktree by name or path and return its details.
+
+    Accepts either ``name`` (the branch/worktree short name) or ``path``
+    (an absolute or relative filesystem path).  The worktree must already
+    exist — this action never creates one.  On success the caller (prompt
+    router) will auto-select the returned path as the session's active
+    working directory.
+    """
+    name: str | None = params.get("name")
+    path: str | None = params.get("path")
+    if not name and not path:
+        raise WtException("attach requires either 'name' or 'path' parameter")
+
+    worktrees = manager.list()
+    matched = None
+    for wt in worktrees:
+        if name and wt.name == name:
+            matched = wt
+            break
+        if path and str(wt.path).rstrip("/") == str(Path(path).expanduser().resolve()).rstrip("/"):
+            # Normalise both sides before comparing so trailing slashes etc. don't matter
+            matched = wt
+            break
+
+    if matched is None:
+        identifier = name or path
+        raise WorktreeNotFound(f"No worktree found matching '{identifier}'")
+
+    return json.dumps({"attached": _worktree_to_dict(matched)}, indent=2)
 
 
 # ---------------------------------------------------------------------------
@@ -168,6 +201,8 @@ class WorktreeExecutor(BaseExecutor):
                 return _run_new(manager, params, default_base, validate_type)
             case "list":
                 return _run_list(manager)
+            case "attach":
+                return _run_attach(manager, params)
             case "merge":
                 return _run_merge(manager, params)
             case "rm":

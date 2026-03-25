@@ -341,6 +341,20 @@ class PromptRouter(
                         session.metadata["selected_worktree_path"] = wt_path
                 except (json.JSONDecodeError, AttributeError, TypeError):
                     pass
+            case "attach":
+                session.metadata["worktree"] = {
+                    "repo_path": repo_path,
+                    "last_action": "attach",
+                }
+                # Auto-select the attached worktree path so subsequent agent tool
+                # calls (e.g. #ClaudeCode) use it as the working directory.
+                try:
+                    data = json.loads(result)
+                    wt_path = data.get("attached", {}).get("path", "")
+                    if wt_path:
+                        session.metadata["selected_worktree_path"] = wt_path
+                except (json.JSONDecodeError, AttributeError, TypeError):
+                    pass
             case "merge" | "rm":
                 session.metadata["worktree"] = {
                     "repo_path": repo_path,
@@ -423,6 +437,7 @@ class PromptRouter(
         session_id: str | None = None,
         attachments: list[ResolvedAttachment] | None = None,
         project_name: str | None = None,
+        selected_worktree_path: str | None = None,
     ) -> str:
         """Handle a user prompt. Creates a new session or resumes an existing one.
 
@@ -435,6 +450,11 @@ class PromptRouter(
                 (e.g. ``"RCFlow"``). Resolved to an absolute path via configured
                 ``projects_dirs``. When provided, sets ``session.main_project_path``
                 before the DB row is written so the initial INSERT already includes it.
+            selected_worktree_path: Absolute path of a worktree pre-selected by the
+                client before the first message was sent. Applied to the session if
+                the session does not already have an explicit worktree selection.
+                Has no effect when the session already has ``selected_worktree_path``
+                set (e.g. via the PATCH endpoint or a previous call).
 
         Returns:
             The session ID.
@@ -447,6 +467,15 @@ class PromptRouter(
         # DB row write, so the initial INSERT already contains main_project_path.
         if project_name:
             self._apply_project_name(session, project_name)
+
+        # Apply the pre-selected worktree path (sent by the client before the first
+        # message). Only set it when the session doesn't already have one — this
+        # preserves any subsequent selection made via the PATCH endpoint or from a
+        # worktree tool call (action=new/attach) that auto-selects the path.
+        if selected_worktree_path and not session.metadata.get("selected_worktree_path"):
+            session.metadata["selected_worktree_path"] = selected_worktree_path
+            if self._session_manager:
+                self._session_manager.broadcast_session_update(session)
 
         # Ensure the sessions row exists in the DB before any telemetry inserts
         # (session_turns and tool_calls FK-reference sessions.id, but sessions are

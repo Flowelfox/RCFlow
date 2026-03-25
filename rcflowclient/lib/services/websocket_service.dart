@@ -126,6 +126,7 @@ class WebSocketService {
     String? sessionId, {
     List<Map<String, dynamic>>? attachments,
     String? projectName,
+    String? selectedWorktreePath,
   }) {
     if (_inputChannel == null) return;
     final msg = <String, dynamic>{
@@ -135,6 +136,8 @@ class WebSocketService {
       if (attachments != null && attachments.isNotEmpty)
         'attachments': attachments,
       if (projectName != null) 'project_name': projectName,
+      if (selectedWorktreePath != null)
+        'selected_worktree_path': selectedWorktreePath,
     };
     _inputChannel!.sink.add(jsonEncode(msg));
   }

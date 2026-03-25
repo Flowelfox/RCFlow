@@ -735,6 +735,39 @@ def test_build_active_worktree_context_path_only(session_manager: SessionManager
     assert "working_directory" in ctx
 
 
+def test_build_active_worktree_context_merge_direction_disambiguation(
+    session_manager: SessionManager,
+) -> None:
+    """The directive must warn the LLM that worktree merge = worktree→main (not main→worktree).
+
+    This guards against the bug where 'pull main into worktree' was interpreted
+    as action='merge' (which merges the worktree INTO main), rather than starting
+    a claude_code session that runs git commands inside the worktree.
+    """
+    router = _make_router(session_manager)
+    session = session_manager.create_session(SessionType.ONE_SHOT)
+    session.metadata["selected_worktree_path"] = "/repos/myproject/.worktrees/feat-xyz"
+    session.metadata["worktree"] = {
+        "repo_path": "/repos/myproject",
+        "last_action": "new",
+        "branch": "feature/feat-xyz",
+        "base": "main",
+    }
+
+    ctx = router._build_active_worktree_context(session)
+
+    assert ctx is not None
+    # Disambiguation block must be present
+    assert "merge direction" in ctx.lower() or "disambiguation" in ctx.lower()
+    # Must clarify that the worktree tool merges the worktree INTO main
+    assert "INTO main" in ctx or "into main" in ctx
+    # Must warn against using the worktree tool for main→worktree direction
+    assert "pull main into worktree" in ctx.lower() or "main → worktree" in ctx or "main -> worktree" in ctx.lower()
+    # Must instruct use of the agent tool (claude_code) with the worktree path
+    assert "claude_code" in ctx
+    assert "/repos/myproject/.worktrees/feat-xyz" in ctx
+
+
 # ---------------------------------------------------------------------------
 # _update_session_worktree_meta — auto-select after creation
 # ---------------------------------------------------------------------------
@@ -1334,3 +1367,82 @@ async def test_pause_session_resolves_pending_plan_review_event(
 
     assert session._plan_review_approved is False
     assert session._plan_review_event.is_set()
+
+
+# ---------------------------------------------------------------------------
+# handle_prompt — selected_worktree_path pre-selection
+# ---------------------------------------------------------------------------
+
+
+async def _empty_agentic_loop(**kwargs):  # type: ignore[no-untyped-def]
+    """Async generator stub that immediately terminates the agentic loop."""
+    return
+    yield  # pragma: no cover — makes this an async generator
+
+
+@pytest.mark.asyncio
+async def test_handle_prompt_applies_selected_worktree_path(
+    session_manager: SessionManager,
+) -> None:
+    """handle_prompt stores selected_worktree_path in session metadata on the first call."""
+    router = _make_router(session_manager)
+    router._llm.run_agentic_loop = _empty_agentic_loop  # type: ignore[method-assign]
+    router._ensure_session_row_in_db = AsyncMock()  # type: ignore[method-assign]
+
+    worktree_path = "/repos/myproject/.worktrees/feat-abc"
+    session_id = await router.handle_prompt(
+        "Hello",
+        selected_worktree_path=worktree_path,
+    )
+
+    session = session_manager.get_session(session_id)
+    assert session is not None
+    assert session.metadata.get("selected_worktree_path") == worktree_path
+
+
+@pytest.mark.asyncio
+async def test_handle_prompt_does_not_override_existing_worktree_path(
+    session_manager: SessionManager,
+) -> None:
+    """handle_prompt must not clobber a worktree path that is already set on the session."""
+    router = _make_router(session_manager)
+    router._llm.run_agentic_loop = _empty_agentic_loop  # type: ignore[method-assign]
+    router._ensure_session_row_in_db = AsyncMock()  # type: ignore[method-assign]
+
+    original_path = "/repos/myproject/.worktrees/original"
+    new_path = "/repos/myproject/.worktrees/other"
+
+    # First call: establish the session with an initial worktree path.
+    session_id = await router.handle_prompt(
+        "First message",
+        selected_worktree_path=original_path,
+    )
+
+    session = session_manager.get_session(session_id)
+    assert session is not None
+    assert session.metadata.get("selected_worktree_path") == original_path
+
+    # Second call on the same session: a different path must NOT override the existing one.
+    await router.handle_prompt(
+        "Second message",
+        session_id=session_id,
+        selected_worktree_path=new_path,
+    )
+
+    assert session.metadata.get("selected_worktree_path") == original_path
+
+
+@pytest.mark.asyncio
+async def test_handle_prompt_no_worktree_path_leaves_metadata_empty(
+    session_manager: SessionManager,
+) -> None:
+    """When no selected_worktree_path is provided, session metadata should not gain the key."""
+    router = _make_router(session_manager)
+    router._llm.run_agentic_loop = _empty_agentic_loop  # type: ignore[method-assign]
+    router._ensure_session_row_in_db = AsyncMock()  # type: ignore[method-assign]
+
+    session_id = await router.handle_prompt("Hello")
+
+    session = session_manager.get_session(session_id)
+    assert session is not None
+    assert "selected_worktree_path" not in session.metadata

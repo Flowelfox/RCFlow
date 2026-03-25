@@ -735,6 +735,22 @@ class ServerConfigContentState extends State<ServerConfigContent> {
         : sections.first;
   }
 
+  static IconData _iconForSection(String section) {
+    switch (section) {
+      case 'Tools':           return Icons.handyman_outlined;
+      case 'LLM':             return Icons.psychology_outlined;
+      case 'Prompt':          return Icons.edit_note_outlined;
+      case 'Codex':           return Icons.menu_book_outlined;
+      case 'Paths':           return Icons.folder_outlined;
+      case 'Tool Management': return Icons.tune_outlined;
+      case 'Session Limits':  return Icons.hourglass_empty_outlined;
+      case 'Artifacts':       return Icons.inventory_2_outlined;
+      case 'Linear':          return Icons.dashboard_outlined;
+      case 'Logging':         return Icons.receipt_long_outlined;
+      default:                return Icons.settings_outlined;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading) {
@@ -778,7 +794,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
               for (final s in _sectionNames)
                 _ConfigSidebarItem(
                   label: s,
-                  icon: s == 'Tools' ? Icons.build_outlined : Icons.tune,
+                  icon: _iconForSection(s),
                   selected: section == s,
                   hasModified: s != 'Tools' &&
                       _options != null &&
@@ -868,7 +884,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
       children: [
         _SectionHeader(
           title: section,
-          icon: Icons.tune,
+          icon: _iconForSection(section),
           hasModified: hasModified,
         ),
         for (final opt in groupOpts) ...[
@@ -911,7 +927,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _SectionHeader(title: 'Tools', icon: Icons.build_outlined),
+        _SectionHeader(title: 'Tools', icon: Icons.handyman_outlined),
         if (_toolsLoading && _tools == null)
           Padding(
             padding: EdgeInsets.symmetric(vertical: 12),

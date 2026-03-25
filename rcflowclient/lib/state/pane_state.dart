@@ -97,6 +97,18 @@ class PaneState extends ChangeNotifier {
   String? _projectNameError;
   String? get projectNameError => _projectNameError;
 
+  // Absolute path of the worktree the user pre-selected before the first message
+  // is sent.  Passed as selected_worktree_path in the first sendPrompt call and
+  // then cleared (the session's worktree selection lives on the backend afterward).
+  // Also cleared when the user starts a new chat or switches sessions.
+  String? _pendingWorktreePath;
+  String? get pendingWorktreePath => _pendingWorktreePath;
+
+  void setPendingWorktreePath(String? path) {
+    _pendingWorktreePath = path;
+    notifyListeners();
+  }
+
   // Task pane state (when pane shows a task detail view)
   String? _taskId;
   String? get taskId => _taskId;
@@ -404,11 +416,15 @@ class PaneState extends ChangeNotifier {
     pendingAck = _sessionId == null; // new chat — expect ack
     notifyListeners();
 
+    // Pass the pre-selected worktree path only for new sessions (no session yet).
+    // After the session exists the user adjusts the worktree via the Project panel.
+    final worktreeToSend = _sessionId == null ? _pendingWorktreePath : null;
     _ws?.sendPrompt(
       text,
       _sessionId,
       attachments: attachments,
       projectName: _selectedProjectName,
+      selectedWorktreePath: worktreeToSend,
     );
   }
 
@@ -514,6 +530,7 @@ class PaneState extends ChangeNotifier {
     _selectedProjectName = null;
     _selectedProjectPath = null;
     _projectNameError = null;
+    _pendingWorktreePath = null;
     _resetPagination();
 
     if (oldSessionId != null && oldWorkerId != null) {
@@ -538,6 +555,7 @@ class PaneState extends ChangeNotifier {
     _runningSubprocess = null;
     _pendingLocalUserMessages = 0;
     _pendingInputText = null;
+    _pendingWorktreePath = null;
     _messages.clear();
     _todos = [];
     _activeRightPanel = null;

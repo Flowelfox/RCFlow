@@ -62,6 +62,62 @@ class _InputAreaState extends State<InputArea> {
   final List<_PendingAttachment> _pendingAttachments = [];
   bool _uploadingAttachments = false;
 
+  // Pre-session worktree cache — fetched when a project is selected before
+  // any session exists. Keyed by projectPath so a project change triggers
+  // a re-fetch and prevents stale data from a previous project.
+  String? _worktreeCacheKey;
+  List<Map<String, dynamic>>? _preSessionWorktrees;
+  bool _loadingWorktrees = false;
+
+  /// Fetch the worktree list for [projectPath] using the given [workerId].
+  /// Results are cached per [projectPath]; a concurrent or redundant call
+  /// while loading is silently ignored.
+  Future<void> _fetchWorktrees(String projectPath, String workerId) async {
+    final cacheKey = '$workerId:$projectPath';
+    if (_worktreeCacheKey == cacheKey && _preSessionWorktrees != null) return;
+    if (_loadingWorktrees) return;
+    if (!mounted) return;
+    setState(() {
+      _loadingWorktrees = true;
+      if (_worktreeCacheKey != cacheKey) {
+        _preSessionWorktrees = null;
+        _worktreeCacheKey = cacheKey;
+      }
+    });
+    try {
+      final ws = context.read<AppState>().wsForWorker(workerId);
+      final result = await ws.listWorktrees(projectPath);
+      if (mounted && _worktreeCacheKey == cacheKey) {
+        setState(() {
+          _preSessionWorktrees = (result['worktrees'] as List<dynamic>? ?? [])
+              .cast<Map<String, dynamic>>();
+        });
+      }
+    } catch (_) {
+      // Silently ignore fetch errors; the chip will remain in a loading state
+    } finally {
+      if (mounted) setState(() => _loadingWorktrees = false);
+    }
+  }
+
+  /// Set or clear the worktree for an active session via the server API.
+  Future<void> _setSessionWorktree(String sessionId, String? path) async {
+    if (!mounted) return;
+    final pane = context.read<PaneState>();
+    final workerId = pane.workerId ?? context.read<AppState>().defaultWorkerId;
+    if (workerId == null) return;
+    final ws = context.read<AppState>().wsForWorker(workerId);
+    try {
+      await ws.setSessionWorktree(sessionId, path);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to set worktree: $e')),
+        );
+      }
+    }
+  }
+
   // Mention overlay state
   OverlayEntry? _overlayEntry;
   // Each entry has 'name' and 'path' keys from the server's project list.
@@ -902,6 +958,24 @@ class _InputAreaState extends State<InputArea> {
     final projectNameError =
         context.select<PaneState, String?>((s) => s.projectNameError);
 
+    // Pre-session worktree chip — shown when a project is selected and no
+    // session exists yet, so the user can pre-select a worktree before sending.
+    final pendingWorktreePath =
+        context.select<PaneState, String?>((s) => s.pendingWorktreePath);
+    final selectedProjectPath =
+        context.select<PaneState, String?>((s) => s.effectiveProjectPath);
+    final showWorktreeChip =
+        sessionId == null && selectedProject != null && selectedProjectPath != null;
+
+    // Active-session worktree chip — shown when the current session has a
+    // project attached, so the user can see / change the active worktree.
+    final activeWorktreePath = context.select<PaneState, String?>(
+        (s) => s.currentSelectedWorktreePath);
+    final activeSessionProjectPath = context.select<PaneState, String?>(
+        (s) => s.currentMainProjectPath);
+    final showActiveWorktreeChip =
+        sessionId != null && activeSessionProjectPath != null;
+
     // Subprocess status bar
     final runningSubprocess = context.select<PaneState, SubprocessInfo?>(
         (s) => s.runningSubprocess);
@@ -976,7 +1050,38 @@ class _InputAreaState extends State<InputArea> {
                 child: _ProjectChip(
                   name: selectedProject,
                   error: projectNameError,
-                  onClear: () => context.read<PaneState>().setSelectedProject(null),
+                  onClear: () {
+                    context.read<PaneState>().setSelectedProject(null);
+                    context.read<PaneState>().setPendingWorktreePath(null);
+                  },
+                ),
+              ),
+            if (showWorktreeChip)
+              Padding(
+                padding: const EdgeInsets.only(left: 4, bottom: 6),
+                child: _WorktreeChip(
+                  selectedPath: pendingWorktreePath,
+                  worktrees: _preSessionWorktrees,
+                  loading: _loadingWorktrees,
+                  onOpen: () => _fetchWorktrees(
+                      selectedProjectPath!, paneWorkerId ?? state.defaultWorkerId ?? ''),
+                  onSelect: (path) =>
+                      context.read<PaneState>().setPendingWorktreePath(path),
+                  onClear: () =>
+                      context.read<PaneState>().setPendingWorktreePath(null),
+                ),
+              ),
+            if (showActiveWorktreeChip)
+              Padding(
+                padding: const EdgeInsets.only(left: 4, bottom: 6),
+                child: _WorktreeChip(
+                  selectedPath: activeWorktreePath,
+                  worktrees: _preSessionWorktrees,
+                  loading: _loadingWorktrees,
+                  onOpen: () => _fetchWorktrees(
+                      activeSessionProjectPath!, paneWorkerId ?? state.defaultWorkerId ?? ''),
+                  onSelect: (path) => _setSessionWorktree(sessionId!, path),
+                  onClear: () => _setSessionWorktree(sessionId!, null),
                 ),
               ),
             // Pending attachment chips
@@ -1350,6 +1455,210 @@ class _ProjectChip extends StatelessWidget {
                     : context.appColors.textMuted,
               ),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Chip displayed above the input field before session creation allowing the
+/// user to pre-select a git worktree.  Shows the selected worktree name when
+/// one is chosen, or a button to open the worktree picker dropdown.
+class _WorktreeChip extends StatelessWidget {
+  final String? selectedPath;
+  final List<Map<String, dynamic>>? worktrees;
+  final bool loading;
+  final VoidCallback onOpen;
+  final void Function(String path) onSelect;
+  final VoidCallback onClear;
+
+  const _WorktreeChip({
+    required this.selectedPath,
+    required this.worktrees,
+    required this.loading,
+    required this.onOpen,
+    required this.onSelect,
+    required this.onClear,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final label = selectedPath != null
+        ? selectedPath!.split('/').last
+        : 'Worktree';
+
+    return GestureDetector(
+      onTap: () {
+        onOpen();
+        // Defer the menu until the frame after onOpen so that the fresh fetch
+        // can complete; but we still open immediately with whatever data is
+        // already cached so the picker is not sluggish.
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          final box = context.findRenderObject() as RenderBox?;
+          if (box == null || !context.mounted) return;
+          final offset = box.localToGlobal(Offset.zero);
+          final items = <PopupMenuEntry<String>>[
+            PopupMenuItem<String>(
+              value: '__none__',
+              height: 36,
+              child: Text(
+                'No worktree (default)',
+                style: TextStyle(
+                    color: context.appColors.textMuted, fontSize: 12),
+              ),
+            ),
+            const PopupMenuDivider(),
+            if (worktrees == null || worktrees!.isEmpty)
+              PopupMenuItem<String>(
+                enabled: false,
+                height: 36,
+                child: Text(
+                  worktrees == null ? 'Loading…' : 'No worktrees',
+                  style: TextStyle(
+                      color: context.appColors.textMuted, fontSize: 12),
+                ),
+              )
+            else
+              ...worktrees!.map((wt) {
+                final name = wt['name'] as String? ?? '';
+                final branch = wt['branch'] as String? ?? '';
+                final path = wt['path'] as String? ?? '';
+                final isSelected = selectedPath == path;
+                return PopupMenuItem<String>(
+                  value: path,
+                  height: 44,
+                  child: Row(
+                    children: [
+                      Icon(
+                        isSelected ? Icons.check_circle : Icons.call_split,
+                        size: 14,
+                        color: isSelected
+                            ? context.appColors.accent
+                            : context.appColors.textMuted,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              name,
+                              style: TextStyle(
+                                color: isSelected
+                                    ? context.appColors.accent
+                                    : context.appColors.textPrimary,
+                                fontSize: 12,
+                                fontWeight: isSelected
+                                    ? FontWeight.w600
+                                    : FontWeight.w500,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            if (branch.isNotEmpty)
+                              Text(
+                                branch,
+                                style: TextStyle(
+                                    color: context.appColors.textMuted,
+                                    fontSize: 10),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }),
+          ];
+
+          showMenu<String>(
+            context: context,
+            position: RelativeRect.fromLTRB(
+              offset.dx,
+              offset.dy - (items.length * 40.0 + 16),
+              offset.dx + box.size.width,
+              offset.dy,
+            ),
+            color: context.appColors.bgSurface,
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10)),
+            items: items,
+          ).then((value) {
+            if (value == null) return;
+            if (value == '__none__') {
+              onClear();
+            } else {
+              onSelect(value);
+            }
+          });
+        });
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(
+          color: selectedPath != null
+              ? context.appColors.accent.withAlpha(18)
+              : context.appColors.bgElevated,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: selectedPath != null
+                ? context.appColors.accent.withAlpha(100)
+                : context.appColors.divider,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              selectedPath != null ? Icons.check_circle : Icons.call_split,
+              size: 14,
+              color: selectedPath != null
+                  ? context.appColors.accent
+                  : context.appColors.textMuted,
+            ),
+            const SizedBox(width: 6),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 160),
+              child: Text(
+                label,
+                style: TextStyle(
+                  color: selectedPath != null
+                      ? context.appColors.accent
+                      : context.appColors.textSecondary,
+                  fontSize: 12,
+                  fontWeight: selectedPath != null
+                      ? FontWeight.w600
+                      : FontWeight.w400,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            if (loading) ...[
+              const SizedBox(width: 6),
+              SizedBox(
+                width: 10,
+                height: 10,
+                child: CircularProgressIndicator(
+                  strokeWidth: 1.5,
+                  color: context.appColors.textMuted,
+                ),
+              ),
+            ] else ...[
+              const SizedBox(width: 4),
+              if (selectedPath != null)
+                GestureDetector(
+                  onTap: onClear,
+                  behavior: HitTestBehavior.opaque,
+                  child: Icon(Icons.close_rounded,
+                      size: 13,
+                      color: context.appColors.accent.withAlpha(180)),
+                )
+              else
+                Icon(Icons.arrow_drop_down,
+                    size: 16, color: context.appColors.textMuted),
+            ],
           ],
         ),
       ),
