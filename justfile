@@ -94,6 +94,21 @@ bundle-linux-client-install: bundle-linux-client
     ln -sfn ~/.local/lib/rcflowclient/rcflowclient ~/.local/bin/rcflowclient
     @echo "Installed to ~/.local/lib/rcflowclient"
 
+# Build macOS Flutter client distributable (must be on macOS)
+[macos]
+bundle-macos-client:
+    cd rcflowclient && flutter build macos --release
+    mkdir -p dist
+    tar -czf dist/rcflowclient-macos-$(uname -m).tar.gz -C rcflowclient/build/macos/Build/Products/Release rcflowclient.app
+
+# Build and install macOS Flutter client (must be on macOS)
+[macos]
+bundle-macos-client-install: bundle-macos-client
+    @echo "Installing macOS Flutter client..."
+    mkdir -p ~/Applications
+    tar -xzf dist/rcflowclient-macos-$(uname -m).tar.gz -C ~/Applications
+    @echo "Installed to ~/Applications/rcflowclient.app"
+
 # Build Windows Flutter client distributable (must be on Windows)
 [windows]
 bundle-windows-client:
