@@ -292,7 +292,9 @@ def _sync_provider_env(settings: dict[str, Any]) -> None:
     elif provider == "anthropic_login":
         # Anthropic subscription auth uses OAuth tokens managed by Claude Code CLI.
         # No API key needed — clear the env section so the CLI uses its own credentials.
+        # Also clear any model override so the CLI uses the subscription's default model.
         settings["env"] = {}
+        settings.pop("model", None)
     elif provider == "bedrock":
         env = {"CLAUDE_CODE_USE_BEDROCK": "1"}
         for setting_key, env_key in (
