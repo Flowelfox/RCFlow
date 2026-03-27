@@ -516,6 +516,8 @@ RestartSec=5
 Environment="GIT_CONFIG_COUNT=1"
 Environment="GIT_CONFIG_KEY_0=safe.directory"
 Environment="GIT_CONFIG_VALUE_0=*"
+# SSH key and other optional overrides (written by installer when an owner SSH key is found)
+EnvironmentFile=-/opt/rcflow/env
 
 NoNewPrivileges=true
 ProtectSystem=strict
@@ -576,6 +578,25 @@ if [ -n "$OWNER_USER" ] && id "$OWNER_USER" &>/dev/null; then
     fi
 fi
 
+# Copy owner user's SSH key so the service can authenticate git push operations
+SSH_KEY=""
+if [ -n "$OWNER_USER" ]; then
+    for key_file in id_ed25519 id_ecdsa id_rsa; do
+        if [ -f "/home/$OWNER_USER/.ssh/$key_file" ]; then
+            SSH_KEY="/home/$OWNER_USER/.ssh/$key_file"
+            break
+        fi
+    done
+fi
+if [ -n "$SSH_KEY" ]; then
+    mkdir -p /opt/rcflow/ssh
+    cp "$SSH_KEY" /opt/rcflow/ssh/id
+    chmod 700 /opt/rcflow/ssh
+    chmod 600 /opt/rcflow/ssh/id
+    echo 'GIT_SSH_COMMAND="ssh -i /opt/rcflow/ssh/id -o StrictHostKeyChecking=accept-new"' \
+        > /opt/rcflow/env
+fi
+
 # Fix ownership
 chown -R rcflow:rcflow /opt/rcflow
 
@@ -618,6 +639,10 @@ WORKDIR=/opt/rcflow
 export GIT_CONFIG_COUNT=1
 export GIT_CONFIG_KEY_0=safe.directory
 export GIT_CONFIG_VALUE_0='*'
+
+# Load optional overrides (SSH key, etc.) written by the installer
+# shellcheck disable=SC1091
+[ -f /opt/rcflow/env ] && set -a && . /opt/rcflow/env && set +a
 
 case "$1" in
     start)
