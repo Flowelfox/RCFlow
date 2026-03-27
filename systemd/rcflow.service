@@ -11,6 +11,11 @@ ExecStart=/opt/rcflow/rcflow
 Restart=on-failure
 RestartSec=5
 
+# Allow rcflow to read git repos owned by other users (git >= 2.35.2 safe.directory check)
+Environment="GIT_CONFIG_COUNT=1"
+Environment="GIT_CONFIG_KEY_0=safe.directory"
+Environment="GIT_CONFIG_VALUE_0=*"
+
 # Security hardening
 NoNewPrivileges=true
 ProtectSystem=strict
