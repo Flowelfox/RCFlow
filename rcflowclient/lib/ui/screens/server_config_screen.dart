@@ -110,7 +110,8 @@ class ServerConfigContentState extends State<ServerConfigContent> {
   final Map<String, String?> _toolSettingsError = {};
   final Map<String, Map<String, dynamic>> _toolSettingsEdited = {};
   final Map<String, bool> _toolSettingsSaving = {};
-  final Set<String> _toolSettingsExpanded = {};
+  // Whether the Tools group in the sidebar is expanded to show sub-items.
+  bool _toolsSidebarExpanded = true;
   final Map<String, Map<String, TextEditingController>>
       _toolSettingsControllers = {};
 
@@ -336,9 +337,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
         _tools![toolName] = updatedTool;
         _toolsUninstalling.remove(toolName);
       });
-      if (_toolSettingsExpanded.contains(toolName)) {
-        _loadToolSettings(toolName);
-      }
+      _loadToolSettings(toolName);
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -358,10 +357,8 @@ class ServerConfigContentState extends State<ServerConfigContent> {
         _tools![toolName] = updatedTool;
         _toolsSwitching.remove(toolName);
       });
-      // Reload settings if the panel is expanded (schema changes with source)
-      if (_toolSettingsExpanded.contains(toolName)) {
-        _loadToolSettings(toolName);
-      }
+      // Reload settings — schema can change when switching between sources.
+      _loadToolSettings(toolName);
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -720,6 +717,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
       for (final opt in _options!) {
         if (seen.add(opt.group) &&
             !excludes.contains(opt.group.toLowerCase()) &&
+            !_mergedIntoTools.contains(opt.group) &&
             _options!.any((o) => o.group == opt.group && _isVisible(o))) {
           sections.add(opt.group);
         }
@@ -730,9 +728,12 @@ class ServerConfigContentState extends State<ServerConfigContent> {
 
   String get _effectiveSection {
     final sections = _sectionNames;
-    return sections.contains(_selectedSection)
-        ? _selectedSection
-        : sections.first;
+    if (sections.contains(_selectedSection)) return _selectedSection;
+    // Also valid when a tool sub-item key is selected (e.g. 'claude_code').
+    if (_tools != null && _tools!.containsKey(_selectedSection)) {
+      return _selectedSection;
+    }
+    return sections.first;
   }
 
   static IconData _iconForSection(String section) {
@@ -792,17 +793,45 @@ class ServerConfigContentState extends State<ServerConfigContent> {
             padding: const EdgeInsets.symmetric(vertical: 8),
             children: [
               for (final s in _sectionNames)
-                _ConfigSidebarItem(
-                  label: s,
-                  icon: _iconForSection(s),
-                  selected: section == s,
-                  hasModified: s != 'Tools' &&
-                      _options != null &&
-                      _options!
-                          .where((o) => o.group == s)
-                          .any((o) => _editedValues.containsKey(o.key)),
-                  onTap: () => setState(() => _selectedSection = s),
-                ),
+                if (s == 'Tools') ...[
+                  // Tools parent — tap selects the general Tools view and
+                  // toggles the sub-item group.
+                  _ConfigSidebarItem(
+                    label: 'Tools',
+                    icon: Icons.handyman_outlined,
+                    selected: section == 'Tools',
+                    hasModified: _options != null &&
+                        _options!
+                            .where((o) => _mergedIntoTools.contains(o.group))
+                            .any((o) => _editedValues.containsKey(o.key)),
+                    trailingIcon: _toolsSidebarExpanded
+                        ? Icons.expand_more_rounded
+                        : Icons.chevron_right_rounded,
+                    onTap: () => setState(() {
+                      _selectedSection = 'Tools';
+                      _toolsSidebarExpanded = !_toolsSidebarExpanded;
+                    }),
+                  ),
+                  // Tool sub-items (Claude Code, Codex, …)
+                  if (_toolsSidebarExpanded && _tools != null)
+                    for (final toolKey in _tools!.keys)
+                      _ConfigSidebarSubItem(
+                        label: _toolDisplayNames[toolKey] ?? toolKey,
+                        selected: section == toolKey,
+                        onTap: () =>
+                            setState(() => _selectedSection = toolKey),
+                      ),
+                ] else
+                  _ConfigSidebarItem(
+                    label: s,
+                    icon: _iconForSection(s),
+                    selected: section == s,
+                    hasModified: _options != null &&
+                        _options!
+                            .where((o) => o.group == s)
+                            .any((o) => _editedValues.containsKey(o.key)),
+                    onTap: () => setState(() => _selectedSection = s),
+                  ),
             ],
           ),
         ),
@@ -870,8 +899,12 @@ class ServerConfigContentState extends State<ServerConfigContent> {
   }
 
   Widget _buildSectionContent(String section) {
-    if (section == 'Tools') {
-      return _buildToolsSection();
+    if (section == 'Tools') return _buildToolsSection();
+
+    // Tool sub-item selected — show that tool's detail view.
+    if (_tools != null && _tools!.containsKey(section)) {
+      return _buildToolDetailSection(
+          section, _tools![section] as Map<String, dynamic>);
     }
 
     final groupOpts =
@@ -923,69 +956,143 @@ class ServerConfigContentState extends State<ServerConfigContent> {
     'codex': 'Codex',
   };
 
+  /// Config option groups that are absorbed into the Tools section body
+  /// instead of appearing as standalone sidebar items.
+  static const _mergedIntoTools = {'Tool Management'};
+
+  /// General Tools view — shown when the "Tools" sidebar parent is selected.
+  ///
+  /// Contains cross-tool actions (Check for Updates, Update All) and a hint
+  /// to select a specific tool from the sidebar.
   Widget _buildToolsSection() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _SectionHeader(title: 'Tools', icon: Icons.handyman_outlined),
-        if (_toolsLoading && _tools == null)
-          Padding(
-            padding: EdgeInsets.symmetric(vertical: 12),
-            child: Center(
-              child: SizedBox(
-                width: 20,
-                height: 20,
-                child:
-                    CircularProgressIndicator(strokeWidth: 2, color: context.appColors.accent),
-              ),
+        Row(
+          children: [
+            _ToolActionButton(
+              label: 'Check for Updates',
+              loading: _toolsLoading,
+              onPressed: (_toolsLoading || _toolsUpdating)
+                  ? null
+                  : _refreshToolStatus,
             ),
-          )
-        else if (_toolsError != null && _tools == null)
-          Padding(
-            padding: EdgeInsets.symmetric(vertical: 8),
-            child: Text(_toolsError!,
-                style: TextStyle(color: context.appColors.errorText, fontSize: 12)),
-          )
-        else if (_tools != null) ...[
-          for (final entry in _tools!.entries)
-            _buildToolRow(entry.key, entry.value as Map<String, dynamic>),
-          const SizedBox(height: 8),
-          Row(
-            children: [
+            if (_hasUpdatesAvailable) ...[
+              const SizedBox(width: 8),
               _ToolActionButton(
-                label: 'Check for Updates',
-                loading: _toolsLoading,
-                onPressed: (_toolsLoading || _toolsUpdating)
-                    ? null
-                    : _refreshToolStatus,
+                label: 'Update All',
+                loading: _toolsUpdating,
+                accent: true,
+                onPressed:
+                    (_toolsUpdating || _toolsUpdatingIndividual.isNotEmpty)
+                        ? null
+                        : _updateTools,
               ),
-              if (_hasUpdatesAvailable) ...[
-                const SizedBox(width: 8),
-                _ToolActionButton(
-                  label: 'Update All',
-                  loading: _toolsUpdating,
-                  accent: true,
-                  onPressed: (_toolsUpdating ||
-                          _toolsUpdatingIndividual.isNotEmpty)
-                      ? null
-                      : _updateTools,
-                ),
-              ],
             ],
+          ],
+        ),
+        if (_toolsError != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(_toolsError!,
+                style:
+                    TextStyle(color: context.appColors.errorText, fontSize: 12)),
           ),
-          if (_toolsError != null)
-            Padding(
-              padding: EdgeInsets.only(top: 6),
-              child: Text(_toolsError!,
-                  style: TextStyle(color: context.appColors.errorText, fontSize: 11)),
-            ),
-        ],
+        // Options from groups merged into Tools (e.g. "Tool Management")
+        ..._buildMergedToolsOptions(),
+        const SizedBox(height: 16),
+        Text(
+          'Select a tool from the sidebar to view its settings.',
+          style: TextStyle(color: context.appColors.textMuted, fontSize: 13),
+        ),
       ],
     );
   }
 
-  Widget _buildToolRow(String key, Map<String, dynamic> tool) {
+  /// Builds the option widgets for every group in [_mergedIntoTools].
+  ///
+  /// Returned as a flat list so it can be spread directly into a Column's
+  /// children (avoids variable declarations inside collection literals).
+  List<Widget> _buildMergedToolsOptions() {
+    if (_options == null) return [];
+    final widgets = <Widget>[];
+    for (final group in _mergedIntoTools) {
+      final groupOpts =
+          _options!.where((o) => o.group == group && _isVisible(o)).toList();
+      if (groupOpts.isEmpty) continue;
+      widgets.add(const SizedBox(height: 20));
+      widgets.add(Divider(color: context.appColors.divider, height: 1));
+      widgets.add(const SizedBox(height: 16));
+      for (final opt in groupOpts) {
+        widgets.add(_buildOptionWidget(opt));
+        widgets.add(const SizedBox(height: 8));
+      }
+    }
+    return widgets;
+  }
+
+  /// Body shown when a specific tool sub-item is selected in the sidebar.
+  ///
+  /// Displays a section header with the tool name then delegates to
+  /// [_buildToolSubsectionBody] for the full install/settings content.
+  Widget _buildToolDetailSection(String key, Map<String, dynamic> tool) {
+    // Kick off settings load the first time this tool's detail view is shown.
+    if (_toolSettings[key] == null &&
+        !(_toolSettingsLoading[key] ?? false)) {
+      Future.microtask(() => _loadToolSettings(key));
+    }
+
     final displayName = _toolDisplayNames[key] ?? key;
+    final installed = tool['installed'] as bool? ?? false;
+    final managed = tool['managed'] as bool? ?? false;
+    final updateAvailable = tool['update_available'] as bool? ?? false;
+    final managedPath = tool['managed_path'] as String?;
+    final externalPath = tool['external_path'] as String?;
+    final canSwitch = managedPath != null && externalPath != null;
+    final isUpdating = _toolsUpdatingIndividual.contains(key);
+    final isSwitching = _toolsSwitching.contains(key);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Header row: tool name + source badge + Update button
+        Row(
+          children: [
+            _SectionHeader(title: displayName, icon: Icons.handyman_outlined),
+            const Spacer(),
+            if (canSwitch)
+              _SourceToggle(
+                managed: managed,
+                switching: isSwitching,
+                onSwitch: (useManaged) => _switchToolSource(key, useManaged),
+              )
+            else if (managed)
+              _SourceBadge(label: 'managed', accent: true)
+            else if (installed)
+              _SourceBadge(label: 'external', accent: false),
+            if (updateAvailable && installed) ...[
+              const SizedBox(width: 8),
+              _ToolActionButton(
+                label: 'Update',
+                loading: isUpdating,
+                accent: true,
+                onPressed: isUpdating ? null : () => _updateSingleTool(key),
+              ),
+            ],
+          ],
+        ),
+        const SizedBox(height: 12),
+        _buildToolSubsectionBody(key, tool),
+      ],
+    );
+  }
+
+  /// Renders the body content for a tool detail view.
+  ///
+  /// Shows version/status, install/uninstall actions, progress feedback,
+  /// errors, and the settings fields inline (always visible, no gear toggle).
+  Widget _buildToolSubsectionBody(String key, Map<String, dynamic> tool) {
     final installed = tool['installed'] as bool? ?? false;
     final managed = tool['managed'] as bool? ?? false;
     final currentVersion = tool['current_version'] as String?;
@@ -995,146 +1102,79 @@ class ServerConfigContentState extends State<ServerConfigContent> {
     final managedPath = tool['managed_path'] as String?;
     final externalPath = tool['external_path'] as String?;
     final canSwitch = managedPath != null && externalPath != null;
-    final isUpdating = _toolsUpdatingIndividual.contains(key);
     final isInstalling = _toolsInstalling.contains(key);
     final isUninstalling = _toolsUninstalling.contains(key);
-    final isSwitching = _toolsSwitching.contains(key);
-    final settingsExpanded = _toolSettingsExpanded.contains(key);
     final progress = _toolProgress[key];
 
-    return Padding(
-      padding: EdgeInsets.only(bottom: 8),
-      child: Container(
-        padding: EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: context.appColors.bgElevated,
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Version / status row with action buttons
+        Row(
           children: [
-            // Top row: name + badge + gear + update button
-            Row(
-              children: [
-                Text(displayName,
-                    style: TextStyle(
-                        color: context.appColors.textPrimary,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600)),
-                const SizedBox(width: 8),
-                if (canSwitch)
-                  _SourceToggle(
-                    managed: managed,
-                    switching: isSwitching,
-                    onSwitch: (useManaged) =>
-                        _switchToolSource(key, useManaged),
-                  )
-                else if (managed)
-                  _SourceBadge(label: 'managed', accent: true)
-                else if (installed)
-                  _SourceBadge(label: 'external', accent: false),
-                const Spacer(),
-                SizedBox(
-                  width: 28,
-                  height: 28,
-                  child: IconButton(
-                    padding: EdgeInsets.zero,
-                    iconSize: 16,
-                    icon: Icon(
-                      settingsExpanded
-                          ? Icons.settings
-                          : Icons.settings_outlined,
-                      color: settingsExpanded ? context.appColors.accentLight : context.appColors.textMuted,
-                    ),
-                    onPressed: () {
-                      setState(() {
-                        if (settingsExpanded) {
-                          _toolSettingsExpanded.remove(key);
-                        } else {
-                          _toolSettingsExpanded.add(key);
-                          if (_toolSettings[key] == null) {
-                            _loadToolSettings(key);
-                          }
-                        }
-                      });
-                    },
-                  ),
-                ),
-                if (updateAvailable && installed) ...[
-                  const SizedBox(width: 4),
-                  _ToolActionButton(
-                    label: 'Update',
-                    loading: isUpdating,
-                    accent: true,
-                    onPressed:
-                        isUpdating ? null : () => _updateSingleTool(key),
-                  ),
-                ],
-                // Show "Install" when no managed binary exists
-                if (managedPath == null && !canSwitch) ...[
-                  const SizedBox(width: 4),
-                  _ToolActionButton(
-                    label: installed ? 'Install managed' : 'Install',
-                    loading: isInstalling,
-                    accent: !installed,
-                    onPressed: isInstalling
-                        ? null
-                        : () => _installManagedTool(key),
-                  ),
-                ],
-                // Show "Uninstall" when managed install exists
-                if (managed && managedPath != null) ...[
-                  const SizedBox(width: 4),
-                  _ToolActionButton(
-                    label: 'Uninstall',
-                    loading: isUninstalling,
-                    accent: false,
-                    onPressed: isUninstalling
-                        ? null
-                        : () => _confirmUninstall(key),
-                  ),
-                ],
-              ],
-            ),
-            SizedBox(height: 6),
-            // Version info
             if (!installed)
               Text('Not installed',
-                  style: TextStyle(color: context.appColors.textMuted, fontSize: 12))
+                  style: TextStyle(
+                      color: context.appColors.textMuted, fontSize: 12))
             else ...[
-              Row(
-                children: [
-                  Text('v$currentVersion',
-                      style:
-                          TextStyle(color: context.appColors.textSecondary, fontSize: 12)),
-                  if (updateAvailable && latestVersion != null) ...[
-                    SizedBox(width: 6),
-                    Icon(Icons.arrow_forward_rounded,
-                        color: context.appColors.textMuted, size: 12),
-                    SizedBox(width: 6),
-                    Text('v$latestVersion',
-                        style:
-                            TextStyle(color: context.appColors.accentLight, fontSize: 12)),
-                  ],
-                ],
+              Text('v$currentVersion',
+                  style: TextStyle(
+                      color: context.appColors.textSecondary, fontSize: 12)),
+              if (updateAvailable && latestVersion != null) ...[
+                const SizedBox(width: 6),
+                Icon(Icons.arrow_forward_rounded,
+                    color: context.appColors.textMuted, size: 12),
+                const SizedBox(width: 6),
+                Text('v$latestVersion',
+                    style: TextStyle(
+                        color: context.appColors.accentLight, fontSize: 12)),
+              ],
+            ],
+            const Spacer(),
+            // Install when no managed binary exists
+            if (managedPath == null && !canSwitch) ...[
+              const SizedBox(width: 4),
+              _ToolActionButton(
+                label: installed ? 'Install managed' : 'Install',
+                loading: isInstalling,
+                accent: !installed,
+                onPressed:
+                    isInstalling ? null : () => _installManagedTool(key),
               ),
             ],
-            if (error != null)
-              Padding(
-                padding: EdgeInsets.only(top: 4),
-                child: Text(error,
-                    style: TextStyle(color: context.appColors.errorText, fontSize: 11)),
+            // Uninstall when a managed install exists
+            if (managed && managedPath != null) ...[
+              const SizedBox(width: 4),
+              _ToolActionButton(
+                label: 'Uninstall',
+                loading: isUninstalling,
+                accent: false,
+                onPressed:
+                    isUninstalling ? null : () => _confirmUninstall(key),
               ),
-            // Progress bar for install/update
-            if (progress != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 6),
-                child: _ToolProgressBar(progress: progress),
-              ),
-            if (settingsExpanded) _buildToolSettingsPanel(key),
+            ],
           ],
         ),
-      ),
+        // Error
+        if (error != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(error,
+                style: TextStyle(
+                    color: context.appColors.errorText, fontSize: 11)),
+          ),
+        // Progress bar for install/update operations
+        if (progress != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: _ToolProgressBar(progress: progress),
+          ),
+        // Settings fields — always visible, no gear toggle required
+        const SizedBox(height: 12),
+        Divider(color: context.appColors.divider, height: 1),
+        const SizedBox(height: 12),
+        _buildToolSettingsPanel(key),
+      ],
     );
   }
 
@@ -1662,7 +1702,6 @@ class ServerConfigContentState extends State<ServerConfigContent> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Divider(color: context.appColors.bgOverlay, height: 16),
         if (loading && fields == null)
           Padding(
             padding: EdgeInsets.symmetric(vertical: 8),
@@ -1780,7 +1819,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
         input = Container(
           padding: EdgeInsets.symmetric(horizontal: 10),
           decoration: BoxDecoration(
-            color: context.appColors.bgSurface,
+            color: context.appColors.bgElevated,
             borderRadius: BorderRadius.circular(8),
           ),
           child: DropdownButtonHideUnderline(
@@ -1816,6 +1855,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
         input = TextField(
           controller: controller,
           style: TextStyle(color: context.appColors.textPrimary, fontSize: 13),
+          textAlignVertical: TextAlignVertical.center,
           maxLines: 3,
           minLines: 2,
           onChanged: (v) {
@@ -1829,8 +1869,9 @@ class ServerConfigContentState extends State<ServerConfigContent> {
           decoration: InputDecoration(
             hintText: 'One entry per line',
             hintStyle: TextStyle(color: context.appColors.textMuted, fontSize: 12),
-            fillColor: context.appColors.bgSurface,
+            fillColor: context.appColors.bgElevated,
             filled: true,
+            isDense: true,
             border: OutlineInputBorder(
               borderSide: BorderSide.none,
               borderRadius: BorderRadius.circular(8),
@@ -1863,12 +1904,14 @@ class ServerConfigContentState extends State<ServerConfigContent> {
           input = TextField(
             controller: controller,
             style: TextStyle(color: context.appColors.textPrimary, fontSize: 13),
+            textAlignVertical: TextAlignVertical.center,
             onChanged: (v) => onChanged(v),
             decoration: InputDecoration(
               hintText: label,
               hintStyle: TextStyle(color: context.appColors.textMuted, fontSize: 12),
-              fillColor: context.appColors.bgSurface,
+              fillColor: context.appColors.bgElevated,
               filled: true,
+              isDense: true,
               border: OutlineInputBorder(
                 borderSide: BorderSide.none,
                 borderRadius: BorderRadius.circular(8),
@@ -1898,7 +1941,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
               backgroundColor: WidgetStatePropertyAll(context.appColors.bgSurface),
             ),
             inputDecorationTheme: InputDecorationTheme(
-              fillColor: context.appColors.bgSurface,
+              fillColor: context.appColors.bgElevated,
               filled: true,
               border: OutlineInputBorder(
                 borderSide: BorderSide.none,
@@ -1918,12 +1961,14 @@ class ServerConfigContentState extends State<ServerConfigContent> {
         input = TextField(
           controller: controller,
           style: TextStyle(color: context.appColors.textPrimary, fontSize: 13),
+          textAlignVertical: TextAlignVertical.center,
           onChanged: (v) => onChanged(v),
           decoration: InputDecoration(
             hintText: label,
             hintStyle: TextStyle(color: context.appColors.textMuted, fontSize: 12),
-            fillColor: context.appColors.bgSurface,
+            fillColor: context.appColors.bgElevated,
             filled: true,
+            isDense: true,
             border: OutlineInputBorder(
               borderSide: BorderSide.none,
               borderRadius: BorderRadius.circular(8),
@@ -2087,6 +2132,7 @@ class _ConfigSidebarItem extends StatelessWidget {
   final IconData icon;
   final bool selected;
   final bool hasModified;
+  final IconData? trailingIcon;
   final VoidCallback onTap;
 
   const _ConfigSidebarItem({
@@ -2094,13 +2140,14 @@ class _ConfigSidebarItem extends StatelessWidget {
     required this.icon,
     required this.selected,
     this.hasModified = false,
+    this.trailingIcon,
     required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       child: Material(
         color: selected ? context.appColors.bgElevated : Colors.transparent,
         borderRadius: BorderRadius.circular(10),
@@ -2108,18 +2155,22 @@ class _ConfigSidebarItem extends StatelessWidget {
           borderRadius: BorderRadius.circular(10),
           onTap: onTap,
           child: Padding(
-            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             child: Row(
               children: [
                 Icon(icon,
                     size: 18,
-                    color: selected ? context.appColors.accentLight : context.appColors.textMuted),
-                SizedBox(width: 10),
+                    color: selected
+                        ? context.appColors.accentLight
+                        : context.appColors.textMuted),
+                const SizedBox(width: 10),
                 Expanded(
                   child: Text(
                     label,
                     style: TextStyle(
-                      color: selected ? context.appColors.textPrimary : context.appColors.textSecondary,
+                      color: selected
+                          ? context.appColors.textPrimary
+                          : context.appColors.textSecondary,
                       fontSize: 14,
                       fontWeight:
                           selected ? FontWeight.w600 : FontWeight.normal,
@@ -2136,6 +2187,73 @@ class _ConfigSidebarItem extends StatelessWidget {
                       shape: BoxShape.circle,
                     ),
                   ),
+                if (trailingIcon != null) ...[
+                  const SizedBox(width: 4),
+                  Icon(trailingIcon,
+                      size: 16, color: context.appColors.textMuted),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Indented sidebar item used for tool sub-entries under the Tools group.
+class _ConfigSidebarSubItem extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _ConfigSidebarSubItem({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      // Left indent aligns the sub-item under the parent's label.
+      padding: const EdgeInsets.only(left: 24, right: 8, top: 1, bottom: 1),
+      child: Material(
+        color: selected ? context.appColors.bgElevated : Colors.transparent,
+        borderRadius: BorderRadius.circular(8),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: onTap,
+          child: Padding(
+            padding:
+                const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            child: Row(
+              children: [
+                Container(
+                  width: 4,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: selected
+                        ? context.appColors.accentLight
+                        : context.appColors.textMuted,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    label,
+                    style: TextStyle(
+                      color: selected
+                          ? context.appColors.textPrimary
+                          : context.appColors.textSecondary,
+                      fontSize: 13,
+                      fontWeight:
+                          selected ? FontWeight.w600 : FontWeight.normal,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
               ],
             ),
           ),
