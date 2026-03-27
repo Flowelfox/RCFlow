@@ -512,6 +512,11 @@ ExecStart=/opt/rcflow/rcflow
 Restart=on-failure
 RestartSec=5
 
+# Allow rcflow to read git repos owned by other users (git >= 2.35.2 safe.directory check)
+Environment="GIT_CONFIG_COUNT=1"
+Environment="GIT_CONFIG_KEY_0=safe.directory"
+Environment="GIT_CONFIG_VALUE_0=*"
+
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=read-only
@@ -560,6 +565,17 @@ mkdir -p /opt/rcflow/data /opt/rcflow/logs /opt/rcflow/certs
 
 # settings.json is created automatically on first server start
 
+# Grant rcflow read access to the installing user's Projects directory.
+# SUDO_USER is set when the user runs: sudo dpkg -i rcflow_*.deb
+OWNER_USER="${SUDO_USER:-}"
+if [ -n "$OWNER_USER" ] && id "$OWNER_USER" &>/dev/null; then
+    usermod -aG "$OWNER_USER" rcflow
+    chmod 710 "/home/$OWNER_USER" 2>/dev/null || true
+    if [ -d "/home/$OWNER_USER/Projects" ]; then
+        chmod 750 "/home/$OWNER_USER/Projects"
+    fi
+fi
+
 # Fix ownership
 chown -R rcflow:rcflow /opt/rcflow
 
@@ -597,6 +613,11 @@ PIDFILE=/var/run/rcflow.pid
 LOGFILE=/opt/rcflow/logs/rcflow.log
 USER=rcflow
 WORKDIR=/opt/rcflow
+
+# Allow rcflow to read git repos owned by other users (git >= 2.35.2 safe.directory check)
+export GIT_CONFIG_COUNT=1
+export GIT_CONFIG_KEY_0=safe.directory
+export GIT_CONFIG_VALUE_0='*'
 
 case "$1" in
     start)
