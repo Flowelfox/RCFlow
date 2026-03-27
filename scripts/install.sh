@@ -174,6 +174,32 @@ if [[ -n "$OWNER_USER" ]]; then
     fi
 fi
 
+# ── Copy SSH key for git push operations ────────────────────────────────────
+
+if [[ -n "$OWNER_USER" ]]; then
+    SSH_KEY=""
+    for key_file in id_ed25519 id_ecdsa id_rsa; do
+        if [[ -f "/home/$OWNER_USER/.ssh/$key_file" ]]; then
+            SSH_KEY="/home/$OWNER_USER/.ssh/$key_file"
+            break
+        fi
+    done
+    if [[ -n "$SSH_KEY" ]]; then
+        info "Copying SSH key for git operations (${SSH_KEY})..."
+        mkdir -p "${INSTALL_PREFIX}/ssh"
+        cp "$SSH_KEY" "${INSTALL_PREFIX}/ssh/id"
+        chown "$SERVICE_USER:$SERVICE_USER" "${INSTALL_PREFIX}/ssh" "${INSTALL_PREFIX}/ssh/id"
+        chmod 700 "${INSTALL_PREFIX}/ssh"
+        chmod 600 "${INSTALL_PREFIX}/ssh/id"
+        printf 'GIT_SSH_COMMAND="ssh -i %s/ssh/id -o StrictHostKeyChecking=accept-new"\n' \
+            "${INSTALL_PREFIX}" > "${INSTALL_PREFIX}/env"
+        chown "$SERVICE_USER:$SERVICE_USER" "${INSTALL_PREFIX}/env"
+        ok "SSH key configured — git push will authenticate as ${OWNER_USER}"
+    else
+        warn "No SSH key found in /home/${OWNER_USER}/.ssh/ — git push over SSH needs manual setup"
+    fi
+fi
+
 # ── Create install directory ────────────────────────────────────────────────
 
 info "Installing to ${INSTALL_PREFIX}..."
@@ -323,6 +349,8 @@ RestartSec=5
 Environment="GIT_CONFIG_COUNT=1"
 Environment="GIT_CONFIG_KEY_0=safe.directory"
 Environment="GIT_CONFIG_VALUE_0=*"
+# SSH key and other optional overrides (written by installer when an owner SSH key is found)
+EnvironmentFile=-${INSTALL_PREFIX}/env
 
 # Security hardening
 NoNewPrivileges=true
