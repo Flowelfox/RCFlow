@@ -289,6 +289,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
         _toolsInstalling.remove(toolName);
         _toolProgress.remove(toolName);
       });
+      _loadToolSettings(toolName);
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -954,6 +955,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
   static const _toolDisplayNames = <String, String>{
     'claude_code': 'Claude Code',
     'codex': 'Codex',
+    'opencode': 'Opencode',
   };
 
   /// Config option groups that are absorbed into the Tools section body

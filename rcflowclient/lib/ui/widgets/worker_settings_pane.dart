@@ -98,7 +98,9 @@ class _WorkerSettingsPaneHeader extends StatelessWidget {
         ? 'Claude Code'
         : toolName == 'codex'
             ? 'Codex'
-            : toolName ?? 'Worker Settings';
+            : toolName == 'opencode'
+                ? 'OpenCode'
+                : toolName ?? 'Worker Settings';
 
     return Container(
       height: 32,
