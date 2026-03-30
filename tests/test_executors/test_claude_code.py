@@ -31,6 +31,7 @@ def claude_code_tool() -> ToolDefinition:
                 "default_permission_mode": "bypassPermissions",
                 "max_turns": 200,
                 "timeout": 1800,
+                "use_pty": False,  # tests mock asyncio pipes; PTY mode tested separately
             }
         },
     )
@@ -81,7 +82,7 @@ class TestBuildCommand:
         }
         cmd = executor._build_command({"prompt": "hello"}, config)
         assert cmd[0] == "/usr/bin/claude"
-        assert "-p" not in cmd
+        assert "--print" in cmd
         assert "--input-format" in cmd
         assert "stream-json" in cmd
         assert "--output-format" in cmd
@@ -89,6 +90,17 @@ class TestBuildCommand:
         assert "bypassPermissions" in cmd
         assert "--max-turns" in cmd
         assert "200" in cmd
+
+    def test_prompt_as_cli_argument(self, executor: ClaudeCodeExecutor):
+        config = {}
+        cmd = executor._build_command({"prompt": "hello"}, config, prompt="do something")
+        assert cmd[-2] == "--"
+        assert cmd[-1] == "do something"
+
+    def test_no_prompt_arg_when_none(self, executor: ClaudeCodeExecutor):
+        config = {}
+        cmd = executor._build_command({"prompt": "hello"}, config)
+        assert "do something" not in cmd
 
     def test_with_model_and_allowed_tools(self, executor: ClaudeCodeExecutor):
         config = {}
@@ -138,13 +150,8 @@ class TestExecuteStreaming:
 
         assert len(chunks) == 2
         assert all(c.stream == "stdout" for c in chunks)
-        # Verify initial prompt was sent via stdin
-        mock_process.stdin.write.assert_called_once()
-        written = mock_process.stdin.write.call_args[0][0]
-        msg = json.loads(written.decode("utf-8").strip())
-        assert msg["type"] == "user"
-        assert msg["message"]["role"] == "user"
-        assert msg["message"]["content"] == "test task"
+        # Initial prompt is passed as CLI arg, not via stdin
+        mock_process.stdin.write.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_handles_non_json_output(self, executor: ClaudeCodeExecutor, claude_code_tool: ToolDefinition):
@@ -288,11 +295,8 @@ class TestRestartWithPrompt:
         assert len(chunks) == 2
         # Same session-id is reused
         assert executor.session_id == original_session_id
-        # The new prompt was sent to stdin
-        mock_process2.stdin.write.assert_called_once()
-        written = mock_process2.stdin.write.call_args[0][0]
-        msg = json.loads(written.decode("utf-8").strip())
-        assert msg["message"]["content"] == "do more work"
+        # Restart prompt is passed as CLI arg, not via stdin
+        mock_process2.stdin.write.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_restart_raises_without_previous_tool_def(self, executor: ClaudeCodeExecutor):
@@ -433,8 +437,8 @@ class TestFollowUpViaStdin:
             follow_chunks.append(chunk)
 
         assert len(follow_chunks) == 2
-        # Verify the follow-up prompt was sent to stdin (second call after initial prompt)
-        assert mock_process.stdin.write.call_count == 2
+        # Follow-up is sent via stdin (initial prompt was a CLI arg, so this is the first stdin write)
+        assert mock_process.stdin.write.call_count == 1
         last_written = mock_process.stdin.write.call_args[0][0]
         msg = json.loads(last_written.decode("utf-8").strip())
         assert msg["type"] == "user"
