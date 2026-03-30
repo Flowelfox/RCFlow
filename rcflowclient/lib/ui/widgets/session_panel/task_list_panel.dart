@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../../../models/app_notification.dart';
@@ -30,6 +31,48 @@ List<LinearIssueInfo> filterLinearIssuesByQuery(
   }).toList();
 }
 
+/// Computes the ordered flat list of *visible* tasks given the current grouping
+/// and collapse state. Tasks inside collapsed groups are excluded. The result
+/// is used to resolve indices for Shift+click range selection.
+///
+/// Exposed at library level so it can be exercised in unit tests without
+/// requiring a widget environment.
+List<TaskInfo> computeFlatVisibleList({
+  required List<TaskInfo> filteredTasks,
+  required List<String> statusOrder,
+  required Set<String> collapsedGroups,
+  required bool groupByWorker,
+  required Set<String> collapsedWorkerGroups,
+}) {
+  final result = <TaskInfo>[];
+  if (groupByWorker) {
+    final tasksByWorker = <String, List<TaskInfo>>{};
+    for (final t in filteredTasks) {
+      tasksByWorker.putIfAbsent(t.workerName, () => []).add(t);
+    }
+    for (final workerName in tasksByWorker.keys) {
+      if (!collapsedWorkerGroups.contains(workerName)) {
+        result.addAll(tasksByWorker[workerName]!);
+      }
+    }
+  } else {
+    final grouped = <String, List<TaskInfo>>{};
+    for (final status in statusOrder) {
+      grouped[status] = [];
+    }
+    for (final t in filteredTasks) {
+      grouped.putIfAbsent(t.status, () => []).add(t);
+    }
+    for (final status in statusOrder) {
+      final group = grouped[status] ?? [];
+      if (group.isNotEmpty && !collapsedGroups.contains(status)) {
+        result.addAll(group);
+      }
+    }
+  }
+  return result;
+}
+
 /// Task list panel for the sidebar Tasks tab.
 ///
 /// Shows all tasks grouped by status (in_progress, todo, review, done), followed
@@ -54,6 +97,16 @@ class _TaskListPanelState extends State<TaskListPanel> {
   String _searchQuery = '';
   final Set<String> _activeStatusFilters = {};
   final Set<String> _activeSourceFilters = {};
+
+  // ---- Multi-select state ----
+  final Set<String> _selectedTaskIds = {};
+  /// Index into [_currentFlatList] of the last plain/ctrl-clicked task.
+  /// Used as the anchor for Shift+click range selection.
+  int? _lastClickedVisibleIndex;
+  /// Populated at the start of each [build] call; used by [_handleTaskTap]
+  /// to resolve Shift+click ranges without passing the list through every
+  /// widget constructor.
+  List<TaskInfo> _currentFlatList = [];
 
   static const _statusOrder = ['in_progress', 'todo', 'review', 'done'];
   static const _statusLabels = {
@@ -161,6 +214,7 @@ class _TaskListPanelState extends State<TaskListPanel> {
       _searchQuery = '';
       _activeStatusFilters.clear();
       _activeSourceFilters.clear();
+      _selectedTaskIds.clear();
     });
     _saveFilters();
   }
@@ -183,6 +237,323 @@ class _TaskListPanelState extends State<TaskListPanel> {
       }
     } finally {
       if (mounted) setState(() => _syncing = false);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Multi-select helpers
+  // ---------------------------------------------------------------------------
+
+  /// Builds a [TaskTile] wired with selection-aware tap and secondary-tap
+  /// overrides. The parent owns all selection state.
+  Widget _buildTaskTile(BuildContext context, TaskInfo task, AppState appState) {
+    final idx = _currentFlatList.indexOf(task);
+    return TaskTile(
+      key: ValueKey(task.taskId),
+      task: task,
+      state: appState,
+      onTaskSelected: widget.onTaskSelected,
+      isSelected: _selectedTaskIds.contains(task.taskId),
+      onTapOverride: () => _handleTaskTap(context, task, idx, appState),
+      onSecondaryTapOverride: _selectedTaskIds.isNotEmpty
+          ? (pos) {
+              if (!_selectedTaskIds.contains(task.taskId)) {
+                setState(() => _selectedTaskIds.add(task.taskId));
+              }
+              _showBulkContextMenu(context, pos, appState);
+            }
+          : null,
+    );
+  }
+
+  /// Handles a tap on a task tile, respecting Shift/Ctrl/Meta modifiers.
+  ///
+  /// - **Shift+click**: range-selects from the last clicked index to [idx].
+  /// - **Ctrl/Meta+click**: toggles [task] in the selection.
+  /// - **Plain click** while selection is non-empty: toggles [task].
+  /// - **Plain click** while selection is empty: opens the task in a pane
+  ///   (default behaviour).
+  void _handleTaskTap(
+      BuildContext context, TaskInfo task, int idx, AppState appState) {
+    final keys = HardwareKeyboard.instance.logicalKeysPressed;
+    final shift = keys.contains(LogicalKeyboardKey.shiftLeft) ||
+        keys.contains(LogicalKeyboardKey.shiftRight);
+    final ctrl = keys.contains(LogicalKeyboardKey.controlLeft) ||
+        keys.contains(LogicalKeyboardKey.controlRight) ||
+        keys.contains(LogicalKeyboardKey.metaLeft) ||
+        keys.contains(LogicalKeyboardKey.metaRight);
+
+    if (shift && _lastClickedVisibleIndex != null) {
+      final anchor = _lastClickedVisibleIndex!;
+      final lo = anchor < idx ? anchor : idx;
+      final hi = anchor < idx ? idx : anchor;
+      setState(() {
+        for (var i = lo; i <= hi; i++) {
+          if (i < _currentFlatList.length) {
+            _selectedTaskIds.add(_currentFlatList[i].taskId);
+          }
+        }
+        _lastClickedVisibleIndex = idx;
+      });
+    } else if (ctrl) {
+      setState(() {
+        if (_selectedTaskIds.contains(task.taskId)) {
+          _selectedTaskIds.remove(task.taskId);
+        } else {
+          _selectedTaskIds.add(task.taskId);
+        }
+        _lastClickedVisibleIndex = idx;
+      });
+    } else if (_selectedTaskIds.isNotEmpty) {
+      setState(() {
+        if (_selectedTaskIds.contains(task.taskId)) {
+          _selectedTaskIds.remove(task.taskId);
+        } else {
+          _selectedTaskIds.add(task.taskId);
+        }
+        _lastClickedVisibleIndex = idx;
+      });
+    } else {
+      // No selection, no modifiers — default: open task in pane.
+      setState(() => _lastClickedVisibleIndex = idx);
+      appState.openTaskInPane(task.taskId);
+      widget.onTaskSelected?.call();
+    }
+  }
+
+  /// The thin bar shown below the filter bar when tasks are selected.
+  Widget _buildSelectionBar(BuildContext context, AppState state) {
+    final count = _selectedTaskIds.length;
+    return Container(
+      color: context.appColors.accent.withAlpha(18),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 5),
+      child: Row(
+        children: [
+          Icon(Icons.check_box_outlined,
+              size: 14, color: context.appColors.accent),
+          const SizedBox(width: 6),
+          Text(
+            '$count task${count == 1 ? '' : 's'} selected',
+            style: TextStyle(
+              color: context.appColors.accentLight,
+              fontSize: 11,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const Spacer(),
+          GestureDetector(
+            onTap: () => setState(() => _selectedTaskIds.clear()),
+            child: Tooltip(
+              message: 'Clear selection (Esc)',
+              child: Icon(Icons.close_rounded,
+                  size: 14, color: context.appColors.textMuted),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Shows the bulk right-click context menu for the current selection.
+  void _showBulkContextMenu(
+      BuildContext context, Offset position, AppState state) {
+    final count = _selectedTaskIds.length;
+    final overlay =
+        Overlay.of(context).context.findRenderObject() as RenderBox;
+
+    showMenu<String>(
+      context: context,
+      position: RelativeRect.fromRect(
+        position & const Size(1, 1),
+        Offset.zero & overlay.size,
+      ),
+      color: context.appColors.bgSurface,
+      shape:
+          RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      items: [
+        PopupMenuItem(
+          enabled: false,
+          height: 28,
+          child: Text(
+            '$count task${count == 1 ? '' : 's'} selected',
+            style: TextStyle(
+                color: context.appColors.textMuted,
+                fontSize: 11,
+                fontWeight: FontWeight.w500),
+          ),
+        ),
+        const PopupMenuDivider(),
+        PopupMenuItem(
+          value: 'status_in_progress',
+          child: Row(children: [
+            Icon(Icons.play_circle_outline,
+                color: const Color(0xFF3B82F6), size: 18),
+            const SizedBox(width: 8),
+            Text('Mark all \u2192 In Progress',
+                style: TextStyle(color: context.appColors.textPrimary)),
+          ]),
+        ),
+        PopupMenuItem(
+          value: 'status_todo',
+          child: Row(children: [
+            Icon(Icons.radio_button_unchecked,
+                color: const Color(0xFF6B7280), size: 18),
+            const SizedBox(width: 8),
+            Text('Mark all \u2192 To Do',
+                style: TextStyle(color: context.appColors.textPrimary)),
+          ]),
+        ),
+        PopupMenuItem(
+          value: 'status_review',
+          child: Row(children: [
+            Icon(Icons.rate_review_outlined,
+                color: const Color(0xFFF59E0B), size: 18),
+            const SizedBox(width: 8),
+            Text('Mark all \u2192 Review',
+                style: TextStyle(color: context.appColors.textPrimary)),
+          ]),
+        ),
+        PopupMenuItem(
+          value: 'status_done',
+          child: Row(children: [
+            Icon(Icons.check_circle_outline,
+                color: const Color(0xFF10B981), size: 18),
+            const SizedBox(width: 8),
+            Text('Mark all \u2192 Done',
+                style: TextStyle(color: context.appColors.textPrimary)),
+          ]),
+        ),
+        const PopupMenuDivider(),
+        PopupMenuItem(
+          value: 'delete',
+          child: Row(children: [
+            Icon(Icons.delete_outline,
+                color: context.appColors.errorText, size: 18),
+            const SizedBox(width: 8),
+            Text(
+              'Delete $count task${count == 1 ? '' : 's'}\u2026',
+              style: TextStyle(color: context.appColors.errorText),
+            ),
+          ]),
+        ),
+        const PopupMenuDivider(),
+        PopupMenuItem(
+          value: 'clear',
+          child: Row(children: [
+            Icon(Icons.close_rounded,
+                color: context.appColors.textSecondary, size: 18),
+            const SizedBox(width: 8),
+            Text('Clear selection',
+                style: TextStyle(color: context.appColors.textPrimary)),
+          ]),
+        ),
+      ],
+    ).then((value) {
+      if (!context.mounted || value == null) return;
+      switch (value) {
+        case 'status_in_progress':
+          _bulkUpdateStatus(context, state, 'in_progress');
+        case 'status_todo':
+          _bulkUpdateStatus(context, state, 'todo');
+        case 'status_review':
+          _bulkUpdateStatus(context, state, 'review');
+        case 'status_done':
+          _bulkUpdateStatus(context, state, 'done');
+        case 'delete':
+          _confirmBulkDelete(context, state);
+        case 'clear':
+          setState(() => _selectedTaskIds.clear());
+      }
+    });
+  }
+
+  Future<void> _bulkUpdateStatus(
+      BuildContext context, AppState state, String newStatus) async {
+    final ids = List<String>.from(_selectedTaskIds);
+    setState(() => _selectedTaskIds.clear());
+
+    int failures = 0;
+    await Future.wait(ids.map((id) async {
+      final task = state.getTask(id);
+      if (task == null) return;
+      final worker = state.getWorker(task.workerId);
+      if (worker == null) return;
+      try {
+        await worker.ws.updateTask(id, status: newStatus);
+      } catch (_) {
+        failures++;
+      }
+    }));
+
+    if (failures > 0 && context.mounted) {
+      state.addSystemMessage(
+          'Failed to update $failures task${failures == 1 ? '' : 's'}',
+          isError: true);
+    }
+  }
+
+  Future<void> _confirmBulkDelete(
+      BuildContext context, AppState state) async {
+    final count = _selectedTaskIds.length;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: context.appColors.bgSurface,
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        title: Text(
+          'Delete $count task${count == 1 ? '' : 's'}',
+          style: TextStyle(
+              color: context.appColors.textPrimary, fontSize: 16),
+        ),
+        content: Text(
+          'Delete $count task${count == 1 ? '' : 's'}? This cannot be undone.',
+          style: TextStyle(
+              color: context.appColors.textSecondary, fontSize: 14),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: Text('Cancel',
+                style:
+                    TextStyle(color: context.appColors.textSecondary)),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: context.appColors.errorText,
+            ),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child:
+                const Text('Delete', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+    await _bulkDelete(context, state);
+  }
+
+  Future<void> _bulkDelete(BuildContext context, AppState state) async {
+    final ids = List<String>.from(_selectedTaskIds);
+    setState(() => _selectedTaskIds.clear());
+
+    int failures = 0;
+    await Future.wait(ids.map((id) async {
+      final task = state.getTask(id);
+      if (task == null) return;
+      final worker = state.getWorker(task.workerId);
+      if (worker == null) return;
+      try {
+        await worker.ws.deleteTask(id);
+      } catch (_) {
+        failures++;
+      }
+    }));
+
+    if (failures > 0 && context.mounted) {
+      state.addSystemMessage(
+          'Failed to delete $failures task${failures == 1 ? '' : 's'}',
+          isError: true);
     }
   }
 
@@ -215,6 +586,15 @@ class _TaskListPanelState extends State<TaskListPanel> {
         final filtered = _filterTasks(tasks, state);
         final filteredUnlinked = _filterUnlinkedIssues(allUnlinkedIssues);
 
+        // Compute and cache the flat visible list for range-selection.
+        _currentFlatList = computeFlatVisibleList(
+          filteredTasks: filtered,
+          statusOrder: _statusOrder,
+          collapsedGroups: _collapsedGroups,
+          groupByWorker: _groupByWorker,
+          collapsedWorkerGroups: _collapsedWorkerGroups,
+        );
+
         // Build list items
         final listItems = <Widget>[];
         if (filtered.isEmpty && filteredUnlinked.isEmpty && _hasActiveFilters) {
@@ -244,16 +624,30 @@ class _TaskListPanelState extends State<TaskListPanel> {
           }
         }
 
-        return Column(
-          children: [
-            _buildFilterBar(context, state),
-            Expanded(
-              child: ListView(
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                children: listItems,
+        return Focus(
+          autofocus: false,
+          onKeyEvent: (node, event) {
+            if (event is KeyDownEvent &&
+                event.logicalKey == LogicalKeyboardKey.escape &&
+                _selectedTaskIds.isNotEmpty) {
+              setState(() => _selectedTaskIds.clear());
+              return KeyEventResult.handled;
+            }
+            return KeyEventResult.ignored;
+          },
+          child: Column(
+            children: [
+              _buildFilterBar(context, state),
+              if (_selectedTaskIds.isNotEmpty)
+                _buildSelectionBar(context, state),
+              Expanded(
+                child: ListView(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  children: listItems,
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         );
       },
     );
@@ -609,11 +1003,7 @@ class _TaskListPanelState extends State<TaskListPanel> {
           ),
         ),
         if (!collapsed) ...[
-          ...tasks.map((t) => TaskTile(
-                task: t,
-                state: state,
-                onTaskSelected: widget.onTaskSelected,
-              )),
+          ...tasks.map((t) => _buildTaskTile(context, t, state)),
           if (unlinkedIssues.isNotEmpty) ...[
             Padding(
               padding: const EdgeInsets.only(left: 32, top: 2, bottom: 2),
@@ -692,11 +1082,7 @@ class _TaskListPanelState extends State<TaskListPanel> {
           ),
         ),
         if (!collapsed)
-          ...tasks.map((t) => TaskTile(
-                task: t,
-                state: state,
-                onTaskSelected: widget.onTaskSelected,
-              )),
+          ...tasks.map((t) => _buildTaskTile(context, t, state)),
       ],
     );
   }
