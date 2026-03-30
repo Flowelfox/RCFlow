@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:window_manager/window_manager.dart';
 
-import '../../models/split_tree.dart';
 import '../../state/app_state.dart';
 import '../../theme.dart';
 
@@ -45,8 +44,15 @@ class CustomTitleBar extends StatelessWidget {
               },
               child: DragToMoveArea(
                 child: Padding(
-                  padding: const EdgeInsets.only(left: 16),
+                  // On macOS, leave space for native traffic-light buttons on the left
+                  padding: EdgeInsets.only(
+                    left: Platform.isMacOS ? 72 : 16,
+                    right: Platform.isMacOS ? 16 : 0,
+                  ),
                   child: Row(
+                    mainAxisAlignment: Platform.isMacOS
+                        ? MainAxisAlignment.end
+                        : MainAxisAlignment.start,
                     children: [
                       _StatusIndicator(
                         connected: connected,
@@ -69,51 +75,8 @@ class CustomTitleBar extends StatelessWidget {
             ),
           ),
 
-          // Split pane button (when connected)
-          if (connected)
-            PopupMenuButton<SplitAxis>(
-              icon: Icon(Icons.view_column_outlined,
-                  color: context.appColors.textSecondary, size: 18),
-              tooltip: 'Split pane',
-              color: context.appColors.bgSurface,
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12)),
-              onSelected: (axis) {
-                final appState = context.read<AppState>();
-                appState.splitPane(appState.activePaneId, axis);
-              },
-              itemBuilder: (_) => [
-                PopupMenuItem(
-                  value: SplitAxis.horizontal,
-                  child: Row(
-                    children: [
-                      Icon(Icons.view_column_outlined,
-                          color: context.appColors.textSecondary, size: 18),
-                      SizedBox(width: 10),
-                      Text('Split Right',
-                          style:
-                              TextStyle(color: context.appColors.textPrimary, fontSize: 14)),
-                    ],
-                  ),
-                ),
-                PopupMenuItem(
-                  value: SplitAxis.vertical,
-                  child: Row(
-                    children: [
-                      Icon(Icons.view_agenda_outlined,
-                          color: context.appColors.textSecondary, size: 18),
-                      SizedBox(width: 10),
-                      Text('Split Down',
-                          style:
-                              TextStyle(color: context.appColors.textPrimary, fontSize: 14)),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-
-          // Window control buttons
-          const _WindowControls(),
+          // Window control buttons (hidden on macOS — native traffic lights used instead)
+          if (!Platform.isMacOS) const _WindowControls(),
         ],
       ),
     );

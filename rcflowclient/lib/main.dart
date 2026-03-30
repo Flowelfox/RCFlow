@@ -65,11 +65,11 @@ void main() async {
   if (_isDesktop) {
     await windowManager.ensureInitialized();
 
-    const windowOptions = WindowOptions(
+    final windowOptions = WindowOptions(
       minimumSize: Size(800, 500),
       title: 'RCFlow',
       titleBarStyle: TitleBarStyle.hidden,
-      windowButtonVisibility: false,
+      windowButtonVisibility: Platform.isMacOS,
     );
 
     windowManager.waitUntilReadyToShow(windowOptions, () async {
