@@ -22,10 +22,45 @@ const defaultSounds = [
 
 class NotificationSoundService {
   final SettingsService _settings;
-  final AudioPlayer _player = AudioPlayer();
+  final AudioPlayer _player;
 
-  NotificationSoundService({required SettingsService settings})
-      : _settings = settings;
+  // Tracks which source is currently loaded in the player.
+  // Format: the soundId for built-in sounds, or 'custom:<path>' for custom files.
+  String? _loadedKey;
+
+  NotificationSoundService({
+    required SettingsService settings,
+    AudioPlayer? player,
+  })  : _settings = settings,
+        _player = player ?? AudioPlayer() {
+    // On Windows, the audioplayers plugin uses Windows Media Foundation (WMF)
+    // to load audio sources asynchronously.  When the app window is not
+    // focused, Flutter's platform-event processing is in a reduced-activity
+    // state, so the WMF "source loaded" callback never reaches Dart and
+    // play() silently does nothing.
+    //
+    // Fix: use ReleaseMode.stop so that stopping the player keeps the source
+    // loaded (instead of releasing it).  We pre-load the configured sound
+    // during construction — while the window is guaranteed to be focused at
+    // app startup — and then use seek(0)+resume() for playback.  Both of
+    // those calls are synchronous platform-channel round-trips that complete
+    // immediately without waiting for any WMF background callbacks.
+    if (Platform.isWindows) {
+      _player.setReleaseMode(ReleaseMode.stop);
+      _preloadCurrentSound();
+    }
+  }
+
+  /// Eagerly loads the currently configured sound into the player.
+  /// Called once at construction while the window is focused.
+  void _preloadCurrentSound() {
+    final soundId = _settings.notificationSound;
+    if (soundId == 'custom') return; // custom path may not exist yet
+    _player
+        .setSource(AssetSource('sounds/$soundId.wav'))
+        .then((_) => _loadedKey = soundId)
+        .catchError((_) {});
+  }
 
   Future<void> playNotificationSound() async {
     final soundId = _settings.notificationSound;
@@ -38,18 +73,59 @@ class NotificationSoundService {
 
   Future<void> _playSound(String soundId) async {
     try {
-      await _player.stop();
-
-      if (soundId == 'custom') {
-        final path = _settings.customSoundPath;
-        if (path.isNotEmpty) {
-          await _player.play(DeviceFileSource(path));
-        }
+      if (Platform.isWindows) {
+        await _playSoundWindows(soundId);
       } else {
-        await _player.play(AssetSource('sounds/$soundId.wav'));
+        await _playSoundDefault(soundId);
       }
     } catch (_) {
       // Silently ignore playback errors
+    }
+  }
+
+  /// Windows-specific playback: avoid triggering an async WMF source reload
+  /// when the app window may not be focused.
+  Future<void> _playSoundWindows(String soundId) async {
+    final String key;
+    final Source source;
+
+    if (soundId == 'custom') {
+      final path = _settings.customSoundPath;
+      if (path.isEmpty) return;
+      key = 'custom:$path';
+      source = DeviceFileSource(path);
+    } else {
+      key = soundId;
+      source = AssetSource('sounds/$soundId.wav');
+    }
+
+    if (_loadedKey == key) {
+      // Source already loaded — seek to beginning and resume.
+      // These are synchronous platform-channel calls that return immediately
+      // and do not wait for WMF callbacks, so they work even when the
+      // app window is unfocused.
+      await _player.seek(Duration.zero);
+      await _player.resume();
+    } else {
+      // Different sound — must load it first.  This path requires the full
+      // async cycle; it works reliably when triggered from the UI (focused).
+      await _player.stop();
+      await _player.play(source);
+      _loadedKey = key;
+    }
+  }
+
+  /// Default playback path used on non-Windows platforms.
+  Future<void> _playSoundDefault(String soundId) async {
+    await _player.stop();
+
+    if (soundId == 'custom') {
+      final path = _settings.customSoundPath;
+      if (path.isNotEmpty) {
+        await _player.play(DeviceFileSource(path));
+      }
+    } else {
+      await _player.play(AssetSource('sounds/$soundId.wav'));
     }
   }
 
