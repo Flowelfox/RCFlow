@@ -154,9 +154,9 @@ class ContextMixin:
         if not resolved:
             return None
 
-        agent_tools = [(n, d) for n, d, e in resolved if e in ("claude_code", "codex")]
+        agent_tools = [(n, d) for n, d, e in resolved if e in ("claude_code", "codex", "opencode")]
         worktree_tools = [(n, d) for n, d, e in resolved if e == "worktree"]
-        other_tools = [(n, d) for n, d, e in resolved if e not in ("claude_code", "codex", "worktree")]
+        other_tools = [(n, d) for n, d, e in resolved if e not in ("claude_code", "codex", "opencode", "worktree")]
 
         parts: list[str] = []
 
@@ -352,7 +352,7 @@ class ContextMixin:
         if repo_path:
             parts.append(f" Repository: '{repo_path}'.")
         parts.append(
-            f" When invoking any agent tool (claude_code, codex), you MUST pass"
+            f" When invoking any agent tool (claude_code, codex, opencode), you MUST pass"
             f" working_directory='{selected_wt}' unless the user explicitly requests"
             f" a different directory."
         )
@@ -395,7 +395,7 @@ class ContextMixin:
                 tool_def = candidate
                 break
 
-        if tool_def is None or tool_def.executor not in ("claude_code", "codex"):
+        if tool_def is None or tool_def.executor not in ("claude_code", "codex", "opencode"):
             return False
 
         # Strip all #mentions and @mentions — if nothing meaningful remains,
@@ -457,7 +457,7 @@ class ContextMixin:
 
         # Build tool_input based on executor type
         tool_input: dict[str, Any] = {}
-        if tool_def.executor in ("claude_code", "codex"):
+        if tool_def.executor in ("claude_code", "codex", "opencode"):
             tool_input["prompt"] = display_text or "Ready for instructions."
             if working_dir:
                 tool_input["working_directory"] = working_dir
@@ -532,5 +532,5 @@ class ContextMixin:
             session.title = title
 
         # If non-agent tool completed, set IDLE
-        if session.claude_code_executor is None and session.codex_executor is None:
+        if session.claude_code_executor is None and session.codex_executor is None and session.opencode_executor is None:
             session.set_activity(ActivityState.IDLE)

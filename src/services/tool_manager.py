@@ -1,4 +1,4 @@
-"""Manages installation and updates of external CLI tools (Claude Code, Codex)."""
+"""Manages installation and updates of external CLI tools (Claude Code, Codex, OpenCode)."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ import shutil
 import sys
 import tarfile
 import tempfile
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -37,6 +38,9 @@ CLAUDE_GCS_BUCKET = (
 
 CODEX_GITHUB_RELEASES_API = "https://api.github.com/repos/openai/codex/releases/latest"
 CODEX_RELEASE_BASE = "https://github.com/openai/codex/releases/download"
+
+OPENCODE_GITHUB_RELEASES_API = "https://api.github.com/repos/sst/opencode/releases/latest"
+OPENCODE_RELEASE_BASE = "https://github.com/sst/opencode/releases/download"
 
 # Timeout for binary downloads (large files)
 _DOWNLOAD_TIMEOUT = 300
@@ -159,6 +163,10 @@ def _parse_version(name: str, raw: str) -> str | None:
         # "codex-cli 0.91.0" → "0.91.0"
         match = re.search(r"([\d.]+)", raw)
         return match.group(1) if match else None
+    if name == "opencode":
+        # "1.3.7" → "1.3.7"
+        match = re.search(r"([\d]+\.[\d]+\.[\d]+)", raw)
+        return match.group(1) if match else None
     return None
 
 
@@ -189,7 +197,7 @@ class ToolManager:
     @property
     def tool_names(self) -> set[str]:
         """Return the set of known tool names."""
-        return set(self._tools.keys()) | {"claude_code", "codex"}
+        return set(self._tools.keys()) | {"claude_code", "codex", "opencode"}
 
     # ------------------------------------------------------------------
     # Public API
@@ -202,8 +210,9 @@ class ToolManager:
         Use ``install_tool()`` or ``install_tool_streaming()`` to install
         on-demand when the user requests it via the UI.
         """
+        _BINARY_NAMES = {"claude_code": "claude", "codex": "codex", "opencode": "opencode"}
         results: dict[str, ManagedTool] = {}
-        for name in ("claude_code", "codex"):
+        for name in ("claude_code", "codex", "opencode"):
             try:
                 tool = await self.detect_tool(name)
                 results[name] = tool
@@ -221,7 +230,7 @@ class ToolManager:
                 logger.exception("Failed to set up tool '%s'", name)
                 results[name] = ManagedTool(
                     name=name,
-                    binary_name="claude" if name == "claude_code" else "codex",
+                    binary_name=_BINARY_NAMES.get(name, name),
                     error=str(exc),
                 )
         self._tools = results
@@ -236,6 +245,8 @@ class ToolManager:
                 elif name == "codex":
                     version, _ = await self._get_latest_codex_version()
                     tool.latest_version = version
+                elif name == "opencode":
+                    tool.latest_version = await self._get_latest_opencode_version()
             except Exception:
                 logger.warning("Failed to check updates for '%s'", name, exc_info=True)
         return dict(self._tools)
@@ -337,7 +348,8 @@ class ToolManager:
 
         Priority: RCFlow managed directory first, then PATH lookup.
         """
-        binary_name = "claude" if name == "claude_code" else "codex"
+        _BINARY_NAMES = {"claude_code": "claude", "codex": "codex", "opencode": "opencode"}
+        binary_name = _BINARY_NAMES.get(name, name)
 
         # Probe both sources so the UI can offer a switch
         mp = self._managed_binary_path(name)
@@ -395,6 +407,8 @@ class ToolManager:
                 tool = await self._install_claude_code()
             elif name == "codex":
                 tool = await self._install_codex()
+            elif name == "opencode":
+                tool = await self._install_opencode()
             else:
                 raise ValueError(f"Unknown tool: {name}")
             self._tools[name] = tool
@@ -552,6 +566,90 @@ class ToolManager:
                         extracted.chmod(0o755)
                         shutil.move(str(extracted), str(binary_path))
 
+    async def _install_opencode(self) -> ManagedTool:
+        """Download and install OpenCode native binary from GitHub Releases."""
+        install_dir = self._base_dir / "opencode"
+        install_dir.mkdir(parents=True, exist_ok=True)
+
+        exe = ".exe" if sys.platform == "win32" else ""
+        binary_path = install_dir / f"opencode{exe}"
+
+        version = await self._get_latest_opencode_version()
+        if not version:
+            raise RuntimeError("Could not determine latest OpenCode version")
+
+        asset_base, ext = _detect_opencode_asset()
+        asset_name = f"{asset_base}{ext}"
+        tag = f"v{version}"
+        download_url = f"{OPENCODE_RELEASE_BASE}/{tag}/{asset_name}"
+
+        await self._download_opencode_binary(install_dir, binary_path, download_url, asset_name, version)
+
+        # Verify the binary can actually run; fall back to musl on glibc-too-old Linux
+        if sys.platform not in ("win32", "darwin"):
+            ok, err = await _verify_binary(str(binary_path))
+            if not ok and "GLIBC" in err and "musl" not in asset_base:
+                musl_asset_base = asset_base + "-musl"
+                musl_asset = f"{musl_asset_base}{ext}"
+                musl_url = f"{OPENCODE_RELEASE_BASE}/{tag}/{musl_asset}"
+                logger.warning(
+                    "OpenCode gnu binary requires newer glibc (%s), retrying with musl variant",
+                    err.splitlines()[0] if err else "unknown",
+                )
+                await self._download_opencode_binary(install_dir, binary_path, musl_url, musl_asset, version)
+
+        logger.info("Installed OpenCode %s to %s", version, binary_path)
+        self._write_version_file("opencode", version)
+        which_str = shutil.which("opencode")
+        if which_str and Path(which_str).resolve() == binary_path.resolve():
+            which_str = None
+        return ManagedTool(
+            name="opencode",
+            binary_name="opencode",
+            binary_path=str(binary_path),
+            current_version=version,
+            latest_version=version,
+            managed=True,
+            managed_path=str(binary_path),
+            external_path=which_str,
+        )
+
+    @staticmethod
+    async def _download_opencode_binary(
+        install_dir: Path, binary_path: Path, download_url: str, asset_name: str, version: str
+    ) -> None:
+        """Download and extract the opencode binary from a release archive."""
+        async with httpx.AsyncClient(follow_redirects=True) as client:
+            resp = await client.get(download_url, timeout=_DOWNLOAD_TIMEOUT)
+            resp.raise_for_status()
+
+            with tempfile.TemporaryDirectory(dir=str(install_dir)) as tmp_dir:
+                archive_path = Path(tmp_dir) / asset_name
+                archive_path.write_bytes(resp.content)
+
+                if asset_name.endswith(".tar.gz"):
+                    with tarfile.open(archive_path, "r:gz") as tf:
+                        members = tf.getnames()
+                        if not members:
+                            raise RuntimeError("OpenCode tarball is empty")
+                        tf.extractall(tmp_dir, filter="data")
+                        extracted = _find_opencode_binary(Path(tmp_dir), members)
+                        if not extracted:
+                            raise RuntimeError(f"Could not find opencode binary in tarball: {members}")
+                        extracted.chmod(0o755)
+                        shutil.move(str(extracted), str(binary_path))
+                else:
+                    # .zip (macOS and Windows)
+                    with zipfile.ZipFile(archive_path) as zf:
+                        names = zf.namelist()
+                        zf.extractall(tmp_dir)
+                        extracted = _find_opencode_binary(Path(tmp_dir), names)
+                        if not extracted:
+                            raise RuntimeError(f"Could not find opencode binary in zip: {names}")
+                        if sys.platform != "win32":
+                            extracted.chmod(0o755)
+                        shutil.move(str(extracted), str(binary_path))
+
     # ------------------------------------------------------------------
     # Streaming install (with progress events)
     # ------------------------------------------------------------------
@@ -567,6 +665,9 @@ class ToolManager:
                     yield event
             elif name == "codex":
                 async for event in self._install_codex_streaming():
+                    yield event
+            elif name == "opencode":
+                async for event in self._install_opencode_streaming():
                     yield event
             else:
                 yield {"step": "error", "message": f"Unknown tool: {name}"}
@@ -791,6 +892,113 @@ class ToolManager:
                     extracted.chmod(0o755)
                     shutil.move(str(extracted), str(binary_path))
 
+    async def _install_opencode_streaming(self) -> AsyncGenerator[dict[str, Any], None]:
+        """Download and install OpenCode from GitHub Releases, yielding progress events."""
+        install_dir = self._base_dir / "opencode"
+        install_dir.mkdir(parents=True, exist_ok=True)
+
+        yield {"step": "checking_version", "message": "Checking latest OpenCode version..."}
+
+        version = await self._get_latest_opencode_version()
+        if not version:
+            yield {"step": "error", "message": "Could not determine latest OpenCode version"}
+            return
+
+        try:
+            asset_base, ext = _detect_opencode_asset()
+        except RuntimeError as exc:
+            yield {"step": "error", "message": str(exc)}
+            return
+
+        asset_name = f"{asset_base}{ext}"
+        tag = f"v{version}"
+        download_url = f"{OPENCODE_RELEASE_BASE}/{tag}/{asset_name}"
+
+        exe = ".exe" if sys.platform == "win32" else ""
+        binary_path = install_dir / f"opencode{exe}"
+
+        yield {"step": "downloading", "progress": 0.0, "message": f"Downloading {asset_name}..."}
+
+        async with (
+            httpx.AsyncClient(follow_redirects=True) as client,
+            client.stream("GET", download_url, timeout=_DOWNLOAD_TIMEOUT) as stream,
+        ):
+            total = int(stream.headers.get("content-length", 0))
+            received = 0
+            chunks: list[bytes] = []
+            async for chunk in stream.aiter_bytes(65536):
+                chunks.append(chunk)
+                received += len(chunk)
+                if total > 0:
+                    pct = received / total
+                    mb_recv = received / 1_048_576
+                    mb_total = total / 1_048_576
+                    yield {
+                        "step": "downloading",
+                        "progress": round(pct, 3),
+                        "message": f"Downloading... {mb_recv:.1f} / {mb_total:.1f} MB",
+                    }
+
+        yield {"step": "installing", "message": "Extracting binary..."}
+
+        with tempfile.TemporaryDirectory(dir=str(install_dir)) as tmp_dir:
+            archive_path = Path(tmp_dir) / asset_name
+            archive_path.write_bytes(b"".join(chunks))
+
+            if asset_name.endswith(".tar.gz"):
+                with tarfile.open(archive_path, "r:gz") as tf:
+                    members = tf.getnames()
+                    if not members:
+                        yield {"step": "error", "message": "OpenCode tarball is empty"}
+                        return
+                    tf.extractall(tmp_dir, filter="data")
+                    extracted = _find_opencode_binary(Path(tmp_dir), members)
+                    if not extracted:
+                        yield {"step": "error", "message": f"Could not find opencode binary in tarball: {members}"}
+                        return
+                    extracted.chmod(0o755)
+                    shutil.move(str(extracted), str(binary_path))
+            else:
+                with zipfile.ZipFile(archive_path) as zf:
+                    names = zf.namelist()
+                    zf.extractall(tmp_dir)
+                    extracted = _find_opencode_binary(Path(tmp_dir), names)
+                    if not extracted:
+                        yield {"step": "error", "message": f"Could not find opencode binary in zip: {names}"}
+                        return
+                    if sys.platform != "win32":
+                        extracted.chmod(0o755)
+                    shutil.move(str(extracted), str(binary_path))
+
+        # Verify + musl fallback on old-glibc Linux
+        if sys.platform not in ("win32", "darwin"):
+            ok, err = await _verify_binary(str(binary_path))
+            if not ok and "GLIBC" in err and "musl" not in asset_base:
+                yield {"step": "installing", "message": "glibc too old; switching to musl variant..."}
+                musl_asset_base = asset_base + "-musl"
+                musl_asset = f"{musl_asset_base}{ext}"
+                musl_url = f"{OPENCODE_RELEASE_BASE}/{tag}/{musl_asset}"
+                await self._download_opencode_binary(install_dir, binary_path, musl_url, musl_asset, version)
+
+        self._write_version_file("opencode", version)
+        which_str = shutil.which("opencode")
+        if which_str and Path(which_str).resolve() == binary_path.resolve():
+            which_str = None
+
+        tool = ManagedTool(
+            name="opencode",
+            binary_name="opencode",
+            binary_path=str(binary_path),
+            current_version=version,
+            latest_version=version,
+            managed=True,
+            managed_path=str(binary_path),
+            external_path=which_str,
+        )
+        self._tools["opencode"] = tool
+        logger.info("Installed OpenCode %s to %s", version, binary_path)
+        yield {"step": "done", "message": f"Installed v{version}"}
+
     # ------------------------------------------------------------------
     # Updates
     # ------------------------------------------------------------------
@@ -817,8 +1025,13 @@ class ToolManager:
         yield {"step": "checking_version", "message": "Checking for updates..."}
         if name == "claude_code":
             latest = await self._get_latest_claude_version()
-        else:
+        elif name == "codex":
             latest, _ = await self._get_latest_codex_version()
+        elif name == "opencode":
+            latest = await self._get_latest_opencode_version()
+        else:
+            yield {"step": "done", "message": f"Update check not supported for {name}"}
+            return
 
         if not latest:
             yield {"step": "done", "message": "Could not check latest version"}
@@ -844,8 +1057,12 @@ class ToolManager:
             # Not our responsibility — just check and log
             if name == "claude_code":
                 latest = await self._get_latest_claude_version()
-            else:
+            elif name == "codex":
                 latest, _ = await self._get_latest_codex_version()
+            elif name == "opencode":
+                latest = await self._get_latest_opencode_version()
+            else:
+                return tool
             if latest and tool.current_version and latest != tool.current_version:
                 logger.info(
                     "%s update available: %s -> %s (not RCFlow-managed, skipping)",
@@ -860,6 +1077,8 @@ class ToolManager:
             return await self._update_claude_code(tool)
         if name == "codex":
             return await self._update_codex(tool)
+        if name == "opencode":
+            return await self._update_opencode(tool)
         return tool
 
     async def _update_claude_code(self, tool: ManagedTool) -> ManagedTool:
@@ -894,6 +1113,23 @@ class ToolManager:
         async with self._lock:
             updated = await self._install_codex()
         self._tools["codex"] = updated
+        return updated
+
+    async def _update_opencode(self, tool: ManagedTool) -> ManagedTool:
+        """Re-download OpenCode from GitHub Releases if a newer version is available."""
+        latest = await self._get_latest_opencode_version()
+        if not latest:
+            return tool
+
+        tool.latest_version = latest
+        if tool.current_version == latest:
+            logger.debug("OpenCode is up to date (%s)", latest)
+            return tool
+
+        logger.info("Updating OpenCode: %s -> %s", tool.current_version, latest)
+        async with self._lock:
+            updated = await self._install_opencode()
+        self._tools["opencode"] = updated
         return updated
 
     # ------------------------------------------------------------------
@@ -946,6 +1182,20 @@ class ToolManager:
             logger.warning("Failed to check latest Codex version", exc_info=True)
             return None, None
 
+    @staticmethod
+    async def _get_latest_opencode_version() -> str | None:
+        """Fetch latest OpenCode version from GitHub Releases API."""
+        try:
+            async with httpx.AsyncClient(follow_redirects=True) as client:
+                resp = await client.get(OPENCODE_GITHUB_RELEASES_API, timeout=_CHECK_TIMEOUT)
+                resp.raise_for_status()
+                data = resp.json()
+                tag: str = data["tag_name"]
+                return tag.lstrip("v")
+        except Exception:
+            logger.warning("Failed to check latest OpenCode version", exc_info=True)
+            return None
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
@@ -962,6 +1212,8 @@ class ToolManager:
             return self._base_dir / "claude-code" / f"claude{exe}"
         if name == "codex":
             return self._base_dir / "codex" / f"codex{exe}"
+        if name == "opencode":
+            return self._base_dir / "opencode" / f"opencode{exe}"
         raise ValueError(f"Unknown tool: {name}")
 
     def _write_version_file(self, name: str, version: str) -> None:
@@ -1007,6 +1259,53 @@ async def _verify_binary(binary_path: str) -> tuple[bool, str]:
         return False, "binary not found"
     except Exception as exc:
         return False, str(exc)
+
+
+def _detect_opencode_asset() -> tuple[str, str]:
+    """Return ``(asset_base, ext)`` for the current platform.
+
+    For example ``("opencode-linux-x64", ".tar.gz")`` or
+    ``("opencode-darwin-arm64", ".zip")``.
+    """
+    machine = platform.machine().lower()
+
+    if sys.platform == "win32":
+        arch = "arm64" if machine in ("arm64", "aarch64") else "x64"
+        return f"opencode-windows-{arch}", ".zip"
+
+    if sys.platform == "darwin":
+        arch = "arm64" if machine in ("arm64", "aarch64") else "x64"
+        return f"opencode-darwin-{arch}", ".zip"
+
+    # Linux
+    if machine in ("aarch64", "arm64"):
+        base = "opencode-linux-arm64"
+        if _is_musl():
+            base += "-musl"
+        return base, ".tar.gz"
+    if machine in ("x86_64", "amd64"):
+        base = "opencode-linux-x64"
+        if _is_musl():
+            base += "-musl"
+        return base, ".tar.gz"
+    raise RuntimeError(f"Unsupported architecture for OpenCode: {machine}")
+
+
+def _find_opencode_binary(extract_dir: Path, members: list[str]) -> Path | None:
+    """Find the opencode CLI binary among extracted archive members.
+
+    Skips desktop/electron variants; returns the first plain ``opencode``
+    (or ``opencode.exe`` on Windows) executable found.
+    """
+    exe = ".exe" if sys.platform == "win32" else ""
+    target_name = f"opencode{exe}"
+    for member in members:
+        p = extract_dir / member
+        if not p.is_file():
+            continue
+        if p.name == target_name and "desktop" not in member.lower() and "electron" not in member.lower():
+            return p
+    return None
 
 
 def _find_codex_binary(extract_dir: Path, members: list[str]) -> Path | None:

@@ -29,6 +29,7 @@ from src.core.permissions import (
 from src.core.session import ActivityState, ActiveSession, SessionStatus, SessionType
 from src.executors.claude_code import ClaudeCodeExecutor
 from src.executors.codex import CodexExecutor
+from src.executors.opencode import OpenCodeExecutor
 from src.models.db import TaskSession as TaskSessionModel
 
 logger = logging.getLogger(__name__)
@@ -127,6 +128,18 @@ class SessionLifecycleMixin:
                 await session._codex_stream_task
         session._codex_stream_task = None
 
+        # Kill OpenCode subprocess if running
+        had_opencode = session.opencode_executor is not None
+        if session.opencode_executor is not None:
+            await session.opencode_executor.cancel()
+            session.opencode_executor = None
+
+        if session._opencode_stream_task is not None and not session._opencode_stream_task.done():
+            session._opencode_stream_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await session._opencode_stream_task
+        session._opencode_stream_task = None
+
         # Auto-deny any pending permission requests
         if session.permission_manager is not None:
             session.permission_manager.cancel_all_pending()
@@ -147,7 +160,7 @@ class SessionLifecycleMixin:
         session.subprocess_current_tool = None
 
         # Close any open agent group before ending the session
-        if had_claude_code or had_codex:
+        if had_claude_code or had_codex or had_opencode:
             session.buffer.push_text(
                 MessageType.AGENT_GROUP_END,
                 {"session_id": session.id},
@@ -222,10 +235,22 @@ class SessionLifecycleMixin:
                 await session._codex_stream_task
         session._codex_stream_task = None
 
+        # Kill OpenCode subprocess if running
+        had_opencode = session.opencode_executor is not None
+        if session.opencode_executor is not None:
+            await session.opencode_executor.cancel()
+            session.opencode_executor = None
+
+        if session._opencode_stream_task is not None and not session._opencode_stream_task.done():
+            session._opencode_stream_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await session._opencode_stream_task
+        session._opencode_stream_task = None
+
         self._resolve_session_end_ask(session, accepted=True)
 
         # Close any open agent group before ending the session
-        if had_claude_code or had_codex:
+        if had_claude_code or had_codex or had_opencode:
             session.buffer.push_text(
                 MessageType.AGENT_GROUP_END,
                 {"session_id": session.id},
@@ -415,7 +440,19 @@ class SessionLifecycleMixin:
                 await session._codex_stream_task
         session._codex_stream_task = None
 
-        had_agent = had_claude_code or had_codex
+        # Kill OpenCode subprocess if running
+        had_opencode = session.opencode_executor is not None
+        if session.opencode_executor is not None:
+            await session.opencode_executor.cancel()
+            session.opencode_executor = None
+
+        if session._opencode_stream_task is not None and not session._opencode_stream_task.done():
+            session._opencode_stream_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await session._opencode_stream_task
+        session._opencode_stream_task = None
+
+        had_agent = had_claude_code or had_codex or had_opencode
 
         # Auto-deny any pending permission requests
         if session.permission_manager is not None:
@@ -506,8 +543,19 @@ class SessionLifecycleMixin:
                 await session._codex_stream_task
         session._codex_stream_task = None
 
+        had_opencode = session.opencode_executor is not None
+        if session.opencode_executor is not None:
+            await session.opencode_executor.cancel()
+            session.opencode_executor = None
+
+        if session._opencode_stream_task is not None and not session._opencode_stream_task.done():
+            session._opencode_stream_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await session._opencode_stream_task
+        session._opencode_stream_task = None
+
         # Close any open agent group
-        if had_claude_code or had_codex:
+        if had_claude_code or had_codex or had_opencode:
             session.buffer.push_text(
                 MessageType.AGENT_GROUP_END,
                 {"session_id": session.id},
@@ -530,8 +578,8 @@ class SessionLifecycleMixin:
         session.set_activity(ActivityState.IDLE)
 
         logger.info(
-            "Interrupted subprocess for session %s (claude_code=%s, codex=%s)",
-            session_id, had_claude_code, had_codex,
+            "Interrupted subprocess for session %s (claude_code=%s, codex=%s, opencode=%s)",
+            session_id, had_claude_code, had_codex, had_opencode,
         )
         return session
 
@@ -569,6 +617,8 @@ class SessionLifecycleMixin:
         if session.metadata.pop("completed_while_paused", False):
             if session.codex_executor is not None:
                 await self._end_codex_session(session)
+            elif session.opencode_executor is not None:
+                await self._end_opencode_session(session)
             else:
                 await self._end_claude_code_session(session)
             logger.info("Resumed session %s", session_id)
@@ -628,6 +678,31 @@ class SessionLifecycleMixin:
                     codex_params = session.metadata.get("codex_parameters", {})
                     codex_executor._last_parameters = codex_params
                     session.codex_executor = codex_executor
+
+        # Reconstruct the OpenCode executor if this session had one before pause.
+        if session.opencode_executor is None:
+            oc_session_id = session.metadata.get("opencode_session_id")
+            oc_tool_name = session.metadata.get("opencode_tool_name")
+            if oc_session_id and oc_tool_name:
+                tool_def = self._tool_registry.get(oc_tool_name)
+                if tool_def is not None and tool_def.executor == "opencode":
+                    binary_path = "opencode"
+                    config = tool_def.get_opencode_config()
+                    binary_path = config.binary_path
+                    if self._tool_manager:
+                        resolved = self._tool_manager.get_binary_path("opencode")
+                        if resolved:
+                            binary_path = resolved
+                    oc_executor = OpenCodeExecutor(
+                        binary_path=binary_path,
+                        session_id=oc_session_id,
+                        extra_env=self._build_opencode_extra_env(),
+                        config_overrides=self._get_managed_config_overrides("opencode"),
+                    )
+                    oc_executor._tool_def = tool_def
+                    oc_params = session.metadata.get("opencode_parameters", {})
+                    oc_executor._last_parameters = oc_params
+                    session.opencode_executor = oc_executor
 
         logger.info("Resumed session %s", session_id)
         return session
@@ -711,6 +786,33 @@ class SessionLifecycleMixin:
                 codex_executor._last_parameters = codex_params
 
                 session.codex_executor = codex_executor
+                session.session_type = SessionType.LONG_RUNNING
+
+        # If this was an OpenCode session, set up executor for lazy restart
+        oc_session_id = session.metadata.get("opencode_session_id")
+        oc_tool_name = session.metadata.get("opencode_tool_name")
+        if oc_session_id and oc_tool_name:
+            tool_def = self._tool_registry.get(oc_tool_name)
+            if tool_def is not None and tool_def.executor == "opencode":
+                binary_path = "opencode"
+                config = tool_def.get_opencode_config()
+                binary_path = config.binary_path
+                if self._tool_manager:
+                    resolved = self._tool_manager.get_binary_path("opencode")
+                    if resolved:
+                        binary_path = resolved
+
+                oc_executor = OpenCodeExecutor(
+                    binary_path=binary_path,
+                    session_id=oc_session_id,
+                    extra_env=self._build_opencode_extra_env(),
+                    config_overrides=self._get_managed_config_overrides("opencode"),
+                )
+                oc_executor._tool_def = tool_def
+                oc_params = session.metadata.get("opencode_parameters", {})
+                oc_executor._last_parameters = oc_params
+
+                session.opencode_executor = oc_executor
                 session.session_type = SessionType.LONG_RUNNING
 
         # Repopulate attached task IDs from task_sessions table
