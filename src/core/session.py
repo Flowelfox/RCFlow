@@ -172,8 +172,10 @@ class ActiveSession:
 
     def set_active(self) -> None:
         if self.status in (
-            SessionStatus.PAUSED, SessionStatus.COMPLETED,
-            SessionStatus.FAILED, SessionStatus.CANCELLED,
+            SessionStatus.PAUSED,
+            SessionStatus.COMPLETED,
+            SessionStatus.FAILED,
+            SessionStatus.CANCELLED,
         ):
             return
         old = self.status
@@ -183,8 +185,10 @@ class ActiveSession:
 
     def set_executing(self) -> None:
         if self.status in (
-            SessionStatus.PAUSED, SessionStatus.COMPLETED,
-            SessionStatus.FAILED, SessionStatus.CANCELLED,
+            SessionStatus.PAUSED,
+            SessionStatus.COMPLETED,
+            SessionStatus.FAILED,
+            SessionStatus.CANCELLED,
         ):
             return
         old = self.status
@@ -276,8 +280,10 @@ class ActiveSession:
     def restore(self) -> None:
         """Restore a session from a terminal or interrupted state back to ACTIVE."""
         restorable = (
-            SessionStatus.COMPLETED, SessionStatus.FAILED,
-            SessionStatus.CANCELLED, SessionStatus.INTERRUPTED,
+            SessionStatus.COMPLETED,
+            SessionStatus.FAILED,
+            SessionStatus.CANCELLED,
+            SessionStatus.INTERRUPTED,
         )
         if self.status not in restorable:
             raise RuntimeError(f"Cannot restore session in state: {self.status.value}")
@@ -418,25 +424,27 @@ class SessionManager:
         # (e.g. _create_tasks_from_session), so check first.
         existing = await db.get(SessionModel, session_uuid)
         if existing is None:
-            db.add(SessionModel(
-                id=session_uuid,
-                backend_id=self._backend_id,
-                created_at=session.created_at,
-                ended_at=session.ended_at,
-                session_type=session.session_type.value,
-                status=session.status.value,
-                title=session.title,
-                main_project_path=session.main_project_path,
-                metadata_=session.metadata,
-                conversation_history=session.conversation_history or None,
-                input_tokens=session.input_tokens,
-                output_tokens=session.output_tokens,
-                cache_creation_input_tokens=session.cache_creation_input_tokens,
-                cache_read_input_tokens=session.cache_read_input_tokens,
-                tool_input_tokens=session.tool_input_tokens,
-                tool_output_tokens=session.tool_output_tokens,
-                tool_cost_usd=session.tool_cost_usd,
-            ))
+            db.add(
+                SessionModel(
+                    id=session_uuid,
+                    backend_id=self._backend_id,
+                    created_at=session.created_at,
+                    ended_at=session.ended_at,
+                    session_type=session.session_type.value,
+                    status=session.status.value,
+                    title=session.title,
+                    main_project_path=session.main_project_path,
+                    metadata_=session.metadata,
+                    conversation_history=session.conversation_history or None,
+                    input_tokens=session.input_tokens,
+                    output_tokens=session.output_tokens,
+                    cache_creation_input_tokens=session.cache_creation_input_tokens,
+                    cache_read_input_tokens=session.cache_read_input_tokens,
+                    tool_input_tokens=session.tool_input_tokens,
+                    tool_output_tokens=session.tool_output_tokens,
+                    tool_cost_usd=session.tool_cost_usd,
+                )
+            )
         else:
             existing.backend_id = self._backend_id
             existing.created_at = session.created_at
@@ -454,17 +462,22 @@ class SessionManager:
             existing.tool_input_tokens = session.tool_input_tokens
             existing.tool_output_tokens = session.tool_output_tokens
             existing.tool_cost_usd = session.tool_cost_usd
-        await db.flush()
+        # Commit the parent row first to satisfy SQLite FK constraints across connections
+        await db.commit()
+
+        # Insert messages in a fresh transaction; clear any existing to avoid conflicts
+        await db.execute(delete(SessionMessageModel).where(SessionMessageModel.session_id == session_uuid))
 
         for msg in session.buffer.text_history:
-            db_msg = SessionMessageModel(
-                session_id=session_uuid,
-                sequence=msg.sequence,
-                message_type=msg.message_type.value,
-                content=msg.data.get("content", ""),
-                metadata_=msg.data,
+            db.add(
+                SessionMessageModel(
+                    session_id=session_uuid,
+                    sequence=msg.sequence,
+                    message_type=msg.message_type.value,
+                    content=msg.data.get("content", ""),
+                    metadata_=msg.data,
+                )
             )
-            db.add(db_msg)
 
         try:
             await db.commit()
@@ -696,8 +709,10 @@ class SessionManager:
         possible.  Returns the number of sessions affected.
         """
         terminal = (
-            SessionStatus.COMPLETED, SessionStatus.FAILED,
-            SessionStatus.CANCELLED, SessionStatus.INTERRUPTED,
+            SessionStatus.COMPLETED,
+            SessionStatus.FAILED,
+            SessionStatus.CANCELLED,
+            SessionStatus.INTERRUPTED,
         )
         count = 0
         for session in self._sessions.values():
@@ -705,6 +720,133 @@ class SessionManager:
                 session.interrupt()
                 count += 1
         return count
+
+    async def reload_stale_sessions(self, db: AsyncSession, backend_id: str) -> int:
+        """Reload stale sessions from the database back into memory on startup.
+
+        Finds all non-terminal sessions for *backend_id* and restores them to the
+        in-memory store so clients can continue using them immediately — without any
+        explicit restore step.  Paused sessions are restored as PAUSED; every other
+        non-terminal status (active, executing, created, interrupted) is restored as
+        ACTIVE because the subprocess is gone after a restart.
+
+        Each session is committed independently so that one corrupt row cannot prevent
+        the others from loading.  Returns the number of sessions reloaded.
+        """
+        stale_statuses = (
+            SessionStatus.CREATED,
+            SessionStatus.ACTIVE,
+            SessionStatus.EXECUTING,
+            SessionStatus.PAUSED,
+            SessionStatus.INTERRUPTED,
+        )
+        stale_rows = (
+            (
+                await db.execute(
+                    select(SessionModel).where(
+                        SessionModel.status.in_([s.value for s in stale_statuses]),
+                        SessionModel.backend_id == backend_id,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+        if not stale_rows:
+            return 0
+
+        reloaded = 0
+        for row in stale_rows:
+            try:
+                session_id = str(row.id)
+                if session_id in self._sessions:
+                    logger.warning("Skipping stale session %s — already in memory", session_id)
+                    continue
+
+                session_type = SessionType(row.session_type)
+                session = ActiveSession(session_id, session_type)
+
+                created_at = row.created_at
+                if created_at and created_at.tzinfo is None:
+                    created_at = created_at.replace(tzinfo=UTC)
+                session.created_at = created_at
+
+                # Paused sessions are restored as PAUSED; everything else as ACTIVE
+                # (executing sessions lose their subprocess on restart).
+                was_paused = row.status == SessionStatus.PAUSED.value
+                session.status = SessionStatus.PAUSED if was_paused else SessionStatus.ACTIVE
+                session._activity_state = ActivityState.IDLE
+
+                session._title = row.title
+                session.main_project_path = row.main_project_path
+
+                meta = dict(row.metadata_) if row.metadata_ else {}
+                meta["restart_interrupted"] = True
+                if was_paused:
+                    meta["was_paused_before_restart"] = True
+                meta.pop("_task_update_fired", None)
+                session.metadata = meta
+
+                session.last_activity_at = datetime.now(UTC)
+                session.input_tokens = row.input_tokens or 0
+                session.output_tokens = row.output_tokens or 0
+                session.cache_creation_input_tokens = row.cache_creation_input_tokens or 0
+                session.cache_read_input_tokens = row.cache_read_input_tokens or 0
+                session.tool_input_tokens = row.tool_input_tokens or 0
+                session.tool_output_tokens = row.tool_output_tokens or 0
+                session.tool_cost_usd = row.tool_cost_usd or 0.0
+
+                if row.conversation_history:
+                    session.conversation_history = list(row.conversation_history)
+
+                # Rebuild buffer from saved messages
+                session_uuid = row.id
+                msg_rows = (
+                    (
+                        await db.execute(
+                            select(SessionMessageModel)
+                            .where(SessionMessageModel.session_id == session_uuid)
+                            .order_by(SessionMessageModel.sequence)
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                for msg_row in msg_rows:
+                    msg_type = MessageType(msg_row.message_type)
+                    data = dict(msg_row.metadata_) if msg_row.metadata_ else {}
+                    if "content" not in data and msg_row.content:
+                        data["content"] = msg_row.content
+                    buffered = BufferedMessage(
+                        sequence=msg_row.sequence,
+                        message_type=msg_type,
+                        data=data,
+                    )
+                    session.buffer._text_messages.append(buffered)
+                    session.buffer._text_sequence = max(session.buffer._text_sequence, msg_row.sequence)
+
+                # Register in memory and remove from DB so the session is fully live
+                session._on_update = lambda s=session: self.broadcast_session_update(s)
+                self._sessions[session_id] = session
+
+                await db.execute(delete(SessionMessageModel).where(SessionMessageModel.session_id == session_uuid))
+                await db.execute(delete(ToolExecutionModel).where(ToolExecutionModel.session_id == session_uuid))
+                await db.execute(delete(TaskSessionModel).where(TaskSessionModel.session_id == session_uuid))
+                await db.execute(delete(ArtifactModel).where(ArtifactModel.session_id == session_uuid))
+                await db.execute(delete(SessionModel).where(SessionModel.id == session_uuid))
+                await db.commit()
+
+                reloaded += 1
+            except Exception:
+                logger.exception("Failed to reload stale session %s on startup", row.id)
+                try:
+                    await db.rollback()
+                except Exception:
+                    logger.debug("Rollback after failed session reload also failed", exc_info=True)
+
+        logger.info("Reloaded %d/%d stale session(s) from database on startup", reloaded, len(stale_rows))
+        return reloaded
 
     async def save_all_sessions(self, db: AsyncSession) -> None:
         """Save ALL in-memory sessions to the database for graceful shutdown.
@@ -736,36 +878,47 @@ class SessionManager:
                     .where(SessionMessageModel.session_id == session_uuid)
                 )
                 if existing_msg_count and existing_msg_count > 0:
-                    await db.execute(
-                        delete(SessionMessageModel)
-                        .where(SessionMessageModel.session_id == session_uuid)
-                    )
+                    await db.execute(delete(SessionMessageModel).where(SessionMessageModel.session_id == session_uuid))
 
                 existing = await db.get(SessionModel, session_uuid)
+                # Only force ended_at for definitively-ended sessions.  Non-terminal
+                # sessions (active, paused, executing, created, interrupted) keep
+                # ended_at=None so reload_stale_sessions can restore them on restart.
+                terminal_with_end = (
+                    SessionStatus.COMPLETED,
+                    SessionStatus.FAILED,
+                    SessionStatus.CANCELLED,
+                )
+                effective_ended_at = (
+                    session.ended_at or datetime.now(UTC) if session.status in terminal_with_end else session.ended_at
+                )
+
                 if existing is None:
-                    db.add(SessionModel(
-                        id=session_uuid,
-                        backend_id=self._backend_id,
-                        created_at=session.created_at,
-                        ended_at=session.ended_at or datetime.now(UTC),
-                        session_type=session.session_type.value,
-                        status=session.status.value,
-                        title=session.title,
-                        main_project_path=session.main_project_path,
-                        metadata_=session.metadata,
-                        input_tokens=session.input_tokens,
-                        output_tokens=session.output_tokens,
-                        cache_creation_input_tokens=session.cache_creation_input_tokens,
-                        cache_read_input_tokens=session.cache_read_input_tokens,
-                        tool_input_tokens=session.tool_input_tokens,
-                        tool_output_tokens=session.tool_output_tokens,
-                        tool_cost_usd=session.tool_cost_usd,
-                        conversation_history=session.conversation_history or None,
-                    ))
+                    db.add(
+                        SessionModel(
+                            id=session_uuid,
+                            backend_id=self._backend_id,
+                            created_at=session.created_at,
+                            ended_at=effective_ended_at,
+                            session_type=session.session_type.value,
+                            status=session.status.value,
+                            title=session.title,
+                            main_project_path=session.main_project_path,
+                            metadata_=session.metadata,
+                            input_tokens=session.input_tokens,
+                            output_tokens=session.output_tokens,
+                            cache_creation_input_tokens=session.cache_creation_input_tokens,
+                            cache_read_input_tokens=session.cache_read_input_tokens,
+                            tool_input_tokens=session.tool_input_tokens,
+                            tool_output_tokens=session.tool_output_tokens,
+                            tool_cost_usd=session.tool_cost_usd,
+                            conversation_history=session.conversation_history or None,
+                        )
+                    )
                 else:
                     existing.backend_id = self._backend_id
                     existing.created_at = session.created_at
-                    existing.ended_at = session.ended_at or datetime.now(UTC)
+                    existing.ended_at = effective_ended_at
                     existing.session_type = session.session_type.value
                     existing.status = session.status.value
                     existing.title = session.title
@@ -779,6 +932,12 @@ class SessionManager:
                     existing.tool_output_tokens = session.tool_output_tokens
                     existing.tool_cost_usd = session.tool_cost_usd
                     existing.conversation_history = session.conversation_history or None
+
+                # Flush the session row before inserting child session_messages so
+                # the FK constraint (session_messages.session_id → sessions.id) is
+                # satisfied even when the parent row is being created in this same
+                # transaction.  Mirrors the explicit flush in archive_session.
+                await db.flush()
 
                 for msg in session.buffer.text_history:
                     db_msg = SessionMessageModel(

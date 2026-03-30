@@ -4,8 +4,6 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
-from sqlalchemy import select
-
 from src.api.http import router as http_router
 from src.api.integrations.linear import router as linear_router
 from src.core.attachment_store import AttachmentStore
@@ -18,7 +16,6 @@ from src.core.prompt_router import PromptRouter
 from src.core.session import SessionManager
 from src.db.engine import check_connection, dispose_engine, get_session_factory, init_engine
 from src.logs import setup_logging
-from src.models.db import Session as SessionModel
 from src.services.artifact_scanner import ArtifactScanner
 from src.services.telemetry_service import TelemetryService
 from src.services.tool_manager import ToolManager
@@ -46,35 +43,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         raise
     logger.info("Database engine initialized")
 
-    # Mark stale non-terminal sessions as interrupted (leftover from previous shutdown).
-    # INTERRUPTED — not failed — because the sessions can be restored by the client.
-    # Only affect sessions owned by this backend instance.
+    # Session manager — created early so stale sessions can be reloaded into it.
+    session_manager = SessionManager(backend_id=settings.RCFLOW_BACKEND_ID)
+
+    # Reload non-terminal sessions from the previous run directly into memory so
+    # clients can continue using them without any explicit restore step.
     db_factory = get_session_factory()
     async with db_factory() as db:
-        stale_statuses = ("created", "active", "executing", "paused", "interrupted")
-        stale_rows = (
-            await db.execute(
-                select(SessionModel).where(
-                    SessionModel.status.in_(stale_statuses),
-                    SessionModel.backend_id == settings.RCFLOW_BACKEND_ID,
-                )
-            )
-        ).scalars().all()
-        for row in stale_rows:
-            was_paused = row.status == "paused"
-            row.status = "interrupted"
-            # Do NOT set ended_at — interrupted sessions are open for restoration.
-            meta = row.metadata_ or {}
-            row.metadata_ = {
-                **meta,
-                "restart_interrupted": True,
-                **({"was_paused_before_restart": True} if was_paused else {}),
-            }
-        if stale_rows:
-            await db.commit()
-            logger.info(
-                "Marked %d stale session(s) as interrupted after restart", len(stale_rows)
-            )
+        await session_manager.reload_stale_sessions(db, settings.RCFLOW_BACKEND_ID)
 
     # Settings
     app.state.settings = settings
@@ -104,8 +80,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     app.state.tool_registry = tool_registry
     logger.info("Loaded %d tools from %s", len(tool_registry.list_tools()), settings.TOOLS_DIR)
 
-    # Session manager
-    session_manager = SessionManager(backend_id=settings.RCFLOW_BACKEND_ID)
     app.state.session_manager = session_manager
 
     # Terminal session manager (PTY terminals, separate from LLM sessions)
@@ -196,10 +170,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     await prompt_router.cancel_pending_tasks()
     if llm_client is not None:
         await llm_client.close()
-
-    completed = session_manager.complete_all_active()
-    if completed:
-        logger.info("Marked %d active session(s) as completed for graceful shutdown", completed)
 
     async with db_session_factory() as db:
         await session_manager.save_all_sessions(db)

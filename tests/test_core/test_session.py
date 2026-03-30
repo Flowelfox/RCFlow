@@ -1,6 +1,77 @@
-import pytest
+import uuid
+from datetime import UTC, datetime
+from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+from sqlalchemy import event, select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
+
+from src.core.buffer import MessageType
 from src.core.session import ActiveSession, SessionManager, SessionStatus, SessionType
+from src.models.db import Base, Session as SessionModel, SessionMessage as SessionMessageModel
+
+
+def _make_session_row(
+    status: str = "active",
+    session_type: str = "one-shot",
+    title: str | None = None,
+    metadata: dict | None = None,
+    conversation_history: list | None = None,
+) -> MagicMock:
+    """Build a minimal mock SessionModel row for reload tests."""
+    row = MagicMock()
+    row.id = uuid.uuid4()
+    row.session_type = session_type
+    row.status = status
+    row.created_at = datetime.now(UTC)
+    row.title = title
+    row.main_project_path = None
+    row.metadata_ = metadata or {}
+    row.input_tokens = 10
+    row.output_tokens = 5
+    row.cache_creation_input_tokens = 0
+    row.cache_read_input_tokens = 0
+    row.tool_input_tokens = 0
+    row.tool_output_tokens = 0
+    row.tool_cost_usd = 0.0
+    row.conversation_history = conversation_history
+    return row
+
+
+def _make_db_mock(stale_rows: list, msg_rows: list | None = None) -> AsyncMock:
+    """Build an AsyncMock DB session that returns *stale_rows* for the first
+    execute call and *msg_rows* (default []) for each subsequent one."""
+    if msg_rows is None:
+        msg_rows = []
+    db = AsyncMock()
+
+    def _execute_side_effect(*_args, **_kwargs):
+        # Each call returns a fresh MagicMock; we swap scalars() returns in order.
+        result = MagicMock()
+        return result
+
+    # We need different results per call, so use a counter-based side_effect.
+    call_results: list[MagicMock] = []
+    # First call: stale sessions query
+    r0 = MagicMock()
+    r0.scalars.return_value.all.return_value = stale_rows
+    call_results.append(r0)
+    # For each row: one messages query + 5 delete statements
+    for _ in stale_rows:
+        r_msg = MagicMock()
+        r_msg.scalars.return_value.all.return_value = msg_rows
+        call_results.append(r_msg)
+        for _ in range(5):
+            call_results.append(MagicMock())
+
+    async def _async_side(*_a, **_kw):
+        return call_results.pop(0)
+
+    db.execute = _async_side
+    db.commit = AsyncMock()
+    db.rollback = AsyncMock()
+    return db
 
 
 class TestActiveSession:
@@ -212,6 +283,170 @@ class TestSessionManager:
         count = manager.complete_all_active()
 
         assert count == 0
+
+    def test_interrupt_all_active_returns_count(self):
+        manager = SessionManager("test-backend")
+        s1 = manager.create_session()
+        s1.set_active()
+        s2 = manager.create_session()
+        s2.set_active()
+        s3 = manager.create_session()
+        s3.set_active()
+        s3.complete()
+
+        count = manager.interrupt_all_active()
+
+        assert count == 2
+        assert s1.status == SessionStatus.INTERRUPTED
+        assert s2.status == SessionStatus.INTERRUPTED
+        assert s3.status == SessionStatus.COMPLETED  # already terminal
+
+    def test_interrupt_all_active_preserves_ended_at_as_none(self):
+        """Interrupted sessions must not have ended_at set so clients can restore them."""
+        manager = SessionManager("test-backend")
+        session = manager.create_session()
+        session.set_active()
+
+        manager.interrupt_all_active()
+
+        assert session.status == SessionStatus.INTERRUPTED
+        assert session.ended_at is None
+
+    def test_interrupt_all_active_handles_paused(self):
+        manager = SessionManager("test-backend")
+        session = manager.create_session()
+        session.set_active()
+        session.pause()
+
+        count = manager.interrupt_all_active()
+
+        assert count == 1
+        assert session.status == SessionStatus.INTERRUPTED
+        assert session.ended_at is None
+
+    def test_interrupt_all_active_skips_terminal(self):
+        manager = SessionManager("test-backend")
+        s1 = manager.create_session()
+        s1.set_active()
+        s1.fail("error")
+        s2 = manager.create_session()
+        s2.set_active()
+        s2.cancel()
+
+        count = manager.interrupt_all_active()
+
+        assert count == 0
+
+
+class TestReloadStaleSessions:
+    @pytest.mark.asyncio
+    async def test_active_session_restored_as_active(self):
+        manager = SessionManager("test-backend")
+        row = _make_session_row(status="active")
+        db = _make_db_mock([row])
+
+        count = await manager.reload_stale_sessions(db, "test-backend")
+
+        assert count == 1
+        session = manager.get_session(str(row.id))
+        assert session is not None
+        assert session.status == SessionStatus.ACTIVE
+        assert session.ended_at is None
+
+    @pytest.mark.asyncio
+    async def test_executing_session_restored_as_active(self):
+        manager = SessionManager("test-backend")
+        row = _make_session_row(status="executing")
+        db = _make_db_mock([row])
+
+        count = await manager.reload_stale_sessions(db, "test-backend")
+
+        assert count == 1
+        session = manager.get_session(str(row.id))
+        assert session.status == SessionStatus.ACTIVE
+
+    @pytest.mark.asyncio
+    async def test_paused_session_restored_as_paused(self):
+        manager = SessionManager("test-backend")
+        row = _make_session_row(status="paused")
+        db = _make_db_mock([row])
+
+        count = await manager.reload_stale_sessions(db, "test-backend")
+
+        assert count == 1
+        session = manager.get_session(str(row.id))
+        assert session.status == SessionStatus.PAUSED
+        assert session.ended_at is None
+        assert session.metadata.get("was_paused_before_restart") is True
+
+    @pytest.mark.asyncio
+    async def test_restart_interrupted_flag_set(self):
+        manager = SessionManager("test-backend")
+        row = _make_session_row(status="active", metadata={"claude_code_session_id": "abc"})
+        db = _make_db_mock([row])
+
+        await manager.reload_stale_sessions(db, "test-backend")
+
+        session = manager.get_session(str(row.id))
+        assert session.metadata.get("restart_interrupted") is True
+        # Existing metadata is preserved
+        assert session.metadata.get("claude_code_session_id") == "abc"
+
+    @pytest.mark.asyncio
+    async def test_empty_db_returns_zero(self):
+        manager = SessionManager("test-backend")
+        row_result = MagicMock()
+        row_result.scalars.return_value.all.return_value = []
+        db = AsyncMock()
+        db.execute = AsyncMock(return_value=row_result)
+
+        count = await manager.reload_stale_sessions(db, "test-backend")
+
+        assert count == 0
+        assert manager.list_active_sessions() == []
+
+    @pytest.mark.asyncio
+    async def test_multiple_sessions_all_reloaded(self):
+        manager = SessionManager("test-backend")
+        rows = [
+            _make_session_row(status="active"),
+            _make_session_row(status="paused"),
+            _make_session_row(status="executing"),
+        ]
+        db = _make_db_mock(rows)
+
+        count = await manager.reload_stale_sessions(db, "test-backend")
+
+        assert count == 3
+        assert len(manager.list_active_sessions()) == 3
+
+    @pytest.mark.asyncio
+    async def test_token_counts_restored(self):
+        manager = SessionManager("test-backend")
+        row = _make_session_row(status="active")
+        row.input_tokens = 200
+        row.output_tokens = 100
+        row.tool_cost_usd = 1.5
+        db = _make_db_mock([row])
+
+        await manager.reload_stale_sessions(db, "test-backend")
+
+        session = manager.get_session(str(row.id))
+        assert session.input_tokens == 200
+        assert session.output_tokens == 100
+        assert session.tool_cost_usd == 1.5
+
+    @pytest.mark.asyncio
+    async def test_conversation_history_restored(self):
+        manager = SessionManager("test-backend")
+        history = [{"role": "user", "content": "hello"}]
+        row = _make_session_row(status="active", conversation_history=history)
+        db = _make_db_mock([row])
+
+        await manager.reload_stale_sessions(db, "test-backend")
+
+        session = manager.get_session(str(row.id))
+        assert session.conversation_history == history
 
 
 class TestPauseReason:
@@ -495,3 +730,248 @@ class TestMainProjectPath:
         ]
         assert len(in_memory_dicts) == 1
         assert in_memory_dicts[0]["main_project_path"] == "/home/fox/Projects/RCFlow"
+
+
+# ---------------------------------------------------------------------------
+# Helpers: real SQLite DB with FK enforcement (mirrors production engine.py)
+# ---------------------------------------------------------------------------
+
+def _make_sqlite_engine():
+    """Create an async SQLite engine with StaticPool and PRAGMA foreign_keys=ON."""
+    engine = create_async_engine(
+        "sqlite+aiosqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+
+    @event.listens_for(engine.sync_engine, "connect")
+    def _set_fk_pragma(dbapi_conn, _record):
+        cursor = dbapi_conn.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
+    return engine
+
+
+async def _create_tables(engine) -> None:
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+
+def _session_factory(engine) -> async_sessionmaker[AsyncSession]:
+    return async_sessionmaker(engine, expire_on_commit=False)
+
+
+# ---------------------------------------------------------------------------
+# Integration tests: archive_session and save_all_sessions vs real SQLite FK
+# ---------------------------------------------------------------------------
+
+
+class TestArchiveSessionSQLiteIntegration:
+    """Integration tests that exercise archive_session and save_all_sessions
+    against a real SQLite DB with PRAGMA foreign_keys=ON so that any FK
+    violation is caught as an IntegrityError instead of silently succeeding.
+    """
+
+    @pytest.fixture(autouse=True)
+    async def setup_db(self):
+        self.engine = _make_sqlite_engine()
+        await _create_tables(self.engine)
+        self.factory = _session_factory(self.engine)
+        yield
+        await self.engine.dispose()
+
+    @pytest.mark.asyncio
+    async def test_archive_cancelled_session_no_prior_stub_row(self):
+        """Archiving a cancelled session that has no pre-existing sessions row
+        must not raise an FK IntegrityError.  This is the primary regression
+        test for the bug: the session_messages rows reference sessions.id, so
+        the sessions row must be written before the messages are committed.
+        """
+        manager = SessionManager("test-backend")
+        session = manager.create_session(SessionType.ONE_SHOT)
+        session.set_active()
+        # Push a SESSION_END message to the buffer (mirrors cancel_session flow)
+        session.buffer.push_text(MessageType.SESSION_END, {"session_id": session.id, "reason": "cancelled"})
+        session.cancel()
+
+        async with self.factory() as db:
+            # No stub row pre-created — archive_session must create it itself.
+            await manager.archive_session(session.id, db)
+
+        # Verify both the sessions row and the session_messages row landed in DB.
+        async with self.factory() as db:
+            session_uuid = uuid.UUID(session.id)
+            db_session = await db.get(SessionModel, session_uuid)
+            assert db_session is not None
+            assert db_session.status == "cancelled"
+
+            msgs = (await db.execute(
+                select(SessionMessageModel).where(SessionMessageModel.session_id == session_uuid)
+            )).scalars().all()
+            assert len(msgs) == 1
+            assert msgs[0].message_type == MessageType.SESSION_END.value
+
+    @pytest.mark.asyncio
+    async def test_archive_cancelled_session_with_prior_stub_row(self):
+        """Archiving when a stub sessions row already exists (created by
+        _ensure_session_row_in_db) must update it and insert messages without
+        any FK violation.
+        """
+        manager = SessionManager("test-backend")
+        session = manager.create_session(SessionType.CONVERSATIONAL)
+        session.set_active()
+        session_uuid = uuid.UUID(session.id)
+
+        # Simulate a pre-existing stub row (as _ensure_session_row_in_db would create)
+        async with self.factory() as db:
+            db.add(SessionModel(
+                id=session_uuid,
+                backend_id="test-backend",
+                created_at=session.created_at,
+                session_type=session.session_type.value,
+                status="active",
+            ))
+            await db.commit()
+
+        # Now push a message, cancel, and archive
+        session.buffer.push_text(MessageType.SESSION_END, {"session_id": session.id, "reason": "cancelled"})
+        session.cancel()
+
+        async with self.factory() as db:
+            await manager.archive_session(session.id, db)
+
+        async with self.factory() as db:
+            db_session = await db.get(SessionModel, session_uuid)
+            assert db_session is not None
+            assert db_session.status == "cancelled"
+
+            msgs = (await db.execute(
+                select(SessionMessageModel).where(SessionMessageModel.session_id == session_uuid)
+            )).scalars().all()
+            assert len(msgs) == 1
+
+    @pytest.mark.asyncio
+    async def test_archive_session_with_multiple_messages(self):
+        """Sessions that have several buffered messages (user text, tool output,
+        session_end) must all be persisted without FK violations.
+        """
+        manager = SessionManager("test-backend")
+        session = manager.create_session(SessionType.ONE_SHOT)
+        session.set_active()
+
+        session.buffer.push_text(MessageType.TEXT_CHUNK, {"session_id": session.id, "content": "hello"})
+        session.buffer.push_text(MessageType.SUMMARY, {"session_id": session.id, "content": "world"})
+        session.buffer.push_text(MessageType.SESSION_END, {"session_id": session.id, "reason": "cancelled"})
+        session.cancel()
+
+        async with self.factory() as db:
+            await manager.archive_session(session.id, db)
+
+        async with self.factory() as db:
+            session_uuid = uuid.UUID(session.id)
+            msgs = (await db.execute(
+                select(SessionMessageModel)
+                .where(SessionMessageModel.session_id == session_uuid)
+                .order_by(SessionMessageModel.sequence)
+            )).scalars().all()
+            assert len(msgs) == 3
+            assert msgs[0].message_type == MessageType.TEXT_CHUNK.value
+            assert msgs[2].message_type == MessageType.SESSION_END.value
+
+    @pytest.mark.asyncio
+    async def test_save_all_sessions_cancelled_no_prior_stub(self):
+        """save_all_sessions must persist a cancelled session that has no
+        pre-existing sessions row without triggering an FK IntegrityError.
+        This tests the explicit db.flush() added to save_all_sessions.
+        """
+        manager = SessionManager("test-backend")
+        session = manager.create_session(SessionType.ONE_SHOT)
+        session.set_active()
+        session.buffer.push_text(MessageType.SESSION_END, {"session_id": session.id, "reason": "cancelled"})
+        session.cancel()
+
+        async with self.factory() as db:
+            await manager.save_all_sessions(db)
+
+        async with self.factory() as db:
+            session_uuid = uuid.UUID(session.id)
+            db_session = await db.get(SessionModel, session_uuid)
+            assert db_session is not None
+            assert db_session.status == "cancelled"
+
+            msgs = (await db.execute(
+                select(SessionMessageModel).where(SessionMessageModel.session_id == session_uuid)
+            )).scalars().all()
+            assert len(msgs) == 1
+            assert msgs[0].message_type == MessageType.SESSION_END.value
+
+    @pytest.mark.asyncio
+    async def test_save_all_sessions_cancelled_with_prior_stub(self):
+        """save_all_sessions must update an existing sessions stub row and
+        correctly insert session_messages without FK violations.
+        """
+        manager = SessionManager("test-backend")
+        session = manager.create_session(SessionType.ONE_SHOT)
+        session.set_active()
+        session_uuid = uuid.UUID(session.id)
+
+        async with self.factory() as db:
+            db.add(SessionModel(
+                id=session_uuid,
+                backend_id="test-backend",
+                created_at=session.created_at,
+                session_type=session.session_type.value,
+                status="active",
+            ))
+            await db.commit()
+
+        session.buffer.push_text(MessageType.SESSION_END, {"session_id": session.id, "reason": "cancelled"})
+        session.cancel()
+
+        async with self.factory() as db:
+            await manager.save_all_sessions(db)
+
+        async with self.factory() as db:
+            db_session = await db.get(SessionModel, session_uuid)
+            assert db_session is not None
+            assert db_session.status == "cancelled"
+
+            msgs = (await db.execute(
+                select(SessionMessageModel).where(SessionMessageModel.session_id == session_uuid)
+            )).scalars().all()
+            assert len(msgs) == 1
+
+    @pytest.mark.asyncio
+    async def test_save_all_sessions_skips_already_archived(self):
+        """If archive_session already ran and removed the session from memory,
+        save_all_sessions must not see it (it's been removed from _sessions).
+        Verifies no double-insert can cause a UniqueConstraint violation.
+        """
+        manager = SessionManager("test-backend")
+        session = manager.create_session(SessionType.ONE_SHOT)
+        session.set_active()
+        session.buffer.push_text(MessageType.SESSION_END, {"session_id": session.id, "reason": "cancelled"})
+        session.cancel()
+
+        session_id = session.id
+
+        # archive_session removes the session from memory
+        async with self.factory() as db:
+            await manager.archive_session(session_id, db)
+
+        # session should no longer be in memory
+        assert manager.get_session(session_id) is None
+
+        # save_all_sessions operates on remaining in-memory sessions — this one
+        # should not be touched (it was already removed).
+        async with self.factory() as db:
+            await manager.save_all_sessions(db)
+
+        # Row should exist exactly once
+        async with self.factory() as db:
+            session_uuid = uuid.UUID(session_id)
+            msgs = (await db.execute(
+                select(SessionMessageModel).where(SessionMessageModel.session_id == session_uuid)
+            )).scalars().all()
+            assert len(msgs) == 1
