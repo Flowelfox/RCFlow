@@ -11,11 +11,26 @@ class TaskTile extends StatelessWidget {
   final AppState state;
   final VoidCallback? onTaskSelected;
 
+  /// When `true`, renders the tile with a selection highlight and a checkbox
+  /// icon in place of the status icon.
+  final bool isSelected;
+
+  /// When non-null, replaces the default open-in-pane tap behavior. The parent
+  /// is responsible for calling [AppState.openTaskInPane] if appropriate.
+  final VoidCallback? onTapOverride;
+
+  /// When non-null, replaces the built-in single-task context menu. The parent
+  /// receives the global tap position and can show its own menu (e.g. bulk).
+  final void Function(Offset globalPosition)? onSecondaryTapOverride;
+
   const TaskTile({
     super.key,
     required this.task,
     required this.state,
     this.onTaskSelected,
+    this.isSelected = false,
+    this.onTapOverride,
+    this.onSecondaryTapOverride,
   });
 
   static const _statusIcons = {
@@ -42,15 +57,18 @@ class TaskTile extends StatelessWidget {
     final issueCount = state.linearIssuesForTask(task.taskId).length;
 
     final tile = GestureDetector(
-      onSecondaryTapUp: (details) =>
-          _showContextMenu(context, details.globalPosition),
+      onSecondaryTapUp: (details) => onSecondaryTapOverride != null
+          ? onSecondaryTapOverride!(details.globalPosition)
+          : _showContextMenu(context, details.globalPosition),
       child: Container(
         decoration: BoxDecoration(
-          color: isActivePane
-              ? context.appColors.accent.withAlpha(25)
-              : isViewed
-                  ? context.appColors.accent.withAlpha(12)
-                  : null,
+          color: isSelected
+              ? context.appColors.accent.withAlpha(20)
+              : isActivePane
+                  ? context.appColors.accent.withAlpha(25)
+                  : isViewed
+                      ? context.appColors.accent.withAlpha(12)
+                      : null,
           border: isActivePane
               ? Border(
                   left: BorderSide(
@@ -63,15 +81,26 @@ class TaskTile extends StatelessWidget {
                   : null,
         ),
         child: ListTile(
-          leading: Container(
-            width: 30,
-            height: 30,
-            decoration: BoxDecoration(
-              color: statusColor.withAlpha(30),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Icon(statusIcon, color: statusColor, size: 16),
-          ),
+          leading: isSelected
+              ? Container(
+                  width: 30,
+                  height: 30,
+                  decoration: BoxDecoration(
+                    color: context.appColors.accent.withAlpha(40),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(Icons.check_box_rounded,
+                      color: context.appColors.accent, size: 16),
+                )
+              : Container(
+                  width: 30,
+                  height: 30,
+                  decoration: BoxDecoration(
+                    color: statusColor.withAlpha(30),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(statusIcon, color: statusColor, size: 16),
+                ),
           title: Text(
             task.title,
             style: TextStyle(
@@ -146,7 +175,7 @@ class TaskTile extends StatelessWidget {
           dense: true,
           visualDensity: const VisualDensity(vertical: -4),
           contentPadding: const EdgeInsets.only(left: 16, right: 8),
-          onTap: () {
+          onTap: onTapOverride ?? () {
             state.openTaskInPane(task.taskId);
             onTaskSelected?.call();
           },
