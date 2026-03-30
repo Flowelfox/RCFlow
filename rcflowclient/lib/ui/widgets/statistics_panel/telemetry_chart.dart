@@ -67,12 +67,18 @@ class TelemetryChart extends StatelessWidget {
   final ZoomLevel zoomLevel;
   final void Function(BucketPoint)? onBucketTapped;
 
+  /// When true, renders the metric name as a small overlay label inside
+  /// the chart area — useful when multiple charts are stacked together
+  /// under the same section heading.
+  final bool showLabel;
+
   const TelemetryChart({
     super.key,
     required this.series,
     required this.metric,
     required this.zoomLevel,
     this.onBucketTapped,
+    this.showLabel = false,
   });
 
   @override
@@ -108,94 +114,152 @@ class TelemetryChart extends StatelessWidget {
     }
 
     final maxY = spots.map((s) => s.y).reduce((a, b) => a > b ? a : b);
+    final midY = maxY / 2;
+    final lastIdx = series.length - 1;
+
+    // Format a bucket timestamp for the X-axis based on zoom level.
+    String fmtBucket(DateTime t) {
+      switch (zoomLevel) {
+        case ZoomLevel.minute:
+          return '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+        case ZoomLevel.hour:
+          return '${t.hour.toString().padLeft(2, '0')}:00';
+        case ZoomLevel.day:
+          return '${t.month}/${t.day}';
+      }
+    }
+
+    final chart = LineChart(
+      LineChartData(
+        minY: 0,
+        maxY: maxY * 1.15,
+        gridData: FlGridData(
+          show: true,
+          drawVerticalLine: false,
+          getDrawingHorizontalLine: (v) => FlLine(
+            color: context.appColors.divider,
+            strokeWidth: 0.5,
+          ),
+        ),
+        borderData: FlBorderData(show: false),
+        titlesData: FlTitlesData(
+          leftTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              reservedSize: 44,
+              getTitlesWidget: (val, meta) {
+                // Show labels at 0, midpoint, and max.
+                final isMax = (val - meta.max).abs() < meta.max * 0.05;
+                final isMid = midY > 0 && (val - midY).abs() < meta.max * 0.05;
+                final isZero = val == 0;
+                if (isMax || isMid || isZero) {
+                  final label = val >= 1000
+                      ? '${(val / 1000).toStringAsFixed(1)}k'
+                      : val.toStringAsFixed(0);
+                  return Text(
+                    label,
+                    style: TextStyle(
+                        color: context.appColors.textMuted, fontSize: 9),
+                  );
+                }
+                return const SizedBox.shrink();
+              },
+            ),
+          ),
+          bottomTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              reservedSize: 14,
+              getTitlesWidget: (val, meta) {
+                final idx = val.round();
+                // Show labels only at first and last data points.
+                if (idx == 0 || idx == lastIdx) {
+                  return Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text(
+                      fmtBucket(series[idx].bucket),
+                      style: TextStyle(
+                          color: context.appColors.textMuted, fontSize: 8),
+                    ),
+                  );
+                }
+                return const SizedBox.shrink();
+              },
+            ),
+          ),
+          rightTitles: const AxisTitles(
+            sideTitles: SideTitles(showTitles: false),
+          ),
+          topTitles: const AxisTitles(
+            sideTitles: SideTitles(showTitles: false),
+          ),
+        ),
+        lineTouchData: LineTouchData(
+          touchCallback: (event, response) {
+            if (event is FlTapUpEvent &&
+                response != null &&
+                response.lineBarSpots != null &&
+                response.lineBarSpots!.isNotEmpty) {
+              final idx = response.lineBarSpots!.first.x.round();
+              if (idx >= 0 && idx < series.length) {
+                onBucketTapped?.call(series[idx]);
+              }
+            }
+          },
+          touchTooltipData: LineTouchTooltipData(
+            getTooltipItems: (spots) => spots.map((s) {
+              final val = s.y >= 1000
+                  ? '${(s.y / 1000).toStringAsFixed(1)}k'
+                  : s.y.toStringAsFixed(s.y < 10 ? 1 : 0);
+              return LineTooltipItem(
+                val,
+                TextStyle(
+                    color: context.appColors.textPrimary,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600),
+              );
+            }).toList(),
+          ),
+        ),
+        lineBarsData: [
+          LineChartBarData(
+            spots: spots,
+            isCurved: true,
+            curveSmoothness: 0.3,
+            color: context.appColors.accent,
+            barWidth: 2,
+            dotData: const FlDotData(show: false),
+            belowBarData: BarAreaData(
+              show: true,
+              color: context.appColors.accent.withAlpha(30),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (!showLabel) {
+      return SizedBox(height: 120, child: chart);
+    }
 
     return SizedBox(
       height: 120,
-      child: LineChart(
-        LineChartData(
-          minY: 0,
-          maxY: maxY * 1.15,
-          gridData: FlGridData(
-            show: true,
-            drawVerticalLine: false,
-            getDrawingHorizontalLine: (v) => FlLine(
-              color: context.appColors.divider,
-              strokeWidth: 0.5,
-            ),
-          ),
-          borderData: FlBorderData(show: false),
-          titlesData: FlTitlesData(
-            leftTitles: AxisTitles(
-              sideTitles: SideTitles(
-                showTitles: true,
-                reservedSize: 44,
-                getTitlesWidget: (val, meta) {
-                  if (val == meta.max || val == 0) {
-                    final label = val >= 1000
-                        ? '${(val / 1000).toStringAsFixed(1)}k'
-                        : val.toStringAsFixed(0);
-                    return Text(
-                      label,
-                      style: TextStyle(
-                          color: context.appColors.textMuted, fontSize: 9),
-                    );
-                  }
-                  return const SizedBox.shrink();
-                },
+      child: Stack(
+        children: [
+          chart,
+          Positioned(
+            top: 4,
+            left: 46,
+            child: Text(
+              metric.label,
+              style: TextStyle(
+                color: context.appColors.textMuted,
+                fontSize: 9,
+                fontWeight: FontWeight.w500,
               ),
             ),
-            bottomTitles: const AxisTitles(
-              sideTitles: SideTitles(showTitles: false),
-            ),
-            rightTitles: const AxisTitles(
-              sideTitles: SideTitles(showTitles: false),
-            ),
-            topTitles: const AxisTitles(
-              sideTitles: SideTitles(showTitles: false),
-            ),
           ),
-          lineTouchData: LineTouchData(
-            touchCallback: (event, response) {
-              if (event is FlTapUpEvent &&
-                  response != null &&
-                  response.lineBarSpots != null &&
-                  response.lineBarSpots!.isNotEmpty) {
-                final idx = response.lineBarSpots!.first.x.round();
-                if (idx >= 0 && idx < series.length) {
-                  onBucketTapped?.call(series[idx]);
-                }
-              }
-            },
-            touchTooltipData: LineTouchTooltipData(
-              getTooltipItems: (spots) => spots.map((s) {
-                final val = s.y >= 1000
-                    ? '${(s.y / 1000).toStringAsFixed(1)}k'
-                    : s.y.toStringAsFixed(s.y < 10 ? 1 : 0);
-                return LineTooltipItem(
-                  val,
-                  TextStyle(
-                      color: context.appColors.textPrimary,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600),
-                );
-              }).toList(),
-            ),
-          ),
-          lineBarsData: [
-            LineChartBarData(
-              spots: spots,
-              isCurved: true,
-              curveSmoothness: 0.3,
-              color: context.appColors.accent,
-              barWidth: 2,
-              dotData: const FlDotData(show: false),
-              belowBarData: BarAreaData(
-                show: true,
-                color: context.appColors.accent.withAlpha(30),
-              ),
-            ),
-          ],
-        ),
+        ],
       ),
     );
   }
