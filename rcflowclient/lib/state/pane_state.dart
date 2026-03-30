@@ -97,6 +97,12 @@ class PaneState extends ChangeNotifier {
   String? _projectNameError;
   String? get projectNameError => _projectNameError;
 
+  // Tool selected via the #ToolName chip above the input field.
+  // When set, the tool mention is prepended to the prompt text on send so
+  // the backend receives a normal #ToolName mention.  Null = no tool selected.
+  String? _selectedToolMention;
+  String? get selectedToolMention => _selectedToolMention;
+
   // Absolute path of the worktree the user pre-selected before the first message
   // is sent.  Passed as selected_worktree_path in the first sendPrompt call and
   // then cleared (the session's worktree selection lives on the backend afterward).
@@ -405,6 +411,10 @@ class PaneState extends ChangeNotifier {
     _inAgentMode = false;
     _dismissSessionEndAsk();
 
+    // Prepend #ToolName to the prompt so the backend sees a normal tool mention.
+    final toolMention = _selectedToolMention;
+    final effectiveText = toolMention != null ? '#$toolMention $text' : text;
+
     _pendingLocalUserMessages++;
     _messages.add(DisplayMessage(
       type: DisplayMessageType.user,
@@ -420,7 +430,7 @@ class PaneState extends ChangeNotifier {
     // After the session exists the user adjusts the worktree via the Project panel.
     final worktreeToSend = _sessionId == null ? _pendingWorktreePath : null;
     _ws?.sendPrompt(
-      text,
+      effectiveText,
       _sessionId,
       attachments: attachments,
       projectName: _selectedProjectName,
@@ -454,6 +464,7 @@ class PaneState extends ChangeNotifier {
     _sessionPaused = false;
     _pausedReason = null;
     _runningSubprocess = null;
+    _selectedToolMention = null;
     _sessionId = sessionId;
 
     final session = _host.sessions.cast<SessionInfo?>().firstWhere(
@@ -530,6 +541,7 @@ class PaneState extends ChangeNotifier {
     _selectedProjectName = null;
     _selectedProjectPath = null;
     _projectNameError = null;
+    _selectedToolMention = null;
     _pendingWorktreePath = null;
     _resetPagination();
 
@@ -555,6 +567,7 @@ class PaneState extends ChangeNotifier {
     _runningSubprocess = null;
     _pendingLocalUserMessages = 0;
     _pendingInputText = null;
+    _selectedToolMention = null;
     _pendingWorktreePath = null;
     _messages.clear();
     _todos = [];
@@ -922,6 +935,12 @@ class PaneState extends ChangeNotifier {
   /// Set a project name error received from the backend session_update.
   void setProjectNameError(String error) {
     _projectNameError = error;
+    notifyListeners();
+  }
+
+  /// Set or clear the tool mention chip above the input field.
+  void setSelectedTool(String? name) {
+    _selectedToolMention = name;
     notifyListeners();
   }
 

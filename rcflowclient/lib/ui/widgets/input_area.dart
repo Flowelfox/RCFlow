@@ -238,18 +238,17 @@ class _InputAreaState extends State<InputArea> {
     final has = _controller.text.trim().isNotEmpty;
     if (has != _hasText) setState(() => _hasText = has);
 
-    // Snapshot project mention state before _checkForMention potentially dismisses it
+    // Snapshot mention state before _checkForMention potentially dismisses it
     final prevMentionStart = _mentionStart;
     final prevMentionType = _mentionType;
-    final prevSuggestions = List<Map<String, String>>.from(_projectSuggestions);
+    final prevProjectSuggestions = List<Map<String, String>>.from(_projectSuggestions);
+    final prevToolSuggestions = List<Map<String, String>>.from(_toolSuggestions);
 
     _checkForMention();
 
-    // Space-trigger: if a project @mention was active and just got dismissed by
-    // typing a space or newline, confirm it as a project chip if the name matches.
-    if (prevMentionType == _MentionType.project &&
-        _mentionStart == null &&
-        prevMentionStart != null) {
+    // Space-trigger: if a mention was active and just got dismissed by typing a
+    // space or newline, confirm it as a chip if the name matches.
+    if (_mentionStart == null && prevMentionStart != null) {
       final text = _controller.text;
       final cursor = _controller.selection.baseOffset;
       if (cursor > 0 && cursor <= text.length) {
@@ -257,13 +256,23 @@ class _InputAreaState extends State<InputArea> {
         if (triggerChar == ' ' || triggerChar == '\n') {
           final typedName = text.substring(prevMentionStart + 1, cursor - 1);
           if (typedName.isNotEmpty) {
-            final match = prevSuggestions.firstWhere(
-              (s) => s['name']!.toLowerCase() == typedName.toLowerCase(),
-              orElse: () => {},
-            );
-            if (match.isNotEmpty) {
-              _confirmProjectMention(match['name']!, prevMentionStart, cursor,
-                  path: match['path']);
+            if (prevMentionType == _MentionType.project) {
+              final match = prevProjectSuggestions.firstWhere(
+                (s) => s['name']!.toLowerCase() == typedName.toLowerCase(),
+                orElse: () => {},
+              );
+              if (match.isNotEmpty) {
+                _confirmProjectMention(match['name']!, prevMentionStart, cursor,
+                    path: match['path']);
+              }
+            } else if (prevMentionType == _MentionType.tool) {
+              final match = prevToolSuggestions.firstWhere(
+                (s) => s['mention_name']!.toLowerCase() == typedName.toLowerCase(),
+                orElse: () => {},
+              );
+              if (match.isNotEmpty) {
+                _confirmToolMention(match['mention_name']!, prevMentionStart, cursor);
+              }
             }
           }
         }
@@ -283,6 +292,16 @@ class _InputAreaState extends State<InputArea> {
     _controller.selection = TextSelection.collapsed(offset: start);
     _dismissOverlay();
     context.read<PaneState>().setSelectedProject(name, path: path);
+  }
+
+  /// Confirms a tool mention: removes `#name[trigger]` from the text field
+  /// and populates the tool chip in PaneState.
+  void _confirmToolMention(String name, int start, int end) {
+    final text = _controller.text;
+    _controller.text = text.substring(0, start) + text.substring(end);
+    _controller.selection = TextSelection.collapsed(offset: start);
+    _dismissOverlay();
+    context.read<PaneState>().setSelectedTool(name);
   }
 
   void _checkForMention() {
@@ -486,6 +505,11 @@ class _InputAreaState extends State<InputArea> {
     if (_mentionType == _MentionType.project) {
       _confirmProjectMention(name, _mentionStart!, _controller.selection.baseOffset,
           path: path);
+      return;
+    }
+    // Tool mentions go to the chip instead of inserting into the text field
+    if (_mentionType == _MentionType.tool) {
+      _confirmToolMention(name, _mentionStart!, _controller.selection.baseOffset);
       return;
     }
     final text = _controller.text;
@@ -718,6 +742,22 @@ class _InputAreaState extends State<InputArea> {
             _confirmProjectMention(typedName, _mentionStart!, cursor,
                 path: match['path']);
             return KeyEventResult.handled;
+          }
+        }
+        // Enter-trigger: confirm a tool #mention that has no overlay open
+        if (_mentionType == _MentionType.tool && _mentionStart != null) {
+          final text = _controller.text;
+          final cursor = _controller.selection.baseOffset;
+          final typedName = text.substring(_mentionStart! + 1, cursor);
+          if (typedName.isNotEmpty) {
+            final match = _toolSuggestions.firstWhere(
+              (s) => s['mention_name']!.toLowerCase() == typedName.toLowerCase(),
+              orElse: () => {},
+            );
+            if (match.isNotEmpty) {
+              _confirmToolMention(match['mention_name']!, _mentionStart!, cursor);
+              return KeyEventResult.handled;
+            }
           }
         }
         _send(); // unawaited — intentional
@@ -958,6 +998,10 @@ class _InputAreaState extends State<InputArea> {
     final projectNameError =
         context.select<PaneState, String?>((s) => s.projectNameError);
 
+    // Tool chip
+    final selectedTool =
+        context.select<PaneState, String?>((s) => s.selectedToolMention);
+
     // Pre-session worktree chip — shown when a project is selected and no
     // session exists yet, so the user can pre-select a worktree before sending.
     final pendingWorktreePath =
@@ -975,6 +1019,17 @@ class _InputAreaState extends State<InputArea> {
         (s) => s.currentMainProjectPath);
     final showActiveWorktreeChip =
         sessionId != null && activeSessionProjectPath != null;
+
+    // Eagerly pre-fetch worktrees as soon as a project path is known so the
+    // chip dropdown is ready on the first click.  _fetchWorktrees is
+    // idempotent (it returns immediately if already loaded or loading).
+    final worktreeProjectPath = selectedProjectPath ?? activeSessionProjectPath;
+    if (worktreeProjectPath != null) {
+      final worktreeWorkerId = paneWorkerId ?? state.defaultWorkerId ?? '';
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _fetchWorktrees(worktreeProjectPath, worktreeWorkerId);
+      });
+    }
 
     // Subprocess status bar
     final runningSubprocess = context.select<PaneState, SubprocessInfo?>(
@@ -1033,65 +1088,67 @@ class _InputAreaState extends State<InputArea> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (showWorkerChip)
-              Padding(
-                padding: const EdgeInsets.only(left: 4, bottom: 6),
-                child: _WorkerChip(
-                  label: selectedWorkerName ?? 'Select worker',
-                  workers: connectedWorkers,
-                  onSelected: (id) {
-                    context.read<PaneState>().setTargetWorker(id);
-                  },
-                ),
-              ),
-            if (selectedProject != null)
-              Padding(
-                padding: const EdgeInsets.only(left: 4, bottom: 6),
-                child: _ProjectChip(
-                  name: selectedProject,
-                  error: projectNameError,
-                  onClear: () {
-                    context.read<PaneState>().setSelectedProject(null);
-                    context.read<PaneState>().setPendingWorktreePath(null);
-                  },
-                ),
-              ),
-            if (showWorktreeChip)
-              Padding(
-                padding: const EdgeInsets.only(left: 4, bottom: 6),
-                child: _WorktreeChip(
-                  selectedPath: pendingWorktreePath,
-                  worktrees: _preSessionWorktrees,
-                  loading: _loadingWorktrees,
-                  onOpen: () => _fetchWorktrees(
-                      selectedProjectPath!, paneWorkerId ?? state.defaultWorkerId ?? ''),
-                  onSelect: (path) =>
-                      context.read<PaneState>().setPendingWorktreePath(path),
-                  onClear: () =>
-                      context.read<PaneState>().setPendingWorktreePath(null),
-                ),
-              ),
-            if (showActiveWorktreeChip)
-              Padding(
-                padding: const EdgeInsets.only(left: 4, bottom: 6),
-                child: _WorktreeChip(
-                  selectedPath: activeWorktreePath,
-                  worktrees: _preSessionWorktrees,
-                  loading: _loadingWorktrees,
-                  onOpen: () => _fetchWorktrees(
-                      activeSessionProjectPath!, paneWorkerId ?? state.defaultWorkerId ?? ''),
-                  onSelect: (path) => _setSessionWorktree(sessionId!, path),
-                  onClear: () => _setSessionWorktree(sessionId!, null),
-                ),
-              ),
-            // Pending attachment chips
-            if (_pendingAttachments.isNotEmpty)
+            // All chips in a single horizontal Wrap row
+            if (showWorkerChip ||
+                selectedProject != null ||
+                selectedTool != null ||
+                showWorktreeChip ||
+                showActiveWorktreeChip ||
+                _pendingAttachments.isNotEmpty ||
+                _uploadingAttachments)
               Padding(
                 padding: const EdgeInsets.only(left: 4, bottom: 6),
                 child: Wrap(
                   spacing: 6,
                   runSpacing: 4,
+                  crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
+                    if (showWorkerChip)
+                      _WorkerChip(
+                        label: selectedWorkerName ?? 'Select worker',
+                        workers: connectedWorkers,
+                        onSelected: (id) {
+                          context.read<PaneState>().setTargetWorker(id);
+                        },
+                      ),
+                    if (selectedProject != null)
+                      _ProjectChip(
+                        name: selectedProject,
+                        error: projectNameError,
+                        onClear: () {
+                          context.read<PaneState>().setSelectedProject(null);
+                          context.read<PaneState>().setPendingWorktreePath(null);
+                        },
+                      ),
+                    if (selectedTool != null)
+                      _ToolChip(
+                        name: selectedTool,
+                        onClear: () {
+                          context.read<PaneState>().setSelectedTool(null);
+                        },
+                      ),
+                    if (showWorktreeChip)
+                      _WorktreeChip(
+                        selectedPath: pendingWorktreePath,
+                        getWorktrees: () => _preSessionWorktrees,
+                        loading: _loadingWorktrees,
+                        onOpen: () => _fetchWorktrees(
+                            selectedProjectPath!, paneWorkerId ?? state.defaultWorkerId ?? ''),
+                        onSelect: (path) =>
+                            context.read<PaneState>().setPendingWorktreePath(path),
+                        onClear: () =>
+                            context.read<PaneState>().setPendingWorktreePath(null),
+                      ),
+                    if (showActiveWorktreeChip)
+                      _WorktreeChip(
+                        selectedPath: activeWorktreePath,
+                        getWorktrees: () => _preSessionWorktrees,
+                        loading: _loadingWorktrees,
+                        onOpen: () => _fetchWorktrees(
+                            activeSessionProjectPath!, paneWorkerId ?? state.defaultWorkerId ?? ''),
+                        onSelect: (path) => _setSessionWorktree(sessionId!, path),
+                        onClear: () => _setSessionWorktree(sessionId!, null),
+                      ),
                     for (int i = 0; i < _pendingAttachments.length; i++)
                       _AttachmentChip(
                         name: _pendingAttachments[i].name,
@@ -1099,15 +1156,12 @@ class _InputAreaState extends State<InputArea> {
                         onRemove: canAttach ? () => _removeAttachment(i) : null,
                       ),
                     if (_uploadingAttachments)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 4),
-                        child: SizedBox(
-                          width: 14,
-                          height: 14,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: context.appColors.textMuted,
-                          ),
+                      SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: context.appColors.textMuted,
                         ),
                       ),
                   ],
@@ -1462,12 +1516,62 @@ class _ProjectChip extends StatelessWidget {
   }
 }
 
+/// Chip displayed above the input field representing a selected tool mention.
+/// Mirrors _ProjectChip but uses a build icon and does not have an error state.
+class _ToolChip extends StatelessWidget {
+  final String name;
+  final VoidCallback onClear;
+
+  const _ToolChip({required this.name, required this.onClear});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: context.appColors.bgElevated,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: context.appColors.divider),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.build_rounded,
+            size: 14,
+            color: context.appColors.textMuted,
+          ),
+          const SizedBox(width: 6),
+          Text(
+            name,
+            style: TextStyle(
+              color: context.appColors.textSecondary,
+              fontSize: 12,
+            ),
+          ),
+          const SizedBox(width: 4),
+          GestureDetector(
+            onTap: onClear,
+            child: Icon(
+              Icons.close_rounded,
+              size: 13,
+              color: context.appColors.textMuted,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// Chip displayed above the input field before session creation allowing the
 /// user to pre-select a git worktree.  Shows the selected worktree name when
 /// one is chosen, or a button to open the worktree picker dropdown.
 class _WorktreeChip extends StatelessWidget {
   final String? selectedPath;
-  final List<Map<String, dynamic>>? worktrees;
+  // ValueGetter so the popup menu reads the current list at open-time, not
+  // the stale value captured when the widget was last constructed.
+  final List<Map<String, dynamic>>? Function() getWorktrees;
   final bool loading;
   final VoidCallback onOpen;
   final void Function(String path) onSelect;
@@ -1475,7 +1579,7 @@ class _WorktreeChip extends StatelessWidget {
 
   const _WorktreeChip({
     required this.selectedPath,
-    required this.worktrees,
+    required this.getWorktrees,
     required this.loading,
     required this.onOpen,
     required this.onSelect,
@@ -1498,6 +1602,9 @@ class _WorktreeChip extends StatelessWidget {
           final box = context.findRenderObject() as RenderBox?;
           if (box == null || !context.mounted) return;
           final offset = box.localToGlobal(Offset.zero);
+          // Read the current worktree list at menu-open time, not the stale
+          // value captured when this widget was last constructed.
+          final currentWorktrees = getWorktrees();
           final items = <PopupMenuEntry<String>>[
             PopupMenuItem<String>(
               value: '__none__',
@@ -1509,18 +1616,18 @@ class _WorktreeChip extends StatelessWidget {
               ),
             ),
             const PopupMenuDivider(),
-            if (worktrees == null || worktrees!.isEmpty)
+            if (currentWorktrees == null || currentWorktrees.isEmpty)
               PopupMenuItem<String>(
                 enabled: false,
                 height: 36,
                 child: Text(
-                  worktrees == null ? 'Loading…' : 'No worktrees',
+                  currentWorktrees == null ? 'Loading…' : 'No worktrees',
                   style: TextStyle(
                       color: context.appColors.textMuted, fontSize: 12),
                 ),
               )
             else
-              ...worktrees!.map((wt) {
+              ...currentWorktrees.map((wt) {
                 final name = wt['name'] as String? ?? '';
                 final branch = wt['branch'] as String? ?? '';
                 final path = wt['path'] as String? ?? '';
