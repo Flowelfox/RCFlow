@@ -243,7 +243,7 @@ The client can connect to multiple RCFlow servers simultaneously. Each server co
 | PATCH  | `/api/sessions/{session_id}/title`      | Yes  | Set or clear a session title (max 200 chars). Body: `{"title": "..."}` or `{"title": null}`. |
 | GET    | `/api/config`                           | Yes  | Get server configuration schema with current values. Secret values are masked. Options grouped by section. |
 | PATCH  | `/api/config`                           | Yes  | Update server configuration. Body: `{"updates": {"KEY": "value", ...}}`. Persists to `settings.json`, reloads settings, and hot-reloads LLM client. Returns updated schema. |
-| GET    | `/api/tools/status`                     | Yes  | Get installation status, versions, and update availability for managed CLI tools (Claude Code, Codex). |
+| GET    | `/api/tools/status`                     | Yes  | Get installation status, versions, and update availability for managed CLI tools (Claude Code, Codex, OpenCode). |
 | POST   | `/api/tools/update`                     | Yes  | Check for and install updates to RCFlow-managed CLI tools. Only updates tools managed by RCFlow (not user-installed ones). |
 | GET    | `/api/tools/{tool_name}/settings`       | Yes  | Get per-tool settings schema and current values for a managed CLI tool. |
 | PATCH  | `/api/tools/{tool_name}/settings`       | Yes  | Update per-tool settings. Body: `{"updates": {"key": value, ...}}`. Returns updated schema+values. |
@@ -1604,11 +1604,32 @@ The `claude_code` executor manages a Claude Code CLI subprocess with bidirection
 
 1. The outer LLM calls `claude_code(prompt=..., working_directory=...)`.
 2. RCFlow validates that `working_directory` exists; returns an error to the LLM if not.
-3. RCFlow spawns `claude --input-format stream-json --output-format stream-json` as a long-lived subprocess.
-4. The initial prompt is sent via stdin in stream-json format.
-5. Output events stream from stdout to the client session buffer in real time.
-6. The session enters "Claude Code mode" — subsequent user messages bypass the outer LLM and route directly to the Claude Code subprocess via stdin.
+3. RCFlow spawns `claude --input-format stream-json --output-format stream-json` as a long-lived subprocess. On Unix the subprocess is backed by a **PTY** (see below); on Windows it uses standard asyncio pipes.
+4. The initial prompt is sent via the PTY master fd (or stdin pipe) in stream-json format.
+5. Output events stream to the client session buffer in real time via `PtyLineReader` (PTY) or `asyncio.StreamReader` (pipe).
+6. The session enters "Claude Code mode" — subsequent user messages bypass the outer LLM and route directly to the Claude Code subprocess via stdin / PTY master.
 7. The process stays alive between turns. Follow-up messages are sent via stdin and responses are read from stdout. If the process unexpectedly crashes, RCFlow restarts it with the same `--session-id` as a fallback.
+
+**PTY-backed execution (Unix):**
+
+By default on Linux and macOS, the Claude Code subprocess is launched with a **pseudoterminal (PTY)** as its stdin and stdout so that `isatty(0)` and `isatty(1)` return `True` inside the child process. This preserves Claude Code's full interactive behaviour:
+
+- **Follow-up questions** (`AskUserQuestion` tool): Claude Code is more likely to ask clarifying questions when it detects a real terminal, rather than silently making assumptions in a headless pipe environment.
+- **Plan mode** (`EnterPlanMode` / `ExitPlanMode`): Flows correctly regardless, but the TTY detection ensures Claude Code does not suppress intermediate prompts.
+- **Tool permission dialogs**: With `default_permission_mode: interactive`, Claude Code's own permission logic is engaged in addition to RCFlow's `PermissionManager` overlay.
+
+Despite using a PTY, the I/O *protocol* remains `stream-json` (`--output-format stream-json`), so all downstream event translation in `_relay_claude_code_stream` is unchanged. The PTY slave is configured in **raw mode** before the child is spawned:
+
+| Setting | Effect |
+|---|---|
+| `~ECHO` | Writes to master fd (our JSON input) are not echoed back as output |
+| `~OPOST` | `\n` is not translated to `\r\n`; JSON lines arrive with clean endings |
+| `~ICANON` | No line buffering; data passes through the discipline immediately |
+| `~ISIG` | Signal generation (Ctrl+C → SIGINT) disabled; `kill_process_tree` handles teardown |
+
+`stderr` is kept as a standard asyncio pipe (not on the PTY) so it can be drained separately without mixing into the JSON stream.
+
+**Disabling PTY mode:** Set `"use_pty": false` in `executor_config.claude_code` to fall back to the original pipe-based I/O (required on Windows, optional on Unix).
 
 **Result summarization:** When Claude Code emits a `result` event (turn complete), the prompt router fires a background task that sends the result text to a fast model (configured via `SUMMARY_MODEL`) to produce a 2-3 sentence summary. The summary is pushed to the session buffer as a `summary` message type, arriving after the `text_chunk(finished=true)` for the result, and displayed in the client UI as a summary bubble. Summary failures are logged but never break the session. A `session_end_ask` message is also pushed immediately after the result to ask the user whether they want to end the session or continue chatting.
 
@@ -1639,7 +1660,8 @@ The `claude_code` executor manages a Claude Code CLI subprocess with bidirection
       "binary_path": "claude",
       "default_permission_mode": "interactive",
       "max_turns": 50,
-      "timeout": 600
+      "timeout": 600,
+      "use_pty": true
     }
   }
 }
@@ -1706,7 +1728,7 @@ The `codex` executor manages an OpenAI Codex CLI subprocess for delegating codin
 
 ### Tool Management Service
 
-RCFlow automatically manages the installation and updating of external CLI tools (Claude Code and Codex). The `ToolManager` service (`src/services/tool_manager.py`) handles detection, installation, and periodic updates using **native binary downloads** — no Node.js or npm required.
+RCFlow automatically manages the installation and updating of external CLI tools (Claude Code, Codex, and OpenCode). The `ToolManager` service (`src/services/tool_manager.py`) handles detection, installation, and periodic updates using **native binary downloads** — no Node.js or npm required.
 
 **How it works:**
 
@@ -1721,15 +1743,18 @@ RCFlow automatically manages the installation and updating of external CLI tools
 
 - **Claude Code**: Native binary downloaded from Anthropic's GCS bucket (`storage.googleapis.com/claude-code-dist-.../claude-code-releases`). SHA256 checksum verified against the official manifest. Binary placed at `~/.local/share/rcflow/tools/claude-code/claude` (Linux) or `%LOCALAPPDATA%\rcflow\tools\claude-code\claude.exe` (Windows).
 - **Codex**: Native binary downloaded from GitHub Releases (`github.com/openai/codex/releases`). The release tarball contains a single binary named `codex-<target>` (e.g. `codex-x86_64-unknown-linux-gnu`) which is extracted and renamed to `codex`. On Windows, the `.exe` is downloaded directly and renamed to `codex.exe`. The responses API proxy is built into the main binary as a subcommand. Binary placed at `~/.local/share/rcflow/tools/codex/codex` (Linux) or `%LOCALAPPDATA%\rcflow\tools\codex\codex.exe` (Windows).
+- **OpenCode**: Native binary downloaded from GitHub Releases (`github.com/sst/opencode/releases`). Linux releases ship as `.tar.gz` archives containing a single `opencode` binary; macOS and Windows releases ship as `.zip` archives. The binary is extracted and placed at `~/.local/share/rcflow/tools/opencode/opencode` (Linux/macOS) or `%LOCALAPPDATA%\rcflow\tools\opencode\opencode.exe` (Windows). On glibc-too-old Linux systems the installer automatically retries with the `-musl` variant. Version is checked via the GitHub Releases API (`api.github.com/repos/sst/opencode/releases/latest`).
 
 **Platform strings:**
 
-| Platform | Claude Code (GCS) | Codex (GitHub) |
-|----------|-------------------|----------------|
-| Linux x64 | `linux-x64` | `x86_64-unknown-linux-gnu` |
-| Linux x64 musl | `linux-x64-musl` | `x86_64-unknown-linux-musl` |
-| Linux arm64 | `linux-arm64` | `aarch64-unknown-linux-gnu` |
-| Windows x64 | `win32-x64` | `x86_64-pc-windows-msvc` |
+| Platform | Claude Code (GCS) | Codex (GitHub) | OpenCode (GitHub) |
+|----------|-------------------|----------------|-------------------|
+| Linux x64 | `linux-x64` | `x86_64-unknown-linux-gnu` | `opencode-linux-x64` |
+| Linux x64 musl | `linux-x64-musl` | `x86_64-unknown-linux-musl` | `opencode-linux-x64-musl` |
+| Linux arm64 | `linux-arm64` | `aarch64-unknown-linux-gnu` | `opencode-linux-arm64` |
+| macOS arm64 | — | — | `opencode-darwin-arm64` |
+| macOS x64 | — | — | `opencode-darwin-x64` |
+| Windows x64 | `win32-x64` | `x86_64-pc-windows-msvc` | `opencode-windows-x64` |
 
 **Configuration:**
 
@@ -2360,10 +2385,16 @@ The sidebar `SessionListPanel` has a **3-tab layout**: **Workers**, **Tasks**, *
 - Tasks grouped by status with collapsible sections
 - **Sync button** (⟳) in the filter bar — calls `worker.ws.syncLinearIssues()` then `listLinearIssues()`
 - **"Unlinked Issues" section** at the bottom — collapsible list of `LinearIssueTile` for all issues where `taskId == null`
+- **Multi-select**: Shift+click selects a range, Ctrl/Meta+click toggles individual tasks, plain click while a selection exists toggles the clicked task; plain click with no selection opens the task in a pane (unchanged). Escape clears the selection.
+- **Selection toolbar**: thin bar shown below the filter bar when ≥1 task is selected, displaying the count and a clear button.
+- **Bulk right-click context menu**: when tasks are selected and the user right-clicks any tile (adding the clicked tile to the selection if not already in it), a bulk menu appears with: *Mark all → In Progress / To Do / Review / Done*, *Delete N tasks…* (with confirmation dialog), and *Clear selection*. When no selection is active the per-tile single-task menu is used instead.
+- `computeFlatVisibleList` is a library-level pure function that builds the ordered flat task list respecting the current grouping and collapse state; used for Shift+click range-index resolution and exercised in unit tests.
 
 **`TaskTile`** (`rcflowclient/lib/ui/widgets/session_panel/task_tile.dart`):
 - Existing session count badge
 - **Linear issue count badge** (purple, shows link icon + count) when the task has linked issues
+- `isSelected` parameter: when `true`, renders a checkbox icon in the leading area and an accent-tinted row background.
+- `onTapOverride` / `onSecondaryTapOverride` parameters: when set by the parent (`TaskListPanel`), replace the tile's built-in open-in-pane and context-menu behaviours respectively.
 
 **`LinearIssueTile`** (`rcflowclient/lib/ui/widgets/session_panel/linear_issue_tile.dart`):
 - Priority icon + colored state background
@@ -2492,7 +2523,7 @@ RCFlow/
 │   │
 │   ├── services/
 │   │   ├── __init__.py
-│   │   ├── tool_manager.py      # Auto-install/update for Claude Code & Codex CLIs
+│   │   ├── tool_manager.py      # Auto-install/update for Claude Code, Codex & OpenCode CLIs
 │   │   └── linear_service.py    # Linear GraphQL API client
 │   │
 │   ├── prompts/
@@ -2566,6 +2597,7 @@ RCFlow supports **Linux (x64, arm64)** and **Windows (x64)**.
 | Codex archive format | `.tar.gz` | `.zip` |
 | Process isolation | `start_new_session=True` | `CREATE_NEW_PROCESS_GROUP` |
 | Process tree kill | `os.killpg(SIGKILL)` | `taskkill /T /F /PID` |
+| Claude Code stdin/stdout | PTY master fd (`pty.openpty`) | asyncio pipe (`PIPE`) |
 | Background mode | systemd service | GUI window (`rcflow gui`) or system tray (`rcflow tray`) |
 | Auto-start | systemd enable | Registry `HKCU\...\Run` key |
 
@@ -2583,6 +2615,13 @@ Process creation and termination are abstracted in `src/utils/process.py`:
 - `kill_process_tree()` — kills a process and all its children (`os.killpg` on POSIX, `taskkill /T /F` on Windows).
 
 Both `ClaudeCodeExecutor` and `CodexExecutor` use these helpers.
+
+`src/utils/pty_utils.py` (Unix-only) provides PTY helpers used by `ClaudeCodeExecutor` in PTY mode:
+
+- `configure_raw(fd)` — sets a PTY slave fd to raw mode (no echo, no `OPOST`, no `ICANON`).
+- `set_winsize(fd, rows, cols)` — configures terminal dimensions via `TIOCSWINSZ`.
+- `PtyLineReader` — async line reader over a PTY master fd using `loop.add_reader`.
+- `strip_ansi(text)` — strips ANSI/VT100 escape sequences from decoded output.
 
 ---
 
