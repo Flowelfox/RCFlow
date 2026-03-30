@@ -27,7 +27,7 @@ class PaneNavEntry {
   final String? artifactId;
   final String? linearIssueId;
   /// Tool name when [paneType] is [PaneType.workerSettings].
-  /// One of ``"claude_code"`` or ``"codex"``.
+  /// One of ``"claude_code"``, ``"codex"``, or ``"opencode"``.
   final String? workerSettingsTool;
   /// Sub-section to show within the worker settings pane.
   /// Defaults to ``"plugins"``.
@@ -155,7 +155,7 @@ class PaneState extends ChangeNotifier {
   String? _workerSettingsTool;
   String? _workerSettingsSection;
 
-  /// The managed tool whose settings are displayed (``"claude_code"`` or ``"codex"``).
+  /// The managed tool whose settings are displayed (``"claude_code"``, ``"codex"``, or ``"opencode"``).
   String? get workerSettingsTool => _workerSettingsTool;
 
   /// The settings sub-section currently shown (e.g. ``"plugins"``).
@@ -317,10 +317,10 @@ class PaneState extends ChangeNotifier {
     return entry;
   }
 
-  // Agent group tracking (Claude Code / Codex collapsible blocks)
+  // Agent group tracking (Claude Code / Codex / OpenCode collapsible blocks)
   // True between agent_group_start and agent_group_end.
   bool _inAgentMode = false;
-  // The tool name for the current agent group (e.g. 'claude_code', 'codex').
+  // The tool name for the current agent group (e.g. 'claude_code', 'codex', 'opencode').
   String _agentToolName = 'claude_code';
   // Human-readable display name for the current agent group.
   String? _agentDisplayName;
@@ -354,8 +354,8 @@ class PaneState extends ChangeNotifier {
   // Terminal statuses for sessions
   static const _terminalStatuses = {'completed', 'failed', 'cancelled'};
 
-  /// Whether the current session is driven by the Claude Code executor.
-  bool get isClaudeCodeSession => _agentToolName == 'claude_code';
+  /// Whether the current session is driven by an agent that supports plugin slash commands.
+  bool get isClaudeCodeSession => _agentToolName == 'claude_code' || _agentToolName == 'opencode';
 
   /// Whether the input area should allow sending messages.
   /// Sending while paused is allowed — the server auto-resumes the session.
@@ -1238,6 +1238,7 @@ class PaneState extends ChangeNotifier {
     bool inAgent = false;
     int? toolGroupIdx;
     String? agentDisplayName;
+    String agentToolName = 'claude_code';
 
     void closeToolGroup() {
       if (toolGroupIdx != null && toolGroupIdx! < target.length) {
@@ -1258,7 +1259,7 @@ class PaneState extends ChangeNotifier {
       target.add(DisplayMessage(
         type: DisplayMessageType.agentGroup,
         sessionId: sessionId,
-        toolName: 'claude_code',
+        toolName: agentToolName,
         displayName: agentDisplayName,
         children: [],
         finished: false,
@@ -1271,7 +1272,9 @@ class PaneState extends ChangeNotifier {
 
       if (type == 'agent_group_start') {
         inAgent = true;
-        agentDisplayName = (msg['metadata'] as Map<String, dynamic>?)?['display_name'] as String?;
+        final meta = msg['metadata'] as Map<String, dynamic>?;
+        agentDisplayName = meta?['display_name'] as String?;
+        agentToolName = meta?['tool_name'] as String? ?? 'claude_code';
         continue;
       }
 
