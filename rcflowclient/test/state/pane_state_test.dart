@@ -462,6 +462,69 @@ void main() {
   });
 
   // ---------------------------------------------------------------------------
+  // Tool mention chip
+  // ---------------------------------------------------------------------------
+
+  group('PaneState.setSelectedTool — tool mention chip', () {
+    PaneState _pane() => PaneState(paneId: 'p1', host: _StubPaneHost([]));
+
+    test('selectedToolMention is null by default', () {
+      expect(_pane().selectedToolMention, isNull);
+    });
+
+    test('setSelectedTool sets the tool name and notifies', () {
+      final pane = _pane();
+      var notified = 0;
+      pane.addListener(() => notified++);
+
+      pane.setSelectedTool('ClaudeCode');
+
+      expect(pane.selectedToolMention, 'ClaudeCode');
+      expect(notified, 1);
+    });
+
+    test('setSelectedTool(null) clears the tool name', () {
+      final pane = _pane();
+      pane.setSelectedTool('ClaudeCode');
+      expect(pane.selectedToolMention, 'ClaudeCode');
+
+      pane.setSelectedTool(null);
+
+      expect(pane.selectedToolMention, isNull);
+    });
+
+    test('goHome clears selectedToolMention', () {
+      final pane = _pane();
+      pane.setSelectedTool('ClaudeCode');
+
+      pane.goHome();
+
+      expect(pane.selectedToolMention, isNull);
+    });
+
+    test('startNewChat clears selectedToolMention', () {
+      final pane = _pane();
+      pane.setSelectedTool('ClaudeCode');
+
+      pane.startNewChat();
+
+      expect(pane.selectedToolMention, isNull);
+    });
+
+    test('switchSession clears selectedToolMention', () {
+      final pane = PaneState(
+        paneId: 'p1',
+        host: _StubPaneHost([_session('s1', 'active')]),
+      );
+      pane.setSelectedTool('ClaudeCode');
+
+      pane.switchSession('s1');
+
+      expect(pane.selectedToolMention, isNull);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
   // Active worktree display on pane switch
   // ---------------------------------------------------------------------------
 
