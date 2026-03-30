@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:window_manager/window_manager.dart';
 
+import '../../models/split_tree.dart';
 import '../../state/app_state.dart';
 import '../../state/pane_state.dart';
 import '../../theme.dart';
@@ -14,7 +15,9 @@ import '../widgets/hotkey_listener.dart';
 import '../widgets/input_area.dart';
 import '../widgets/output_display.dart';
 import '../widgets/session_panel.dart';
+import '../widgets/settings_menu.dart';
 import '../widgets/split_view.dart';
+import '../widgets/worker_picker_dialog.dart';
 
 bool get _isDesktop =>
     Platform.isWindows || Platform.isLinux || Platform.isMacOS;
@@ -58,7 +61,7 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
   Widget build(BuildContext context) {
     if (!_isDesktop) return _buildNonDesktop(context);
 
-    return HotkeyListener(
+    final desktop = HotkeyListener(
       child: LayoutBuilder(
         builder: (context, constraints) {
           final isWide = constraints.maxWidth > 700;
@@ -140,6 +143,214 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
         },
       ),
     );
+
+    if (Platform.isMacOS) {
+      return PlatformMenuBar(
+        menus: _buildMacOSMenus(context),
+        child: desktop,
+      );
+    }
+    return desktop;
+  }
+
+  /// Builds the native macOS menu bar entries, wired to app actions.
+  ///
+  /// Uses [PlatformMenuItemGroup] to create visual separator sections —
+  /// groups are automatically surrounded by dividers on macOS.
+  List<PlatformMenuItem> _buildMacOSMenus(BuildContext context) {
+    return [
+      // ── RCFlow (app) menu ──────────────────────────────────────────────
+      PlatformMenu(
+        label: 'RCFlow',
+        menus: [
+          PlatformMenuItemGroup(
+            members: [
+              const PlatformProvidedMenuItem(
+                  type: PlatformProvidedMenuItemType.about),
+            ],
+          ),
+          PlatformMenuItemGroup(
+            members: [
+              PlatformMenuItem(
+                label: 'Settings…',
+                shortcut: const SingleActivator(LogicalKeyboardKey.comma,
+                    meta: true),
+                onSelected: () => showSettingsMenu(context),
+              ),
+            ],
+          ),
+          PlatformMenuItemGroup(
+            members: [
+              const PlatformProvidedMenuItem(
+                  type: PlatformProvidedMenuItemType.servicesSubmenu),
+            ],
+          ),
+          PlatformMenuItemGroup(
+            members: [
+              const PlatformProvidedMenuItem(
+                  type: PlatformProvidedMenuItemType.hide),
+              const PlatformProvidedMenuItem(
+                  type: PlatformProvidedMenuItemType.hideOtherApplications),
+              const PlatformProvidedMenuItem(
+                  type: PlatformProvidedMenuItemType.showAllApplications),
+            ],
+          ),
+          if (PlatformProvidedMenuItem.hasMenu(
+              PlatformProvidedMenuItemType.quit))
+            PlatformMenuItemGroup(
+              members: [
+                const PlatformProvidedMenuItem(
+                    type: PlatformProvidedMenuItemType.quit),
+              ],
+            ),
+        ],
+      ),
+      // ── File menu ──────────────────────────────────────────────────────
+      PlatformMenu(
+        label: 'File',
+        menus: [
+          PlatformMenuItemGroup(
+            members: [
+              PlatformMenuItem(
+                label: 'New Session',
+                shortcut: const SingleActivator(LogicalKeyboardKey.keyN,
+                    meta: true),
+                onSelected: () =>
+                    _newSessionFromMenu(context, context.read<AppState>()),
+              ),
+            ],
+          ),
+          PlatformMenuItemGroup(
+            members: [
+              PlatformMenuItem(
+                label: 'Split Right',
+                shortcut: const SingleActivator(LogicalKeyboardKey.backslash,
+                    meta: true),
+                onSelected: () {
+                  final appState = context.read<AppState>();
+                  if (!appState.hasNoPanes) {
+                    appState.splitPane(
+                        appState.activePaneId, SplitAxis.horizontal);
+                  }
+                },
+              ),
+              PlatformMenuItem(
+                label: 'Split Down',
+                shortcut: const SingleActivator(LogicalKeyboardKey.backslash,
+                    meta: true, shift: true),
+                onSelected: () {
+                  final appState = context.read<AppState>();
+                  if (!appState.hasNoPanes) {
+                    appState.splitPane(
+                        appState.activePaneId, SplitAxis.vertical);
+                  }
+                },
+              ),
+            ],
+          ),
+          PlatformMenuItemGroup(
+            members: [
+              PlatformMenuItem(
+                label: 'Close Pane',
+                shortcut: const SingleActivator(LogicalKeyboardKey.keyW,
+                    meta: true),
+                onSelected: () {
+                  final appState = context.read<AppState>();
+                  if (!appState.hasNoPanes) {
+                    appState.closePane(appState.activePaneId);
+                  }
+                },
+              ),
+              PlatformMenuItem(
+                label: 'Reopen Closed Pane',
+                shortcut: const SingleActivator(LogicalKeyboardKey.keyT,
+                    meta: true, shift: true),
+                onSelected: () =>
+                    context.read<AppState>().reopenLastClosedPane(),
+              ),
+            ],
+          ),
+          PlatformMenuItemGroup(
+            members: [
+              PlatformMenuItem(
+                label: 'Refresh Sessions',
+                shortcut: const SingleActivator(LogicalKeyboardKey.keyR,
+                    meta: true),
+                onSelected: () => context.read<AppState>().refreshSessions(),
+              ),
+            ],
+          ),
+        ],
+      ),
+      // ── View menu ──────────────────────────────────────────────────────
+      PlatformMenu(
+        label: 'View',
+        menus: [
+          PlatformMenuItemGroup(
+            members: [
+              PlatformMenuItem(
+                label: 'Toggle Sidebar',
+                shortcut: const SingleActivator(LogicalKeyboardKey.keyB,
+                    meta: true),
+                onSelected: () => context.read<AppState>().toggleSidebar(),
+              ),
+            ],
+          ),
+          if (PlatformProvidedMenuItem.hasMenu(
+              PlatformProvidedMenuItemType.toggleFullScreen))
+            PlatformMenuItemGroup(
+              members: [
+                const PlatformProvidedMenuItem(
+                    type: PlatformProvidedMenuItemType.toggleFullScreen),
+              ],
+            ),
+        ],
+      ),
+      // ── Window menu ────────────────────────────────────────────────────
+      PlatformMenu(
+        label: 'Window',
+        menus: [
+          PlatformMenuItemGroup(
+            members: [
+              const PlatformProvidedMenuItem(
+                  type: PlatformProvidedMenuItemType.minimizeWindow),
+              const PlatformProvidedMenuItem(
+                  type: PlatformProvidedMenuItemType.zoomWindow),
+            ],
+          ),
+          PlatformMenuItemGroup(
+            members: [
+              const PlatformProvidedMenuItem(
+                  type: PlatformProvidedMenuItemType.arrangeWindowsInFront),
+            ],
+          ),
+        ],
+      ),
+    ];
+  }
+
+  void _newSessionFromMenu(BuildContext context, AppState appState) {
+    final connectedWorkers = appState.workerConfigs.where((c) {
+      final w = appState.getWorker(c.id);
+      return w?.isConnected ?? false;
+    }).toList();
+
+    if (connectedWorkers.length == 1) {
+      final pane = appState.ensureChatPane();
+      pane.setTargetWorker(connectedWorkers.first.id);
+      pane.startNewChat();
+      appState.requestInputFocus();
+      return;
+    }
+
+    showWorkerPickerDialog(context).then((workerId) {
+      if (workerId != null && context.mounted) {
+        final pane = appState.ensureChatPane();
+        pane.setTargetWorker(workerId);
+        pane.startNewChat();
+        appState.requestInputFocus();
+      }
+    });
   }
 
   Widget _buildNonDesktop(BuildContext context) {
