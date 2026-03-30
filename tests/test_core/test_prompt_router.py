@@ -1446,3 +1446,113 @@ async def test_handle_prompt_no_worktree_path_leaves_metadata_empty(
     session = session_manager.get_session(session_id)
     assert session is not None
     assert "selected_worktree_path" not in session.metadata
+
+
+# ---------------------------------------------------------------------------
+# OpenCode lifecycle tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_interrupt_subprocess_with_opencode_executor(session_manager: SessionManager) -> None:
+    """Interrupting a session with a running OpenCode executor cancels it and pushes AGENT_GROUP_END."""
+    router = _make_router(session_manager)
+    session = session_manager.create_session(SessionType.LONG_RUNNING)
+    session.set_active()
+
+    mock_executor = AsyncMock()
+    mock_executor.cancel = AsyncMock()
+    session.opencode_executor = mock_executor
+
+    task_future: asyncio.Future[None] = asyncio.get_event_loop().create_future()
+    task = asyncio.ensure_future(task_future)
+    session._opencode_stream_task = task
+
+    result = await router.interrupt_subprocess(session.id)
+
+    assert result.status == SessionStatus.ACTIVE
+    mock_executor.cancel.assert_awaited_once()
+    assert session.opencode_executor is None
+    assert session._opencode_stream_task is None
+
+    group_end_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.AGENT_GROUP_END]
+    assert len(group_end_msgs) == 1
+    text_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.TEXT_CHUNK]
+    assert any("[Subprocess interrupted by user]" in m.data.get("content", "") for m in text_msgs)
+
+
+@pytest.mark.asyncio
+async def test_cancel_session_with_opencode_executor(session_manager: SessionManager) -> None:
+    """Cancelling a session with a running OpenCode executor kills it and pushes AGENT_GROUP_END."""
+    router = _make_router(session_manager)
+    session = session_manager.create_session(SessionType.LONG_RUNNING)
+    session.set_active()
+
+    mock_executor = AsyncMock()
+    mock_executor.cancel = AsyncMock()
+    session.opencode_executor = mock_executor
+
+    task_future: asyncio.Future[None] = asyncio.get_event_loop().create_future()
+    task = asyncio.ensure_future(task_future)
+    session._opencode_stream_task = task
+
+    result = await router.cancel_session(session.id)
+
+    assert result.status == SessionStatus.CANCELLED
+    mock_executor.cancel.assert_awaited_once()
+    assert session.opencode_executor is None
+    assert session._opencode_stream_task is None
+
+    group_end_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.AGENT_GROUP_END]
+    assert len(group_end_msgs) == 1
+
+
+@pytest.mark.asyncio
+async def test_pause_session_with_opencode_executor(session_manager: SessionManager) -> None:
+    """Pausing a session with a running OpenCode executor should kill it and emit AGENT_GROUP_END."""
+    router = _make_router(session_manager)
+    session = session_manager.create_session(SessionType.LONG_RUNNING)
+    session.set_active()
+
+    mock_executor = AsyncMock()
+    mock_executor.cancel = AsyncMock()
+    session.opencode_executor = mock_executor
+
+    task_future: asyncio.Future[None] = asyncio.get_event_loop().create_future()
+    task = asyncio.ensure_future(task_future)
+    session._opencode_stream_task = task
+
+    result = await router.pause_session(session.id)
+
+    assert result.status == SessionStatus.PAUSED
+    mock_executor.cancel.assert_awaited_once()
+    assert session.opencode_executor is None
+    assert session._opencode_stream_task is None
+
+    group_end_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.AGENT_GROUP_END]
+    assert len(group_end_msgs) == 1
+    paused_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.SESSION_PAUSED]
+    assert len(paused_msgs) == 1
+    assert paused_msgs[0].data["claude_code_interrupted"] is True
+    assert group_end_msgs[0].sequence < paused_msgs[0].sequence
+
+
+@pytest.mark.asyncio
+async def test_resume_session_reconstructs_opencode_executor(session_manager: SessionManager) -> None:
+    """After pausing, resuming a session with opencode metadata should reconstruct the executor."""
+    router = _make_router_with_real_registry(session_manager)
+    session = session_manager.create_session(SessionType.LONG_RUNNING)
+    session.set_active()
+
+    # Simulate metadata written by _start_opencode
+    session.metadata["opencode_session_id"] = "oc-sess-abc"
+    session.metadata["opencode_tool_name"] = "opencode"
+    session.metadata["opencode_parameters"] = {"prompt": "write tests", "working_directory": "/tmp"}
+
+    session.pause()
+
+    result = await router.resume_session(session.id)
+
+    assert result.status == SessionStatus.ACTIVE
+    assert result.opencode_executor is not None
+    assert result.opencode_executor.opencode_session_id == "oc-sess-abc"

@@ -15,6 +15,7 @@ from src.services.tool_manager import (
     ToolManager,
     _detect_claude_platform,
     _detect_codex_target,
+    _detect_opencode_asset,
     _parse_version,
 )
 
@@ -91,6 +92,13 @@ class TestParseVersion:
 
     def test_no_version_found(self):
         assert _parse_version("codex", "no version here") is None
+
+    def test_opencode_version_bare(self):
+        assert _parse_version("opencode", "1.3.7") == "1.3.7"
+
+    def test_opencode_version_prefixed(self):
+        # tolerate "opencode 1.3.7" just in case
+        assert _parse_version("opencode", "opencode 1.3.7") == "1.3.7"
 
 
 # ---------------------------------------------------------------------------
@@ -455,3 +463,181 @@ class TestVersionQueries:
         with _mock_httpx_transport(lambda req: httpx.Response(500)):
             version = await ToolManager._get_latest_claude_version()
         assert version is None
+
+    @pytest.mark.asyncio
+    async def test_get_latest_opencode_version(self):
+        with _mock_httpx_transport(lambda req: httpx.Response(200, json={"tag_name": "v1.3.7"})):
+            version = await ToolManager._get_latest_opencode_version()
+        assert version == "1.3.7"
+
+    @pytest.mark.asyncio
+    async def test_get_latest_opencode_version_follows_redirect(self):
+        """GitHub sometimes issues a 301 redirect; the client must follow it."""
+        call_count = 0
+
+        def _redirecting_handler(req):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return httpx.Response(
+                    301,
+                    headers={"location": "https://api.github.com/repos/sst/opencode/releases/123456789"},
+                )
+            return httpx.Response(200, json={"tag_name": "v2.0.0"})
+
+        with _mock_httpx_transport(_redirecting_handler):
+            version = await ToolManager._get_latest_opencode_version()
+        assert version == "2.0.0"
+        assert call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_get_latest_opencode_version_network_error(self):
+        with _mock_httpx_transport(lambda req: httpx.Response(500)):
+            version = await ToolManager._get_latest_opencode_version()
+        assert version is None
+
+
+# ---------------------------------------------------------------------------
+# Platform detection — OpenCode
+# ---------------------------------------------------------------------------
+
+
+class TestOpenCodePlatformDetection:
+    @patch("src.services.tool_manager.sys.platform", "linux")
+    @patch("src.services.tool_manager.platform.machine", return_value="x86_64")
+    @patch("src.services.tool_manager._is_musl", return_value=False)
+    def test_linux_x64_glibc(self, _musl, _machine):
+        base, ext = _detect_opencode_asset()
+        assert base == "opencode-linux-x64"
+        assert ext == ".tar.gz"
+
+    @patch("src.services.tool_manager.sys.platform", "linux")
+    @patch("src.services.tool_manager.platform.machine", return_value="x86_64")
+    @patch("src.services.tool_manager._is_musl", return_value=True)
+    def test_linux_x64_musl(self, _musl, _machine):
+        base, ext = _detect_opencode_asset()
+        assert base == "opencode-linux-x64-musl"
+        assert ext == ".tar.gz"
+
+    @patch("src.services.tool_manager.sys.platform", "linux")
+    @patch("src.services.tool_manager.platform.machine", return_value="aarch64")
+    @patch("src.services.tool_manager._is_musl", return_value=False)
+    def test_linux_arm64(self, _musl, _machine):
+        base, ext = _detect_opencode_asset()
+        assert base == "opencode-linux-arm64"
+        assert ext == ".tar.gz"
+
+    @patch("src.services.tool_manager.sys.platform", "darwin")
+    @patch("src.services.tool_manager.platform.machine", return_value="arm64")
+    def test_darwin_arm64(self, _machine):
+        base, ext = _detect_opencode_asset()
+        assert base == "opencode-darwin-arm64"
+        assert ext == ".zip"
+
+    @patch("src.services.tool_manager.sys.platform", "darwin")
+    @patch("src.services.tool_manager.platform.machine", return_value="x86_64")
+    def test_darwin_x64(self, _machine):
+        base, ext = _detect_opencode_asset()
+        assert base == "opencode-darwin-x64"
+        assert ext == ".zip"
+
+    @patch("src.services.tool_manager.sys.platform", "linux")
+    @patch("src.services.tool_manager.platform.machine", return_value="ppc64le")
+    def test_unsupported_arch(self, _machine):
+        with pytest.raises(RuntimeError, match="Unsupported"):
+            _detect_opencode_asset()
+
+
+# ---------------------------------------------------------------------------
+# Installation — OpenCode
+# ---------------------------------------------------------------------------
+
+
+class TestInstallOpenCode:
+    @pytest.mark.asyncio
+    @patch("src.services.tool_manager.sys.platform", "linux")
+    @patch("src.services.tool_manager.platform.machine", return_value="x86_64")
+    @patch("src.services.tool_manager._is_musl", return_value=False)
+    async def test_install_opencode(self, _musl, _machine, tool_manager: ToolManager, tmp_path: Path):
+        """Test OpenCode installation with mocked HTTP responses."""
+        member_name = "opencode"
+
+        # Build a tarball in memory with a fake binary
+        tar_path = tmp_path / "opencode.tar.gz"
+        fake_bin = tmp_path / member_name
+        fake_bin.write_text("#!/bin/sh\necho '1.3.7'")
+        fake_bin.chmod(0o755)
+        with tarfile.open(tar_path, "w:gz") as tf:
+            tf.add(str(fake_bin), arcname=member_name)
+        tar_content = tar_path.read_bytes()
+
+        with (
+            patch.object(
+                ToolManager,
+                "_get_latest_opencode_version",
+                new_callable=AsyncMock,
+                return_value="1.3.7",
+            ),
+            patch(
+                "src.services.tool_manager._verify_binary",
+                new_callable=AsyncMock,
+                return_value=(True, ""),
+            ),
+            _mock_httpx_transport(lambda req: httpx.Response(200, content=tar_content)),
+        ):
+            tool = await tool_manager._install_opencode()
+
+        assert tool.managed is True
+        assert tool.current_version == "1.3.7"
+        assert tool.binary_path is not None
+        assert Path(tool.binary_path).exists()
+
+    @pytest.mark.asyncio
+    @patch("src.services.tool_manager.sys.platform", "linux")
+    @patch("src.services.tool_manager.platform.machine", return_value="x86_64")
+    @patch("src.services.tool_manager._is_musl", return_value=False)
+    async def test_install_opencode_streaming_updates_tools_dict(
+        self, _musl, _machine, tool_manager: ToolManager, tmp_path: Path
+    ):
+        """install_tool_streaming for opencode must update _tools with managed=True.
+
+        The frontend relies on this so that a subsequent GET /tools/{name}/settings
+        returns managed-only fields (provider, model, API keys) immediately after
+        installation — without requiring a server restart.
+        """
+        member_name = "opencode"
+
+        tar_path = tmp_path / "opencode.tar.gz"
+        fake_bin = tmp_path / member_name
+        fake_bin.write_text("#!/bin/sh\necho '1.3.7'")
+        fake_bin.chmod(0o755)
+        with tarfile.open(tar_path, "w:gz") as tf:
+            tf.add(str(fake_bin), arcname=member_name)
+        tar_content = tar_path.read_bytes()
+
+        events: list[dict] = []
+        with (
+            patch.object(
+                ToolManager,
+                "_get_latest_opencode_version",
+                new_callable=AsyncMock,
+                return_value="1.3.7",
+            ),
+            patch(
+                "src.services.tool_manager._verify_binary",
+                new_callable=AsyncMock,
+                return_value=(True, ""),
+            ),
+            _mock_httpx_transport(lambda req: httpx.Response(200, content=tar_content)),
+        ):
+            async for event in tool_manager.install_tool_streaming("opencode"):
+                events.append(event)
+
+        # Streaming must end with a "done" event
+        assert events[-1]["step"] == "done"
+
+        # _tools must be updated in-process so settings requests see managed=True
+        tool = tool_manager._tools.get("opencode")
+        assert tool is not None
+        assert tool.managed is True
+        assert tool.current_version == "1.3.7"

@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
-VALID_EXECUTORS = {"shell", "http", "claude_code", "codex", "worktree"}
+VALID_EXECUTORS = {"shell", "http", "claude_code", "codex", "opencode", "worktree"}
 VALID_SESSION_TYPES = {"one-shot", "long-running"}
 VALID_LLM_CONTEXTS = {"stateless", "session-scoped"}
 VALID_OS = {"windows", "linux", "darwin"}
@@ -56,6 +56,12 @@ class CodexExecutorConfig(BaseModel):
     timeout: int = 600
 
 
+class OpenCodeExecutorConfig(BaseModel):
+    binary_path: str = "opencode"
+    model: str = ""
+    timeout: int = 600
+
+
 class WorktreeExecutorConfig(BaseModel):
     default_base_branch: str = "main"
     validate_branch_type: bool = True
@@ -95,6 +101,9 @@ class ToolDefinition(BaseModel):
 
     def get_codex_config(self) -> CodexExecutorConfig:
         return CodexExecutorConfig(**self.executor_config["codex"])
+
+    def get_opencode_config(self) -> OpenCodeExecutorConfig:
+        return OpenCodeExecutorConfig(**self.executor_config["opencode"])
 
     def get_worktree_config(self) -> WorktreeExecutorConfig:
         return WorktreeExecutorConfig(**self.executor_config.get("worktree", {}))

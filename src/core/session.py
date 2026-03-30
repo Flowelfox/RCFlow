@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from src.core.permissions import PermissionManager
     from src.executors.claude_code import ClaudeCodeExecutor
     from src.executors.codex import CodexExecutor
+    from src.executors.opencode import OpenCodeExecutor
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +74,9 @@ class ActiveSession:
         # Codex CLI mode: same pattern as Claude Code but with one-shot processes
         self.codex_executor: CodexExecutor | None = None
         self._codex_stream_task: asyncio.Task[None] | None = None
+        # OpenCode CLI mode: one-shot processes with session ID continuation
+        self.opencode_executor: OpenCodeExecutor | None = None
+        self._opencode_stream_task: asyncio.Task[None] | None = None
         self._prompt_lock: asyncio.Lock = asyncio.Lock()
         # Interactive permission approval manager (None = bypass/auto mode)
         self.permission_manager: PermissionManager | None = None
@@ -121,13 +125,16 @@ class ActiveSession:
         """Return the managed agent type driving this session, or None for pure-LLM sessions.
 
         Returns ``"claude_code"`` when a Claude Code executor is attached,
-        ``"codex"`` when a Codex executor is attached, and ``None`` for sessions
-        that are handled directly by the built-in LLM without a managed subprocess.
+        ``"codex"`` when a Codex executor is attached, ``"opencode"`` when an
+        OpenCode executor is attached, and ``None`` for sessions that are handled
+        directly by the built-in LLM without a managed subprocess.
         """
         if self.claude_code_executor is not None:
             return "claude_code"
         if self.codex_executor is not None:
             return "codex"
+        if self.opencode_executor is not None:
+            return "opencode"
         return None
 
     @property

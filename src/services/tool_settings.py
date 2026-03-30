@@ -33,6 +33,12 @@ _CODEX_PROVIDER_KEYS = frozenset({
     "codex_api_key",
 })
 
+# Keys related to OpenCode provider configuration (used for env sync detection).
+_OPENCODE_PROVIDER_KEYS = frozenset({
+    "provider",
+    "opencode_api_key",
+})
+
 _MASK_CHAR = "*"
 _MASK_VISIBLE_CHARS = 4
 
@@ -233,14 +239,79 @@ CODEX_SETTINGS_SCHEMA: list[dict[str, Any]] = [
     },
 ]
 
+OPENCODE_SETTINGS_SCHEMA: list[dict[str, Any]] = [
+    {
+        "key": "provider",
+        "label": "API Provider",
+        "type": "select",
+        "default": "",
+        "description": "API key source for OpenCode. 'Global' uses server-level config.",
+        "options": [
+            {"value": "", "label": "Global"},
+            {"value": "anthropic", "label": "Anthropic"},
+            {"value": "openai", "label": "OpenAI"},
+        ],
+        "managed_only": True,
+    },
+    {
+        "key": "opencode_api_key",
+        "label": "Anthropic API Key",
+        "type": "secret",
+        "default": "",
+        "description": "API key for Anthropic provider.",
+        "managed_only": True,
+        "visible_when": {"key": "provider", "value": "anthropic"},
+    },
+    {
+        "key": "openai_api_key",
+        "label": "OpenAI API Key",
+        "type": "secret",
+        "default": "",
+        "description": "API key for OpenAI provider.",
+        "managed_only": True,
+        "visible_when": {"key": "provider", "value": "openai"},
+    },
+    {
+        "key": "model",
+        "label": "Model",
+        "type": "model_select",
+        "default": "",
+        "description": "Model to use for OpenCode sessions (e.g. 'anthropic/claude-sonnet-4-5').",
+        "provider_key": "provider",
+        "models": {
+            "": {"options": [], "allow_custom": True},
+            "anthropic": PROVIDER_MODELS["anthropic"],
+            "openai": PROVIDER_MODELS["openai"],
+        },
+    },
+    {
+        "key": "max_turns",
+        "label": "Max turns",
+        "type": "string",
+        "default": "",
+        "description": "Maximum agentic turns per session (default unlimited).",
+        "managed_only": True,
+    },
+    {
+        "key": "timeout",
+        "label": "Timeout (seconds)",
+        "type": "string",
+        "default": "",
+        "description": "Process timeout in seconds (default 600).",
+        "managed_only": True,
+    },
+]
+
 _TOOL_SCHEMAS: dict[str, list[dict[str, Any]]] = {
     "claude_code": CLAUDE_CODE_SETTINGS_SCHEMA,
     "codex": CODEX_SETTINGS_SCHEMA,
+    "opencode": OPENCODE_SETTINGS_SCHEMA,
 }
 
 _TOOL_CONFIG_PATHS: dict[str, str] = {
     "claude_code": os.path.join("claude-code", "config", "settings.json"),
     "codex": os.path.join("codex", "config", "codex.json"),
+    "opencode": os.path.join("opencode", "config", "opencode.json"),
 }
 
 
@@ -306,6 +377,30 @@ def _sync_provider_env(settings: dict[str, Any]) -> None:
             if val:
                 env[env_key] = val
         settings["env"] = env
+    else:
+        # Global / empty — remove env section so global config takes over.
+        settings.pop("env", None)
+
+
+def _sync_opencode_provider_env(settings: dict[str, Any]) -> None:
+    """Rebuild the ``env`` section of OpenCode settings based on provider fields.
+
+    Called after provider-related keys are updated. Mutates *settings* in place.
+    """
+    provider = settings.get("provider", "")
+
+    if provider == "anthropic":
+        api_key = settings.get("opencode_api_key", "")
+        env: dict[str, str] = {}
+        if api_key:
+            env["ANTHROPIC_API_KEY"] = api_key
+        settings["env"] = env if env else {}
+    elif provider == "openai":
+        api_key = settings.get("openai_api_key", "")
+        env = {}
+        if api_key:
+            env["OPENAI_API_KEY"] = api_key
+        settings["env"] = env if env else {}
     else:
         # Global / empty — remove env section so global config takes over.
         settings.pop("env", None)
@@ -486,6 +581,8 @@ class ToolSettingsManager:
             _sync_provider_env(current)
         elif tool_name == "codex" and _CODEX_PROVIDER_KEYS & set(updates.keys()):
             _sync_codex_provider_env(current)
+        elif tool_name == "opencode" and _OPENCODE_PROVIDER_KEYS & set(updates.keys()):
+            _sync_opencode_provider_env(current)
 
         rel = _TOOL_CONFIG_PATHS.get(tool_name)
         assert rel is not None

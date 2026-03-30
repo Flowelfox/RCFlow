@@ -10,6 +10,8 @@ The ``PromptRouter`` class is composed from five mixin modules:
   subprocess lifecycle
 - :class:`~src.core.agent_codex.CodexAgentMixin` — Codex CLI subprocess
   lifecycle
+- :class:`~src.core.agent_opencode.OpenCodeAgentMixin` — OpenCode CLI subprocess
+  lifecycle
 - :class:`~src.core.background_tasks.BackgroundTasksMixin` — fire-and-forget
   background tasks (logging, archiving, summaries, titles, tasks, artifacts)
 """
@@ -26,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from src.config import Settings
 from src.core.agent_claude_code import ClaudeCodeAgentMixin
 from src.core.agent_codex import CodexAgentMixin
+from src.core.agent_opencode import OpenCodeAgentMixin
 from src.core.attachment_store import ResolvedAttachment
 from src.core.background_tasks import BackgroundTasksMixin
 from src.core.buffer import MessageType
@@ -36,6 +39,7 @@ from src.core.session_lifecycle import SessionLifecycleMixin
 from src.executors.base import BaseExecutor, ExecutionChunk
 from src.executors.claude_code import ClaudeCodeExecutor
 from src.executors.codex import CodexExecutor
+from src.executors.opencode import OpenCodeExecutor
 from src.executors.http import HttpExecutor
 from src.executors.shell import ShellExecutor
 from src.executors.worktree import WorktreeExecutor
@@ -63,6 +67,7 @@ class PromptRouter(
     ContextMixin,
     ClaudeCodeAgentMixin,
     CodexAgentMixin,
+    OpenCodeAgentMixin,
     BackgroundTasksMixin,
 ):
     """Routes user prompts through the LLM pipeline with tool execution."""
@@ -155,6 +160,22 @@ class PromptRouter(
                 binary_path=binary_path,
                 extra_env=self._build_codex_extra_env(),
                 config_overrides=self._get_managed_config_overrides("codex"),
+            )
+
+        # OpenCode executors are always created fresh (one per session)
+        if executor_type == "opencode":
+            binary_path = "opencode"
+            if tool_def is not None:
+                config = tool_def.get_opencode_config()
+                binary_path = config.binary_path
+            if self._tool_manager:
+                resolved = self._tool_manager.get_binary_path("opencode")
+                if resolved:
+                    binary_path = resolved
+            return OpenCodeExecutor(
+                binary_path=binary_path,
+                extra_env=self._build_opencode_extra_env(),
+                config_overrides=self._get_managed_config_overrides("opencode"),
             )
 
         if executor_type not in self._executors:
@@ -516,6 +537,18 @@ class PromptRouter(
             await self._forward_to_codex(session, text)
             return session.id
 
+        # If session has an active OpenCode executor, forward message directly
+        if session.opencode_executor is not None:
+            buffer_data3oc: dict[str, Any] = {"content": text, "role": "user"}
+            if attachments:
+                buffer_data3oc["attachments"] = [
+                    {"name": a.file_name, "mime_type": a.mime_type, "size": len(a.data)}
+                    for a in attachments
+                ]
+            session.buffer.push_text(MessageType.TEXT_CHUNK, buffer_data3oc)
+            await self._forward_to_opencode(session, text)
+            return session.id
+
         # Direct tool mode: bypass LLM entirely, parse #tool_name syntax
         if self.is_direct_tool_mode:
             session.set_active()
@@ -626,7 +659,11 @@ class PromptRouter(
             async def execute_tool(tool_call: ToolCallRequest) -> str:
                 nonlocal agent_started
                 result = await self._execute_tool(session, tool_call)
-                if session.claude_code_executor is not None or session.codex_executor is not None:
+                if (
+                    session.claude_code_executor is not None
+                    or session.codex_executor is not None
+                    or session.opencode_executor is not None
+                ):
                     agent_started = True
                 return result
 
@@ -721,6 +758,7 @@ class PromptRouter(
                 if (
                     session.claude_code_executor is None
                     and session.codex_executor is None
+                    and session.opencode_executor is None
                     and last_assistant
                     and self._contains_session_end_ask(last_assistant)
                 ):
@@ -749,7 +787,11 @@ class PromptRouter(
                     self._fire_realtime_artifact_scan(session)
 
                 # Session stays ACTIVE — only end_session() or cancel_session() will complete it
-                if session.claude_code_executor is None and session.codex_executor is None:
+                if (
+                    session.claude_code_executor is None
+                    and session.codex_executor is None
+                    and session.opencode_executor is None
+                ):
                     session.set_activity(ActivityState.IDLE)
 
             except Exception as e:
@@ -780,7 +822,7 @@ class PromptRouter(
         # For agent tools, push AGENT_SESSION_START (visible banner) then
         # AGENT_GROUP_START (collapsible sub-message group) so the frontend
         # shows "Claude Code started" with the prompt before tool output.
-        if tool_def is not None and tool_def.executor in ("claude_code", "codex"):
+        if tool_def is not None and tool_def.executor in ("claude_code", "codex", "opencode"):
             session.buffer.push_text(
                 MessageType.AGENT_SESSION_START,
                 {
@@ -830,6 +872,8 @@ class PromptRouter(
             return await self._start_claude_code(session, tool_def, tool_call)
         if tool_def.executor == "codex":
             return await self._start_codex(session, tool_def, tool_call)
+        if tool_def.executor == "opencode":
+            return await self._start_opencode(session, tool_def, tool_call)
 
         # Worktree tool always requires explicit user approval before execution,
         # regardless of the session's existing permission mode.  The 'list'
