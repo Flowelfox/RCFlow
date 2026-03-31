@@ -1,159 +1,105 @@
 # RCFlow
 
-A WebSocket-based action server that translates natural language prompts into tool executions via LLM. Users connect from mobile or desktop clients, send text or voice prompts, and the server uses Anthropic Claude to interpret those prompts into tool calls — shell commands, HTTP API calls, Claude Code sessions, and more. Results stream back to the client in real time over WebSocket channels.
+A coding agent orchestration platform: a backend server paired with a Flutter desktop and mobile client. Run and manage multiple coding agents — Claude Code, OpenAI Codex, and OpenCode — across your projects from a single place. Send prompts from any device, monitor sessions in real time, and let agents work in parallel while you stay in the loop.
 
 ## Key Features
 
-- **Natural language to action** — Send text or voice prompts; the LLM decides which tools to invoke and executes them on the host machine
+- **Agent orchestration** — Spin up and manage Claude Code, Codex, and OpenCode agents concurrently across different projects and worktrees
+- **Built-in client** — Flutter desktop and mobile app for sending prompts, reviewing output, approving tool calls, and managing sessions
+- **Remote control** — Drive agents from any device over WebSocket; the server runs on your machine, the client runs anywhere
 - **Real-time streaming** — Separate WebSocket channels for text input, audio input, text output, and audio output
-- **Pluggable tools** — Tools are defined as JSON files and loaded at startup; add new tools without code changes
-- **Multiple executors** — Shell commands, HTTP API calls, Claude Code (interactive coding agent), and OpenAI Codex
-- **Session management** — Persistent sessions with pause/resume/restore, conversation history, and automatic archival to database
+- **Pluggable tools** — Tools are JSON files loaded at startup; extend agent capabilities without code changes
+- **Session management** — Persistent sessions with pause/resume/restore, history, and automatic database archival
 - **Speech support** — Pluggable STT (Wispr Flow) and TTS providers for voice-driven workflows
-- **Multi-backend LLM** — Supports Anthropic API directly or via AWS Bedrock
-- **Cross-platform** — Server runs on Linux and Windows; Flutter client targets Android and Windows desktop
-- **Hot-reloadable config** — Change LLM provider, API keys, and other settings at runtime via the API
-- **Tool management** — Automatic detection, installation, and updates of managed CLI tools (Claude Code, Codex)
-
-## Architecture
-
-```
-┌─────────────────┐
-│  Mobile/Desktop  │
-│     Client       │
-└────┬───┬───┬───┬┘
-     │   │   │   │
-     ▼   ▼   ▼   ▼
-  /ws/input  /ws/output    ← 4 WebSocket channels
-  /text      /text
-  /audio     /audio
-     │              ▲
-     ▼              │
-  Prompt Router → LLM (Anthropic/Bedrock) → Tool Executor → Session Manager
-                                                                    │
-                                                                    ▼
-                                                              Database
-                                                        (SQLite / PostgreSQL)
-```
-
-**Request lifecycle:** Client sends text/audio → STT transcribes audio → Prompt Router creates/resumes a session → LLM generates tool calls → Executors run tools → Output streams back via WebSocket → Session archived to database on completion.
-
-## Prerequisites
-
-- **Python 3.12+**
-- **[uv](https://docs.astral.sh/uv/)** — Python package manager
-- **Anthropic API key** or **AWS Bedrock** access for LLM inference
-- **SQLite** (default, zero-config) or **PostgreSQL** for persistence
-- **Flutter SDK 3.11+** (only if building the client)
+- **Multi-backend LLM** — Anthropic API, AWS Bedrock, or OpenAI-compatible providers
+- **Hot-reloadable config** — Change LLM provider, API keys, and settings at runtime via the API
 
 ## Installation
 
+### Prerequisites
+
+- **Python 3.12+**
+- **[uv](https://docs.astral.sh/uv/)** — Python package manager (`curl -LsSf https://astral.sh/uv/install.sh | sh`)
+- An LLM API key — **Anthropic**, **OpenAI**, or **AWS Bedrock** access
+
+### From a Release
+
+Download the latest release archive from the [Releases page](../../releases), extract it, and install:
+
 ```bash
-# Clone the repository
-git clone <repo-url> && cd rcflow
+# Extract the release archive
+tar -xf rcflow-<version>.tar.gz
+cd rcflow-<version>
 
-# Install production dependencies
-just install
+# Install into /opt/rcflow (or any directory you prefer)
+sudo mkdir -p /opt/rcflow
+sudo cp -r . /opt/rcflow
+cd /opt/rcflow
 
-# Or install with dev dependencies (linting, testing, pre-commit hooks)
-just dev
+# Create virtual environment and install dependencies
+uv sync --no-dev
 ```
 
-For PostgreSQL support:
+For PostgreSQL support instead of the default SQLite:
 
 ```bash
-uv sync --extra postgres
+uv sync --no-dev --extra postgres
 ```
 
-## Configuration
-
-Settings are stored in `settings.json`. The file is created automatically on first run with default values and a generated API key. You can also create it manually:
-
-Key settings:
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `RCFLOW_HOST` | Server bind address | `0.0.0.0` |
-| `RCFLOW_PORT` | Server port | `53890` |
-| `RCFLOW_API_KEY` | API key for client authentication | *(required)* |
-| `LLM_PROVIDER` | `anthropic` or `bedrock` | `anthropic` |
-| `ANTHROPIC_API_KEY` | Anthropic API key (when using direct API) | |
-| `ANTHROPIC_MODEL` | Model ID | `claude-sonnet-4-6` |
-| `DATABASE_URL` | SQLAlchemy async database URL | `sqlite+aiosqlite:///./data/rcflow.db` |
-| `SSL_CERTFILE` / `SSL_KEYFILE` | TLS certificate paths (enables WSS) | |
-| `STT_PROVIDER` | Speech-to-text provider | `wispr_flow` |
-| `PROJECTS_DIR` | Root directory containing project folders | `~/Projects` |
-| `TOOLS_DIR` | Directory containing tool JSON definitions | `./tools` |
-| `LOG_LEVEL` | Logging verbosity | `INFO` |
-
-See `Design.md` for the full list including AWS Bedrock, TTS, Codex, and tool management options. Environment variables set in the shell take precedence over values in `settings.json`.
-
-## Usage
-
-### Development
+### Run the Server
 
 ```bash
-# Start the server
-just run
-
-# Or directly
 uv run rcflow
 ```
 
-The server will start on the configured host and port (default: `0.0.0.0:53890`).
+On first run, `settings.json` is created automatically with default values and a generated API key. The server binds to `0.0.0.0:53890` by default.
 
-### Database Migrations
+Apply database migrations before first use:
 
 ```bash
-# Apply all migrations
-just migrate
-
-# Generate a new migration after model changes
-just migrate-gen "describe your change"
-
-# Rollback the last migration
-just migrate-down
+uv run alembic upgrade head
 ```
 
-### Production (systemd)
+### systemd Service (Linux)
 
-A systemd service file is provided at `systemd/rcflow.service`:
+A service file is included in the release:
 
 ```bash
-# Copy and enable the service
 sudo cp systemd/rcflow.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now rcflow
 ```
 
-The service expects the application to be installed at `/opt/rcflow` with a `settings.json` file and virtual environment in place.
+The service expects the application at `/opt/rcflow` with `settings.json` and the virtual environment in place.
 
 ### Flutter Client
 
-```bash
-# Run in hot reload mode (Android emulator)
-just flutter-run
+Pre-built APKs (Android) and Windows installers are attached to each release. Download and install the appropriate artifact for your platform — no build step required.
 
-# Build debug APK
-just flutter-build
+## Configuration
 
-# Build release APK (split per ABI)
-just flutter-release
+Settings are stored in `settings.json` in the server directory. Edit the file directly or use the `/api/config` endpoint to update settings at runtime.
 
-# Build Windows desktop release
-just flutter-windows
-```
+| Setting | Description | Default |
+|---------|-------------|---------|
+| `RCFLOW_HOST` | Server bind address | `0.0.0.0` |
+| `RCFLOW_PORT` | Server port | `53890` |
+| `RCFLOW_API_KEY` | API key for client authentication | *(auto-generated)* |
+| `LLM_PROVIDER` | `anthropic`, `bedrock`, `openai`, or `none` | `anthropic` |
+| `ANTHROPIC_API_KEY` | Anthropic API key | |
+| `ANTHROPIC_MODEL` | Model ID | `claude-sonnet-4-6` |
+| `DATABASE_URL` | SQLAlchemy async database URL | `sqlite+aiosqlite:///./data/rcflow.db` |
+| `SSL_CERTFILE` / `SSL_KEYFILE` | TLS certificate paths (enables WSS) | |
+| `STT_PROVIDER` | Speech-to-text provider | `wispr_flow` |
+| `PROJECTS_DIR` | Root directory for project folders | `~/Projects` |
+| `TOOLS_DIR` | Directory for tool JSON definitions | `./tools` |
+| `LOG_LEVEL` | Logging verbosity | `INFO` |
 
-Helper scripts for Android emulator setup on WSL2:
-
-```bash
-just start-emulator    # Start Windows Android emulator (cold boot)
-just setup-emulator    # Setup WSL2 ADB connection
-```
+Environment variables take precedence over `settings.json`. See `Design.md` for the full list including AWS Bedrock, TTS, Codex, and tool management options.
 
 ## API
 
-RCFlow exposes a REST API and four WebSocket endpoints. The server auto-generates OpenAPI documentation at `/docs` when running.
+OpenAPI docs are served at `/docs` while the server is running.
 
 ### REST Endpoints (`/api`)
 
@@ -185,73 +131,41 @@ RCFlow exposes a REST API and four WebSocket endpoints. The server auto-generate
 | `/ws/output/text` | Server → Client | Receive streaming text output |
 | `/ws/output/audio` | Server → Client | Receive streaming audio (TTS) |
 
-All authenticated endpoints require the `RCFLOW_API_KEY` header/query parameter.
+All authenticated endpoints require the `RCFLOW_API_KEY` header or query parameter.
 
 ## Tools
 
-Tools are defined as JSON files in the `tools/` directory. Each tool specifies its name, description, parameters (JSON Schema), executor type, and configuration. Built-in tools:
+Tools are JSON files in the `tools/` directory. Each defines a name, description, parameters (JSON Schema), executor type, and configuration.
 
 | Tool | Executor | Description |
 |------|----------|-------------|
 | `shell_exec` | `shell` | Execute shell commands on the host |
-| `system_info` | `shell` (script) | Gather system information |
+| `system_info` | `shell` | Gather system information |
 | `claude_code` | `claude_code` | Interactive Claude Code coding sessions |
 | `codex` | `codex` | OpenAI Codex coding sessions |
 
-## Testing
-
-```bash
-# Run tests
-just test
-
-# Run tests with coverage report
-just coverage
-
-# Run all checks (lint + typecheck + test)
-just check
-```
-
-Individual checks:
-
-```bash
-just lint        # Ruff linting
-just typecheck   # ty type checking
-just format      # Auto-format with Ruff
-```
-
-## Project Structure
+## Architecture
 
 ```
-rcflow/
-├── src/                    # Python server
-│   ├── api/                # FastAPI routes
-│   │   ├── http.py         # REST endpoints
-│   │   └── ws/             # WebSocket handlers (input/output, text/audio)
-│   ├── core/               # Core logic
-│   │   ├── llm.py          # LLM client (Anthropic/Bedrock)
-│   │   ├── prompt_router.py# Routes prompts through LLM and tools
-│   │   ├── session.py      # Session lifecycle management
-│   │   └── buffer.py       # Message buffering and history
-│   ├── executors/          # Tool executors (shell, http, claude_code, codex)
-│   ├── tools/              # Tool registry and JSON loader
-│   ├── speech/             # STT/TTS provider abstractions
-│   ├── prompts/            # Prompt template builder (Jinja2)
-│   ├── services/           # Tool management and settings
-│   ├── models/             # SQLAlchemy models
-│   ├── db/                 # Database engine and Alembic migrations
-│   ├── config.py           # Settings (pydantic-settings)
-│   └── main.py             # FastAPI app factory and lifespan
-├── rcflowclient/           # Flutter client (Android, Windows, Linux, macOS, Web)
-├── tools/                  # Tool definition JSON files
-├── tests/                  # pytest test suite
-├── systemd/                # systemd service file
-├── scripts/                # Helper scripts (emulator setup, icon generation)
-├── certs/                  # TLS certificates (gitignored)
-├── alembic.ini             # Alembic migration config
-├── justfile                # Build, run, test, and deploy commands
-├── pyproject.toml          # Python project metadata and dependencies
-└── Design.md               # Detailed design document
+┌──────────────────┐
+│  Mobile/Desktop  │
+│      Client      │
+└──┬───┬───┬───┬───┘
+   │   │   │   │
+   ▼   ▼   ▼   ▼
+/ws/input    /ws/output      ← 4 WebSocket channels
+/text        /text
+/audio       /audio
+   │                 ▲
+   ▼                 │
+Prompt Router → LLM (Anthropic/Bedrock) → Tool Executor → Session Manager
+                                                                 │
+                                                                 ▼
+                                                           Database
+                                                     (SQLite / PostgreSQL)
 ```
+
+**Request lifecycle:** Client sends text/audio → STT transcribes audio → Prompt Router creates/resumes a session → LLM generates tool calls → Executors run tools → Output streams back via WebSocket → Session archived to database on completion.
 
 ## License
 
