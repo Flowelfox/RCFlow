@@ -118,6 +118,38 @@ class TestActiveSession:
         session.cancel()
         assert session.status == SessionStatus.CANCELLED
 
+    def test_clear_subprocess_tracking(self):
+        """clear_subprocess_tracking() resets all subprocess fields and pushes null status."""
+        session = ActiveSession("test-id", SessionType.LONG_RUNNING)
+        session.subprocess_started_at = datetime.now(UTC)
+        session.subprocess_current_tool = "Read"
+        session.subprocess_type = "claude_code"
+        session.subprocess_display_name = "Claude Code"
+        session.subprocess_working_directory = "/tmp/project"
+
+        ephemeral_messages: list[dict] = []
+        original_push = session.buffer.push_ephemeral
+
+        def capture_ephemeral(msg_type, data):
+            ephemeral_messages.append({"type": msg_type, "data": data})
+            original_push(msg_type, data)
+
+        session.buffer.push_ephemeral = capture_ephemeral
+
+        session.clear_subprocess_tracking()
+
+        assert session.subprocess_started_at is None
+        assert session.subprocess_current_tool is None
+        assert session.subprocess_type is None
+        assert session.subprocess_display_name is None
+        assert session.subprocess_working_directory is None
+
+        # Verify null subprocess_status was pushed
+        assert len(ephemeral_messages) == 1
+        assert ephemeral_messages[0]["type"] == MessageType.SUBPROCESS_STATUS
+        assert ephemeral_messages[0]["data"]["subprocess_type"] is None
+        assert ephemeral_messages[0]["data"]["session_id"] == "test-id"
+
 
 class TestPauseResume:
     def test_pause_active_session(self):

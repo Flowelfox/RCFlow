@@ -578,6 +578,7 @@ class ClaudeCodeAgentMixin:
                 exit_code,
             )
             session.set_activity(ActivityState.IDLE)
+            session.clear_subprocess_tracking()
             session.buffer.push_text(
                 MessageType.AGENT_GROUP_END,
                 {"session_id": session.id},
@@ -615,15 +616,7 @@ class ClaudeCodeAgentMixin:
         session._claude_code_stream_task = None
 
         # Clear subprocess tracking and broadcast null status
-        session.subprocess_started_at = None
-        session.subprocess_current_tool = None
-        session.subprocess_type = None
-        session.subprocess_display_name = None
-        session.subprocess_working_directory = None
-        session.buffer.push_ephemeral(
-            MessageType.SUBPROCESS_STATUS,
-            {"session_id": session.id, "subprocess_type": None},
-        )
+        session.clear_subprocess_tracking()
 
         if session.status == SessionStatus.PAUSED:
             # Defer end/archive — user will see output on resume
@@ -761,6 +754,7 @@ class ClaudeCodeAgentMixin:
                 exit_code,
             )
             session.set_activity(ActivityState.IDLE)
+            session.clear_subprocess_tracking()
             session.buffer.push_text(
                 MessageType.AGENT_GROUP_END,
                 {"session_id": session.id},
@@ -834,6 +828,7 @@ class ClaudeCodeAgentMixin:
                 exit_code,
             )
             session.set_activity(ActivityState.IDLE)
+            session.clear_subprocess_tracking()
             session.buffer.push_text(
                 MessageType.AGENT_GROUP_END,
                 {"session_id": session.id},

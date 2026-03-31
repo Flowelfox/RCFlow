@@ -155,9 +155,8 @@ class SessionLifecycleMixin:
             session._plan_review_feedback = None
             session._plan_review_event.set()
 
-        # Clear subprocess tracking fields
-        session.subprocess_started_at = None
-        session.subprocess_current_tool = None
+        # Clear subprocess tracking fields and broadcast null status
+        session.clear_subprocess_tracking()
 
         # Close any open agent group before ending the session
         if had_claude_code or had_codex or had_opencode:
@@ -248,6 +247,9 @@ class SessionLifecycleMixin:
         session._opencode_stream_task = None
 
         self._resolve_session_end_ask(session, accepted=True)
+
+        # Clear subprocess tracking fields and broadcast null status
+        session.clear_subprocess_tracking()
 
         # Close any open agent group before ending the session
         if had_claude_code or had_codex or had_opencode:
@@ -469,9 +471,8 @@ class SessionLifecycleMixin:
             session._plan_review_feedback = None
             session._plan_review_event.set()
 
-        # Clear subprocess tracking fields
-        session.subprocess_started_at = None
-        session.subprocess_current_tool = None
+        # Clear subprocess tracking fields and broadcast null status
+        session.clear_subprocess_tracking()
 
         session.pause()
 
@@ -565,15 +566,8 @@ class SessionLifecycleMixin:
                 {"session_id": session.id, "content": "[Subprocess interrupted by user]\n"},
             )
 
-        # Clear subprocess tracking fields
-        session.subprocess_started_at = None
-        session.subprocess_current_tool = None
-
-        # Broadcast null subprocess_status so the client clears its indicator
-        session.buffer.push_ephemeral(
-            MessageType.SUBPROCESS_STATUS,
-            {"session_id": session.id, "subprocess_type": None},
-        )
+        # Clear subprocess tracking fields and broadcast null status
+        session.clear_subprocess_tracking()
 
         session.set_activity(ActivityState.IDLE)
 

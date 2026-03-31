@@ -160,6 +160,23 @@ class ActiveSession:
         if self._on_update:
             self._on_update()
 
+    def clear_subprocess_tracking(self) -> None:
+        """Clear transient subprocess fields and broadcast a null status.
+
+        Called whenever the managed subprocess is no longer running
+        (normal end, unexpected exit, cancel, pause, etc.) so the client
+        hides the subprocess indicator bar.
+        """
+        self.subprocess_started_at = None
+        self.subprocess_current_tool = None
+        self.subprocess_type = None
+        self.subprocess_display_name = None
+        self.subprocess_working_directory = None
+        self.buffer.push_ephemeral(
+            MessageType.SUBPROCESS_STATUS,
+            {"session_id": self.id, "subprocess_type": None},
+        )
+
     @property
     def title(self) -> str | None:
         return self._title

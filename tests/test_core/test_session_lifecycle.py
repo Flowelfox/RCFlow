@@ -337,6 +337,31 @@ class TestInterruptSubprocess:
         result = await router.interrupt_subprocess(session.id)
         assert result.status == SessionStatus.ACTIVE
 
+    async def test_interrupt_clears_subprocess_tracking(self, session_manager: SessionManager) -> None:
+        """Interrupting a subprocess must clear ALL tracking fields and push null status."""
+        router = _make_router(session_manager)
+        session = session_manager.create_session(SessionType.LONG_RUNNING)
+        session.set_active()
+
+        # Simulate active subprocess tracking
+        session.subprocess_started_at = datetime.now(UTC)
+        session.subprocess_current_tool = "Edit"
+        session.subprocess_type = "claude_code"
+        session.subprocess_display_name = "Claude Code"
+        session.subprocess_working_directory = "/tmp/project"
+
+        mock_executor = AsyncMock()
+        mock_executor.cancel = AsyncMock()
+        session.claude_code_executor = mock_executor
+
+        await router.interrupt_subprocess(session.id)
+
+        assert session.subprocess_started_at is None
+        assert session.subprocess_current_tool is None
+        assert session.subprocess_type is None
+        assert session.subprocess_display_name is None
+        assert session.subprocess_working_directory is None
+
     async def test_terminal_session_raises(self, session_manager: SessionManager) -> None:
         router = _make_router(session_manager)
         session = session_manager.create_session(SessionType.ONE_SHOT)
