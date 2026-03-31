@@ -5,17 +5,16 @@ Revises: fea687bf3218
 Create Date: 2026-03-08 02:06:57.901726
 
 """
-from typing import Sequence, Union
+from collections.abc import Sequence
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = 'ea58dc65fd1f'
-down_revision: Union[str, Sequence[str], None] = 'fea687bf3218'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | Sequence[str] | None = 'fea687bf3218'
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
@@ -29,8 +28,18 @@ def upgrade() -> None:
         sa.Column('description', sa.Text(), nullable=True),
         sa.Column('status', sa.String(length=20), nullable=False),
         sa.Column('source', sa.String(length=10), nullable=False),
-        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
-        sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+        sa.Column(
+            'created_at',
+            sa.DateTime(timezone=True),
+            server_default=sa.text('(CURRENT_TIMESTAMP)'),
+            nullable=False,
+        ),
+        sa.Column(
+            'updated_at',
+            sa.DateTime(timezone=True),
+            server_default=sa.text('(CURRENT_TIMESTAMP)'),
+            nullable=False,
+        ),
         sa.PrimaryKeyConstraint('id')
     )
     op.create_index('ix_tasks_backend_id', 'tasks', ['backend_id'], unique=False)
@@ -42,7 +51,12 @@ def upgrade() -> None:
         sa.Column('id', sa.Uuid(), nullable=False),
         sa.Column('task_id', sa.Uuid(), nullable=False),
         sa.Column('session_id', sa.Uuid(), nullable=False),
-        sa.Column('attached_at', sa.DateTime(timezone=True), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+        sa.Column(
+            'attached_at',
+            sa.DateTime(timezone=True),
+            server_default=sa.text('(CURRENT_TIMESTAMP)'),
+            nullable=False,
+        ),
         sa.ForeignKeyConstraint(['session_id'], ['sessions.id'], ondelete='CASCADE'),
         sa.ForeignKeyConstraint(['task_id'], ['tasks.id'], ondelete='CASCADE'),
         sa.PrimaryKeyConstraint('id'),

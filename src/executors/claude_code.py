@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -312,7 +313,7 @@ class ClaudeCodeExecutor(BaseExecutor):
           separately for diagnostics without mixing into the JSON stream.
         * A :class:`~src.utils.pty_utils.PtyLineReader` wraps ``master_fd`` for
           async line-by-line reading via the event loop I/O callback.
-        * Terminal dimensions are set to 24 rows × 220 cols so Claude Code has
+        * Terminal dimensions are set to 24 rows x 220 cols so Claude Code has
           room for tool output without wrapping artifacts.
         * ``TERM=xterm-256color`` is set so Claude Code uses full colour output
           within the TUI; ``--output-format stream-json`` suppresses the visual
@@ -694,10 +695,8 @@ class ClaudeCodeExecutor(BaseExecutor):
             self._pty_reader.close()
             self._pty_reader = None
         if self._master_fd is not None:
-            try:
+            with contextlib.suppress(OSError):
                 os.close(self._master_fd)
-            except OSError:
-                pass
             self._master_fd = None
 
     async def stop_process(self) -> None:

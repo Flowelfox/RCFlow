@@ -6,12 +6,16 @@ Cross-platform: uses native pty/fork on Unix, pywinpty (ConPTY) on Windows.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 import shutil
 import struct
 import sys
-from collections.abc import Awaitable, Callable
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +28,7 @@ if _IS_WINDOWS:
 else:
     import fcntl
     import pty
+    import select as _select
     import signal
     import termios
 
@@ -177,10 +182,8 @@ class PTYSession:
             os.environ["TERM"] = "xterm-256color"
             os.environ["COLORTERM"] = "truecolor"
 
-            try:
+            with contextlib.suppress(OSError):
                 os.chdir(self.cwd)
-            except OSError:
-                pass
 
             os.execvp(self.shell, [self.shell])
         else:
@@ -229,9 +232,7 @@ class PTYSession:
         if self._master_fd is None or self._closed:
             return None
         try:
-            import select as sel
-
-            readable, _, _ = sel.select([self._master_fd], [], [], 0.5)
+            readable, _, _ = _select.select([self._master_fd], [], [], 0.5)
             if not readable:
                 return b"" if not self._closed else None
             return os.read(self._master_fd, 65536)
@@ -332,18 +333,14 @@ class PTYSession:
         self.rows = rows
         if _IS_WINDOWS:
             if self._pty_process is not None:
-                try:
+                with contextlib.suppress(Exception):
                     self._pty_process.setwinsize(rows, cols)
-                except Exception:
-                    pass
         else:
             if self._master_fd is not None:
                 self._set_winsize(self._master_fd, rows, cols)
                 if self._pid is not None:
-                    try:
+                    with contextlib.suppress(ProcessLookupError, PermissionError):
                         os.killpg(os.getpgid(self._pid), signal.SIGWINCH)
-                    except (ProcessLookupError, PermissionError):
-                        pass
 
     @staticmethod
     def _set_winsize(fd: int, rows: int, cols: int) -> None:
@@ -370,24 +367,18 @@ class PTYSession:
 
     async def _close_unix(self) -> None:
         if self._pid is not None:
-            try:
+            with contextlib.suppress(ProcessLookupError, PermissionError):
                 os.killpg(os.getpgid(self._pid), signal.SIGHUP)
-            except (ProcessLookupError, PermissionError):
-                pass
 
         if self._master_fd is not None:
-            try:
+            with contextlib.suppress(OSError):
                 os.close(self._master_fd)
-            except OSError:
-                pass
             self._master_fd = None
 
         if self._reader_task is not None:
             self._reader_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._reader_task
-            except asyncio.CancelledError:
-                pass
 
     async def _close_windows(self) -> None:
         if self._pty_process is not None:
@@ -400,7 +391,5 @@ class PTYSession:
 
         if self._reader_task is not None:
             self._reader_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._reader_task
-            except asyncio.CancelledError:
-                pass

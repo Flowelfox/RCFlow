@@ -21,7 +21,10 @@ depends_on: str | Sequence[str] | None = None
 def upgrade() -> None:
     op.add_column("sessions", sa.Column("input_tokens", sa.Integer(), nullable=False, server_default="0"))
     op.add_column("sessions", sa.Column("output_tokens", sa.Integer(), nullable=False, server_default="0"))
-    op.add_column("sessions", sa.Column("cache_creation_input_tokens", sa.Integer(), nullable=False, server_default="0"))
+    op.add_column(
+        "sessions",
+        sa.Column("cache_creation_input_tokens", sa.Integer(), nullable=False, server_default="0"),
+    )
     op.add_column("sessions", sa.Column("cache_read_input_tokens", sa.Integer(), nullable=False, server_default="0"))
     op.add_column("sessions", sa.Column("tool_input_tokens", sa.Integer(), nullable=False, server_default="0"))
     op.add_column("sessions", sa.Column("tool_output_tokens", sa.Integer(), nullable=False, server_default="0"))

@@ -9,14 +9,16 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Depends, Query, Request
 
 from src.api.deps import verify_http_api_key
 from src.api.routes.rcflow_plugins import PluginStateManager
-from src.config import Settings
 from src.paths import get_managed_cc_plugins_dir, get_managed_tools_dir
+
+if TYPE_CHECKING:
+    from src.config import Settings
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -33,18 +35,18 @@ _hide_re = re.compile(r"^hide-from-slash-command-tool\s*:\s*(.+)$", re.MULTILINE
 # text but are intentionally secondary — live descriptions sourced from Claude
 # itself take precedence when available.
 _FALLBACK_CC_BUILTINS: list[dict[str, str]] = [
-    {"name": "help",        "description": "Get help with using Claude Code",              "source": "claude_code_builtin"},
-    {"name": "clear",       "description": "Clear conversation history",                   "source": "claude_code_builtin"},
-    {"name": "compact",     "description": "Compact conversation to save context",         "source": "claude_code_builtin"},
-    {"name": "cost",        "description": "Show token usage and cost for session",        "source": "claude_code_builtin"},
-    {"name": "resume",      "description": "Resume a previous Claude Code session",        "source": "claude_code_builtin"},
-    {"name": "init",        "description": "Initialize project with CLAUDE.md",            "source": "claude_code_builtin"},
-    {"name": "bug",         "description": "Report a bug in Claude Code",                  "source": "claude_code_builtin"},
-    {"name": "pr-comments", "description": "Review and address PR comments",               "source": "claude_code_builtin"},
-    {"name": "permissions", "description": "Manage Claude Code permissions",               "source": "claude_code_builtin"},
-    {"name": "doctor",      "description": "Run diagnostics on Claude Code setup",         "source": "claude_code_builtin"},
-    {"name": "vim",         "description": "Toggle vim keybindings",                       "source": "claude_code_builtin"},
-    {"name": "btw",         "description": "Add an inline note or comment to the context", "source": "claude_code_builtin"},
+    {"name": "help", "description": "Get help with using Claude Code", "source": "claude_code_builtin"},
+    {"name": "clear", "description": "Clear conversation history", "source": "claude_code_builtin"},
+    {"name": "compact", "description": "Compact conversation to save context", "source": "claude_code_builtin"},
+    {"name": "cost", "description": "Show token usage and cost for session", "source": "claude_code_builtin"},
+    {"name": "resume", "description": "Resume a previous Claude Code session", "source": "claude_code_builtin"},
+    {"name": "init", "description": "Initialize project with CLAUDE.md", "source": "claude_code_builtin"},
+    {"name": "bug", "description": "Report a bug in Claude Code", "source": "claude_code_builtin"},
+    {"name": "pr-comments", "description": "Review and address PR comments", "source": "claude_code_builtin"},
+    {"name": "permissions", "description": "Manage Claude Code permissions", "source": "claude_code_builtin"},
+    {"name": "doctor", "description": "Run diagnostics on Claude Code setup", "source": "claude_code_builtin"},
+    {"name": "vim", "description": "Toggle vim keybindings", "source": "claude_code_builtin"},
+    {"name": "btw", "description": "Add an inline note or comment to the context", "source": "claude_code_builtin"},
 ]
 
 # In-process cache: populated on the first successful fetch or fallback.
@@ -157,7 +159,7 @@ async def _fetch_from_claude(binary: str) -> list[dict[str, str]]:
                     "source": "claude_code_builtin",
                 })
         return commands
-    except (asyncio.TimeoutError, Exception) as exc:
+    except (TimeoutError, Exception) as exc:
         logger.debug("cc_builtins: fetch failed — %s", exc)
         return []
 

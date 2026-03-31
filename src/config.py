@@ -186,7 +186,9 @@ class Settings(BaseSettings):
 
     # Artifacts
     ARTIFACT_INCLUDE_PATTERN: str = "*.md"
-    ARTIFACT_EXCLUDE_PATTERN: str = "node_modules/**,__pycache__/**,.git/**,.venv/**,venv/**,.env/**,build/**,dist/**,target/**,*.pyc"
+    ARTIFACT_EXCLUDE_PATTERN: str = (
+        "node_modules/**,__pycache__/**,.git/**,.venv/**,venv/**,.env/**,build/**,dist/**,target/**,*.pyc"
+    )
     ARTIFACT_AUTO_SCAN: bool = True
     ARTIFACT_MAX_FILE_SIZE: int = 5242880  # 5MB in bytes
 
@@ -384,7 +386,10 @@ CONFIG_OPTIONS: list[dict[str, Any]] = [
         "label": "Global Prompt",
         "type": "textarea",
         "group": "Prompt",
-        "description": "Custom instructions appended to the system prompt for every session (e.g. language preferences, behavioral guidelines, domain expertise)",
+        "description": (
+            "Custom instructions appended to the system prompt for every session"
+            " (e.g. language preferences, behavioral guidelines, domain expertise)"
+        ),
         "required": False,
         "restart_required": False,
         "visible_when": {"key": "LLM_PROVIDER", "value_not": "none"},
@@ -551,9 +556,7 @@ def get_config_schema(settings: Settings) -> list[dict[str, Any]]:
                 value = []
         elif isinstance(raw_value, Path):
             value = str(raw_value)
-        elif isinstance(raw_value, bool):
-            value = raw_value
-        elif isinstance(raw_value, (int, float)):
+        elif isinstance(raw_value, bool | int | float):
             value = raw_value
         else:
             value = str(raw_value) if raw_value is not None else ""

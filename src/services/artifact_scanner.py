@@ -5,14 +5,15 @@ import logging
 import mimetypes
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from src.config import Settings
-from src.models.db import Artifact, Session as SessionModel, SessionMessage
+from src.models.db import Artifact, SessionMessage
+from src.models.db import Session as SessionModel
 
 logger = logging.getLogger(__name__)
 
@@ -155,7 +156,7 @@ class ArtifactScanner:
             try:
                 stat = file_path.stat()
                 file_size = stat.st_size
-                modified_at = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
+                modified_at = datetime.fromtimestamp(stat.st_mtime, tz=UTC)
             except OSError:
                 logger.debug("Could not stat file: %s", file_path)
                 continue

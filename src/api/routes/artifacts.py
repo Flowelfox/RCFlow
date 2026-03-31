@@ -135,7 +135,7 @@ async def update_artifact_settings(
 
         # Recreate artifact scanner with new settings
         settings = Settings()  # type: ignore[call-arg]
-        from src.services.artifact_scanner import ArtifactScanner
+        from src.services.artifact_scanner import ArtifactScanner  # noqa: PLC0415
 
         request.app.state.artifact_scanner = ArtifactScanner(
             settings,

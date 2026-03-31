@@ -16,7 +16,7 @@ The ``PromptRouter`` class is composed from five mixin modules:
   background tasks (logging, archiving, summaries, titles, tasks, artifacts)
 """
 
-import asyncio
+import asyncio  # noqa: TC003
 import json
 import logging
 import os
@@ -39,8 +39,8 @@ from src.core.session_lifecycle import SessionLifecycleMixin
 from src.executors.base import BaseExecutor, ExecutionChunk
 from src.executors.claude_code import ClaudeCodeExecutor
 from src.executors.codex import CodexExecutor
-from src.executors.opencode import OpenCodeExecutor
 from src.executors.http import HttpExecutor
+from src.executors.opencode import OpenCodeExecutor
 from src.executors.shell import ShellExecutor
 from src.executors.worktree import WorktreeExecutor
 from src.services.artifact_scanner import ArtifactScanner
@@ -248,7 +248,7 @@ class PromptRouter(
             return True
         if att.mime_type in self._TEXT_MIME_TYPES:
             return True
-        import os
+        import os  # noqa: PLC0415
         _, ext = os.path.splitext(att.file_name.lower())
         return ext in self._TEXT_EXTENSIONS
 
@@ -262,7 +262,7 @@ class PromptRouter(
         - Text files → inline text blocks with a filename header
         - Other binary → a brief placeholder text block
         """
-        import base64
+        import base64  # noqa: PLC0415
 
         provider = self._llm.provider if self._llm else "anthropic"
         vision_ok = self._llm.supports_vision if self._llm else False
@@ -679,7 +679,6 @@ class PromptRouter(
             _tel_turn_idx: int = 0
             _tel_tool_idx: int = 0  # tool call index within the current LLM turn
 
-            backend_id = self._settings.RCFLOW_BACKEND_ID if self._settings else ""
             if self._telemetry is not None:
                 _tel_turn = await self._telemetry.record_turn_start(
                     session_id=session.id,
@@ -880,7 +879,7 @@ class PromptRouter(
         # action is read-only and is exempted from the approval gate.
         if tool_def.executor == "worktree" and tool_call.tool_input.get("action") != "list":
             if session.permission_manager is None:
-                from src.core.permissions import PermissionManager
+                from src.core.permissions import PermissionManager  # noqa: PLC0415
                 session.permission_manager = PermissionManager()
             decision = await self._handle_permission_check(
                 session, tool_call.tool_name, tool_call.tool_input

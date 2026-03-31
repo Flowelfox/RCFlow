@@ -283,10 +283,10 @@ async def install_tool_plugin(tool_name: str, body: InstallPluginRequest) -> dic
                 if dest.exists():
                     shutil.rmtree(dest, ignore_errors=True)
                 raise HTTPException(status_code=500, detail=f"git clone failed: {error_text}")
-        except asyncio.TimeoutError:
+        except TimeoutError:
             if dest.exists():
                 shutil.rmtree(dest, ignore_errors=True)
-            raise HTTPException(status_code=504, detail="git clone timed out after 120 s")
+            raise HTTPException(status_code=504, detail="git clone timed out after 120 s") from None
 
     logger.info("Installed %s plugin '%s' from %s", tool_name, plugin_name, source)
     state = PluginStateManager(plugins_dir)
@@ -317,7 +317,7 @@ async def uninstall_tool_plugin(tool_name: str, name: str) -> dict[str, str]:
     try:
         plugin_dir.resolve().relative_to(plugins_dir.resolve())
     except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid plugin name")
+        raise HTTPException(status_code=400, detail="Invalid plugin name") from None
 
     shutil.rmtree(plugin_dir, ignore_errors=False)
 
@@ -361,7 +361,7 @@ async def set_tool_plugin_enabled(
     try:
         plugin_dir.resolve().relative_to(plugins_dir.resolve())
     except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid plugin name")
+        raise HTTPException(status_code=400, detail="Invalid plugin name") from None
 
     state = PluginStateManager(plugins_dir)
     await state.set_enabled(name, enabled=body.enabled)

@@ -279,7 +279,7 @@ async def get_linear_issue(issue_id: str, request: Request) -> dict[str, Any]:
     try:
         uid = uuid.UUID(issue_id)
     except ValueError:
-        raise HTTPException(status_code=422, detail="Invalid UUID format")
+        raise HTTPException(status_code=422, detail="Invalid UUID format") from None
 
     async with db_factory() as db:
         stmt = select(LinearIssueModel).where(
@@ -406,7 +406,7 @@ async def update_linear_issue(
     try:
         uid = uuid.UUID(issue_id)
     except ValueError:
-        raise HTTPException(status_code=422, detail="Invalid UUID format")
+        raise HTTPException(status_code=422, detail="Invalid UUID format") from None
 
     async with db_factory() as db:
         stmt = select(LinearIssueModel).where(
@@ -460,7 +460,7 @@ async def link_issue_to_task(
         uid = uuid.UUID(issue_id)
         task_uid = uuid.UUID(body.task_id)
     except ValueError:
-        raise HTTPException(status_code=422, detail="Invalid UUID format")
+        raise HTTPException(status_code=422, detail="Invalid UUID format") from None
 
     async with db_factory() as db:
         issue_stmt = select(LinearIssueModel).where(
@@ -516,7 +516,7 @@ async def create_task_from_linear_issue(
     try:
         uid = uuid.UUID(issue_id)
     except ValueError:
-        raise HTTPException(status_code=422, detail="Invalid UUID format")
+        raise HTTPException(status_code=422, detail="Invalid UUID format") from None
 
     now = datetime.now(UTC)
 
@@ -586,7 +586,7 @@ async def unlink_issue_from_task(issue_id: str, request: Request) -> dict[str, A
     try:
         uid = uuid.UUID(issue_id)
     except ValueError:
-        raise HTTPException(status_code=422, detail="Invalid UUID format")
+        raise HTTPException(status_code=422, detail="Invalid UUID format") from None
 
     async with db_factory() as db:
         stmt = select(LinearIssueModel).where(

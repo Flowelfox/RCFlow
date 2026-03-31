@@ -1,6 +1,5 @@
 import logging
 import logging.config
-from pathlib import Path
 from typing import Any
 
 from src.config import Settings
@@ -26,10 +25,7 @@ class MultiLineExceptionFormatter(logging.Formatter):
 
         if saved_exc_info:
             prefix_end = main_message.find(record.getMessage())
-            if prefix_end > 0:
-                prefix = main_message[:prefix_end]
-            else:
-                prefix = ""
+            prefix = main_message[:prefix_end] if prefix_end > 0 else ""
 
             exc_text = super().formatException(saved_exc_info)
             exc_lines = exc_text.split("\n")

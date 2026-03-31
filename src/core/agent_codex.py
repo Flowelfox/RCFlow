@@ -13,7 +13,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -23,6 +22,8 @@ from src.core.session import ActivityState, SessionStatus, SessionType
 from src.executors.codex import CodexExecutor
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
+
     from src.core.llm import ToolCallRequest
     from src.core.session import ActiveSession
     from src.executors.base import ExecutionChunk
@@ -387,10 +388,7 @@ class CodexAgentMixin:
                 elif item_type == "file_change":
                     diff = item.get("diff", "")
                     file_path = item.get("file_path", item.get("file", ""))
-                    if diff:
-                        content = _truncate_tool_output(diff)
-                    else:
-                        content = f"File changed: {file_path}" if file_path else ""
+                    content = _truncate_tool_output(diff) if diff else f"File changed: {file_path}" if file_path else ""
                     if content:
                         session.buffer.push_text(
                             MessageType.TOOL_OUTPUT,

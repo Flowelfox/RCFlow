@@ -7,14 +7,16 @@ such as artifacts discovered within that project.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select
 
 from src.api.deps import verify_http_api_key
-from src.config import Settings
 from src.models.db import Artifact as ArtifactModel
+
+if TYPE_CHECKING:
+    from src.config import Settings
 
 logger = logging.getLogger(__name__)
 

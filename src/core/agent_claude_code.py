@@ -16,7 +16,6 @@ import logging
 import os
 import shutil
 import sys
-from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -33,6 +32,8 @@ from src.core.session import ActivityState, SessionStatus, SessionType
 from src.executors.claude_code import ClaudeCodeExecutor
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
+
     from src.core.llm import ToolCallRequest
     from src.core.session import ActiveSession
     from src.executors.base import ExecutionChunk
@@ -471,9 +472,8 @@ class ClaudeCodeAgentMixin:
                 if cc_in or cc_out:
                     session.tool_input_tokens += cc_in
                     session.tool_output_tokens += cc_out
-                if cost_usd or cc_in or cc_out:
-                    if session._on_update:
-                        session._on_update()
+                if (cost_usd or cc_in or cc_out) and session._on_update:
+                    session._on_update()
 
                 if result_subtype == "max_turns":
                     # Claude Code hit --max-turns limit; pause the session so the

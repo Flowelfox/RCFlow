@@ -26,7 +26,7 @@ from src.core.permissions import (
     PermissionManager,
     PermissionScope,
 )
-from src.core.session import ActivityState, ActiveSession, SessionStatus, SessionType
+from src.core.session import ActiveSession, ActivityState, SessionStatus, SessionType
 from src.executors.claude_code import ClaudeCodeExecutor
 from src.executors.codex import CodexExecutor
 from src.executors.opencode import OpenCodeExecutor

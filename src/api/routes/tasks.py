@@ -10,7 +10,6 @@ from pydantic import BaseModel
 from sqlalchemy import select
 
 from src.api.deps import verify_http_api_key
-from src.config import Settings
 from src.models.db import Session as SessionModel
 from src.models.db import Task as TaskModel
 from src.models.db import TaskSession as TaskSessionModel
@@ -18,6 +17,7 @@ from src.models.db import TaskSession as TaskSessionModel
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
+    from src.config import Settings
     from src.core.session import SessionManager
 
 logger = logging.getLogger(__name__)

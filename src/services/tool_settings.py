@@ -10,8 +10,10 @@ from __future__ import annotations
 import json
 import logging
 import os
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 from src.config import PROVIDER_MODELS
 from src.paths import get_managed_tools_dir
