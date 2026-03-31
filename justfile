@@ -57,12 +57,12 @@ migrate-down:
     uv run alembic downgrade -1
 
 # Build distributable package for current platform
-bundle:
-    uv run python scripts/bundle.py
+bundle *FLAGS:
+    uv run python scripts/bundle.py {{ FLAGS }}
 
 # Build Linux backend .deb package (must be on Linux)
-bundle-linux-backend:
-    uv run --extra bundle python scripts/bundle.py --platform linux --installer
+bundle-linux-backend *FLAGS:
+    uv run --extra bundle python scripts/bundle.py --platform linux --installer {{ FLAGS }}
 
 # Build and install Linux backend .deb package (must be on Linux)
 bundle-linux-backend-install:
@@ -70,8 +70,8 @@ bundle-linux-backend-install:
 
 # Build macOS backend installer (.pkg, must be on macOS)
 [macos]
-bundle-macos-backend:
-    uv run --extra bundle python scripts/bundle.py --platform macos --installer
+bundle-macos-backend *FLAGS:
+    uv run --extra bundle python scripts/bundle.py --platform macos --installer {{ FLAGS }}
 
 # Build and install macOS backend (.pkg, must be on macOS)
 [macos]
@@ -79,9 +79,23 @@ bundle-macos-backend-install:
     uv run --extra bundle python scripts/bundle.py --platform macos --install
 
 # Build Linux Flutter client distributable (must be on Linux)
+# Requires: cmake, ninja, clang, pkg-config, libgtk-3-dev
+# Install missing deps with: sudo apt-get install cmake ninja-build clang pkg-config libgtk-3-dev
 [unix]
 bundle-linux-client:
-    cd rcflowclient && flutter build linux --release
+    #!/usr/bin/env bash
+    set -euo pipefail
+    missing=()
+    for cmd in cmake ninja clang pkg-config; do
+        command -v "$cmd" &>/dev/null || missing+=("$cmd")
+    done
+    if (( ${#missing[@]} > 0 )); then
+        printf '\nERROR: Missing Linux build dependencies: %s\n\n' "${missing[*]}"
+        printf 'Install them on Debian/Ubuntu with:\n'
+        printf '  sudo apt-get install cmake ninja-build clang pkg-config libgtk-3-dev\n\n'
+        exit 1
+    fi
+    (cd rcflowclient && flutter build linux --release)
     mkdir -p dist
     tar -czf dist/rcflowclient-linux-$(uname -m).tar.gz -C rcflowclient/build/linux/x64/release bundle
 
@@ -126,8 +140,8 @@ bundle-windows-client-install: bundle-windows-client
 
 # Build Windows backend installer (setup.exe, must be on Windows)
 [windows]
-bundle-windows-backend:
-    uv run --extra tray --extra bundle python scripts/bundle.py --platform windows --installer
+bundle-windows-backend *FLAGS:
+    uv run --extra tray --extra bundle python scripts/bundle.py --platform windows --installer {{ FLAGS }}
 
 # Build and install Windows backend (setup.exe, must be on Windows)
 [windows]

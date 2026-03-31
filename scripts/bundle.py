@@ -7,6 +7,7 @@ Usage:
     python scripts/bundle.py --platform linux --installer  # Build .deb package
     python scripts/bundle.py --platform windows --installer # Build setup.exe
     python scripts/bundle.py --platform macos --installer   # Build .pkg installer
+    python scripts/bundle.py --sign                        # Build and sign for current platform
 
 Outputs:
     dist/rcflow-{version}-{platform}-{arch}.tar.gz   (Linux archive)
@@ -14,11 +15,32 @@ Outputs:
     dist/rcflow-{version}-{platform}-{arch}.zip       (Windows archive)
     dist/rcflow-{version}-{arch}-setup.exe            (Windows installer)
     dist/rcflow-{version}-macos-{arch}.pkg            (macOS installer)
+
+Code signing (--sign):
+    Signing is optional and controlled by the --sign flag. When enabled, the
+    appropriate platform signing tool is invoked after each artifact is produced.
+    Required environment variables per platform:
+
+    Windows (Authenticode via signtool.exe):
+        SIGN_CERT_PATH        Path to .pfx certificate file
+        SIGN_CERT_PASSWORD    PFX password
+        SIGN_TIMESTAMP_URL    Timestamp server (default: http://timestamp.digicert.com)
+
+    macOS (codesign + notarization):
+        SIGN_IDENTITY         Developer ID Application identity (e.g. "Developer ID Application: ...")
+        SIGN_INSTALLER_IDENTITY  Developer ID Installer identity (for .pkg)
+        APPLE_ID              Apple account email (for notarization)
+        APPLE_TEAM_ID         Developer team ID
+        APPLE_APP_PASSWORD    App-specific password for notarytool
+
+    Linux (GPG detached signatures):
+        GPG_KEY_ID            GPG key ID or fingerprint for signing
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
 import platform
 import shutil
@@ -868,6 +890,212 @@ rm -rf {pkg_stage}
     return None
 
 
+### Code Signing ###
+
+
+def _check_sign_env(variables: list[str]) -> dict[str, str]:
+    """Verify that required environment variables are set for signing.
+
+    Returns a dict of variable name → value. Exits with an error if any are missing.
+    """
+    values: dict[str, str] = {}
+    missing: list[str] = []
+    for var in variables:
+        val = os.environ.get(var)
+        if val:
+            values[var] = val
+        else:
+            missing.append(var)
+    if missing:
+        print(
+            f"ERROR: Code signing requested but missing environment variables:\n"
+            f"  {', '.join(missing)}\n"
+            f"Set these variables or omit --sign to build without signing.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    return values
+
+
+def sign_windows(path: Path) -> None:
+    """Sign a Windows binary or installer with Authenticode (signtool.exe).
+
+    Required env vars: SIGN_CERT_PATH, SIGN_CERT_PASSWORD.
+    Optional: SIGN_TIMESTAMP_URL (defaults to http://timestamp.digicert.com).
+    """
+    env = _check_sign_env(["SIGN_CERT_PATH", "SIGN_CERT_PASSWORD"])
+    timestamp_url = os.environ.get("SIGN_TIMESTAMP_URL", "http://timestamp.digicert.com")
+
+    signtool = shutil.which("signtool")
+    if not signtool:
+        # Check Windows SDK default locations
+        sdk_root = os.environ.get("WindowsSdkVerBinPath", "")
+        if sdk_root:
+            candidate = os.path.join(sdk_root, "x64", "signtool.exe")
+            if os.path.isfile(candidate):
+                signtool = candidate
+        if not signtool:
+            for candidate_path in [
+                r"C:\Program Files (x86)\Windows Kits\10\bin\10.0.22621.0\x64\signtool.exe",
+                r"C:\Program Files (x86)\Windows Kits\10\bin\10.0.22000.0\x64\signtool.exe",
+            ]:
+                if os.path.isfile(candidate_path):
+                    signtool = candidate_path
+                    break
+
+    if not signtool:
+        print(
+            "ERROR: signtool.exe not found.\n"
+            "  Install the Windows SDK or add signtool.exe to PATH.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    cmd = [
+        signtool, "sign",
+        "/f", env["SIGN_CERT_PATH"],
+        "/p", env["SIGN_CERT_PASSWORD"],
+        "/tr", timestamp_url,
+        "/td", "sha256",
+        "/fd", "sha256",
+        str(path),
+    ]
+    print(f"Signing {path.name} with Authenticode...")
+    subprocess.check_call(cmd)
+    print(f"  Signed: {path.name}")
+
+
+def sign_macos(path: Path) -> None:
+    """Sign a macOS binary or .app bundle with codesign.
+
+    Required env var: SIGN_IDENTITY (e.g. "Developer ID Application: Name (TEAMID)").
+    """
+    env = _check_sign_env(["SIGN_IDENTITY"])
+
+    entitlements = PROJECT_ROOT / "rcflowclient" / "macos" / "Runner" / "Release.entitlements"
+    cmd = [
+        "codesign",
+        "--deep",
+        "--force",
+        "--options", "runtime",
+        "--sign", env["SIGN_IDENTITY"],
+        "--timestamp",
+    ]
+    if entitlements.exists():
+        cmd.extend(["--entitlements", str(entitlements)])
+    cmd.append(str(path))
+
+    print(f"Signing {path.name} with codesign...")
+    subprocess.check_call(cmd)
+    print(f"  Signed: {path.name}")
+
+
+def sign_macos_pkg(path: Path) -> None:
+    """Sign a macOS .pkg installer with productsign.
+
+    Required env var: SIGN_INSTALLER_IDENTITY (e.g. "Developer ID Installer: Name (TEAMID)").
+    """
+    env = _check_sign_env(["SIGN_INSTALLER_IDENTITY"])
+
+    signed_path = path.with_suffix(".signed.pkg")
+    cmd = [
+        "productsign",
+        "--sign", env["SIGN_INSTALLER_IDENTITY"],
+        "--timestamp",
+        str(path),
+        str(signed_path),
+    ]
+
+    print(f"Signing {path.name} with productsign...")
+    subprocess.check_call(cmd)
+
+    # Replace the unsigned pkg with the signed one
+    path.unlink()
+    signed_path.rename(path)
+    print(f"  Signed: {path.name}")
+
+
+def notarize_macos(path: Path) -> None:
+    """Submit a macOS artifact for Apple notarization and staple the ticket.
+
+    Required env vars: APPLE_ID, APPLE_TEAM_ID, APPLE_APP_PASSWORD.
+    """
+    env = _check_sign_env(["APPLE_ID", "APPLE_TEAM_ID", "APPLE_APP_PASSWORD"])
+
+    print(f"Submitting {path.name} for notarization...")
+    submit_cmd = [
+        "xcrun", "notarytool", "submit",
+        str(path),
+        "--apple-id", env["APPLE_ID"],
+        "--team-id", env["APPLE_TEAM_ID"],
+        "--password", env["APPLE_APP_PASSWORD"],
+        "--wait",
+    ]
+    subprocess.check_call(submit_cmd)
+
+    print(f"Stapling notarization ticket to {path.name}...")
+    subprocess.check_call(["xcrun", "stapler", "staple", str(path)])
+    print(f"  Notarized: {path.name}")
+
+
+def sign_linux(path: Path) -> None:
+    """Create a GPG detached signature for a Linux artifact.
+
+    Required env var: GPG_KEY_ID.
+    """
+    env = _check_sign_env(["GPG_KEY_ID"])
+
+    sig_path = Path(str(path) + ".asc")
+    cmd = [
+        "gpg",
+        "--batch", "--yes",
+        "--local-user", env["GPG_KEY_ID"],
+        "--armor",
+        "--detach-sign",
+        "--output", str(sig_path),
+        str(path),
+    ]
+
+    print(f"GPG-signing {path.name}...")
+    subprocess.check_call(cmd)
+    print(f"  Signature: {sig_path.name}")
+
+
+def generate_checksums(artifacts: list[Path]) -> Path | None:
+    """Generate a SHA256SUMS file for all artifacts in dist/.
+
+    If GPG_KEY_ID is set, also signs the checksums file.
+    """
+    if not artifacts:
+        return None
+
+    dist_dir = PROJECT_ROOT / "dist"
+    checksums_path = dist_dir / "SHA256SUMS"
+    lines: list[str] = []
+    for artifact in sorted(artifacts):
+        if not artifact.exists():
+            continue
+        sha256 = hashlib.sha256(artifact.read_bytes()).hexdigest()
+        lines.append(f"{sha256}  {artifact.name}")
+
+    checksums_path.write_text("\n".join(lines) + "\n")
+    print(f"Generated {checksums_path.name} ({len(lines)} entries)")
+
+    gpg_key = os.environ.get("GPG_KEY_ID")
+    if gpg_key:
+        sig_path = Path(str(checksums_path) + ".asc")
+        subprocess.check_call([
+            "gpg", "--batch", "--yes",
+            "--local-user", gpg_key,
+            "--armor", "--detach-sign",
+            "--output", str(sig_path),
+            str(checksums_path),
+        ])
+        print(f"  GPG-signed: {sig_path.name}")
+
+    return checksums_path
+
+
 def run_install(bundle_dir: Path, installer_path: Path | None, target_platform: str) -> None:
     """Run the platform-appropriate installer after a successful build."""
     if target_platform == "linux":
@@ -921,6 +1149,11 @@ def main() -> None:
         action="store_true",
         help="Install after building (implies --installer for platforms that use one)",
     )
+    parser.add_argument(
+        "--sign",
+        action="store_true",
+        help="Sign artifacts after building (requires platform-specific env vars)",
+    )
     args = parser.parse_args()
 
     # --install implies --installer
@@ -967,12 +1200,24 @@ def main() -> None:
     bundle_dir = assemble_bundle(pyinstaller_dir, target_platform, version, arch)
     print()
 
-    # Step 4: Create archive
+    # Step 4: Sign the main executable (before archiving, so the archive contains the signed binary)
+    if args.sign:
+        exe_name = "rcflow.exe" if target_platform == "windows" else "rcflow"
+        exe_path = bundle_dir / exe_name
+        if exe_path.exists():
+            print("=== Step 3a: Signing executable ===")
+            if target_platform == "windows":
+                sign_windows(exe_path)
+            elif target_platform == "macos":
+                sign_macos(exe_path)
+            print()
+
+    # Step 5: Create archive
     print("=== Step 3: Creating archive ===")
     archive_path = create_archive(bundle_dir, target_platform, version, arch)
     print()
 
-    # Step 5: Build platform installer (optional)
+    # Step 6: Build platform installer (optional)
     installer_path = None
     if args.installer:
         if target_platform == "windows":
@@ -990,11 +1235,37 @@ def main() -> None:
         else:
             print(f"WARNING: --installer is not supported on {target_platform}. Skipping.", file=sys.stderr)
 
+    # Step 7: Sign installer artifacts
+    if args.sign:
+        print("=== Step 5: Signing artifacts ===")
+        if target_platform == "windows":
+            if installer_path:
+                sign_windows(installer_path)
+        elif target_platform == "macos":
+            if installer_path:
+                sign_macos_pkg(installer_path)
+                notarize_macos(installer_path)
+        elif target_platform == "linux":
+            sign_linux(archive_path)
+            if installer_path:
+                sign_linux(installer_path)
+        print()
+
+    # Step 8: Generate checksums
+    produced_artifacts = [archive_path]
+    if installer_path:
+        produced_artifacts.append(installer_path)
+    print("=== Checksums ===")
+    generate_checksums(produced_artifacts)
+    print()
+
     print("=== Build complete ===")
     print(f"  Archive: {archive_path}")
     print(f"  Bundle:  {bundle_dir}")
     if installer_path:
         print(f"  Installer: {installer_path}")
+    if args.sign:
+        print("  Signing:  enabled")
     print()
 
     # Step 6: Auto-install if requested

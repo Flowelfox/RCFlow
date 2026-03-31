@@ -1,0 +1,522 @@
+# =============================================================================
+# Signed Release Build
+#
+# Triggered by pushing a version tag (v*.*.*).  Builds, signs, and publishes
+# installable packages for every supported platform as a GitHub Release.
+#
+# Required repository secrets (configure in Settings → Secrets → Actions):
+#
+#   Windows (Authenticode):
+#     SIGN_CERT_BASE64         Base64-encoded .pfx certificate
+#     SIGN_CERT_PASSWORD       PFX password
+#
+#   macOS (codesign + notarization):
+#     MACOS_CERTIFICATE_BASE64             Base64 .p12 Developer ID Application cert
+#     MACOS_CERTIFICATE_PASSWORD           P12 password
+#     MACOS_INSTALLER_CERTIFICATE_BASE64   Base64 .p12 Developer ID Installer cert
+#     MACOS_INSTALLER_CERTIFICATE_PASSWORD P12 password
+#     APPLE_ID                             Apple account email
+#     APPLE_TEAM_ID                        Developer team ID
+#     APPLE_APP_PASSWORD                   App-specific password for notarytool
+#
+#   Linux + checksums (GPG):
+#     GPG_PRIVATE_KEY          ASCII-armored GPG private key
+#     GPG_PASSPHRASE           GPG key passphrase
+#
+#   Android (APK signing):
+#     ANDROID_KEYSTORE_BASE64  Base64-encoded .keystore file
+#     ANDROID_KEYSTORE_PASSWORD Keystore password
+#     ANDROID_KEY_ALIAS         Key alias
+#     ANDROID_KEY_PASSWORD      Key password
+# =============================================================================
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write   # Create GitHub Releases and upload assets
+
+jobs:
+  # ===========================================================================
+  # BACKEND — Linux
+  # ===========================================================================
+  backend-linux:
+    name: Backend — Linux (signed)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python 3.12
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --extra bundle
+
+      - name: Import GPG key
+        if: "${{ env.GPG_PRIVATE_KEY != '' }}"
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+          # Extract the key ID from the imported key
+          GPG_KEY_ID=$(gpg --list-secret-keys --keyid-format long 2>/dev/null | grep sec | head -1 | awk '{print $2}' | cut -d'/' -f2)
+          echo "GPG_KEY_ID=$GPG_KEY_ID" >> "$GITHUB_ENV"
+          # Pre-set passphrase for non-interactive signing
+          echo "$GPG_PASSPHRASE" | gpg --batch --pinentry-mode loopback --passphrase-fd 0 --sign --local-user "$GPG_KEY_ID" /dev/null 2>/dev/null || true
+
+      - name: Build and sign backend package
+        env:
+          GPG_KEY_ID: ${{ env.GPG_KEY_ID }}
+        run: uv run python scripts/bundle.py --platform linux --installer --sign
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-linux
+          path: dist/
+          if-no-files-found: error
+
+  # ===========================================================================
+  # BACKEND — macOS (Apple Silicon)
+  # ===========================================================================
+  backend-macos:
+    name: Backend — macOS (signed + notarized)
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python 3.12
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --extra bundle
+
+      - name: Install signing certificate
+        env:
+          MACOS_CERTIFICATE_BASE64: ${{ secrets.MACOS_CERTIFICATE_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_INSTALLER_CERTIFICATE_BASE64: ${{ secrets.MACOS_INSTALLER_CERTIFICATE_BASE64 }}
+          MACOS_INSTALLER_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_INSTALLER_CERTIFICATE_PASSWORD }}
+        run: |
+          # Create a temporary keychain for CI
+          KEYCHAIN_PATH="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 32)"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          # Import application certificate
+          CERT_PATH="$RUNNER_TEMP/app_cert.p12"
+          echo "$MACOS_CERTIFICATE_BASE64" | base64 --decode > "$CERT_PATH"
+          security import "$CERT_PATH" -P "$MACOS_CERTIFICATE_PASSWORD" \
+            -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          rm "$CERT_PATH"
+
+          # Import installer certificate
+          INST_CERT_PATH="$RUNNER_TEMP/inst_cert.p12"
+          echo "$MACOS_INSTALLER_CERTIFICATE_BASE64" | base64 --decode > "$INST_CERT_PATH"
+          security import "$INST_CERT_PATH" -P "$MACOS_INSTALLER_CERTIFICATE_PASSWORD" \
+            -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          rm "$INST_CERT_PATH"
+
+          # Set the keychain as the default and add to search list
+          security list-keychains -d user -s "$KEYCHAIN_PATH" "$(security default-keychain -d user | tr -d '"')"
+          security default-keychain -s "$KEYCHAIN_PATH"
+
+          # Allow codesign to access the keychain without prompting
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          # Extract signing identity names for bundle.py
+          APP_IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | grep "Developer ID Application" | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          INST_IDENTITY=$(security find-identity -v "$KEYCHAIN_PATH" | grep "Developer ID Installer" | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          echo "SIGN_IDENTITY=$APP_IDENTITY" >> "$GITHUB_ENV"
+          echo "SIGN_INSTALLER_IDENTITY=$INST_IDENTITY" >> "$GITHUB_ENV"
+
+      - name: Build, sign, and notarize backend package
+        env:
+          SIGN_IDENTITY: ${{ env.SIGN_IDENTITY }}
+          SIGN_INSTALLER_IDENTITY: ${{ env.SIGN_INSTALLER_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: uv run python scripts/bundle.py --platform macos --installer --sign
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-macos
+          path: dist/
+          if-no-files-found: error
+
+  # ===========================================================================
+  # BACKEND — Windows
+  # ===========================================================================
+  backend-windows:
+    name: Backend — Windows (signed)
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python 3.12
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --extra bundle --extra tray
+
+      - name: Add Inno Setup to PATH
+        run: echo "C:\Program Files (x86)\Inno Setup 6" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        shell: pwsh
+
+      - name: Decode signing certificate
+        env:
+          SIGN_CERT_BASE64: ${{ secrets.SIGN_CERT_BASE64 }}
+        run: |
+          $certBytes = [Convert]::FromBase64String($env:SIGN_CERT_BASE64)
+          $certPath = "$env:RUNNER_TEMP\signing_cert.pfx"
+          [IO.File]::WriteAllBytes($certPath, $certBytes)
+          echo "SIGN_CERT_PATH=$certPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+        shell: pwsh
+
+      - name: Build and sign backend package
+        env:
+          SIGN_CERT_PATH: ${{ env.SIGN_CERT_PATH }}
+          SIGN_CERT_PASSWORD: ${{ secrets.SIGN_CERT_PASSWORD }}
+        run: uv run python scripts/bundle.py --platform windows --installer --sign
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-windows
+          path: dist/
+          if-no-files-found: error
+
+  # ===========================================================================
+  # FLUTTER CLIENT — Linux
+  # ===========================================================================
+  client-linux:
+    name: Flutter client — Linux
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux desktop build dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y cmake ninja-build clang pkg-config libgtk-3-dev
+
+      - name: Set up Flutter (stable)
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install Flutter packages
+        working-directory: rcflowclient
+        run: flutter pub get
+
+      - name: Build Linux desktop
+        working-directory: rcflowclient
+        run: flutter build linux --release
+
+      - name: Package Linux client
+        run: |
+          mkdir -p dist
+          tar -czf dist/rcflowclient-linux-x86_64.tar.gz \
+            -C rcflowclient/build/linux/x64/release bundle
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: client-linux
+          path: dist/
+          if-no-files-found: error
+
+  # ===========================================================================
+  # FLUTTER CLIENT — macOS (signed + notarized)
+  # ===========================================================================
+  client-macos:
+    name: Flutter client — macOS (signed + notarized)
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install signing certificate
+        env:
+          MACOS_CERTIFICATE_BASE64: ${{ secrets.MACOS_CERTIFICATE_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          KEYCHAIN_PATH="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 32)"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          CERT_PATH="$RUNNER_TEMP/app_cert.p12"
+          echo "$MACOS_CERTIFICATE_BASE64" | base64 --decode > "$CERT_PATH"
+          security import "$CERT_PATH" -P "$MACOS_CERTIFICATE_PASSWORD" \
+            -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          rm "$CERT_PATH"
+
+          security list-keychains -d user -s "$KEYCHAIN_PATH" "$(security default-keychain -d user | tr -d '"')"
+          security default-keychain -s "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+      - name: Set up Flutter (stable)
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install Flutter packages
+        working-directory: rcflowclient
+        run: flutter pub get
+
+      - name: Build macOS desktop
+        working-directory: rcflowclient
+        run: flutter build macos --release
+
+      - name: Sign .app bundle
+        env:
+          MACOS_CERTIFICATE_BASE64: ${{ secrets.MACOS_CERTIFICATE_BASE64 }}
+        run: |
+          APP_PATH="rcflowclient/build/macos/Build/Products/Release/RCFlow.app"
+          IDENTITY=$(security find-identity -v -p codesigning | grep "Developer ID Application" | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          codesign --deep --force --options runtime --sign "$IDENTITY" --timestamp "$APP_PATH"
+
+      - name: Notarize .app bundle
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          APP_PATH="rcflowclient/build/macos/Build/Products/Release/RCFlow.app"
+          # Create a zip for notarization submission (notarytool requires an archive)
+          ditto -c -k --keepParent "$APP_PATH" "$RUNNER_TEMP/RCFlow.zip"
+          xcrun notarytool submit "$RUNNER_TEMP/RCFlow.zip" \
+            --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_PASSWORD" --wait
+          xcrun stapler staple "$APP_PATH"
+
+      - name: Package macOS client
+        run: |
+          mkdir -p dist
+          tar -czf dist/rcflowclient-macos-$(uname -m).tar.gz \
+            -C rcflowclient/build/macos/Build/Products/Release RCFlow.app
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: client-macos
+          path: dist/
+          if-no-files-found: error
+
+  # ===========================================================================
+  # FLUTTER CLIENT — Windows (signed)
+  # ===========================================================================
+  client-windows:
+    name: Flutter client — Windows (signed)
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Flutter (stable)
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install Flutter packages
+        working-directory: rcflowclient
+        run: flutter pub get
+
+      - name: Build Windows desktop
+        working-directory: rcflowclient
+        run: flutter build windows --release
+
+      - name: Decode signing certificate
+        env:
+          SIGN_CERT_BASE64: ${{ secrets.SIGN_CERT_BASE64 }}
+        run: |
+          $certBytes = [Convert]::FromBase64String($env:SIGN_CERT_BASE64)
+          $certPath = "$env:RUNNER_TEMP\signing_cert.pfx"
+          [IO.File]::WriteAllBytes($certPath, $certBytes)
+          echo "SIGN_CERT_PATH=$certPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+        shell: pwsh
+
+      - name: Sign Windows executable
+        env:
+          SIGN_CERT_PATH: ${{ env.SIGN_CERT_PATH }}
+          SIGN_CERT_PASSWORD: ${{ secrets.SIGN_CERT_PASSWORD }}
+        run: |
+          $exePath = "rcflowclient\build\windows\x64\runner\Release\rcflowclient.exe"
+          & signtool sign /f "$env:SIGN_CERT_PATH" /p "$env:SIGN_CERT_PASSWORD" `
+            /tr http://timestamp.digicert.com /td sha256 /fd sha256 "$exePath"
+        shell: pwsh
+
+      - name: Package Windows client
+        shell: pwsh
+        run: |
+          if (-not (Test-Path dist)) { New-Item -ItemType Directory -Path dist | Out-Null }
+          Compress-Archive -Force `
+            -Path 'rcflowclient\build\windows\x64\runner\Release\*' `
+            -DestinationPath 'dist\rcflowclient-windows-x64.zip'
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: client-windows
+          path: dist/
+          if-no-files-found: error
+
+  # ===========================================================================
+  # FLUTTER CLIENT — Android (signed)
+  # ===========================================================================
+  client-android:
+    name: Flutter client — Android (signed)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Flutter (stable)
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install Flutter packages
+        working-directory: rcflowclient
+        run: flutter pub get
+
+      - name: Accept Android SDK licenses
+        working-directory: rcflowclient
+        run: yes | flutter doctor --android-licenses || true
+
+      - name: Configure release signing
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          # Decode the keystore
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > rcflowclient/android/app/release.keystore
+
+          # Create key.properties for the Gradle build
+          cat > rcflowclient/android/key.properties <<EOF
+          storePassword=$ANDROID_KEYSTORE_PASSWORD
+          keyPassword=$ANDROID_KEY_PASSWORD
+          keyAlias=$ANDROID_KEY_ALIAS
+          storeFile=app/release.keystore
+          EOF
+
+      - name: Build signed Android APKs
+        working-directory: rcflowclient
+        run: flutter build apk --release --split-per-abi
+
+      - name: Collect Android APKs
+        run: |
+          mkdir -p dist
+          cp rcflowclient/build/app/outputs/flutter-apk/app-*-release.apk dist/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: client-android
+          path: dist/
+          if-no-files-found: error
+
+  # ===========================================================================
+  # PUBLISH GITHUB RELEASE
+  # ===========================================================================
+  release:
+    name: Publish GitHub Release
+    needs:
+      - backend-linux
+      - backend-macos
+      - backend-windows
+      - client-linux
+      - client-macos
+      - client-windows
+      - client-android
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets/
+          merge-multiple: true
+
+      - name: Import GPG key for checksums
+        if: "${{ secrets.GPG_PRIVATE_KEY != '' }}"
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+          GPG_KEY_ID=$(gpg --list-secret-keys --keyid-format long 2>/dev/null | grep sec | head -1 | awk '{print $2}' | cut -d'/' -f2)
+          echo "GPG_KEY_ID=$GPG_KEY_ID" >> "$GITHUB_ENV"
+
+      - name: Generate SHA256 checksums
+        working-directory: release-assets
+        run: |
+          sha256sum * > SHA256SUMS 2>/dev/null || true
+          # Remove directory entries if any
+          sed -i '/\/$/d' SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Sign checksums file
+        if: "${{ env.GPG_KEY_ID != '' }}"
+        working-directory: release-assets
+        run: |
+          gpg --batch --yes --local-user "$GPG_KEY_ID" \
+            --armor --detach-sign --output SHA256SUMS.asc SHA256SUMS
+
+      - name: Extract version from tag
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" release-assets/* \
+            --title "RCFlow $VERSION" \
+            --generate-notes

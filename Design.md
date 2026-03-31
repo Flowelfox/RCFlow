@@ -2705,6 +2705,20 @@ RCFlow is distributed as a self-contained package built with PyInstaller. End us
 
 Backend build script: `scripts/bundle.py`. Requires PyInstaller (`uv add --dev pyinstaller`). Cross-compilation is not supported — build on the target platform. Client targets build the Flutter desktop app (`rcflowclient`) for the respective platform.
 
+The `bundle-linux-client` target requires the following system packages in addition to Flutter SDK 3.11+:
+
+```
+sudo apt-get install cmake ninja-build clang pkg-config libgtk-3-dev
+```
+
+- `cmake` — CMake 3.13+ (Flutter's Linux build system)
+- `ninja-build` — Ninja build tool (the `ninja` binary)
+- `clang` — C/C++ compiler (`clang++` is Flutter's default on Linux)
+- `pkg-config` — used to locate GTK and GLib libraries
+- `libgtk-3-dev` — GTK+-3.0 headers and shared libraries
+
+The recipe checks for these binaries at startup and prints the install command above if any are missing.
+
 The `bundle-linux-backend` target builds a `.deb` package that installs RCFlow to `/opt/rcflow` with a systemd service. Requires `dpkg-deb` (standard on Debian/Ubuntu). Install with `sudo dpkg -i dist/rcflow_*.deb`.
 
 The `bundle-windows-backend` target builds a windowed (no console) executable with GUI + system tray support and compiles a `setup.exe` installer using Inno Setup 6. Requires Inno Setup 6 installed on the build machine (`iscc.exe` on PATH or in default location).
@@ -2750,6 +2764,42 @@ The `rcflow` entry point supports subcommands relevant to bundled operation:
 - `rcflow set-api-key <value>` — Save a new API key
 
 On frozen Windows builds, the default command (no subcommand) launches `gui` mode.
+
+### Code Signing
+
+All release artifacts are signed to prevent OS security warnings and verify integrity. Signing is optional (controlled by `--sign` flag in `bundle.py`) and requires platform-specific credentials via environment variables.
+
+| Platform | Tool | What is signed |
+|----------|------|---------------|
+| **Windows** | `signtool.exe` (Authenticode) | `rcflow.exe`, `setup.exe` (Inno Setup), `rcflowclient.exe` |
+| **macOS** | `codesign` + `notarytool` | `rcflow` binary, `.pkg` installer, `RCFlow.app` client bundle |
+| **Linux** | GPG detached signatures | `.tar.gz` archive, `.deb` package |
+| **Android** | Gradle `signingConfigs` | Release APK (via `key.properties` keystore) |
+
+**Environment variables for signing:**
+
+- **Windows:** `SIGN_CERT_PATH` (`.pfx` path), `SIGN_CERT_PASSWORD`, `SIGN_TIMESTAMP_URL` (default: `http://timestamp.digicert.com`)
+- **macOS:** `SIGN_IDENTITY` (Developer ID Application), `SIGN_INSTALLER_IDENTITY` (Developer ID Installer), `APPLE_ID`, `APPLE_TEAM_ID`, `APPLE_APP_PASSWORD`
+- **Linux:** `GPG_KEY_ID`
+- **Android:** `key.properties` file in `rcflowclient/android/` pointing to a release keystore (gitignored)
+
+**Build commands with signing:**
+
+```bash
+just bundle --sign                          # Current platform
+just bundle-linux-backend --sign            # Linux .deb + GPG
+just bundle-macos-backend --sign            # macOS .pkg + notarization
+just bundle-windows-backend --sign          # Windows setup.exe + Authenticode
+```
+
+**CI/CD:** The `release.yml` GitHub Actions workflow triggers on version tags (`v*.*.*`), builds all platforms in parallel with signing, generates `SHA256SUMS` (GPG-signed), and publishes a GitHub Release with all artifacts.
+
+**Artifact verification:**
+
+- All platforms: `sha256sum -c SHA256SUMS` + `gpg --verify SHA256SUMS.asc`
+- Windows: Right-click → Properties → Digital Signatures
+- macOS: `codesign -dv --verbose=2 /path/to/binary` or `spctl --assess`
+- Android: `apksigner verify --print-certs app.apk`
 
 ---
 
