@@ -6,15 +6,15 @@ repos:
         args: [--fix]
       - id: ruff-format
 
-  - repo: https://github.com/astral-sh/ty
-    rev: 0.0.16
-    hooks:
-      - id: ty
-        args: [check, src/]
-        pass_filenames: false
-
   - repo: local
     hooks:
+      - id: ty
+        name: ty
+        entry: uv run ty check src/
+        language: system
+        pass_filenames: false
+        types: [python]
+
       - id: pytest
         name: pytest
         entry: uv run pytest tests/ -x -q

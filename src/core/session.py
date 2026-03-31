@@ -479,10 +479,17 @@ class SessionManager:
             existing.tool_input_tokens = session.tool_input_tokens
             existing.tool_output_tokens = session.tool_output_tokens
             existing.tool_cost_usd = session.tool_cost_usd
-        # Commit the parent row first to satisfy SQLite FK constraints across connections
-        await db.commit()
+        # Flush the parent row so the FK constraint
+        # (session_messages.session_id → sessions.id) is satisfied when child
+        # rows are flushed in the same transaction.  Using flush() instead of
+        # commit() keeps everything in a single transaction, avoiding a window
+        # where concurrent StaticPool tasks could interfere with the committed
+        # parent before children are written (the previous two-commit approach
+        # was vulnerable to this with aiosqlite + StaticPool).
+        await db.flush()
 
-        # Insert messages in a fresh transaction; clear any existing to avoid conflicts
+        # Clear any existing messages to avoid UniqueConstraint conflicts,
+        # then insert current buffer messages.
         await db.execute(delete(SessionMessageModel).where(SessionMessageModel.session_id == session_uuid))
 
         for msg in session.buffer.text_history:

@@ -769,6 +769,7 @@ class TestMainProjectPath:
 # Helpers: real SQLite DB with FK enforcement (mirrors production engine.py)
 # ---------------------------------------------------------------------------
 
+
 def _make_sqlite_engine():
     """Create an async SQLite engine with StaticPool and PRAGMA foreign_keys=ON."""
     engine = create_async_engine(
@@ -839,9 +840,11 @@ class TestArchiveSessionSQLiteIntegration:
             assert db_session is not None
             assert db_session.status == "cancelled"
 
-            msgs = (await db.execute(
-                select(SessionMessageModel).where(SessionMessageModel.session_id == session_uuid)
-            )).scalars().all()
+            msgs = (
+                (await db.execute(select(SessionMessageModel).where(SessionMessageModel.session_id == session_uuid)))
+                .scalars()
+                .all()
+            )
             assert len(msgs) == 1
             assert msgs[0].message_type == MessageType.SESSION_END.value
 
@@ -858,13 +861,15 @@ class TestArchiveSessionSQLiteIntegration:
 
         # Simulate a pre-existing stub row (as _ensure_session_row_in_db would create)
         async with self.factory() as db:
-            db.add(SessionModel(
-                id=session_uuid,
-                backend_id="test-backend",
-                created_at=session.created_at,
-                session_type=session.session_type.value,
-                status="active",
-            ))
+            db.add(
+                SessionModel(
+                    id=session_uuid,
+                    backend_id="test-backend",
+                    created_at=session.created_at,
+                    session_type=session.session_type.value,
+                    status="active",
+                )
+            )
             await db.commit()
 
         # Now push a message, cancel, and archive
@@ -879,9 +884,11 @@ class TestArchiveSessionSQLiteIntegration:
             assert db_session is not None
             assert db_session.status == "cancelled"
 
-            msgs = (await db.execute(
-                select(SessionMessageModel).where(SessionMessageModel.session_id == session_uuid)
-            )).scalars().all()
+            msgs = (
+                (await db.execute(select(SessionMessageModel).where(SessionMessageModel.session_id == session_uuid)))
+                .scalars()
+                .all()
+            )
             assert len(msgs) == 1
 
     @pytest.mark.asyncio
@@ -903,11 +910,17 @@ class TestArchiveSessionSQLiteIntegration:
 
         async with self.factory() as db:
             session_uuid = uuid.UUID(session.id)
-            msgs = (await db.execute(
-                select(SessionMessageModel)
-                .where(SessionMessageModel.session_id == session_uuid)
-                .order_by(SessionMessageModel.sequence)
-            )).scalars().all()
+            msgs = (
+                (
+                    await db.execute(
+                        select(SessionMessageModel)
+                        .where(SessionMessageModel.session_id == session_uuid)
+                        .order_by(SessionMessageModel.sequence)
+                    )
+                )
+                .scalars()
+                .all()
+            )
             assert len(msgs) == 3
             assert msgs[0].message_type == MessageType.TEXT_CHUNK.value
             assert msgs[2].message_type == MessageType.SESSION_END.value
@@ -933,9 +946,11 @@ class TestArchiveSessionSQLiteIntegration:
             assert db_session is not None
             assert db_session.status == "cancelled"
 
-            msgs = (await db.execute(
-                select(SessionMessageModel).where(SessionMessageModel.session_id == session_uuid)
-            )).scalars().all()
+            msgs = (
+                (await db.execute(select(SessionMessageModel).where(SessionMessageModel.session_id == session_uuid)))
+                .scalars()
+                .all()
+            )
             assert len(msgs) == 1
             assert msgs[0].message_type == MessageType.SESSION_END.value
 
@@ -950,13 +965,15 @@ class TestArchiveSessionSQLiteIntegration:
         session_uuid = uuid.UUID(session.id)
 
         async with self.factory() as db:
-            db.add(SessionModel(
-                id=session_uuid,
-                backend_id="test-backend",
-                created_at=session.created_at,
-                session_type=session.session_type.value,
-                status="active",
-            ))
+            db.add(
+                SessionModel(
+                    id=session_uuid,
+                    backend_id="test-backend",
+                    created_at=session.created_at,
+                    session_type=session.session_type.value,
+                    status="active",
+                )
+            )
             await db.commit()
 
         session.buffer.push_text(MessageType.SESSION_END, {"session_id": session.id, "reason": "cancelled"})
@@ -970,9 +987,11 @@ class TestArchiveSessionSQLiteIntegration:
             assert db_session is not None
             assert db_session.status == "cancelled"
 
-            msgs = (await db.execute(
-                select(SessionMessageModel).where(SessionMessageModel.session_id == session_uuid)
-            )).scalars().all()
+            msgs = (
+                (await db.execute(select(SessionMessageModel).where(SessionMessageModel.session_id == session_uuid)))
+                .scalars()
+                .all()
+            )
             assert len(msgs) == 1
 
     @pytest.mark.asyncio
@@ -1004,7 +1023,73 @@ class TestArchiveSessionSQLiteIntegration:
         # Row should exist exactly once
         async with self.factory() as db:
             session_uuid = uuid.UUID(session_id)
-            msgs = (await db.execute(
-                select(SessionMessageModel).where(SessionMessageModel.session_id == session_uuid)
-            )).scalars().all()
+            msgs = (
+                (await db.execute(select(SessionMessageModel).where(SessionMessageModel.session_id == session_uuid)))
+                .scalars()
+                .all()
+            )
             assert len(msgs) == 1
+
+    @pytest.mark.asyncio
+    async def test_archive_session_single_transaction_atomicity(self):
+        """archive_session must write parent and child rows in a single
+        transaction (flush + commit) so that a failure during message insertion
+        does not leave an orphaned sessions row without its messages.
+
+        This is a regression test for the FK constraint failure that occurred
+        when archive_session used two separate commits — the first for the
+        parent sessions row and the second for session_messages.  With
+        aiosqlite + StaticPool (shared connection), concurrent background tasks
+        could interfere between the two commits, causing the parent row to be
+        absent when the child rows were inserted.
+        """
+        manager = SessionManager("test-backend")
+        session = manager.create_session(SessionType.ONE_SHOT)
+        session.set_active()
+        session.buffer.push_text(MessageType.TEXT_CHUNK, {"session_id": session.id, "content": "hello"})
+        session.buffer.push_text(MessageType.SESSION_END, {"session_id": session.id, "reason": "done"})
+        session.complete()
+
+        session_uuid = uuid.UUID(session.id)
+        commit_count = 0
+        original_commit = AsyncSession.commit
+
+        async def counting_commit(self_db):
+            nonlocal commit_count
+            commit_count += 1
+            return await original_commit(self_db)
+
+        # Monkey-patch commit to count invocations — archive_session should
+        # issue exactly ONE commit (parent flush + messages in the same txn).
+        AsyncSession.commit = counting_commit  # type: ignore[assignment]
+        try:
+            async with self.factory() as db:
+                await manager.archive_session(session.id, db)
+        finally:
+            AsyncSession.commit = original_commit  # type: ignore[assignment]
+
+        assert commit_count == 1, (
+            f"archive_session should use exactly 1 commit (got {commit_count}); "
+            "parent row must be flushed, not committed separately"
+        )
+
+        # Verify data integrity
+        async with self.factory() as db:
+            db_session = await db.get(SessionModel, session_uuid)
+            assert db_session is not None
+            assert db_session.status == "completed"
+
+            msgs = (
+                (
+                    await db.execute(
+                        select(SessionMessageModel)
+                        .where(SessionMessageModel.session_id == session_uuid)
+                        .order_by(SessionMessageModel.sequence)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assert len(msgs) == 2
+            assert msgs[0].message_type == MessageType.TEXT_CHUNK.value
+            assert msgs[1].message_type == MessageType.SESSION_END.value

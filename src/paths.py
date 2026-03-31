@@ -20,7 +20,7 @@ def get_bundle_dir() -> Path:
     When running from source, this is the project root (parent of ``src/``).
     """
     if is_frozen():
-        return Path(sys._MEIPASS)  # type: ignore[attr-defined]
+        return Path(getattr(sys, "_MEIPASS"))  # noqa: B009 - private attr set by PyInstaller at runtime
     return Path(__file__).resolve().parent.parent
 
 
@@ -73,7 +73,7 @@ def get_templates_dir() -> Path:
     When running from source, they're at ``src/prompts/templates``.
     """
     if is_frozen():
-        return Path(sys._MEIPASS) / "templates"  # type: ignore[attr-defined]
+        return Path(getattr(sys, "_MEIPASS")) / "templates"  # noqa: B009
     return Path(__file__).resolve().parent / "prompts" / "templates"
 
 
