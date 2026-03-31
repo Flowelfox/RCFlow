@@ -894,7 +894,7 @@ class TestArchiveSessionSQLiteIntegration:
         session.set_active()
 
         session.buffer.push_text(MessageType.TEXT_CHUNK, {"session_id": session.id, "content": "hello"})
-        session.buffer.push_text(MessageType.SUMMARY, {"session_id": session.id, "content": "world"})
+        session.buffer.push_text(MessageType.NOTIFICATION, {"session_id": session.id, "content": "world"})
         session.buffer.push_text(MessageType.SESSION_END, {"session_id": session.id, "reason": "cancelled"})
         session.cancel()
 

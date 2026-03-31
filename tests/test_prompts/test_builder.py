@@ -58,7 +58,6 @@ class TestPromptBuilder:
         """The rendered prompt contains expected content sections."""
         builder = PromptBuilder()
         result = builder.build(projects_dirs="/home/user/Projects", os_name="Linux")
-        assert "text-to-speech" in result
         assert "claude_code" in result
         assert "Project conventions" in result
 

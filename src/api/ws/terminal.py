@@ -16,7 +16,7 @@ import uuid as uuid_mod
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 
-from src.api.deps import verify_ws_api_key
+from src.api.deps import handle_ws_first_message_auth, verify_ws_api_key
 from src.terminal.manager import MAX_TERMINALS_PER_CONNECTION
 
 logger = logging.getLogger(__name__)
@@ -26,7 +26,7 @@ router = APIRouter()
 @router.websocket("/ws/terminal")
 async def ws_terminal(
     websocket: WebSocket,
-    api_key: str = Query(...),
+    api_key: str | None = Query(None),
 ) -> None:
     """WebSocket endpoint for interactive terminal sessions.
 
@@ -52,8 +52,13 @@ async def ws_terminal(
         Header: 1 byte direction + 16 bytes terminal UUID
         Payload: raw terminal data (UTF-8 + ANSI escape sequences)
     """
-    await verify_ws_api_key(api_key)
-    await websocket.accept()
+    if api_key is not None:
+        await verify_ws_api_key(websocket, api_key)
+        await websocket.accept()
+    else:
+        await websocket.accept()
+        if not await handle_ws_first_message_auth(websocket):
+            return
 
     terminal_manager = websocket.app.state.terminal_manager
     connection_terminals: set[str] = set()

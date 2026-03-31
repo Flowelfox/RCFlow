@@ -368,7 +368,7 @@ class OpenCodeExecutor(BaseExecutor):
         raise RuntimeError(
             "OpenCode CLI does not support reading more events from a completed turn; use restart_with_prompt() instead"
         )
-        yield  # type: ignore[misc]  # pragma: no cover
+        yield  # pragma: no cover
 
     async def execute(
         self,

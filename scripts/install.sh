@@ -300,10 +300,17 @@ if [[ ! -f "$INSTALL_PREFIX/settings.json" ]]; then
 JSONEOF
 
     chmod 600 "$INSTALL_PREFIX/settings.json"
+
+    # Write the API key to a root-readable file instead of printing it to
+    # stdout (which may be captured in shell history, logs, or CI output).
+    echo "$API_KEY" > "$INSTALL_PREFIX/initial-key.txt"
+    chmod 600 "$INSTALL_PREFIX/initial-key.txt"
+
     ok "Configuration created with generated API key"
     echo ""
-    echo -e "  ${YELLOW}API Key: ${API_KEY}${NC}"
-    echo -e "  ${YELLOW}Save this key — you'll need it to connect clients.${NC}"
+    echo -e "  ${YELLOW}API key saved to: ${INSTALL_PREFIX}/initial-key.txt${NC}"
+    echo -e "  ${YELLOW}Read with: sudo cat ${INSTALL_PREFIX}/initial-key.txt${NC}"
+    echo -e "  ${YELLOW}Delete after copying: sudo rm ${INSTALL_PREFIX}/initial-key.txt${NC}"
     echo -e "  ${YELLOW}Config file: ${INSTALL_PREFIX}/settings.json${NC}"
     echo ""
 else

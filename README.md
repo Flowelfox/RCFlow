@@ -7,10 +7,9 @@ A coding agent orchestration platform: a backend server paired with a Flutter de
 - **Agent orchestration** — Spin up and manage Claude Code, Codex, and OpenCode agents concurrently across different projects and worktrees
 - **Built-in client** — Flutter desktop and mobile app for sending prompts, reviewing output, approving tool calls, and managing sessions
 - **Remote control** — Drive agents from any device over WebSocket; the server runs on your machine, the client runs anywhere
-- **Real-time streaming** — Separate WebSocket channels for text input, audio input, text output, and audio output
+- **Real-time streaming** — Separate WebSocket channels for text input and text output
 - **Pluggable tools** — Tools are JSON files loaded at startup; extend agent capabilities without code changes
 - **Session management** — Persistent sessions with pause/resume/restore, history, and automatic database archival
-- **Speech support** — Pluggable STT (Wispr Flow) and TTS providers for voice-driven workflows
 - **Multi-backend LLM** — Anthropic API, AWS Bedrock, or OpenAI-compatible providers
 - **Hot-reloadable config** — Change LLM provider, API keys, and settings at runtime via the API
 
@@ -127,9 +126,7 @@ OpenAPI docs are served at `/docs` while the server is running.
 | Path | Direction | Description |
 |------|-----------|-------------|
 | `/ws/input/text` | Client → Server | Send text prompts |
-| `/ws/input/audio` | Client → Server | Send audio for STT transcription |
 | `/ws/output/text` | Server → Client | Receive streaming text output |
-| `/ws/output/audio` | Server → Client | Receive streaming audio (TTS) |
 
 All authenticated endpoints require the `RCFLOW_API_KEY` header or query parameter.
 
@@ -165,7 +162,7 @@ Prompt Router → LLM (Anthropic/Bedrock) → Tool Executor → Session Manager
                                                      (SQLite / PostgreSQL)
 ```
 
-**Request lifecycle:** Client sends text/audio → STT transcribes audio → Prompt Router creates/resumes a session → LLM generates tool calls → Executors run tools → Output streams back via WebSocket → Session archived to database on completion.
+**Request lifecycle:** Client sends text → Prompt Router creates/resumes a session → LLM generates tool calls → Executors run tools → Output streams back via WebSocket → Session archived to database on completion.
 
 ## Testing
 

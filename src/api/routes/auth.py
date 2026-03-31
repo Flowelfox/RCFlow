@@ -93,8 +93,9 @@ async def _stream_browser_auth(binary_path: str, config_dir: Path) -> AsyncGener
             stderr=asyncio.subprocess.STDOUT,
             env=env,
         )
-    except Exception as exc:
-        yield json_mod.dumps({"step": "error", "message": str(exc)}) + "\n"
+    except Exception:
+        logger.exception("Failed to launch Codex login process")
+        yield json_mod.dumps({"step": "error", "message": "Failed to start login process — see server logs"}) + "\n"
         return
 
     try:
@@ -163,9 +164,9 @@ async def _stream_browser_auth(binary_path: str, config_dir: Path) -> AsyncGener
         elif proc.returncode == 0:
             yield json_mod.dumps({"step": "complete", "message": "Login completed"}) + "\n"
 
-    except Exception as exc:
+    except Exception:
         logger.exception("Codex browser login failed")
-        yield json_mod.dumps({"step": "error", "message": str(exc)}) + "\n"
+        yield json_mod.dumps({"step": "error", "message": "Login failed — see server logs"}) + "\n"
     finally:
         if proc.returncode is None:
             proc.kill()
@@ -186,8 +187,9 @@ async def _stream_device_auth(binary_path: str, config_dir: Path) -> AsyncGenera
             stderr=asyncio.subprocess.STDOUT,
             env=env,
         )
-    except Exception as exc:
-        yield json_mod.dumps({"step": "error", "message": str(exc)}) + "\n"
+    except Exception:
+        logger.exception("Failed to launch Codex device-auth process")
+        yield json_mod.dumps({"step": "error", "message": "Failed to start login process — see server logs"}) + "\n"
         return
 
     found_url: str | None = None
@@ -263,9 +265,9 @@ async def _stream_device_auth(binary_path: str, config_dir: Path) -> AsyncGenera
         elif proc.returncode == 0:
             yield json_mod.dumps({"step": "complete", "message": "Login completed"}) + "\n"
 
-    except Exception as exc:
+    except Exception:
         logger.exception("Codex device-auth login failed")
-        yield json_mod.dumps({"step": "error", "message": str(exc)}) + "\n"
+        yield json_mod.dumps({"step": "error", "message": "Login failed — see server logs"}) + "\n"
     finally:
         if proc.returncode is None:
             proc.kill()

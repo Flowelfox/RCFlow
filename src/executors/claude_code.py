@@ -89,7 +89,7 @@ class ClaudeCodeExecutor(BaseExecutor):
         # PTY state — set during _start_process, cleared in _cleanup_process
         self._use_pty: bool = False  # resolved per-invocation from config
         self._master_fd: int | None = None
-        self._pty_reader: PtyLineReader | None = None  # type: ignore[name-defined]
+        self._pty_reader: PtyLineReader | None = None
 
     @property
     def is_running(self) -> bool:
@@ -337,7 +337,7 @@ class ClaudeCodeExecutor(BaseExecutor):
         self._last_parameters = parameters
 
         # Open PTY pair and configure slave to raw mode.
-        master_fd, slave_fd = _pty.openpty()  # type: ignore[name-defined]
+        master_fd, slave_fd = _pty.openpty()
         configure_raw(slave_fd)
         set_winsize(master_fd, rows=24, cols=220)
 
@@ -365,7 +365,7 @@ class ClaudeCodeExecutor(BaseExecutor):
         os.close(slave_fd)
 
         self._master_fd = master_fd
-        self._pty_reader = PtyLineReader(master_fd)  # type: ignore[name-defined]
+        self._pty_reader = PtyLineReader(master_fd)
         self._process = process
         self._done = False
         self._got_result = False
@@ -575,7 +575,7 @@ class ClaudeCodeExecutor(BaseExecutor):
                     continue
 
                 # Strip any ANSI escape sequences that leaked into the stream.
-                decoded = strip_ansi(decoded).strip()  # type: ignore[name-defined]
+                decoded = strip_ansi(decoded).strip()
                 if not decoded:
                     continue
 

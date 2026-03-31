@@ -1,7 +1,15 @@
 import asyncio
+import logging
+from collections import deque
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
+
+logger = logging.getLogger(__name__)
+
+# Maximum number of messages retained in the text history buffer (F11).
+# When the limit is reached the oldest message is evicted to cap memory usage.
+_MAX_BUFFER_MESSAGES = 2000
 
 
 class MessageType(StrEnum):
@@ -45,7 +53,7 @@ class SessionBuffer:
 
     def __init__(self, session_id: str) -> None:
         self.session_id = session_id
-        self._text_messages: list[BufferedMessage] = []
+        self._text_messages: deque[BufferedMessage] = deque(maxlen=_MAX_BUFFER_MESSAGES)
         self._text_sequence: int = 0
         self._text_subscribers: dict[str, asyncio.Queue[BufferedMessage | None]] = {}
 
@@ -54,7 +62,12 @@ class SessionBuffer:
         return list(self._text_messages)
 
     def push_text(self, message_type: MessageType, data: dict[str, Any]) -> BufferedMessage:
-        """Push a text message to the buffer and notify all subscribers."""
+        """Push a text message to the buffer and notify all subscribers.
+
+        When the buffer exceeds ``_MAX_BUFFER_MESSAGES`` the oldest entry is
+        evicted so that long-running sessions cannot exhaust process memory
+        (F11 remediation).
+        """
         self._text_sequence += 1
         msg = BufferedMessage(sequence=self._text_sequence, message_type=message_type, data=data)
         self._text_messages.append(msg)

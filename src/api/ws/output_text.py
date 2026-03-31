@@ -6,7 +6,7 @@ import uuid
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from sqlalchemy import select
 
-from src.api.deps import verify_ws_api_key
+from src.api.deps import handle_ws_first_message_auth, verify_ws_api_key
 from src.core.prompt_router import PromptRouter
 from src.models.db import Artifact as ArtifactModel
 from src.models.db import LinearIssue as LinearIssueModel
@@ -21,7 +21,7 @@ router = APIRouter()
 @router.websocket("/ws/output/text")
 async def ws_output_text(
     websocket: WebSocket,
-    api_key: str = Query(...),
+    api_key: str | None = Query(None),
 ) -> None:
     """WebSocket endpoint for streaming text responses to clients.
 
@@ -46,8 +46,13 @@ async def ws_output_text(
             ...
         }
     """
-    await verify_ws_api_key(api_key)
-    await websocket.accept()
+    if api_key is not None:
+        await verify_ws_api_key(websocket, api_key)
+        await websocket.accept()
+    else:
+        await websocket.accept()
+        if not await handle_ws_first_message_auth(websocket):
+            return
 
     session_manager = websocket.app.state.session_manager
     subscriber_id = str(uuid.uuid4())

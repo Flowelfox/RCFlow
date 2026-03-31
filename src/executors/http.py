@@ -1,9 +1,13 @@
+import asyncio
+import ipaddress
 import json
 import logging
 import os
 import re
+import socket
 from collections.abc import AsyncGenerator
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
@@ -14,6 +18,73 @@ logger = logging.getLogger(__name__)
 
 # Match ${ENV_VAR_NAME} for environment variable substitution
 _ENV_VAR_PATTERN = re.compile(r"\$\{(\w+)\}")
+
+# ---------------------------------------------------------------------------
+# SSRF protection (F2)
+# ---------------------------------------------------------------------------
+
+_BLOCKED_NETWORKS: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = [
+    # RFC-1918 private ranges
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    # Loopback
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("::1/128"),
+    # Link-local / cloud instance-metadata (169.254.169.254, etc.)
+    ipaddress.ip_network("169.254.0.0/16"),
+    ipaddress.ip_network("fe80::/10"),
+    # Unspecified / broadcast
+    ipaddress.ip_network("0.0.0.0/8"),
+    # Unique-local IPv6 (fc00::/7 covers fd00::/8 too)
+    ipaddress.ip_network("fc00::/7"),
+]
+
+
+def _is_blocked_ip(ip_str: str) -> bool:
+    """Return True if *ip_str* falls in a private or reserved address range."""
+    try:
+        addr = ipaddress.ip_address(ip_str)
+        return any(addr in net for net in _BLOCKED_NETWORKS)
+    except ValueError:
+        return True  # Fail closed on unparseable addresses
+
+
+async def _validate_url_no_ssrf(url: str) -> None:
+    """Raise ValueError if *url* resolves to a private or reserved address.
+
+    Protects against Server-Side Request Forgery (SSRF) by blocking HTTP
+    tool requests to RFC-1918 private ranges, loopback, link-local (including
+    cloud metadata endpoints such as 169.254.169.254), and IPv6 private
+    ranges.  DNS is resolved here and each returned address is validated so
+    that DNS-rebinding attacks are also mitigated.
+    """
+    try:
+        parsed = urlparse(url)
+    except Exception as exc:
+        raise ValueError(f"Invalid URL: {url!r}") from exc
+
+    hostname = parsed.hostname
+    if not hostname:
+        raise ValueError(f"URL has no hostname: {url!r}")
+
+    port = parsed.port or (443 if parsed.scheme in ("https", "wss") else 80)
+
+    loop = asyncio.get_running_loop()
+    try:
+        infos = await loop.run_in_executor(
+            None,
+            lambda: socket.getaddrinfo(hostname, port, socket.AF_UNSPEC, socket.SOCK_STREAM),
+        )
+    except OSError as exc:
+        raise ValueError(f"DNS resolution failed for {hostname!r}: {exc}") from exc
+
+    for info in infos:
+        ip = info[4][0]
+        if _is_blocked_ip(ip):
+            raise ValueError(
+                f"HTTP tool request blocked: {hostname!r} resolves to private/reserved address {ip!r}"
+            )
 
 
 def _substitute_env_vars(text: str) -> str:
@@ -41,6 +112,7 @@ class HttpExecutor(BaseExecutor):
         config = tool.get_http_config()
 
         url = _substitute_env_vars(config.url_template.format(**parameters))
+        await _validate_url_no_ssrf(url)
         headers = {k: _substitute_env_vars(v) for k, v in config.headers.items()}
 
         body = None
@@ -98,6 +170,7 @@ class HttpExecutor(BaseExecutor):
         config = tool.get_http_config()
 
         url = _substitute_env_vars(config.url_template.format(**parameters))
+        await _validate_url_no_ssrf(url)
         headers = {k: _substitute_env_vars(v) for k, v in config.headers.items()}
 
         body = None

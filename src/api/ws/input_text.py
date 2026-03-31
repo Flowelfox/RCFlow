@@ -5,7 +5,7 @@ import logging
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from sqlalchemy import select
 
-from src.api.deps import verify_ws_api_key
+from src.api.deps import handle_ws_first_message_auth, verify_ws_api_key
 from src.core.attachment_store import AttachmentStore, ResolvedAttachment
 from src.models.db import LinearIssue as LinearIssueModel
 
@@ -16,7 +16,7 @@ router = APIRouter()
 @router.websocket("/ws/input/text")
 async def ws_input_text(
     websocket: WebSocket,
-    api_key: str = Query(...),
+    api_key: str | None = Query(None),
 ) -> None:
     """WebSocket endpoint for receiving user text prompts.
 
@@ -45,8 +45,13 @@ async def ws_input_text(
             "session_id": "uuid"
         }
     """
-    await verify_ws_api_key(api_key)
-    await websocket.accept()
+    if api_key is not None:
+        await verify_ws_api_key(websocket, api_key)
+        await websocket.accept()
+    else:
+        await websocket.accept()
+        if not await handle_ws_first_message_auth(websocket):
+            return
 
     prompt_router = websocket.app.state.prompt_router
     background_tasks: set[asyncio.Task[str]] = set()

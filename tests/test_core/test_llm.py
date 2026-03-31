@@ -39,7 +39,6 @@ def _make_llm_client(provider: str, model: str) -> LLMClient:
     settings.AWS_SECRET_ACCESS_KEY = ""
     settings.ANTHROPIC_API_KEY = "test"
     settings.OPENAI_API_KEY = "test"
-    settings.SUMMARY_MODEL = ""
     settings.TITLE_MODEL = ""
     settings.TASK_MODEL = ""
     settings.GLOBAL_PROMPT = ""

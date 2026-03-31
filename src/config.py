@@ -127,13 +127,22 @@ class Settings(BaseSettings):
     )
 
     # Server
-    RCFLOW_HOST: str = "0.0.0.0"
+    # Default to loopback — production deployments must set RCFLOW_HOST=0.0.0.0
+    # explicitly to listen on all interfaces (F7 remediation).
+    RCFLOW_HOST: str = "127.0.0.1"
     RCFLOW_PORT: int = _DEFAULT_PORT
     RCFLOW_API_KEY: str = ""
     RCFLOW_BACKEND_ID: str = ""
 
+    # WebSocket origin validation (F6 remediation).
+    # Comma-separated list of allowed Origin header values for WebSocket
+    # connections (e.g. "https://app.example.com,http://localhost:3000").
+    # Empty string (default) disables the check — native-app clients without
+    # an Origin header are always allowed regardless of this setting.
+    WS_ALLOWED_ORIGINS: str = ""
+
     # SSL/TLS (WSS)
-    WSS_ENABLED: bool = True
+    WSS_ENABLED: bool = False
     SSL_CERTFILE: str = ""
     SSL_KEYFILE: str = ""
 
@@ -169,7 +178,6 @@ class Settings(BaseSettings):
     # Use Anthropic model ID for direct API, Bedrock model ID for Bedrock.
     # e.g. "claude-haiku-4-5" or "us.anthropic.claude-haiku-4-5-20251001-v1:0"
     # When blank, each falls back to the main model.
-    SUMMARY_MODEL: str = ""
     TITLE_MODEL: str = ""
     TASK_MODEL: str = ""
 
@@ -216,7 +224,7 @@ class Settings(BaseSettings):
 
 def get_settings() -> Settings:
     logger = logging.getLogger(__name__)
-    settings = Settings()  # type: ignore[call-arg]
+    settings = Settings()
     if not settings.RCFLOW_API_KEY:
         api_key = secrets.token_urlsafe(32)
         update_settings_file({"RCFLOW_API_KEY": api_key})
@@ -329,22 +337,6 @@ CONFIG_OPTIONS: list[dict[str, Any]] = [
         "visible_when": {"key": "LLM_PROVIDER", "value": "openai"},
         "provider_key": "LLM_PROVIDER",
         "models": {
-            "openai": PROVIDER_MODELS["openai"],
-        },
-    },
-    {
-        "key": "SUMMARY_MODEL",
-        "label": "Summary Model",
-        "type": "model_select",
-        "group": "LLM",
-        "description": "Model for TTS-friendly summaries (blank = use main model)",
-        "required": False,
-        "restart_required": True,
-        "visible_when": {"key": "LLM_PROVIDER", "value_not": "none"},
-        "provider_key": "LLM_PROVIDER",
-        "models": {
-            "anthropic": PROVIDER_MODELS["anthropic"],
-            "bedrock": PROVIDER_MODELS["bedrock"],
             "openai": PROVIDER_MODELS["openai"],
         },
     },
@@ -601,7 +593,11 @@ def update_settings_file(updates: dict[str, str]) -> None:
 
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+        # Atomic write: write to a temp file first, then rename so a crash
+        # mid-write cannot corrupt the settings file (F16 remediation).
+        tmp_path = path.with_suffix(".tmp")
+        tmp_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+        tmp_path.replace(path)
     except PermissionError:
         print(
             f"WARNING: Cannot write to {path} — permission denied. "

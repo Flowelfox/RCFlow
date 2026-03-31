@@ -36,7 +36,7 @@ def client(test_app: FastAPI) -> TestClient:
 def _patch_ws_auth():
     """Bypass WebSocket API-key verification for all tests in this module."""
 
-    async def _noop(api_key: str = "") -> str:
+    async def _noop(websocket: object = None, api_key: str = "") -> str:
         return api_key
 
     with (

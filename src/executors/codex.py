@@ -361,7 +361,7 @@ class CodexExecutor(BaseExecutor):
             "Codex CLI does not support reading more events from a completed turn; use restart_with_prompt() instead"
         )
         # Make this a generator so the type signature is correct
-        yield  # type: ignore[misc]  # pragma: no cover
+        yield  # pragma: no cover
 
     async def execute(
         self,

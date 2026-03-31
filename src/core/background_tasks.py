@@ -173,7 +173,7 @@ class BackgroundTasksMixin:
     # --- Summary generation ---
 
     def _fire_summary_task(self, session: ActiveSession, text: str, *, push_session_end_ask: bool = False) -> None:
-        """Schedule a background task to summarize Claude Code result text."""
+        """Schedule a background task to summarize the result text and push it to the session buffer."""
         if self._llm is None:  # ty:ignore[unresolved-attribute]
             # No LLM — skip summary, but still push SESSION_END_ASK if requested
             if push_session_end_ask:
@@ -189,7 +189,7 @@ class BackgroundTasksMixin:
     async def _summarize_and_push(
         self, session: ActiveSession, text: str, *, push_session_end_ask: bool = False
     ) -> None:
-        """Generate a concise summary and push it to the session buffer."""
+        """Generate a concise summary and push it to the session buffer. Never raises."""
         try:
             summary = await self._llm.summarize(text)  # ty:ignore[unresolved-attribute]
             session.buffer.push_text(
