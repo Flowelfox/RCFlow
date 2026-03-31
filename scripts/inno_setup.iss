@@ -50,6 +50,13 @@ DisableProgramGroupPage=yes
 LicenseFile=
 ; Allow user to choose whether to launch at startup
 ChangesEnvironment=yes
+; Code signing — requires SignTool to be defined when invoking ISCC.
+; To sign the installer, pass /DSignFiles=1 and define a signtool:
+;   iscc ... /DSignFiles=1 /SMySignTool="signtool.exe sign /f $qcert.pfx$q /p pass /tr http://timestamp.digicert.com /td sha256 /fd sha256 $f"
+#ifdef SignFiles
+SignTool=MySignTool
+SignedUninstaller=yes
+#endif
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
