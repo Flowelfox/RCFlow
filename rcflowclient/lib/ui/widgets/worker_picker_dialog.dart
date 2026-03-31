@@ -84,8 +84,7 @@ class _WorkerPickerDialogState extends State<_WorkerPickerDialog> {
     if (connected.isEmpty) return;
 
     final currentPos = connected.indexOf(_selectedIndex);
-    final newPos =
-        (currentPos + delta + connected.length) % connected.length;
+    final newPos = (currentPos + delta + connected.length) % connected.length;
     setState(() => _selectedIndex = connected[newPos]);
   }
 
@@ -157,8 +156,11 @@ class _WorkerPickerDialogState extends State<_WorkerPickerDialog> {
                   padding: const EdgeInsets.all(24),
                   child: Column(
                     children: [
-                      Icon(Icons.cloud_off_outlined,
-                          size: 32, color: context.appColors.textMuted),
+                      Icon(
+                        Icons.cloud_off_outlined,
+                        size: 32,
+                        color: context.appColors.textMuted,
+                      ),
                       const SizedBox(height: 12),
                       Text(
                         'No connected workers',
@@ -204,7 +206,9 @@ class _WorkerPickerDialogState extends State<_WorkerPickerDialog> {
                               ? context.appColors.accent.withAlpha(30)
                               : Colors.transparent,
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 20, vertical: 10),
+                            horizontal: 20,
+                            vertical: 10,
+                          ),
                           child: Row(
                             children: [
                               Container(
@@ -247,8 +251,10 @@ class _WorkerPickerDialogState extends State<_WorkerPickerDialog> {
               // Footer hint
               Divider(color: context.appColors.divider, height: 1),
               Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 12,
+                ),
                 child: Row(
                   children: [
                     Text(

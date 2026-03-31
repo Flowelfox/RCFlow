@@ -57,7 +57,10 @@ class _NotificationOverlayState extends State<NotificationOverlay> {
     }
   }
 
-  Widget _buildAnimated(AppNotification notification, Animation<double> animation) {
+  Widget _buildAnimated(
+    AppNotification notification,
+    Animation<double> animation,
+  ) {
     final slide = Tween<Offset>(
       begin: const Offset(1.0, 0.0),
       end: Offset.zero,

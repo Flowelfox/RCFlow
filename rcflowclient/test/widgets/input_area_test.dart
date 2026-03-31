@@ -4,7 +4,6 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
-import 'package:rcflowclient/models/subprocess_info.dart';
 import 'package:rcflowclient/services/settings_service.dart';
 import 'package:rcflowclient/state/app_state.dart';
 import 'package:rcflowclient/state/pane_state.dart';
@@ -55,8 +54,9 @@ Future<(AppState, PaneState)> _setupStates() async {
 
 void main() {
   group('InputArea — restore button', () {
-    testWidgets('shows Restore button instead of Send when session ended',
-        (tester) async {
+    testWidgets('shows Restore button instead of Send when session ended', (
+      tester,
+    ) async {
       final (appState, paneState) = await _setupStates();
 
       // Simulate a session ending: set the session ID then mark it ended.
@@ -64,7 +64,8 @@ void main() {
       paneState.handleSessionEnded('sess-1');
 
       await tester.pumpWidget(
-          _buildInputArea(appState: appState, paneState: paneState));
+        _buildInputArea(appState: appState, paneState: paneState),
+      );
       await tester.pump();
 
       expect(find.byTooltip('Restore session'), findsOneWidget);
@@ -73,27 +74,31 @@ void main() {
       expect(find.byIcon(Icons.arrow_upward_rounded), findsNothing);
     });
 
-    testWidgets('does not show Restore button when session is active',
-        (tester) async {
+    testWidgets('does not show Restore button when session is active', (
+      tester,
+    ) async {
       final (appState, paneState) = await _setupStates();
 
       await tester.pumpWidget(
-          _buildInputArea(appState: appState, paneState: paneState));
+        _buildInputArea(appState: appState, paneState: paneState),
+      );
       await tester.pump();
 
       expect(find.byTooltip('Restore session'), findsNothing);
       expect(find.byIcon(Icons.arrow_upward_rounded), findsOneWidget);
     });
 
-    testWidgets('Restore button disappears after session is restored',
-        (tester) async {
+    testWidgets('Restore button disappears after session is restored', (
+      tester,
+    ) async {
       final (appState, paneState) = await _setupStates();
 
       paneState.handleAck('sess-2');
       paneState.handleSessionEnded('sess-2');
 
       await tester.pumpWidget(
-          _buildInputArea(appState: appState, paneState: paneState));
+        _buildInputArea(appState: appState, paneState: paneState),
+      );
       await tester.pump();
       expect(find.byTooltip('Restore session'), findsOneWidget);
 
@@ -106,12 +111,14 @@ void main() {
   });
 
   group('InputArea — subprocess status bar', () {
-    testWidgets('status bar is hidden when runningSubprocess is null',
-        (tester) async {
+    testWidgets('status bar is hidden when runningSubprocess is null', (
+      tester,
+    ) async {
       final (appState, paneState) = await _setupStates();
 
       await tester.pumpWidget(
-          _buildInputArea(appState: appState, paneState: paneState));
+        _buildInputArea(appState: appState, paneState: paneState),
+      );
       await tester.pump();
 
       // No subprocess — the display name should not be visible
@@ -119,12 +126,14 @@ void main() {
       expect(find.byTooltip('Kill subprocess'), findsNothing);
     });
 
-    testWidgets('status bar appears when runningSubprocess is set',
-        (tester) async {
+    testWidgets('status bar appears when runningSubprocess is set', (
+      tester,
+    ) async {
       final (appState, paneState) = await _setupStates();
 
       await tester.pumpWidget(
-          _buildInputArea(appState: appState, paneState: paneState));
+        _buildInputArea(appState: appState, paneState: paneState),
+      );
       await tester.pump();
 
       paneState.setRunningSubprocess(makeSubprocessInfo());
@@ -134,12 +143,14 @@ void main() {
       expect(find.byTooltip('Kill subprocess'), findsOneWidget);
     });
 
-    testWidgets('status bar shows tool name when currentTool is set',
-        (tester) async {
+    testWidgets('status bar shows tool name when currentTool is set', (
+      tester,
+    ) async {
       final (appState, paneState) = await _setupStates();
 
       await tester.pumpWidget(
-          _buildInputArea(appState: appState, paneState: paneState));
+        _buildInputArea(appState: appState, paneState: paneState),
+      );
       await tester.pump();
 
       paneState.setRunningSubprocess(makeSubprocessInfo(currentTool: 'Bash'));
@@ -149,12 +160,14 @@ void main() {
       expect(find.text('Claude Code · Bash'), findsOneWidget);
     });
 
-    testWidgets('status bar disappears when runningSubprocess is cleared',
-        (tester) async {
+    testWidgets('status bar disappears when runningSubprocess is cleared', (
+      tester,
+    ) async {
       final (appState, paneState) = await _setupStates();
 
       await tester.pumpWidget(
-          _buildInputArea(appState: appState, paneState: paneState));
+        _buildInputArea(appState: appState, paneState: paneState),
+      );
 
       paneState.setRunningSubprocess(makeSubprocessInfo());
       await tester.pump();
@@ -166,12 +179,14 @@ void main() {
       expect(find.text('Claude Code'), findsNothing);
     });
 
-    testWidgets('tapping kill button invokes interruptSubprocess (no crash)',
-        (tester) async {
+    testWidgets('tapping kill button invokes interruptSubprocess (no crash)', (
+      tester,
+    ) async {
       final (appState, paneState) = await _setupStates();
 
       await tester.pumpWidget(
-          _buildInputArea(appState: appState, paneState: paneState));
+        _buildInputArea(appState: appState, paneState: paneState),
+      );
 
       paneState.setRunningSubprocess(makeSubprocessInfo());
       await tester.pump();
@@ -188,11 +203,14 @@ void main() {
       // No exception — test passes
     });
 
-    testWidgets('shows Codex display name for Codex subprocess', (tester) async {
+    testWidgets('shows Codex display name for Codex subprocess', (
+      tester,
+    ) async {
       final (appState, paneState) = await _setupStates();
 
       await tester.pumpWidget(
-          _buildInputArea(appState: appState, paneState: paneState));
+        _buildInputArea(appState: appState, paneState: paneState),
+      );
       await tester.pump();
 
       paneState.setRunningSubprocess(makeCodexSubprocessInfo());

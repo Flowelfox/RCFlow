@@ -42,6 +42,7 @@ class _TourStep {
   final GlobalKey targetKey;
   final String title;
   final String description;
+
   /// Preferred side to show the tooltip relative to the target.
   final _TooltipSide preferredSide;
 
@@ -98,8 +99,7 @@ final _tourSteps = [
   _TourStep(
     targetKey: keys.settingsButtonKey,
     title: 'Settings',
-    description:
-        'Manage workers, appearance, notifications, and more.',
+    description: 'Manage workers, appearance, notifications, and more.',
     preferredSide: _TooltipSide.right,
   ),
 ];
@@ -125,9 +125,7 @@ class _OnboardingOverlayState extends State<_OnboardingOverlay>
 
   /// Steps filtered to only those whose target widget is currently mounted.
   List<_TourStep> get _activeSteps {
-    return _tourSteps
-        .where((s) => s.targetKey.currentContext != null)
-        .toList();
+    return _tourSteps.where((s) => s.targetKey.currentContext != null).toList();
   }
 
   @override
@@ -247,20 +245,28 @@ class _OnboardingOverlayState extends State<_OnboardingOverlay>
 
     switch (step.preferredSide) {
       case _TooltipSide.right:
-        left = (targetRect.right + tooltipPadding)
-            .clamp(0, screenSize.width - tooltipWidth - 16);
+        left = (targetRect.right + tooltipPadding).clamp(
+          0,
+          screenSize.width - tooltipWidth - 16,
+        );
         top = targetRect.center.dy - 60;
       case _TooltipSide.left:
-        left = (targetRect.left - tooltipWidth - tooltipPadding)
-            .clamp(16, screenSize.width - tooltipWidth);
+        left = (targetRect.left - tooltipWidth - tooltipPadding).clamp(
+          16,
+          screenSize.width - tooltipWidth,
+        );
         top = targetRect.center.dy - 60;
       case _TooltipSide.bottom:
-        left = (targetRect.center.dx - tooltipWidth / 2)
-            .clamp(16, screenSize.width - tooltipWidth - 16);
+        left = (targetRect.center.dx - tooltipWidth / 2).clamp(
+          16,
+          screenSize.width - tooltipWidth - 16,
+        );
         top = targetRect.bottom + tooltipPadding;
       case _TooltipSide.top:
-        left = (targetRect.center.dx - tooltipWidth / 2)
-            .clamp(16, screenSize.width - tooltipWidth - 16);
+        left = (targetRect.center.dx - tooltipWidth / 2).clamp(
+          16,
+          screenSize.width - tooltipWidth - 16,
+        );
         top = targetRect.top - tooltipPadding - 160;
     }
 
@@ -277,9 +283,7 @@ class _OnboardingOverlayState extends State<_OnboardingOverlay>
           decoration: BoxDecoration(
             color: context.appColors.bgSurface,
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: context.appColors.accent.withAlpha(80),
-            ),
+            border: Border.all(color: context.appColors.accent.withAlpha(80)),
             boxShadow: [
               BoxShadow(
                 color: Colors.black.withAlpha(80),
@@ -323,18 +327,25 @@ class _OnboardingOverlayState extends State<_OnboardingOverlay>
                   const Spacer(),
                   TextButton(
                     onPressed: _done,
-                    child: Text('Skip',
-                        style: TextStyle(
-                            color: context.appColors.textMuted, fontSize: 13)),
+                    child: Text(
+                      'Skip',
+                      style: TextStyle(
+                        color: context.appColors.textMuted,
+                        fontSize: 13,
+                      ),
+                    ),
                   ),
                   const SizedBox(width: 4),
                   FilledButton(
                     style: FilledButton.styleFrom(
                       backgroundColor: context.appColors.accent,
                       shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10)),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 10),
+                        horizontal: 16,
+                        vertical: 10,
+                      ),
                     ),
                     onPressed: _next,
                     child: Text(
@@ -377,8 +388,11 @@ class _SpotlightPainter extends CustomPainter {
     // Use path difference to cut out the target area from the full scrim.
     final outerPath = Path()..addRect(Offset.zero & size);
     final innerPath = Path()..addRRect(rrect);
-    final combinedPath =
-        Path.combine(PathOperation.difference, outerPath, innerPath);
+    final combinedPath = Path.combine(
+      PathOperation.difference,
+      outerPath,
+      innerPath,
+    );
 
     canvas.drawPath(combinedPath, scrimPaint);
 

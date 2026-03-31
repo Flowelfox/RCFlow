@@ -142,8 +142,11 @@ class _SetupWizardState extends State<_SetupWizard> {
       _testMessage = '';
     });
 
-    final url =
-        ServerUrl(rawHost: '$host:$port', apiKey: apiKey, secure: _useSSL);
+    final url = ServerUrl(
+      rawHost: '$host:$port',
+      apiKey: apiKey,
+      secure: _useSSL,
+    );
 
     try {
       final httpClient = io.HttpClient();
@@ -153,8 +156,9 @@ class _SetupWizardState extends State<_SetupWizard> {
       httpClient.connectionTimeout = const Duration(seconds: 5);
       final healthUri = url.http('/api/health');
       final request = await httpClient.getUrl(healthUri);
-      final response =
-          await request.close().timeout(const Duration(seconds: 8));
+      final response = await request.close().timeout(
+        const Duration(seconds: 8),
+      );
       final statusCode = response.statusCode;
       await response.drain<void>();
       httpClient.close(force: true);
@@ -352,8 +356,8 @@ class _SetupWizardState extends State<_SetupWizard> {
                   color: isDone
                       ? context.appColors.accent
                       : isActive
-                          ? context.appColors.accentLight
-                          : context.appColors.bgOverlay,
+                      ? context.appColors.accentLight
+                      : context.appColors.bgOverlay,
                 ),
               ),
             ),
@@ -372,16 +376,20 @@ class _SetupWizardState extends State<_SetupWizard> {
           if (_currentStep < _totalSteps - 1)
             TextButton(
               onPressed: _skip,
-              child: Text('Skip Setup',
-                  style: TextStyle(color: context.appColors.textMuted)),
+              child: Text(
+                'Skip Setup',
+                style: TextStyle(color: context.appColors.textMuted),
+              ),
             ),
           const Spacer(),
           // Back button
           if (_currentStep > 0 && _currentStep < _totalSteps - 1)
             TextButton(
               onPressed: () => _goTo(_currentStep - 1),
-              child: Text('Back',
-                  style: TextStyle(color: context.appColors.textSecondary)),
+              child: Text(
+                'Back',
+                style: TextStyle(color: context.appColors.textSecondary),
+              ),
             ),
           if (_currentStep > 0) const SizedBox(width: 8),
           // Forward / Finish button
@@ -397,7 +405,10 @@ class _SetupWizardState extends State<_SetupWizard> {
         return FilledButton(
           style: _accentButtonStyle(),
           onPressed: () => _goTo(1),
-          child: const Text('Get Started', style: TextStyle(color: Colors.white)),
+          child: const Text(
+            'Get Started',
+            style: TextStyle(color: Colors.white),
+          ),
         );
       case 1:
         return FilledButton(
@@ -408,10 +419,14 @@ class _SetupWizardState extends State<_SetupWizard> {
                   width: 18,
                   height: 18,
                   child: CircularProgressIndicator(
-                      strokeWidth: 2, color: Colors.white),
+                    strokeWidth: 2,
+                    color: Colors.white,
+                  ),
                 )
-              : const Text('Connect & Continue',
-                  style: TextStyle(color: Colors.white)),
+              : const Text(
+                  'Connect & Continue',
+                  style: TextStyle(color: Colors.white),
+                ),
         );
       case 2:
         return FilledButton(
@@ -471,8 +486,11 @@ class _SetupWizardState extends State<_SetupWizard> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.rocket_launch_rounded,
-              size: 64, color: context.appColors.accent),
+          Icon(
+            Icons.rocket_launch_rounded,
+            size: 64,
+            color: context.appColors.accent,
+          ),
           const SizedBox(height: 24),
           Text(
             'Welcome to RCFlow',
@@ -527,8 +545,10 @@ class _SetupWizardState extends State<_SetupWizard> {
           TextField(
             controller: _nameCtrl,
             autofocus: true,
-            style:
-                TextStyle(color: context.appColors.textPrimary, fontSize: 15),
+            style: TextStyle(
+              color: context.appColors.textPrimary,
+              fontSize: 15,
+            ),
             decoration: _inputDecoration(
               hint: 'Home Server',
               icon: Icons.label_outlined,
@@ -552,7 +572,9 @@ class _SetupWizardState extends State<_SetupWizard> {
                     TextField(
                       controller: _hostCtrl,
                       style: TextStyle(
-                          color: context.appColors.textPrimary, fontSize: 15),
+                        color: context.appColors.textPrimary,
+                        fontSize: 15,
+                      ),
                       decoration: _inputDecoration(
                         hint: '127.0.0.1',
                         icon: Icons.dns_outlined,
@@ -576,7 +598,9 @@ class _SetupWizardState extends State<_SetupWizard> {
                       controller: _portCtrl,
                       keyboardType: TextInputType.number,
                       style: TextStyle(
-                          color: context.appColors.textPrimary, fontSize: 15),
+                        color: context.appColors.textPrimary,
+                        fontSize: 15,
+                      ),
                       decoration: _inputDecoration(
                         hint: '53890',
                         error: _fieldError(_portCtrl),
@@ -596,33 +620,40 @@ class _SetupWizardState extends State<_SetupWizard> {
           TextField(
             controller: _apiKeyCtrl,
             obscureText: _obscureKey,
-            style:
-                TextStyle(color: context.appColors.textPrimary, fontSize: 15),
-            decoration: _inputDecoration(
-              hint: 'Enter API key',
-              icon: Icons.key_outlined,
-              error: _fieldError(_apiKeyCtrl),
-            ).copyWith(
-              suffixIcon: IconButton(
-                icon: Icon(
-                  _obscureKey
-                      ? Icons.visibility_off_outlined
-                      : Icons.visibility_outlined,
-                  color: context.appColors.textMuted,
-                  size: 20,
-                ),
-                onPressed: () => setState(() => _obscureKey = !_obscureKey),
-              ),
+            style: TextStyle(
+              color: context.appColors.textPrimary,
+              fontSize: 15,
             ),
+            decoration:
+                _inputDecoration(
+                  hint: 'Enter API key',
+                  icon: Icons.key_outlined,
+                  error: _fieldError(_apiKeyCtrl),
+                ).copyWith(
+                  suffixIcon: IconButton(
+                    icon: Icon(
+                      _obscureKey
+                          ? Icons.visibility_off_outlined
+                          : Icons.visibility_outlined,
+                      color: context.appColors.textMuted,
+                      size: 20,
+                    ),
+                    onPressed: () => setState(() => _obscureKey = !_obscureKey),
+                  ),
+                ),
             onChanged: (_) {
               if (_submitted) setState(() {});
             },
           ),
           const SizedBox(height: 12),
           SwitchListTile(
-            title: Text('Use SSL (wss://)',
-                style: TextStyle(
-                    color: context.appColors.textPrimary, fontSize: 14)),
+            title: Text(
+              'Use SSL (wss://)',
+              style: TextStyle(
+                color: context.appColors.textPrimary,
+                fontSize: 14,
+              ),
+            ),
             value: _useSSL,
             activeTrackColor: context.appColors.accent,
             contentPadding: EdgeInsets.zero,
@@ -630,18 +661,26 @@ class _SetupWizardState extends State<_SetupWizard> {
           ),
           if (_useSSL)
             SwitchListTile(
-              title: Text('Allow self-signed certificate',
-                  style: TextStyle(
-                      color: context.appColors.textPrimary, fontSize: 14)),
+              title: Text(
+                'Allow self-signed certificate',
+                style: TextStyle(
+                  color: context.appColors.textPrimary,
+                  fontSize: 14,
+                ),
+              ),
               value: _allowSelfSigned,
               activeTrackColor: context.appColors.accent,
               contentPadding: EdgeInsets.zero,
               onChanged: (v) => setState(() => _allowSelfSigned = v),
             ),
           SwitchListTile(
-            title: Text('Auto-connect on start',
-                style: TextStyle(
-                    color: context.appColors.textPrimary, fontSize: 14)),
+            title: Text(
+              'Auto-connect on start',
+              style: TextStyle(
+                color: context.appColors.textPrimary,
+                fontSize: 14,
+              ),
+            ),
             value: _autoConnect,
             activeTrackColor: context.appColors.accent,
             contentPadding: EdgeInsets.zero,
@@ -661,9 +700,12 @@ class _SetupWizardState extends State<_SetupWizard> {
                   foregroundColor: context.appColors.textSecondary,
                   side: BorderSide(color: context.appColors.divider),
                   shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10)),
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 10,
+                  ),
                 ),
               ),
               const SizedBox(width: 12),
@@ -672,38 +714,58 @@ class _SetupWizardState extends State<_SetupWizard> {
                   width: 18,
                   height: 18,
                   child: CircularProgressIndicator(
-                      strokeWidth: 2, color: context.appColors.accentLight),
+                    strokeWidth: 2,
+                    color: context.appColors.accentLight,
+                  ),
                 ),
               if (_testStatus == _TestStatus.success) ...[
-                Icon(Icons.check_circle_rounded,
-                    color: context.appColors.successText, size: 18),
+                Icon(
+                  Icons.check_circle_rounded,
+                  color: context.appColors.successText,
+                  size: 18,
+                ),
                 const SizedBox(width: 6),
                 Flexible(
-                  child: Text(_testMessage,
-                      style: TextStyle(
-                          color: context.appColors.successText, fontSize: 13),
-                      overflow: TextOverflow.ellipsis),
+                  child: Text(
+                    _testMessage,
+                    style: TextStyle(
+                      color: context.appColors.successText,
+                      fontSize: 13,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
               ],
               if (_testStatus == _TestStatus.failure) ...[
-                Icon(Icons.cancel_rounded,
-                    color: context.appColors.errorText, size: 18),
+                Icon(
+                  Icons.cancel_rounded,
+                  color: context.appColors.errorText,
+                  size: 18,
+                ),
                 const SizedBox(width: 6),
                 Flexible(
-                  child: Text(_testMessage,
-                      style: TextStyle(
-                          color: context.appColors.errorText, fontSize: 13),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis),
+                  child: Text(
+                    _testMessage,
+                    style: TextStyle(
+                      color: context.appColors.errorText,
+                      fontSize: 13,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
               ],
             ],
           ),
           if (_connectError != null) ...[
             const SizedBox(height: 8),
-            Text(_connectError!,
-                style: TextStyle(
-                    color: context.appColors.errorText, fontSize: 13)),
+            Text(
+              _connectError!,
+              style: TextStyle(
+                color: context.appColors.errorText,
+                fontSize: 13,
+              ),
+            ),
           ],
         ],
       ),
@@ -748,7 +810,9 @@ class _SetupWizardState extends State<_SetupWizard> {
               Text(
                 'Configure the language model provider for your server.',
                 style: TextStyle(
-                    color: context.appColors.textMuted, fontSize: 13),
+                  color: context.appColors.textMuted,
+                  fontSize: 13,
+                ),
               ),
             ],
           ),
@@ -788,8 +852,7 @@ class _SetupWizardState extends State<_SetupWizard> {
           Text(
             'Choose which agent to use by default for new sessions. '
             'You can always override this per-session with the # selector.',
-            style:
-                TextStyle(color: context.appColors.textMuted, fontSize: 13),
+            style: TextStyle(color: context.appColors.textMuted, fontSize: 13),
           ),
           const SizedBox(height: 20),
           // Tool status cards
@@ -798,24 +861,35 @@ class _SetupWizardState extends State<_SetupWizard> {
               padding: const EdgeInsets.symmetric(vertical: 32),
               child: Center(
                 child: CircularProgressIndicator(
-                    color: context.appColors.accent),
+                  color: context.appColors.accent,
+                ),
               ),
             )
           else if (_toolsError != null)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 16),
-              child: Text('Could not load tool status: $_toolsError',
-                  style: TextStyle(
-                      color: context.appColors.errorText, fontSize: 13)),
+              child: Text(
+                'Could not load tool status: $_toolsError',
+                style: TextStyle(
+                  color: context.appColors.errorText,
+                  fontSize: 13,
+                ),
+              ),
             )
           else if (_tools != null)
-            ..._tools!.entries.map((e) => _buildToolCard(e.key, e.value as Map<String, dynamic>)),
+            ..._tools!.entries.map(
+              (e) => _buildToolCard(e.key, e.value as Map<String, dynamic>),
+            ),
           if (_tools == null && !_toolsLoading && _toolsError == null)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 16),
-              child: Text('No tool information available.',
-                  style: TextStyle(
-                      color: context.appColors.textMuted, fontSize: 13)),
+              child: Text(
+                'No tool information available.',
+                style: TextStyle(
+                  color: context.appColors.textMuted,
+                  fontSize: 13,
+                ),
+              ),
             ),
           const SizedBox(height: 20),
           _label('Default agent'),
@@ -824,18 +898,21 @@ class _SetupWizardState extends State<_SetupWizard> {
             initialValue: _defaultAgent,
             dropdownColor: context.appColors.bgElevated,
             style: TextStyle(
-                color: context.appColors.textPrimary, fontSize: 14),
-            decoration: _inputDecoration(
-              icon: Icons.smart_toy_outlined,
+              color: context.appColors.textPrimary,
+              fontSize: 14,
             ),
+            decoration: _inputDecoration(icon: Icons.smart_toy_outlined),
             items: const [
               DropdownMenuItem(
-                  value: null, child: Text('None (let LLM decide)')),
+                value: null,
+                child: Text('None (let LLM decide)'),
+              ),
               DropdownMenuItem(
-                  value: 'claude_code', child: Text('Claude Code')),
+                value: 'claude_code',
+                child: Text('Claude Code'),
+              ),
               DropdownMenuItem(value: 'codex', child: Text('Codex')),
-              DropdownMenuItem(
-                  value: 'opencode', child: Text('OpenCode')),
+              DropdownMenuItem(value: 'opencode', child: Text('OpenCode')),
             ],
             onChanged: (v) => setState(() => _defaultAgent = v),
           ),
@@ -870,38 +947,47 @@ class _SetupWizardState extends State<_SetupWizard> {
         ),
         child: Row(
           children: [
-            Icon(Icons.smart_toy_outlined,
-                color: installed
-                    ? context.appColors.accent
-                    : context.appColors.textMuted,
-                size: 24),
+            Icon(
+              Icons.smart_toy_outlined,
+              color: installed
+                  ? context.appColors.accent
+                  : context.appColors.textMuted,
+              size: 24,
+            ),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(displayName,
-                      style: TextStyle(
-                          color: context.appColors.textPrimary,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w500)),
+                  Text(
+                    displayName,
+                    style: TextStyle(
+                      color: context.appColors.textPrimary,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
                   const SizedBox(height: 2),
                   Text(
                     installed
                         ? 'Installed${version != null ? ' (v$version)' : ''}${managed ? ' \u2022 Managed' : ''}'
                         : 'Not installed',
                     style: TextStyle(
-                        color: installed
-                            ? context.appColors.textMuted
-                            : context.appColors.errorText,
-                        fontSize: 12),
+                      color: installed
+                          ? context.appColors.textMuted
+                          : context.appColors.errorText,
+                      fontSize: 12,
+                    ),
                   ),
                 ],
               ),
             ),
             if (installed)
-              Icon(Icons.check_circle_rounded,
-                  color: context.appColors.successText, size: 20),
+              Icon(
+                Icons.check_circle_rounded,
+                color: context.appColors.successText,
+                size: 20,
+              ),
           ],
         ),
       ),
@@ -930,8 +1016,11 @@ class _SetupWizardState extends State<_SetupWizard> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.check_circle_outline_rounded,
-              size: 56, color: context.appColors.successText),
+          Icon(
+            Icons.check_circle_outline_rounded,
+            size: 56,
+            color: context.appColors.successText,
+          ),
           const SizedBox(height: 20),
           Text(
             'You\'re all set!',
@@ -965,8 +1054,7 @@ class _SetupWizardState extends State<_SetupWizard> {
           Text(
             'You can change these settings anytime from the Settings menu.',
             textAlign: TextAlign.center,
-            style: TextStyle(
-                color: context.appColors.textMuted, fontSize: 13),
+            style: TextStyle(color: context.appColors.textMuted, fontSize: 13),
           ),
         ],
       ),
@@ -978,14 +1066,19 @@ class _SetupWizardState extends State<_SetupWizard> {
       children: [
         SizedBox(
           width: 110,
-          child: Text(label,
-              style: TextStyle(
-                  color: context.appColors.textMuted, fontSize: 13)),
+          child: Text(
+            label,
+            style: TextStyle(color: context.appColors.textMuted, fontSize: 13),
+          ),
         ),
         Expanded(
-          child: Text(value,
-              style: TextStyle(
-                  color: context.appColors.textPrimary, fontSize: 14)),
+          child: Text(
+            value,
+            style: TextStyle(
+              color: context.appColors.textPrimary,
+              fontSize: 14,
+            ),
+          ),
         ),
       ],
     );
@@ -999,14 +1092,15 @@ class _SetupWizardState extends State<_SetupWizard> {
     return RichText(
       text: TextSpan(
         text: text,
-        style:
-            TextStyle(color: context.appColors.textSecondary, fontSize: 13),
+        style: TextStyle(color: context.appColors.textSecondary, fontSize: 13),
         children: [
           if (required)
             TextSpan(
               text: ' *',
               style: TextStyle(
-                  color: context.appColors.accentLight, fontSize: 13),
+                color: context.appColors.accentLight,
+                fontSize: 13,
+              ),
             ),
         ],
       ),
@@ -1020,8 +1114,9 @@ class _SetupWizardState extends State<_SetupWizard> {
   }) {
     return InputDecoration(
       hintText: hint,
-      prefixIcon:
-          icon != null ? Icon(icon, color: context.appColors.textMuted, size: 20) : null,
+      prefixIcon: icon != null
+          ? Icon(icon, color: context.appColors.textMuted, size: 20)
+          : null,
       fillColor: context.appColors.bgElevated,
       border: OutlineInputBorder(
         borderSide: BorderSide.none,
@@ -1042,13 +1137,18 @@ class _SetupWizardState extends State<_SetupWizard> {
         children: [
           Icon(icon, color: context.appColors.textMuted, size: 40),
           const SizedBox(height: 16),
-          Text(title,
-              style: TextStyle(
-                  color: context.appColors.textSecondary, fontSize: 15)),
+          Text(
+            title,
+            style: TextStyle(
+              color: context.appColors.textSecondary,
+              fontSize: 15,
+            ),
+          ),
           const SizedBox(height: 4),
-          Text(subtitle,
-              style: TextStyle(
-                  color: context.appColors.textMuted, fontSize: 13)),
+          Text(
+            subtitle,
+            style: TextStyle(color: context.appColors.textMuted, fontSize: 13),
+          ),
         ],
       ),
     );

@@ -16,8 +16,9 @@ class SessionLeadingIcon extends StatelessWidget {
     final bgColor = _sessionIconBg(context, session);
     final isAwaitingPermission =
         session.activityState == 'awaiting_permission' &&
-            (session.status == 'active' || session.status == 'executing');
-    final isProcessing = session.isProcessing &&
+        (session.status == 'active' || session.status == 'executing');
+    final isProcessing =
+        session.isProcessing &&
         !isAwaitingPermission &&
         (session.status == 'active' || session.status == 'executing');
 
@@ -39,8 +40,7 @@ class SessionLeadingIcon extends StatelessWidget {
         (s.status == 'active' || s.status == 'executing')) {
       return Icons.shield_outlined;
     }
-    if ((s.status == 'active' || s.status == 'executing') &&
-        !s.isProcessing) {
+    if ((s.status == 'active' || s.status == 'executing') && !s.isProcessing) {
       return Icons.chat_bubble_outline_rounded;
     }
     return switch (s.status) {
@@ -58,8 +58,7 @@ class SessionLeadingIcon extends StatelessWidget {
         (s.status == 'active' || s.status == 'executing')) {
       return context.appColors.toolAccent;
     }
-    if ((s.status == 'active' || s.status == 'executing') &&
-        !s.isProcessing) {
+    if ((s.status == 'active' || s.status == 'executing') && !s.isProcessing) {
       return context.appColors.accentLight;
     }
     return switch (s.status) {
@@ -77,8 +76,7 @@ class SessionLeadingIcon extends StatelessWidget {
         (s.status == 'active' || s.status == 'executing')) {
       return Color(0xFF2A2000);
     }
-    if ((s.status == 'active' || s.status == 'executing') &&
-        !s.isProcessing) {
+    if ((s.status == 'active' || s.status == 'executing') && !s.isProcessing) {
       return Color(0xFF112233);
     }
     return switch (s.status) {

@@ -50,7 +50,11 @@ class _PlanReviewAskCardState extends State<PlanReviewAskCard> {
       children: [
         Row(
           children: [
-            Icon(Icons.assignment_rounded, color: context.appColors.accentLight, size: 18),
+            Icon(
+              Icons.assignment_rounded,
+              color: context.appColors.accentLight,
+              size: 18,
+            ),
             SizedBox(width: 8),
             Expanded(
               child: Text(
@@ -85,8 +89,9 @@ class _PlanReviewAskCardState extends State<PlanReviewAskCard> {
                 ),
                 code: TextStyle(
                   color: context.appColors.textPrimary,
-                  backgroundColor:
-                      context.appColors.toolBg.withValues(alpha: 0.6),
+                  backgroundColor: context.appColors.toolBg.withValues(
+                    alpha: 0.6,
+                  ),
                   fontSize: 12,
                   fontFamily: 'monospace',
                 ),
@@ -104,14 +109,19 @@ class _PlanReviewAskCardState extends State<PlanReviewAskCard> {
           TextField(
             controller: _controller,
             autofocus: true,
-            style: TextStyle(color: context.appColors.textPrimary, fontSize: 13),
+            style: TextStyle(
+              color: context.appColors.textPrimary,
+              fontSize: 13,
+            ),
             maxLines: 3,
             minLines: 1,
             decoration: InputDecoration(
               hintText: 'Describe what to change...',
               isDense: true,
-              contentPadding:
-                  EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              contentPadding: EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 10,
+              ),
               fillColor: context.appColors.bgOverlay,
               border: OutlineInputBorder(
                 borderSide: BorderSide.none,
@@ -134,9 +144,10 @@ class _PlanReviewAskCardState extends State<PlanReviewAskCard> {
                     ),
                     padding: const EdgeInsets.symmetric(vertical: 12),
                   ),
-                  child: const Text('Cancel',
-                      style: TextStyle(
-                          fontSize: 14, fontWeight: FontWeight.w600)),
+                  child: const Text(
+                    'Cancel',
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                  ),
                 ),
               ),
               const SizedBox(width: 10),
@@ -145,9 +156,11 @@ class _PlanReviewAskCardState extends State<PlanReviewAskCard> {
                   onPressed: _controller.text.trim().isEmpty
                       ? null
                       : () {
-                          context
-                              .read<PaneState>()
-                              .sendInteractiveResponse(widget.message, _controller.text.trim(), accepted: false);
+                          context.read<PaneState>().sendInteractiveResponse(
+                            widget.message,
+                            _controller.text.trim(),
+                            accepted: false,
+                          );
                         },
                   style: FilledButton.styleFrom(
                     backgroundColor: context.appColors.accent,
@@ -157,9 +170,10 @@ class _PlanReviewAskCardState extends State<PlanReviewAskCard> {
                     ),
                     padding: const EdgeInsets.symmetric(vertical: 12),
                   ),
-                  child: const Text('Send Feedback',
-                      style: TextStyle(
-                          fontSize: 14, fontWeight: FontWeight.w600)),
+                  child: const Text(
+                    'Send Feedback',
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                  ),
                 ),
               ),
             ],
@@ -178,18 +192,20 @@ class _PlanReviewAskCardState extends State<PlanReviewAskCard> {
                     ),
                     padding: const EdgeInsets.symmetric(vertical: 12),
                   ),
-                  child: const Text('Edit',
-                      style: TextStyle(
-                          fontSize: 14, fontWeight: FontWeight.w600)),
+                  child: const Text(
+                    'Edit',
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                  ),
                 ),
               ),
               const SizedBox(width: 10),
               Expanded(
                 child: FilledButton(
                   onPressed: () {
-                    context
-                        .read<PaneState>()
-                        .sendInteractiveResponse(widget.message, 'Looks good, proceed with the plan.');
+                    context.read<PaneState>().sendInteractiveResponse(
+                      widget.message,
+                      'Looks good, proceed with the plan.',
+                    );
                   },
                   style: FilledButton.styleFrom(
                     backgroundColor: context.appColors.accent,
@@ -198,9 +214,10 @@ class _PlanReviewAskCardState extends State<PlanReviewAskCard> {
                     ),
                     padding: const EdgeInsets.symmetric(vertical: 12),
                   ),
-                  child: const Text('Approve',
-                      style: TextStyle(
-                          fontSize: 14, fontWeight: FontWeight.w600)),
+                  child: const Text(
+                    'Approve',
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                  ),
                 ),
               ),
             ],
@@ -215,7 +232,9 @@ class _PlanReviewAskCardState extends State<PlanReviewAskCard> {
       children: [
         Icon(
           approved ? Icons.check_circle_rounded : Icons.rate_review_rounded,
-          color: approved ? context.appColors.successText : context.appColors.accentLight,
+          color: approved
+              ? context.appColors.successText
+              : context.appColors.accentLight,
           size: 18,
         ),
         SizedBox(width: 8),
@@ -223,7 +242,9 @@ class _PlanReviewAskCardState extends State<PlanReviewAskCard> {
           child: Text(
             approved ? 'Plan approved' : 'Plan feedback sent',
             style: TextStyle(
-              color: approved ? context.appColors.textPrimary : context.appColors.textSecondary,
+              color: approved
+                  ? context.appColors.textPrimary
+                  : context.appColors.textSecondary,
               fontSize: 14,
               fontWeight: FontWeight.w500,
             ),

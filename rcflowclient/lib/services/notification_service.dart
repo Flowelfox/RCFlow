@@ -33,7 +33,9 @@ class NotificationService extends ChangeNotifier {
 
     // Evict oldest non-error if over limit
     while (_notifications.length > _maxVisible) {
-      final idx = _notifications.indexWhere((n) => n.level != NotificationLevel.error);
+      final idx = _notifications.indexWhere(
+        (n) => n.level != NotificationLevel.error,
+      );
       if (idx >= 0) {
         _removeAt(idx);
       } else {

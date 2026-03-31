@@ -18,8 +18,9 @@ class TodoPanel extends StatelessWidget {
     final todos = pane.todos;
     if (todos.isEmpty) return const SizedBox.shrink();
 
-    final completed =
-        todos.where((t) => t.status == TodoStatus.completed).length;
+    final completed = todos
+        .where((t) => t.status == TodoStatus.completed)
+        .length;
     final total = todos.length;
     final progress = total > 0 ? completed / total : 0.0;
 
@@ -32,8 +33,9 @@ class TodoPanel extends StatelessWidget {
             height: 36,
             padding: const EdgeInsets.symmetric(horizontal: 12),
             decoration: BoxDecoration(
-              border:
-                  Border(bottom: BorderSide(color: context.appColors.divider)),
+              border: Border(
+                bottom: BorderSide(color: context.appColors.divider),
+              ),
             ),
             child: Row(
               children: [
@@ -66,8 +68,10 @@ class TodoPanel extends StatelessWidget {
                   child: IconButton(
                     padding: EdgeInsets.zero,
                     iconSize: 14,
-                    icon: Icon(Icons.close_rounded,
-                        color: context.appColors.textMuted),
+                    icon: Icon(
+                      Icons.close_rounded,
+                      color: context.appColors.textMuted,
+                    ),
                     tooltip: 'Hide todo',
                     onPressed: pane.toggleTodoPanel,
                   ),
@@ -153,14 +157,14 @@ class _TodoPanelItemState extends State<_TodoPanelItem>
       isCompleted
           ? Icons.check_box_rounded
           : isActive
-              ? Icons.sync_rounded
-              : Icons.check_box_outline_blank_rounded,
+          ? Icons.sync_rounded
+          : Icons.check_box_outline_blank_rounded,
       size: 14,
       color: isCompleted
           ? context.appColors.successText
           : isActive
-              ? context.appColors.accent
-              : context.appColors.textMuted,
+          ? context.appColors.accent
+          : context.appColors.textMuted,
     );
 
     return Container(
@@ -174,10 +178,7 @@ class _TodoPanelItemState extends State<_TodoPanelItem>
           Padding(
             padding: const EdgeInsets.only(top: 2),
             child: isActive
-                ? RotationTransition(
-                    turns: _spinController,
-                    child: icon,
-                  )
+                ? RotationTransition(turns: _spinController, child: icon)
                 : icon,
           ),
           const SizedBox(width: 6),
@@ -188,8 +189,8 @@ class _TodoPanelItemState extends State<_TodoPanelItem>
                 color: isCompleted
                     ? context.appColors.textMuted
                     : isActive
-                        ? context.appColors.textPrimary
-                        : context.appColors.textSecondary,
+                    ? context.appColors.textPrimary
+                    : context.appColors.textSecondary,
                 fontSize: 12,
                 height: 1.4,
                 decoration: isCompleted ? TextDecoration.lineThrough : null,

@@ -52,9 +52,12 @@ class SettingsService {
   static const _tasksCollapsedGroupsKey = 'rcflow_tasks_collapsed_groups';
   static const _tasksGroupByWorkerKey = 'rcflow_tasks_group_by_worker';
   static const _workersGroupByProjectKey = 'rcflow_workers_group_by_project';
-  static const _artifactsGroupByProjectKey = 'rcflow_artifacts_group_by_project';
-  static const _artifactsExpandedWorkersKey = 'rcflow_artifacts_expanded_workers';
-  static const _artifactsExpandedProjectsKey = 'rcflow_artifacts_expanded_projects';
+  static const _artifactsGroupByProjectKey =
+      'rcflow_artifacts_group_by_project';
+  static const _artifactsExpandedWorkersKey =
+      'rcflow_artifacts_expanded_workers';
+  static const _artifactsExpandedProjectsKey =
+      'rcflow_artifacts_expanded_projects';
 
   // Setup / onboarding keys
   static const _setupCompleteKey = 'rcflow_setup_complete';
@@ -124,7 +127,9 @@ class SettingsService {
 
   set workers(List<WorkerConfig> value) {
     _prefs.setString(
-        _workersKey, jsonEncode(value.map((w) => w.toJson()).toList()));
+      _workersKey,
+      jsonEncode(value.map((w) => w.toJson()).toList()),
+    );
   }
 
   // --- Per-worker last session ID ---
@@ -133,8 +138,9 @@ class SettingsService {
     final raw = _prefs.getString(_lastSessionPerWorkerKey);
     if (raw == null) return {};
     try {
-      return (jsonDecode(raw) as Map<String, dynamic>)
-          .map((k, v) => MapEntry(k, v as String));
+      return (jsonDecode(raw) as Map<String, dynamic>).map(
+        (k, v) => MapEntry(k, v as String),
+      );
     } catch (_) {
       return {};
     }
@@ -158,8 +164,9 @@ class SettingsService {
     final raw = _prefs.getString(_cachedSessionsPerWorkerKey);
     if (raw == null) return {};
     try {
-      return (jsonDecode(raw) as Map<String, dynamic>)
-          .map((k, v) => MapEntry(k, v as String));
+      return (jsonDecode(raw) as Map<String, dynamic>).map(
+        (k, v) => MapEntry(k, v as String),
+      );
     } catch (_) {
       return {};
     }
@@ -203,14 +210,11 @@ class SettingsService {
   set notificationSound(String value) =>
       _prefs.setString(_notificationSoundKey, value);
 
-  String get customSoundPath =>
-      _prefs.getString(_customSoundPathKey) ?? '';
+  String get customSoundPath => _prefs.getString(_customSoundPathKey) ?? '';
   set customSoundPath(String value) =>
       _prefs.setString(_customSoundPathKey, value);
 
-
-  int get terminalScrollback =>
-      _prefs.getInt(_terminalScrollbackKey) ?? 1000;
+  int get terminalScrollback => _prefs.getInt(_terminalScrollbackKey) ?? 1000;
   set terminalScrollback(int value) =>
       _prefs.setInt(_terminalScrollbackKey, value);
 
@@ -224,8 +228,7 @@ class SettingsService {
   set terminalCursorStyle(String value) =>
       _prefs.setString(_terminalCursorStyleKey, value);
 
-  double get terminalFontSize =>
-      _prefs.getDouble(_terminalFontSizeKey) ?? 14.0;
+  double get terminalFontSize => _prefs.getDouble(_terminalFontSizeKey) ?? 14.0;
   set terminalFontSize(double value) =>
       _prefs.setDouble(_terminalFontSizeKey, value);
 
@@ -294,8 +297,7 @@ class SettingsService {
   set workersFilterStatus(List<String> value) =>
       _setJsonStringList(_workersFilterStatusKey, value);
 
-  String get tasksFilterSearch =>
-      _prefs.getString(_tasksFilterSearchKey) ?? '';
+  String get tasksFilterSearch => _prefs.getString(_tasksFilterSearchKey) ?? '';
   set tasksFilterSearch(String value) =>
       _prefs.setString(_tasksFilterSearchKey, value);
 

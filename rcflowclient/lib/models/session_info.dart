@@ -13,18 +13,18 @@ class WorktreeInfo {
   });
 
   factory WorktreeInfo.fromJson(Map<String, dynamic> json) => WorktreeInfo(
-        repoPath: json['repo_path'] as String? ?? '',
-        lastAction: json['last_action'] as String? ?? '',
-        branch: json['branch'] as String?,
-        base: json['base'] as String?,
-      );
+    repoPath: json['repo_path'] as String? ?? '',
+    lastAction: json['last_action'] as String? ?? '',
+    branch: json['branch'] as String?,
+    base: json['base'] as String?,
+  );
 
   Map<String, dynamic> toJson() => {
-        'repo_path': repoPath,
-        'last_action': lastAction,
-        if (branch != null) 'branch': branch,
-        if (base != null) 'base': base,
-      };
+    'repo_path': repoPath,
+    'last_action': lastAction,
+    if (branch != null) 'branch': branch,
+    if (base != null) 'base': base,
+  };
 }
 
 class SessionInfo {
@@ -35,6 +35,7 @@ class SessionInfo {
   final DateTime? createdAt;
   final String? title;
   final String workerId;
+
   /// Reason the session is paused, if applicable. "max_turns" means Claude Code
   /// hit its configured turn limit. Null for manual pauses or non-paused sessions.
   final String? pausedReason;
@@ -46,11 +47,14 @@ class SessionInfo {
   final int toolInputTokens;
   final int toolOutputTokens;
   final double toolCostUsd;
+
   /// Non-null when this session has executed at least one worktree tool.
   final WorktreeInfo? worktreeInfo;
+
   /// Absolute path of the worktree selected as the agent working directory,
   /// or null if no worktree is explicitly selected for this session.
   final String? selectedWorktreePath;
+
   /// Absolute path of the project directory attached to this session via the
   /// latest @ProjectName mention.  Null means the session is "Global" (no
   /// project attached yet).
@@ -94,8 +98,10 @@ class SessionInfo {
   int get totalInputTokens => inputTokens + toolInputTokens;
   int get totalOutputTokens => outputTokens + toolOutputTokens;
 
-  factory SessionInfo.fromJson(Map<String, dynamic> json,
-      {String workerId = ''}) {
+  factory SessionInfo.fromJson(
+    Map<String, dynamic> json, {
+    String workerId = '',
+  }) {
     DateTime? createdAt;
     final raw = json['created_at'] as String?;
     if (raw != null) {
@@ -128,30 +134,30 @@ class SessionInfo {
   }
 
   Map<String, dynamic> toJson() => {
-        'session_id': sessionId,
-        'session_type': sessionType,
-        'status': status,
-        if (activityState != null) 'activity_state': activityState,
-        if (createdAt != null) 'created_at': createdAt!.toIso8601String(),
-        if (title != null) 'title': title,
-        'worker_id': workerId,
-        if (pausedReason != null) 'paused_reason': pausedReason,
-        'input_tokens': inputTokens,
-        'output_tokens': outputTokens,
-        'cache_creation_input_tokens': cacheCreationInputTokens,
-        'cache_read_input_tokens': cacheReadInputTokens,
-        'tool_input_tokens': toolInputTokens,
-        'tool_output_tokens': toolOutputTokens,
-        'tool_cost_usd': toolCostUsd,
-        if (worktreeInfo != null) 'worktree': worktreeInfo!.toJson(),
-        if (selectedWorktreePath != null) 'selected_worktree_path': selectedWorktreePath,
-        if (mainProjectPath != null) 'main_project_path': mainProjectPath,
-        if (agentType != null) 'agent_type': agentType,
-      };
+    'session_id': sessionId,
+    'session_type': sessionType,
+    'status': status,
+    if (activityState != null) 'activity_state': activityState,
+    if (createdAt != null) 'created_at': createdAt!.toIso8601String(),
+    if (title != null) 'title': title,
+    'worker_id': workerId,
+    if (pausedReason != null) 'paused_reason': pausedReason,
+    'input_tokens': inputTokens,
+    'output_tokens': outputTokens,
+    'cache_creation_input_tokens': cacheCreationInputTokens,
+    'cache_read_input_tokens': cacheReadInputTokens,
+    'tool_input_tokens': toolInputTokens,
+    'tool_output_tokens': toolOutputTokens,
+    'tool_cost_usd': toolCostUsd,
+    if (worktreeInfo != null) 'worktree': worktreeInfo!.toJson(),
+    if (selectedWorktreePath != null)
+      'selected_worktree_path': selectedWorktreePath,
+    if (mainProjectPath != null) 'main_project_path': mainProjectPath,
+    if (agentType != null) 'agent_type': agentType,
+  };
 
-  String get shortId => sessionId.length >= 8
-      ? '${sessionId.substring(0, 8)}...'
-      : sessionId;
+  String get shortId =>
+      sessionId.length >= 8 ? '${sessionId.substring(0, 8)}...' : sessionId;
 
   SessionInfo copyWith({
     String? sessionId,
@@ -189,8 +195,7 @@ class SessionInfo {
       outputTokens: outputTokens ?? this.outputTokens,
       cacheCreationInputTokens:
           cacheCreationInputTokens ?? this.cacheCreationInputTokens,
-      cacheReadInputTokens:
-          cacheReadInputTokens ?? this.cacheReadInputTokens,
+      cacheReadInputTokens: cacheReadInputTokens ?? this.cacheReadInputTokens,
       toolInputTokens: toolInputTokens ?? this.toolInputTokens,
       toolOutputTokens: toolOutputTokens ?? this.toolOutputTokens,
       toolCostUsd: toolCostUsd ?? this.toolCostUsd,

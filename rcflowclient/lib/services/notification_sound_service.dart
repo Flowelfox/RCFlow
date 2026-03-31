@@ -31,8 +31,8 @@ class NotificationSoundService {
   NotificationSoundService({
     required SettingsService settings,
     AudioPlayer? player,
-  })  : _settings = settings,
-        _player = player ?? AudioPlayer() {
+  }) : _settings = settings,
+       _player = player ?? AudioPlayer() {
     // On Windows, the audioplayers plugin uses Windows Media Foundation (WMF)
     // to load audio sources asynchronously.  When the app window is not
     // focused, Flutter's platform-event processing is in a reduced-activity
@@ -58,7 +58,9 @@ class NotificationSoundService {
     if (soundId == 'custom') return; // custom path may not exist yet
     _player
         .setSource(AssetSource('sounds/$soundId.wav'))
-        .then((_) => _loadedKey = soundId)
+        .then((_) {
+          _loadedKey = soundId;
+        })
         .catchError((_) {});
   }
 
@@ -142,18 +144,12 @@ class NotificationSoundService {
     if (bytes.length < 44) return 'Invalid WAV file';
 
     // Parse WAV header to get duration
-    final sampleRate = bytes[24] |
-        (bytes[25] << 8) |
-        (bytes[26] << 16) |
-        (bytes[27] << 24);
-    final dataSize = bytes[40] |
-        (bytes[41] << 8) |
-        (bytes[42] << 16) |
-        (bytes[43] << 24);
-    final bytesPerSec = bytes[28] |
-        (bytes[29] << 8) |
-        (bytes[30] << 16) |
-        (bytes[31] << 24);
+    final sampleRate =
+        bytes[24] | (bytes[25] << 8) | (bytes[26] << 16) | (bytes[27] << 24);
+    final dataSize =
+        bytes[40] | (bytes[41] << 8) | (bytes[42] << 16) | (bytes[43] << 24);
+    final bytesPerSec =
+        bytes[28] | (bytes[29] << 8) | (bytes[30] << 16) | (bytes[31] << 24);
 
     if (sampleRate <= 0 || bytesPerSec <= 0) return 'Invalid WAV header';
 

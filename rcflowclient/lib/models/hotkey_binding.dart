@@ -22,23 +22,23 @@ enum HotkeyAction {
 
 /// Human-readable label for a [HotkeyAction].
 String hotkeyActionLabel(HotkeyAction action) => switch (action) {
-      HotkeyAction.closePane => 'Close Pane',
-      HotkeyAction.newSession => 'New Session',
-      HotkeyAction.openSettings => 'Open Settings',
-      HotkeyAction.focusPaneLeft => 'Focus Left Pane',
-      HotkeyAction.focusPaneRight => 'Focus Right Pane',
-      HotkeyAction.focusPaneUp => 'Focus Up Pane',
-      HotkeyAction.focusPaneDown => 'Focus Down Pane',
-      HotkeyAction.toggleSidebar => 'Toggle Sidebar',
-      HotkeyAction.focusInputArea => 'Focus Input',
-      HotkeyAction.nextPane => 'Next Pane',
-      HotkeyAction.previousPane => 'Previous Pane',
-      HotkeyAction.splitRight => 'Split Right',
-      HotkeyAction.splitDown => 'Split Down',
-      HotkeyAction.openTerminal => 'Open Terminal',
-      HotkeyAction.refreshSessions => 'Refresh Sessions',
-      HotkeyAction.reopenLastClosedPane => 'Reopen Closed Pane',
-    };
+  HotkeyAction.closePane => 'Close Pane',
+  HotkeyAction.newSession => 'New Session',
+  HotkeyAction.openSettings => 'Open Settings',
+  HotkeyAction.focusPaneLeft => 'Focus Left Pane',
+  HotkeyAction.focusPaneRight => 'Focus Right Pane',
+  HotkeyAction.focusPaneUp => 'Focus Up Pane',
+  HotkeyAction.focusPaneDown => 'Focus Down Pane',
+  HotkeyAction.toggleSidebar => 'Toggle Sidebar',
+  HotkeyAction.focusInputArea => 'Focus Input',
+  HotkeyAction.nextPane => 'Next Pane',
+  HotkeyAction.previousPane => 'Previous Pane',
+  HotkeyAction.splitRight => 'Split Right',
+  HotkeyAction.splitDown => 'Split Down',
+  HotkeyAction.openTerminal => 'Open Terminal',
+  HotkeyAction.refreshSessions => 'Refresh Sessions',
+  HotkeyAction.reopenLastClosedPane => 'Reopen Closed Pane',
+};
 
 /// Grouped actions for display in settings.
 const hotkeyActionGroups = {
@@ -87,14 +87,14 @@ class HotkeyBinding {
   });
 
   Map<String, dynamic> toJson() => {
-        'action': action.name,
-        'ctrl': ctrl,
-        'alt': alt,
-        'shift': shift,
-        'meta': meta,
-        'keyId': key.keyId,
-        'keyLabel': key.keyLabel,
-      };
+    'action': action.name,
+    'ctrl': ctrl,
+    'alt': alt,
+    'shift': shift,
+    'meta': meta,
+    'keyId': key.keyId,
+    'keyLabel': key.keyLabel,
+  };
 
   factory HotkeyBinding.fromJson(Map<String, dynamic> json) {
     return HotkeyBinding(
@@ -135,13 +135,17 @@ class HotkeyBinding {
   /// Check if a KeyEvent matches this binding.
   bool matches(KeyEvent event, Set<LogicalKeyboardKey> keysPressed) {
     if (event.logicalKey != key) return false;
-    final isCtrl = keysPressed.contains(LogicalKeyboardKey.controlLeft) ||
+    final isCtrl =
+        keysPressed.contains(LogicalKeyboardKey.controlLeft) ||
         keysPressed.contains(LogicalKeyboardKey.controlRight);
-    final isAlt = keysPressed.contains(LogicalKeyboardKey.altLeft) ||
+    final isAlt =
+        keysPressed.contains(LogicalKeyboardKey.altLeft) ||
         keysPressed.contains(LogicalKeyboardKey.altRight);
-    final isShift = keysPressed.contains(LogicalKeyboardKey.shiftLeft) ||
+    final isShift =
+        keysPressed.contains(LogicalKeyboardKey.shiftLeft) ||
         keysPressed.contains(LogicalKeyboardKey.shiftRight);
-    final isMeta = keysPressed.contains(LogicalKeyboardKey.metaLeft) ||
+    final isMeta =
+        keysPressed.contains(LogicalKeyboardKey.metaLeft) ||
         keysPressed.contains(LogicalKeyboardKey.metaRight);
     return ctrl == isCtrl && alt == isAlt && shift == isShift && meta == isMeta;
   }

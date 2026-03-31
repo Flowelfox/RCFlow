@@ -20,6 +20,7 @@ class WorkerConfig {
   bool allowSelfSigned;
   bool autoConnect;
   int sortOrder;
+
   /// Default coding agent for new sessions on this worker.
   /// One of ``'codex'``, ``'opencode'``, ``'claude_code'``, or null (no default).
   String? defaultAgent;
@@ -48,7 +49,9 @@ class WorkerConfig {
     int port;
     if (legacyPort != null) {
       host = rawHost;
-      port = legacyPort is int ? legacyPort : int.tryParse(legacyPort.toString()) ?? 53890;
+      port = legacyPort is int
+          ? legacyPort
+          : int.tryParse(legacyPort.toString()) ?? 53890;
     } else if (rawHost.contains(':')) {
       final parts = rawHost.split(':');
       host = parts[0];
@@ -70,22 +73,24 @@ class WorkerConfig {
       allowSelfSigned: json['allow_self_signed'] as bool? ?? true,
       autoConnect: json['auto_connect'] as bool? ?? true,
       sortOrder: json['sort_order'] as int? ?? 0,
-      defaultAgent: (rawAgent != null && _kValidAgents.contains(rawAgent)) ? rawAgent : null,
+      defaultAgent: (rawAgent != null && _kValidAgents.contains(rawAgent))
+          ? rawAgent
+          : null,
     );
   }
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'name': name,
-        'host': host,
-        'port': port,
-        'api_key': apiKey,
-        'use_ssl': useSSL,
-        'allow_self_signed': allowSelfSigned,
-        'auto_connect': autoConnect,
-        'sort_order': sortOrder,
-        if (defaultAgent != null) 'default_agent': defaultAgent,
-      };
+    'id': id,
+    'name': name,
+    'host': host,
+    'port': port,
+    'api_key': apiKey,
+    'use_ssl': useSSL,
+    'allow_self_signed': allowSelfSigned,
+    'auto_connect': autoConnect,
+    'sort_order': sortOrder,
+    if (defaultAgent != null) 'default_agent': defaultAgent,
+  };
 
   WorkerConfig copyWith({
     String? id,
@@ -109,7 +114,9 @@ class WorkerConfig {
       allowSelfSigned: allowSelfSigned ?? this.allowSelfSigned,
       autoConnect: autoConnect ?? this.autoConnect,
       sortOrder: sortOrder ?? this.sortOrder,
-      defaultAgent: defaultAgent == _sentinel ? this.defaultAgent : defaultAgent as String?,
+      defaultAgent: defaultAgent == _sentinel
+          ? this.defaultAgent
+          : defaultAgent as String?,
     );
   }
 

@@ -53,11 +53,17 @@ void _teardownAudioPlayerMocks() {
   final messenger =
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
   messenger.setMockMethodCallHandler(
-      const MethodChannel('xyz.luan/audioplayers.global'), null);
+    const MethodChannel('xyz.luan/audioplayers.global'),
+    null,
+  );
   messenger.setMockMethodCallHandler(
-      const MethodChannel('xyz.luan/audioplayers'), null);
+    const MethodChannel('xyz.luan/audioplayers'),
+    null,
+  );
   messenger.setMockStreamHandler(
-      const EventChannel('xyz.luan/audioplayers.global/events'), null);
+    const EventChannel('xyz.luan/audioplayers.global/events'),
+    null,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -173,8 +179,7 @@ void main() {
       svc.dispose();
 
       expect(calls.map((c) => c.method), contains('setReleaseMode'));
-      final call =
-          calls.firstWhere((c) => c.method == 'setReleaseMode');
+      final call = calls.firstWhere((c) => c.method == 'setReleaseMode');
       // audioplayers encodes ReleaseMode.stop as the string 'ReleaseMode.stop'
       expect(call.arguments['releaseMode'], contains('stop'));
     });

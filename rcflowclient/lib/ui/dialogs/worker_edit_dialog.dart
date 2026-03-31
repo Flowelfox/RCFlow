@@ -84,7 +84,11 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
     _tabController = TabController(length: _tabCount, vsync: this);
     _nameCtrl = TextEditingController(text: widget.existing?.name ?? '');
     _hostCtrl = TextEditingController(text: widget.existing?.host ?? '');
-    _portCtrl = TextEditingController(text: widget.existing != null ? widget.existing!.port.toString() : '53890');
+    _portCtrl = TextEditingController(
+      text: widget.existing != null
+          ? widget.existing!.port.toString()
+          : '53890',
+    );
     _apiKeyCtrl = TextEditingController(text: widget.existing?.apiKey ?? '');
     _useSSL = widget.existing?.useSSL ?? false;
     _allowSelfSigned = widget.existing?.allowSelfSigned ?? true;
@@ -122,7 +126,9 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
     final host = _hostCtrl.text.trim();
     final portStr = _portCtrl.text.trim();
     final apiKey = _apiKeyCtrl.text.trim();
-    if (name.isEmpty || host.isEmpty || portStr.isEmpty || apiKey.isEmpty) return;
+    if (name.isEmpty || host.isEmpty || portStr.isEmpty || apiKey.isEmpty) {
+      return;
+    }
     final port = int.tryParse(portStr);
     if (port == null || port < 1 || port > 65535) return;
 
@@ -162,18 +168,29 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
       builder: (ctx) => AlertDialog(
         backgroundColor: context.appColors.bgSurface,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        title: Text('Discard changes?',
-            style: TextStyle(color: context.appColors.textPrimary, fontSize: 16)),
-        content: Text('Your unsaved changes will be lost.',
-            style: TextStyle(color: context.appColors.textSecondary, fontSize: 14)),
+        title: Text(
+          'Discard changes?',
+          style: TextStyle(color: context.appColors.textPrimary, fontSize: 16),
+        ),
+        content: Text(
+          'Your unsaved changes will be lost.',
+          style: TextStyle(
+            color: context.appColors.textSecondary,
+            fontSize: 14,
+          ),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
-            child: Text('No',
-                style: TextStyle(color: context.appColors.textSecondary)),
+            child: Text(
+              'No',
+              style: TextStyle(color: context.appColors.textSecondary),
+            ),
           ),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: context.appColors.accent),
+            style: FilledButton.styleFrom(
+              backgroundColor: context.appColors.accent,
+            ),
             onPressed: () => Navigator.of(ctx).pop(true),
             child: const Text('Yes', style: TextStyle(color: Colors.white)),
           ),
@@ -210,7 +227,11 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
       _testMessage = '';
     });
 
-    final url = ServerUrl(rawHost: '$host:$port', apiKey: apiKey, secure: _useSSL);
+    final url = ServerUrl(
+      rawHost: '$host:$port',
+      apiKey: apiKey,
+      secure: _useSSL,
+    );
 
     try {
       // 1. HTTP health check
@@ -221,8 +242,9 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
       httpClient.connectionTimeout = const Duration(seconds: 5);
       final healthUri = url.http('/api/health');
       final request = await httpClient.getUrl(healthUri);
-      final response =
-          await request.close().timeout(const Duration(seconds: 8));
+      final response = await request.close().timeout(
+        const Duration(seconds: 8),
+      );
       final statusCode = response.statusCode;
       await response.drain<void>();
       httpClient.close(force: true);
@@ -334,14 +356,11 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
               child: ConstrainedBox(
                 constraints: BoxConstraints(maxHeight: contentHeight),
                 child: _hasWorker
-                  ? TabBarView(
-                      controller: _tabController,
-                      children: [
-                        _buildMainTab(),
-                        _buildServerTab(),
-                      ],
-                    )
-                  : _buildMainTab(),
+                    ? TabBarView(
+                        controller: _tabController,
+                        children: [_buildMainTab(), _buildServerTab()],
+                      )
+                    : _buildMainTab(),
               ),
             ),
             // Test connection area
@@ -355,15 +374,21 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
                   Spacer(),
                   TextButton(
                     onPressed: _confirmCancel,
-                    child: Text('Cancel',
-                        style: TextStyle(color: context.appColors.textSecondary)),
+                    child: Text(
+                      'Cancel',
+                      style: TextStyle(color: context.appColors.textSecondary),
+                    ),
                   ),
                   SizedBox(width: 8),
                   FilledButton(
-                    style: FilledButton.styleFrom(backgroundColor: context.appColors.accent),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: context.appColors.accent,
+                    ),
                     onPressed: _save,
-                    child: Text(_isEdit ? 'Save' : 'Add',
-                        style: const TextStyle(color: Colors.white)),
+                    child: Text(
+                      _isEdit ? 'Save' : 'Add',
+                      style: const TextStyle(color: Colors.white),
+                    ),
                   ),
                 ],
               ),
@@ -385,11 +410,17 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
           TextField(
             controller: _nameCtrl,
             autofocus: true,
-            style: TextStyle(color: context.appColors.textPrimary, fontSize: 15),
+            style: TextStyle(
+              color: context.appColors.textPrimary,
+              fontSize: 15,
+            ),
             decoration: InputDecoration(
               hintText: 'Home Server',
-              prefixIcon: Icon(Icons.label_outlined,
-                  color: context.appColors.textMuted, size: 20),
+              prefixIcon: Icon(
+                Icons.label_outlined,
+                color: context.appColors.textMuted,
+                size: 20,
+              ),
               fillColor: context.appColors.bgElevated,
               border: OutlineInputBorder(
                 borderSide: BorderSide.none,
@@ -414,11 +445,17 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
                     SizedBox(height: 6),
                     TextField(
                       controller: _hostCtrl,
-                      style: TextStyle(color: context.appColors.textPrimary, fontSize: 15),
+                      style: TextStyle(
+                        color: context.appColors.textPrimary,
+                        fontSize: 15,
+                      ),
                       decoration: InputDecoration(
                         hintText: '127.0.0.1',
-                        prefixIcon: Icon(Icons.dns_outlined,
-                            color: context.appColors.textMuted, size: 20),
+                        prefixIcon: Icon(
+                          Icons.dns_outlined,
+                          color: context.appColors.textMuted,
+                          size: 20,
+                        ),
                         fillColor: context.appColors.bgElevated,
                         border: OutlineInputBorder(
                           borderSide: BorderSide.none,
@@ -444,7 +481,10 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
                     TextField(
                       controller: _portCtrl,
                       keyboardType: TextInputType.number,
-                      style: TextStyle(color: context.appColors.textPrimary, fontSize: 15),
+                      style: TextStyle(
+                        color: context.appColors.textPrimary,
+                        fontSize: 15,
+                      ),
                       decoration: InputDecoration(
                         hintText: '53890',
                         fillColor: context.appColors.bgElevated,
@@ -469,11 +509,17 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
           TextField(
             controller: _apiKeyCtrl,
             obscureText: _obscureKey,
-            style: TextStyle(color: context.appColors.textPrimary, fontSize: 15),
+            style: TextStyle(
+              color: context.appColors.textPrimary,
+              fontSize: 15,
+            ),
             decoration: InputDecoration(
               hintText: 'Enter API key',
-              prefixIcon: Icon(Icons.key_outlined,
-                  color: context.appColors.textMuted, size: 20),
+              prefixIcon: Icon(
+                Icons.key_outlined,
+                color: context.appColors.textMuted,
+                size: 20,
+              ),
               suffixIcon: IconButton(
                 icon: Icon(
                   _obscureKey
@@ -482,8 +528,7 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
                   color: context.appColors.textMuted,
                   size: 20,
                 ),
-                onPressed: () =>
-                    setState(() => _obscureKey = !_obscureKey),
+                onPressed: () => setState(() => _obscureKey = !_obscureKey),
               ),
               fillColor: context.appColors.bgElevated,
               border: OutlineInputBorder(
@@ -498,29 +543,53 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
           ),
           SizedBox(height: 16),
           SwitchListTile(
-            title: Text('Use SSL (wss://)',
-                style: TextStyle(color: context.appColors.textPrimary, fontSize: 14)),
+            title: Text(
+              'Use SSL (wss://)',
+              style: TextStyle(
+                color: context.appColors.textPrimary,
+                fontSize: 14,
+              ),
+            ),
             value: _useSSL,
             activeTrackColor: context.appColors.accent,
             contentPadding: EdgeInsets.zero,
             onChanged: (v) => setState(() => _useSSL = v),
           ),
           SwitchListTile(
-            title: Text('Allow self-signed certificate',
-                style: TextStyle(color: context.appColors.textPrimary, fontSize: 14)),
+            title: Text(
+              'Allow self-signed certificate',
+              style: TextStyle(
+                color: context.appColors.textPrimary,
+                fontSize: 14,
+              ),
+            ),
             subtitle: Text(
-                'Trust servers with self-signed TLS certificates',
-                style: TextStyle(color: context.appColors.textMuted, fontSize: 12)),
+              'Trust servers with self-signed TLS certificates',
+              style: TextStyle(
+                color: context.appColors.textMuted,
+                fontSize: 12,
+              ),
+            ),
             value: _allowSelfSigned,
             activeTrackColor: context.appColors.accent,
             contentPadding: EdgeInsets.zero,
             onChanged: (v) => setState(() => _allowSelfSigned = v),
           ),
           SwitchListTile(
-            title: Text('Auto-connect',
-                style: TextStyle(color: context.appColors.textPrimary, fontSize: 14)),
-            subtitle: Text('Connect automatically on app start',
-                style: TextStyle(color: context.appColors.textMuted, fontSize: 12)),
+            title: Text(
+              'Auto-connect',
+              style: TextStyle(
+                color: context.appColors.textPrimary,
+                fontSize: 14,
+              ),
+            ),
+            subtitle: Text(
+              'Connect automatically on app start',
+              style: TextStyle(
+                color: context.appColors.textMuted,
+                fontSize: 12,
+              ),
+            ),
             value: _autoConnect,
             activeTrackColor: context.appColors.accent,
             contentPadding: EdgeInsets.zero,
@@ -530,12 +599,18 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
           _buildLabel('Default coding agent'),
           SizedBox(height: 6),
           DropdownButtonFormField<String?>(
-            value: _defaultAgent,
+            initialValue: _defaultAgent,
             dropdownColor: context.appColors.bgElevated,
-            style: TextStyle(color: context.appColors.textPrimary, fontSize: 14),
+            style: TextStyle(
+              color: context.appColors.textPrimary,
+              fontSize: 14,
+            ),
             decoration: InputDecoration(
-              prefixIcon: Icon(Icons.smart_toy_outlined,
-                  color: context.appColors.textMuted, size: 20),
+              prefixIcon: Icon(
+                Icons.smart_toy_outlined,
+                color: context.appColors.textMuted,
+                size: 20,
+              ),
               fillColor: context.appColors.bgElevated,
               border: OutlineInputBorder(
                 borderSide: BorderSide.none,
@@ -543,8 +618,14 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
               ),
             ),
             items: const [
-              DropdownMenuItem(value: null, child: Text('None (let LLM decide)')),
-              DropdownMenuItem(value: 'claude_code', child: Text('Claude Code')),
+              DropdownMenuItem(
+                value: null,
+                child: Text('None (let LLM decide)'),
+              ),
+              DropdownMenuItem(
+                value: 'claude_code',
+                child: Text('Claude Code'),
+              ),
               DropdownMenuItem(value: 'codex', child: Text('Codex')),
               DropdownMenuItem(value: 'opencode', child: Text('OpenCode')),
             ],
@@ -571,11 +652,18 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.link_off_rounded, color: context.appColors.textMuted, size: 40),
+          Icon(
+            Icons.link_off_rounded,
+            color: context.appColors.textMuted,
+            size: 40,
+          ),
           SizedBox(height: 16),
           Text(
             'Not connected to server',
-            style: TextStyle(color: context.appColors.textSecondary, fontSize: 15),
+            style: TextStyle(
+              color: context.appColors.textSecondary,
+              fontSize: 15,
+            ),
           ),
           SizedBox(height: 4),
           Text(
@@ -584,15 +672,15 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
           ),
           const SizedBox(height: 20),
           FilledButton.icon(
-            onPressed: isConnecting
-                ? null
-                : () => worker.connect(),
+            onPressed: isConnecting ? null : () => worker.connect(),
             icon: isConnecting
                 ? SizedBox(
                     width: 16,
                     height: 16,
                     child: CircularProgressIndicator(
-                        strokeWidth: 2, color: Colors.white),
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
                   )
                 : Icon(Icons.link_rounded, size: 18),
             label: Text(isConnecting ? 'Connecting...' : 'Connect'),
@@ -601,9 +689,9 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
               foregroundColor: Colors.white,
               disabledBackgroundColor: context.appColors.accentDim,
               shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10)),
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
             ),
           ),
         ],
@@ -617,17 +705,18 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
       child: Row(
         children: [
           OutlinedButton.icon(
-            onPressed:
-                _testStatus == _TestStatus.testing ? null : _testConnection,
+            onPressed: _testStatus == _TestStatus.testing
+                ? null
+                : _testConnection,
             icon: Icon(Icons.wifi_tethering_rounded, size: 18),
             label: Text('Test Connection'),
             style: OutlinedButton.styleFrom(
               foregroundColor: context.appColors.textSecondary,
               side: BorderSide(color: context.appColors.divider),
               shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10)),
-              padding:
-                  EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              padding: EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             ),
           ),
           SizedBox(width: 12),
@@ -636,29 +725,44 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
               width: 18,
               height: 18,
               child: CircularProgressIndicator(
-                  strokeWidth: 2, color: context.appColors.accentLight),
+                strokeWidth: 2,
+                color: context.appColors.accentLight,
+              ),
             ),
           if (_testStatus == _TestStatus.success) ...[
-            Icon(Icons.check_circle_rounded,
-                color: context.appColors.successText, size: 18),
+            Icon(
+              Icons.check_circle_rounded,
+              color: context.appColors.successText,
+              size: 18,
+            ),
             SizedBox(width: 6),
             Flexible(
               child: Text(
                 _testMessage,
-                style: TextStyle(color: context.appColors.successText, fontSize: 13),
+                style: TextStyle(
+                  color: context.appColors.successText,
+                  fontSize: 13,
+                ),
                 overflow: TextOverflow.ellipsis,
               ),
             ),
           ],
           if (_testStatus == _TestStatus.failure) ...[
-            Icon(Icons.cancel_rounded, color: context.appColors.errorText, size: 18),
+            Icon(
+              Icons.cancel_rounded,
+              color: context.appColors.errorText,
+              size: 18,
+            ),
             SizedBox(width: 6),
             Flexible(
               child: Tooltip(
                 message: _testMessage,
                 child: Text(
                   _testMessage,
-                  style: TextStyle(color: context.appColors.errorText, fontSize: 13),
+                  style: TextStyle(
+                    color: context.appColors.errorText,
+                    fontSize: 13,
+                  ),
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -679,7 +783,10 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
           if (required)
             TextSpan(
               text: ' *',
-              style: TextStyle(color: context.appColors.accentLight, fontSize: 13),
+              style: TextStyle(
+                color: context.appColors.accentLight,
+                fontSize: 13,
+              ),
             ),
         ],
       ),

@@ -39,9 +39,7 @@ void main() {
     });
 
     test('fromJson handles missing optional fields', () {
-      final session = SessionInfo.fromJson({
-        'session_id': 'test-id',
-      });
+      final session = SessionInfo.fromJson({'session_id': 'test-id'});
       expect(session.sessionType, 'unknown');
       expect(session.status, 'unknown');
     });
@@ -54,9 +52,7 @@ void main() {
     });
 
     test('shortId handles short IDs', () {
-      final session = SessionInfo.fromJson({
-        'session_id': 'short',
-      });
+      final session = SessionInfo.fromJson({'session_id': 'short'});
       expect(session.shortId, 'short');
     });
   });
@@ -86,10 +82,14 @@ void main() {
   group('ServerUrl', () {
     test('builds ws URLs from raw ip:port', () {
       final url = ServerUrl(rawHost: '192.168.1.100:8765', apiKey: 'mykey');
-      expect(url.wsInputText().toString(),
-          'ws://192.168.1.100:8765/ws/input/text?api_key=mykey');
-      expect(url.wsOutputText().toString(),
-          'ws://192.168.1.100:8765/ws/output/text?api_key=mykey');
+      expect(
+        url.wsInputText().toString(),
+        'ws://192.168.1.100:8765/ws/input/text?api_key=mykey',
+      );
+      expect(
+        url.wsOutputText().toString(),
+        'ws://192.168.1.100:8765/ws/output/text?api_key=mykey',
+      );
     });
 
     test('strips ws:// scheme', () {
@@ -120,8 +120,10 @@ void main() {
 
     test('encodes special characters in api key for ws URLs', () {
       final url = ServerUrl(rawHost: 'host:8765', apiKey: 'key with spaces');
-      expect(url.wsInputText().toString(),
-          contains('api_key=key%20with%20spaces'));
+      expect(
+        url.wsInputText().toString(),
+        contains('api_key=key%20with%20spaces'),
+      );
     });
   });
 }

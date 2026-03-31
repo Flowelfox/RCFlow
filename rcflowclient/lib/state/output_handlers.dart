@@ -17,8 +17,7 @@ import '../models/ws_messages.dart';
 import 'pane_state.dart';
 
 /// Signature for per-pane output message handlers.
-typedef OutputHandler = void Function(
-    Map<String, dynamic> msg, PaneState pane);
+typedef OutputHandler = void Function(Map<String, dynamic> msg, PaneState pane);
 
 // ---------------------------------------------------------------------------
 // Handler implementations
@@ -32,18 +31,22 @@ void handleTextChunk(Map<String, dynamic> msg, PaneState pane) {
     if (pane.consumeLocalUserMessage(content)) return;
     final rawAtts = msg['attachments'] as List<dynamic>?;
     final attachments = rawAtts?.cast<Map<String, dynamic>>();
-    pane.addDisplayMessage(DisplayMessage(
-      type: DisplayMessageType.user,
-      content: content,
-      sessionId: msg['session_id'] as String?,
-      finished: true,
-      attachments: attachments,
-    ));
+    pane.addDisplayMessage(
+      DisplayMessage(
+        type: DisplayMessageType.user,
+        content: content,
+        sessionId: msg['session_id'] as String?,
+        finished: true,
+        attachments: attachments,
+      ),
+    );
     return;
   }
 
-  var content =
-      (msg['content'] as String? ?? '').replaceAll('[SessionEndAsk]', '');
+  var content = (msg['content'] as String? ?? '').replaceAll(
+    '[SessionEndAsk]',
+    '',
+  );
   if (content.isNotEmpty) {
     pane.appendAssistantChunk(content);
   }
@@ -74,77 +77,89 @@ void handleError(Map<String, dynamic> msg, PaneState pane) {
     return;
   }
 
-  pane.addSystemMessage(msg['content'] as String? ?? 'Unknown error',
-      isError: true);
+  pane.addSystemMessage(
+    msg['content'] as String? ?? 'Unknown error',
+    isError: true,
+  );
 }
 
 void handleSummary(Map<String, dynamic> msg, PaneState pane) {
   pane.finalizeStream();
-  pane.addDisplayMessage(DisplayMessage(
-    type: DisplayMessageType.summary,
-    content: msg['content'] as String? ?? '',
-    sessionId: msg['session_id'] as String?,
-    finished: true,
-  ));
+  pane.addDisplayMessage(
+    DisplayMessage(
+      type: DisplayMessageType.summary,
+      content: msg['content'] as String? ?? '',
+      sessionId: msg['session_id'] as String?,
+      finished: true,
+    ),
+  );
 }
 
 void handleSessionEndAsk(Map<String, dynamic> msg, PaneState pane) {
   pane.finalizeStream();
   pane.stripSessionEndAskTag();
-  pane.addDisplayMessage(DisplayMessage(
-    type: DisplayMessageType.sessionEndAsk,
-    sessionId: msg['session_id'] as String?,
-    accepted: msg['accepted'] as bool?,
-  ));
+  pane.addDisplayMessage(
+    DisplayMessage(
+      type: DisplayMessageType.sessionEndAsk,
+      sessionId: msg['session_id'] as String?,
+      accepted: msg['accepted'] as bool?,
+    ),
+  );
 }
 
 void handlePlanModeAsk(Map<String, dynamic> msg, PaneState pane) {
   pane.finalizeStream();
-  pane.addDisplayMessage(DisplayMessage(
-    type: DisplayMessageType.planModeAsk,
-    sessionId: msg['session_id'] as String?,
-    accepted: msg['accepted'] as bool?,
-  ));
+  pane.addDisplayMessage(
+    DisplayMessage(
+      type: DisplayMessageType.planModeAsk,
+      sessionId: msg['session_id'] as String?,
+      accepted: msg['accepted'] as bool?,
+    ),
+  );
 }
 
 void handlePlanReviewAsk(Map<String, dynamic> msg, PaneState pane) {
   pane.finalizeStream();
   // Deduplicate: skip if there is already a pending (unresolved) plan review.
   if (pane.messages.any(
-      (m) => m.type == DisplayMessageType.planReviewAsk && m.accepted == null)) {
+    (m) => m.type == DisplayMessageType.planReviewAsk && m.accepted == null,
+  )) {
     return;
   }
   final planInput = msg['plan_input'] as Map<String, dynamic>?;
-  final planContent = planInput?['plan'] as String? ??
-      planInput?['content'] as String? ??
-      '';
-  pane.addDisplayMessage(DisplayMessage(
-    type: DisplayMessageType.planReviewAsk,
-    sessionId: msg['session_id'] as String?,
-    accepted: msg['accepted'] as bool?,
-    content: planContent,
-  ));
+  final planContent =
+      planInput?['plan'] as String? ?? planInput?['content'] as String? ?? '';
+  pane.addDisplayMessage(
+    DisplayMessage(
+      type: DisplayMessageType.planReviewAsk,
+      sessionId: msg['session_id'] as String?,
+      accepted: msg['accepted'] as bool?,
+      content: planContent,
+    ),
+  );
 }
 
 void handlePermissionRequest(Map<String, dynamic> msg, PaneState pane) {
   pane.finalizeStream();
-  pane.addDisplayMessageInStream(DisplayMessage(
-    type: DisplayMessageType.permissionRequest,
-    sessionId: msg['session_id'] as String?,
-    content: msg['description'] as String? ?? '',
-    // When replaying a session buffer that already has a resolved permission,
-    // the backend includes 'accepted' in the message data so the widget
-    // renders in its resolved state instead of showing the pending UI.
-    accepted: msg['accepted'] as bool?,
-    toolInput: {
-      'request_id': msg['request_id'],
-      'tool_name': msg['tool_name'],
-      'tool_input': msg['tool_input'],
-      'description': msg['description'],
-      'risk_level': msg['risk_level'],
-      'scope_options': msg['scope_options'],
-    },
-  ));
+  pane.addDisplayMessageInStream(
+    DisplayMessage(
+      type: DisplayMessageType.permissionRequest,
+      sessionId: msg['session_id'] as String?,
+      content: msg['description'] as String? ?? '',
+      // When replaying a session buffer that already has a resolved permission,
+      // the backend includes 'accepted' in the message data so the widget
+      // renders in its resolved state instead of showing the pending UI.
+      accepted: msg['accepted'] as bool?,
+      toolInput: {
+        'request_id': msg['request_id'],
+        'tool_name': msg['tool_name'],
+        'tool_input': msg['tool_input'],
+        'description': msg['description'],
+        'risk_level': msg['risk_level'],
+        'scope_options': msg['scope_options'],
+      },
+    ),
+  );
 }
 
 void handleTodoUpdate(Map<String, dynamic> msg, PaneState pane) {
@@ -157,13 +172,15 @@ void handleTodoUpdate(Map<String, dynamic> msg, PaneState pane) {
 
   // Also add an inline display message in the output stream
   final completed = todos.where((t) => t.status == TodoStatus.completed).length;
-  pane.addDisplayMessageInStream(DisplayMessage(
-    type: DisplayMessageType.todoUpdate,
-    sessionId: msg['session_id'] as String?,
-    content: '$completed/${todos.length}',
-    toolInput: msg,
-    finished: true,
-  ));
+  pane.addDisplayMessageInStream(
+    DisplayMessage(
+      type: DisplayMessageType.todoUpdate,
+      sessionId: msg['session_id'] as String?,
+      content: '$completed/${todos.length}',
+      toolInput: msg,
+      finished: true,
+    ),
+  );
 }
 
 void handleThinking(Map<String, dynamic> msg, PaneState pane) {
@@ -178,27 +195,31 @@ void handleThinking(Map<String, dynamic> msg, PaneState pane) {
     return;
   }
 
-  pane.addDisplayMessageInStream(DisplayMessage(
-    type: DisplayMessageType.thinking,
-    sessionId: msg['session_id'] as String?,
-    content: content,
-  ));
+  pane.addDisplayMessageInStream(
+    DisplayMessage(
+      type: DisplayMessageType.thinking,
+      sessionId: msg['session_id'] as String?,
+      content: content,
+    ),
+  );
 }
 
 void handleAgentSessionStart(Map<String, dynamic> msg, PaneState pane) {
   pane.finalizeStream();
-  pane.addDisplayMessage(DisplayMessage(
-    type: DisplayMessageType.agentSessionStart,
-    sessionId: msg['session_id'] as String?,
-    toolName: msg['agent_type'] as String?,
-    displayName: msg['display_name'] as String?,
-    content: msg['prompt'] as String? ?? '',
-    toolInput: {
-      'working_directory': msg['working_directory'],
-      'prompt': msg['prompt'],
-    },
-    finished: true,
-  ));
+  pane.addDisplayMessage(
+    DisplayMessage(
+      type: DisplayMessageType.agentSessionStart,
+      sessionId: msg['session_id'] as String?,
+      toolName: msg['agent_type'] as String?,
+      displayName: msg['display_name'] as String?,
+      content: msg['prompt'] as String? ?? '',
+      toolInput: {
+        'working_directory': msg['working_directory'],
+        'prompt': msg['prompt'],
+      },
+      finished: true,
+    ),
+  );
 }
 
 void handleAgentGroupStart(Map<String, dynamic> msg, PaneState pane) {
@@ -230,11 +251,13 @@ void handleSessionPaused(Map<String, dynamic> msg, PaneState pane) {
   final reason = msg['reason'] as String?;
   pane.handleSessionPaused(pausedId, reason: reason);
   if (reason == 'max_turns') {
-    pane.addDisplayMessage(DisplayMessage(
-      type: DisplayMessageType.pausedMaxTurns,
-      sessionId: pausedId,
-      finished: true,
-    ));
+    pane.addDisplayMessage(
+      DisplayMessage(
+        type: DisplayMessageType.pausedMaxTurns,
+        sessionId: pausedId,
+        finished: true,
+      ),
+    );
   }
 }
 
@@ -294,101 +317,135 @@ final Map<String, OutputHandler> outputHandlerRegistry = {
 // ---------------------------------------------------------------------------
 
 /// Signature for history message builders.
-typedef HistoryBuilder = void Function(
+typedef HistoryBuilder =
+    void Function(
+      Map<String, dynamic> msg,
+      String sessionId,
+      List<DisplayMessage> messages,
+    );
+
+void buildTextChunkHistory(
   Map<String, dynamic> msg,
   String sessionId,
   List<DisplayMessage> messages,
-);
-
-void buildTextChunkHistory(Map<String, dynamic> msg, String sessionId,
-    List<DisplayMessage> messages) {
-  final content =
-      (msg['content'] as String? ?? '').replaceAll('[SessionEndAsk]', '');
+) {
+  final content = (msg['content'] as String? ?? '').replaceAll(
+    '[SessionEndAsk]',
+    '',
+  );
   final metadata = msg['metadata'] as Map<String, dynamic>? ?? {};
 
   if (metadata['role'] == 'user') {
     final rawAtts = metadata['attachments'] as List<dynamic>?;
     final attachments = rawAtts?.cast<Map<String, dynamic>>();
-    messages.add(DisplayMessage(
-      type: DisplayMessageType.user,
-      content: content,
-      sessionId: sessionId,
-      finished: true,
-      attachments: attachments,
-    ));
+    messages.add(
+      DisplayMessage(
+        type: DisplayMessageType.user,
+        content: content,
+        sessionId: sessionId,
+        finished: true,
+        attachments: attachments,
+      ),
+    );
   } else {
     if (messages.isNotEmpty &&
         messages.last.type == DisplayMessageType.assistant &&
         messages.last.sessionId == sessionId) {
       messages.last.content += content;
     } else {
-      messages.add(DisplayMessage(
-        type: DisplayMessageType.assistant,
-        content: content,
-        sessionId: sessionId,
-        finished: true,
-      ));
+      messages.add(
+        DisplayMessage(
+          type: DisplayMessageType.assistant,
+          content: content,
+          sessionId: sessionId,
+          finished: true,
+        ),
+      );
     }
   }
 }
 
-void buildToolStartHistory(Map<String, dynamic> msg, String sessionId,
-    List<DisplayMessage> messages) {
+void buildToolStartHistory(
+  Map<String, dynamic> msg,
+  String sessionId,
+  List<DisplayMessage> messages,
+) {
   final metadata = msg['metadata'] as Map<String, dynamic>? ?? {};
-  messages.add(DisplayMessage(
-    type: DisplayMessageType.toolBlock,
-    sessionId: sessionId,
-    toolName: metadata['tool_name'] as String? ?? 'unknown',
-    displayName: metadata['display_name'] as String?,
-    toolInput: metadata['tool_input'] as Map<String, dynamic>?,
-    finished: false,
-  ));
+  messages.add(
+    DisplayMessage(
+      type: DisplayMessageType.toolBlock,
+      sessionId: sessionId,
+      toolName: metadata['tool_name'] as String? ?? 'unknown',
+      displayName: metadata['display_name'] as String?,
+      toolInput: metadata['tool_input'] as Map<String, dynamic>?,
+      finished: false,
+    ),
+  );
 }
 
-void buildToolOutputHistory(Map<String, dynamic> msg, String sessionId,
-    List<DisplayMessage> messages) {
+void buildToolOutputHistory(
+  Map<String, dynamic> msg,
+  String sessionId,
+  List<DisplayMessage> messages,
+) {
   final content = msg['content'] as String? ?? '';
   if (messages.isNotEmpty &&
       messages.last.type == DisplayMessageType.toolBlock &&
       messages.last.sessionId == sessionId) {
     messages.last.content += content;
   } else {
-    messages.add(DisplayMessage(
-      type: DisplayMessageType.toolBlock,
-      sessionId: sessionId,
-      toolName: 'output',
-      content: content,
-      finished: true,
-    ));
+    messages.add(
+      DisplayMessage(
+        type: DisplayMessageType.toolBlock,
+        sessionId: sessionId,
+        toolName: 'output',
+        content: content,
+        finished: true,
+      ),
+    );
   }
 }
 
-void buildErrorHistory(Map<String, dynamic> msg, String sessionId,
-    List<DisplayMessage> messages) {
-  messages.add(DisplayMessage(
-    type: DisplayMessageType.error,
-    content: msg['content'] as String? ?? '',
-    sessionId: sessionId,
-    finished: true,
-  ));
+void buildErrorHistory(
+  Map<String, dynamic> msg,
+  String sessionId,
+  List<DisplayMessage> messages,
+) {
+  messages.add(
+    DisplayMessage(
+      type: DisplayMessageType.error,
+      content: msg['content'] as String? ?? '',
+      sessionId: sessionId,
+      finished: true,
+    ),
+  );
 }
 
-void buildSummaryHistory(Map<String, dynamic> msg, String sessionId,
-    List<DisplayMessage> messages) {
-  messages.add(DisplayMessage(
-    type: DisplayMessageType.summary,
-    content: msg['content'] as String? ?? '',
-    sessionId: sessionId,
-    finished: true,
-  ));
+void buildSummaryHistory(
+  Map<String, dynamic> msg,
+  String sessionId,
+  List<DisplayMessage> messages,
+) {
+  messages.add(
+    DisplayMessage(
+      type: DisplayMessageType.summary,
+      content: msg['content'] as String? ?? '',
+      sessionId: sessionId,
+      finished: true,
+    ),
+  );
 }
 
-void buildSessionEndAskHistory(Map<String, dynamic> msg, String sessionId,
-    List<DisplayMessage> messages) {
+void buildSessionEndAskHistory(
+  Map<String, dynamic> msg,
+  String sessionId,
+  List<DisplayMessage> messages,
+) {
   for (int i = messages.length - 1; i >= 0; i--) {
     if (messages[i].type == DisplayMessageType.assistant) {
-      messages[i].content =
-          messages[i].content.replaceAll('[SessionEndAsk]', '').trimRight();
+      messages[i].content = messages[i].content
+          .replaceAll('[SessionEndAsk]', '')
+          .trimRight();
       break;
     }
   }
@@ -396,15 +453,20 @@ void buildSessionEndAskHistory(Map<String, dynamic> msg, String sessionId,
   final metadata = msg['metadata'] as Map<String, dynamic>? ?? {};
   bool? accepted = metadata['accepted'] as bool?;
   accepted ??= false;
-  messages.add(DisplayMessage(
-    type: DisplayMessageType.sessionEndAsk,
-    sessionId: sessionId,
-    accepted: accepted,
-  ));
+  messages.add(
+    DisplayMessage(
+      type: DisplayMessageType.sessionEndAsk,
+      sessionId: sessionId,
+      accepted: accepted,
+    ),
+  );
 }
 
-void buildSessionEndHistory(Map<String, dynamic> msg, String sessionId,
-    List<DisplayMessage> messages) {
+void buildSessionEndHistory(
+  Map<String, dynamic> msg,
+  String sessionId,
+  List<DisplayMessage> messages,
+) {
   for (final m in messages) {
     if (m.type == DisplayMessageType.toolBlock && !m.finished) {
       m.finished = true;
@@ -423,82 +485,111 @@ void buildSessionEndHistory(Map<String, dynamic> msg, String sessionId,
   }
 }
 
-void buildSessionPausedHistory(Map<String, dynamic> msg, String sessionId,
-    List<DisplayMessage> messages) {
+void buildSessionPausedHistory(
+  Map<String, dynamic> msg,
+  String sessionId,
+  List<DisplayMessage> messages,
+) {
   final metadata = msg['metadata'] as Map<String, dynamic>? ?? {};
   final reason = metadata['reason'] as String?;
   if (reason == 'max_turns') {
-    messages.add(DisplayMessage(
-      type: DisplayMessageType.pausedMaxTurns,
-      sessionId: sessionId,
-      finished: true,
-    ));
+    messages.add(
+      DisplayMessage(
+        type: DisplayMessageType.pausedMaxTurns,
+        sessionId: sessionId,
+        finished: true,
+      ),
+    );
   } else {
-    messages.add(DisplayMessage(
-      type: DisplayMessageType.system,
-      content: 'Session paused',
-      sessionId: sessionId,
-      finished: true,
-    ));
+    messages.add(
+      DisplayMessage(
+        type: DisplayMessageType.system,
+        content: 'Session paused',
+        sessionId: sessionId,
+        finished: true,
+      ),
+    );
   }
 }
 
-void buildSessionResumedHistory(Map<String, dynamic> msg, String sessionId,
-    List<DisplayMessage> messages) {
-  messages.add(DisplayMessage(
-    type: DisplayMessageType.system,
-    content: 'Session resumed',
-    sessionId: sessionId,
-    finished: true,
-  ));
+void buildSessionResumedHistory(
+  Map<String, dynamic> msg,
+  String sessionId,
+  List<DisplayMessage> messages,
+) {
+  messages.add(
+    DisplayMessage(
+      type: DisplayMessageType.system,
+      content: 'Session resumed',
+      sessionId: sessionId,
+      finished: true,
+    ),
+  );
 }
 
-void buildPlanModeAskHistory(Map<String, dynamic> msg, String sessionId,
-    List<DisplayMessage> messages) {
+void buildPlanModeAskHistory(
+  Map<String, dynamic> msg,
+  String sessionId,
+  List<DisplayMessage> messages,
+) {
   final metadata = msg['metadata'] as Map<String, dynamic>? ?? {};
-  messages.add(DisplayMessage(
-    type: DisplayMessageType.planModeAsk,
-    sessionId: sessionId,
-    accepted: metadata['accepted'] as bool? ?? true,
-  ));
+  messages.add(
+    DisplayMessage(
+      type: DisplayMessageType.planModeAsk,
+      sessionId: sessionId,
+      accepted: metadata['accepted'] as bool? ?? true,
+    ),
+  );
 }
 
-void buildPlanReviewAskHistory(Map<String, dynamic> msg, String sessionId,
-    List<DisplayMessage> messages) {
+void buildPlanReviewAskHistory(
+  Map<String, dynamic> msg,
+  String sessionId,
+  List<DisplayMessage> messages,
+) {
   final metadata = msg['metadata'] as Map<String, dynamic>? ?? {};
   final planInput = metadata['plan_input'] as Map<String, dynamic>?;
-  final planContent = planInput?['plan'] as String? ??
-      planInput?['content'] as String? ??
-      '';
-  messages.add(DisplayMessage(
-    type: DisplayMessageType.planReviewAsk,
-    sessionId: sessionId,
-    accepted: metadata['accepted'] as bool? ?? true,
-    content: planContent,
-  ));
+  final planContent =
+      planInput?['plan'] as String? ?? planInput?['content'] as String? ?? '';
+  messages.add(
+    DisplayMessage(
+      type: DisplayMessageType.planReviewAsk,
+      sessionId: sessionId,
+      accepted: metadata['accepted'] as bool? ?? true,
+      content: planContent,
+    ),
+  );
 }
 
-void buildPermissionRequestHistory(Map<String, dynamic> msg, String sessionId,
-    List<DisplayMessage> messages) {
+void buildPermissionRequestHistory(
+  Map<String, dynamic> msg,
+  String sessionId,
+  List<DisplayMessage> messages,
+) {
   final metadata = msg['metadata'] as Map<String, dynamic>? ?? {};
-  messages.add(DisplayMessage(
-    type: DisplayMessageType.permissionRequest,
-    sessionId: sessionId,
-    content: metadata['description'] as String? ?? '',
-    accepted: metadata['accepted'] as bool? ?? true,
-    toolInput: {
-      'request_id': metadata['request_id'],
-      'tool_name': metadata['tool_name'],
-      'tool_input': metadata['tool_input'],
-      'description': metadata['description'],
-      'risk_level': metadata['risk_level'],
-      'scope_options': metadata['scope_options'],
-    },
-  ));
+  messages.add(
+    DisplayMessage(
+      type: DisplayMessageType.permissionRequest,
+      sessionId: sessionId,
+      content: metadata['description'] as String? ?? '',
+      accepted: metadata['accepted'] as bool? ?? true,
+      toolInput: {
+        'request_id': metadata['request_id'],
+        'tool_name': metadata['tool_name'],
+        'tool_input': metadata['tool_input'],
+        'description': metadata['description'],
+        'risk_level': metadata['risk_level'],
+        'scope_options': metadata['scope_options'],
+      },
+    ),
+  );
 }
 
-void buildTodoUpdateHistory(Map<String, dynamic> msg, String sessionId,
-    List<DisplayMessage> messages) {
+void buildTodoUpdateHistory(
+  Map<String, dynamic> msg,
+  String sessionId,
+  List<DisplayMessage> messages,
+) {
   final metadata = msg['metadata'] as Map<String, dynamic>? ?? {};
   final rawTodos = metadata['todos'] as List<dynamic>? ?? [];
   final total = rawTodos.length;
@@ -506,47 +597,59 @@ void buildTodoUpdateHistory(Map<String, dynamic> msg, String sessionId,
       .whereType<Map<String, dynamic>>()
       .where((t) => t['status'] == 'completed')
       .length;
-  messages.add(DisplayMessage(
-    type: DisplayMessageType.todoUpdate,
-    sessionId: sessionId,
-    content: '$completed/$total',
-    toolInput: metadata,
-    finished: true,
-  ));
+  messages.add(
+    DisplayMessage(
+      type: DisplayMessageType.todoUpdate,
+      sessionId: sessionId,
+      content: '$completed/$total',
+      toolInput: metadata,
+      finished: true,
+    ),
+  );
 }
 
-void buildThinkingHistory(Map<String, dynamic> msg, String sessionId,
-    List<DisplayMessage> messages) {
+void buildThinkingHistory(
+  Map<String, dynamic> msg,
+  String sessionId,
+  List<DisplayMessage> messages,
+) {
   final content = msg['content'] as String? ?? '';
   if (messages.isNotEmpty &&
       messages.last.type == DisplayMessageType.thinking &&
       messages.last.sessionId == sessionId) {
     messages.last.content += content;
   } else {
-    messages.add(DisplayMessage(
-      type: DisplayMessageType.thinking,
-      content: content,
-      sessionId: sessionId,
-      finished: true,
-    ));
+    messages.add(
+      DisplayMessage(
+        type: DisplayMessageType.thinking,
+        content: content,
+        sessionId: sessionId,
+        finished: true,
+      ),
+    );
   }
 }
 
-void buildAgentSessionStartHistory(Map<String, dynamic> msg, String sessionId,
-    List<DisplayMessage> messages) {
+void buildAgentSessionStartHistory(
+  Map<String, dynamic> msg,
+  String sessionId,
+  List<DisplayMessage> messages,
+) {
   final metadata = msg['metadata'] as Map<String, dynamic>? ?? {};
-  messages.add(DisplayMessage(
-    type: DisplayMessageType.agentSessionStart,
-    sessionId: sessionId,
-    toolName: metadata['agent_type'] as String?,
-    displayName: metadata['display_name'] as String?,
-    content: metadata['prompt'] as String? ?? '',
-    toolInput: {
-      'working_directory': metadata['working_directory'],
-      'prompt': metadata['prompt'],
-    },
-    finished: true,
-  ));
+  messages.add(
+    DisplayMessage(
+      type: DisplayMessageType.agentSessionStart,
+      sessionId: sessionId,
+      toolName: metadata['agent_type'] as String?,
+      displayName: metadata['display_name'] as String?,
+      content: metadata['prompt'] as String? ?? '',
+      toolInput: {
+        'working_directory': metadata['working_directory'],
+        'prompt': metadata['prompt'],
+      },
+      finished: true,
+    ),
+  );
 }
 
 /// Maps archived message type strings to history builder functions.

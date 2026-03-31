@@ -110,11 +110,7 @@ class _SessionPaneState extends State<SessionPane> {
               data.terminalId,
             );
           } else if (data is TaskDragData) {
-            appState.splitPaneWithTask(
-              widget.pane.paneId,
-              zone,
-              data.taskId,
-            );
+            appState.splitPaneWithTask(widget.pane.paneId, zone, data.taskId);
           }
         },
         builder: (context, candidateData, rejectedData) {
@@ -132,7 +128,8 @@ class _SessionPaneState extends State<SessionPane> {
             onPointerDown: (_) {
               if (appState.activePaneId != widget.pane.paneId) {
                 Future.microtask(
-                    () => appState.setActivePane(widget.pane.paneId));
+                  () => appState.setActivePane(widget.pane.paneId),
+                );
               }
             },
             child: Stack(
@@ -158,7 +155,9 @@ class _SessionPaneState extends State<SessionPane> {
                             ),
                             Expanded(
                               child: TerminalPane(
-                                key: appState.terminalPaneKey(widget.pane.paneId),
+                                key: appState.terminalPaneKey(
+                                  widget.pane.paneId,
+                                ),
                                 paneId: widget.pane.paneId,
                                 info: terminalInfo,
                                 appState: appState,
@@ -167,34 +166,31 @@ class _SessionPaneState extends State<SessionPane> {
                           ],
                         )
                       : isTaskPane
-                          ? TaskPane(
-                              paneId: widget.pane.paneId,
-                              pane: widget.pane,
-                            )
-                          : isArtifactPane
-                              ? ArtifactPane(
-                                  paneId: widget.pane.paneId,
-                                  pane: widget.pane,
-                                )
-                              : isLinearIssuePane
-                                  ? LinearIssuePane(
-                                      paneId: widget.pane.paneId,
-                                      pane: widget.pane,
-                                    )
-                                  : isWorkerSettingsPane
-                                      ? WorkerSettingsPane(
-                                          paneId: widget.pane.paneId,
-                                          pane: widget.pane,
-                                        )
-                                      : Column(
-                              children: [
-                                const PaneHeader(),
-                                Expanded(
-                                  child: _OutputWithRightPanels(pane: widget.pane),
-                                ),
-                                InputArea(key: onboarding.inputAreaKey),
-                              ],
+                      ? TaskPane(paneId: widget.pane.paneId, pane: widget.pane)
+                      : isArtifactPane
+                      ? ArtifactPane(
+                          paneId: widget.pane.paneId,
+                          pane: widget.pane,
+                        )
+                      : isLinearIssuePane
+                      ? LinearIssuePane(
+                          paneId: widget.pane.paneId,
+                          pane: widget.pane,
+                        )
+                      : isWorkerSettingsPane
+                      ? WorkerSettingsPane(
+                          paneId: widget.pane.paneId,
+                          pane: widget.pane,
+                        )
+                      : Column(
+                          children: [
+                            const PaneHeader(),
+                            Expanded(
+                              child: _OutputWithRightPanels(pane: widget.pane),
                             ),
+                            InputArea(key: onboarding.inputAreaKey),
+                          ],
+                        ),
                 ),
                 if (_hoverZone != null) _DropZoneOverlay(zone: _hoverZone!),
               ],
@@ -216,8 +212,7 @@ class _OutputWithRightPanels extends StatefulWidget {
   const _OutputWithRightPanels({required this.pane});
 
   @override
-  State<_OutputWithRightPanels> createState() =>
-      _OutputWithRightPanelsState();
+  State<_OutputWithRightPanels> createState() => _OutputWithRightPanelsState();
 }
 
 class _OutputWithRightPanelsState extends State<_OutputWithRightPanels> {
@@ -244,14 +239,12 @@ class _OutputWithRightPanelsState extends State<_OutputWithRightPanels> {
           MouseRegion(
             cursor: SystemMouseCursors.resizeColumn,
             child: GestureDetector(
-              onHorizontalDragStart: (_) =>
-                  setState(() => _dragging = true),
+              onHorizontalDragStart: (_) => setState(() => _dragging = true),
               onHorizontalDragUpdate: (details) {
                 final newWidth = panelWidth - details.delta.dx;
                 pane.setRightPanelWidth(newWidth);
               },
-              onHorizontalDragEnd: (_) =>
-                  setState(() => _dragging = false),
+              onHorizontalDragEnd: (_) => setState(() => _dragging = false),
               child: Container(
                 width: 5,
                 color: _dragging
@@ -338,8 +331,9 @@ class _RightBookmarks extends StatelessWidget {
   }
 
   String _todoLabel(PaneState pane) {
-    final completed =
-        pane.todos.where((t) => t.status == TodoStatus.completed).length;
+    final completed = pane.todos
+        .where((t) => t.status == TodoStatus.completed)
+        .length;
     return 'Todo $completed/${pane.todos.length}';
   }
 }
@@ -369,12 +363,10 @@ class _BookmarkTab extends StatelessWidget {
       message: label,
       child: InkWell(
         onTap: onTap,
-        borderRadius:
-            const BorderRadius.horizontal(left: Radius.circular(6)),
+        borderRadius: const BorderRadius.horizontal(left: Radius.circular(6)),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 150),
-          padding:
-              const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
           decoration: BoxDecoration(
             color: isActive
                 ? context.appColors.bgSurface
@@ -389,15 +381,18 @@ class _BookmarkTab extends StatelessWidget {
               top: BorderSide(color: context.appColors.divider),
               bottom: BorderSide(color: context.appColors.divider),
             ),
-            borderRadius:
-                const BorderRadius.horizontal(left: Radius.circular(6)),
+            borderRadius: const BorderRadius.horizontal(
+              left: Radius.circular(6),
+            ),
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon,
-                  size: 14,
-                  color: isActive ? iconColor : context.appColors.textMuted),
+              Icon(
+                icon,
+                size: 14,
+                color: isActive ? iconColor : context.appColors.textMuted,
+              ),
               const SizedBox(height: 4),
               RotatedBox(
                 quarterTurns: 1,
@@ -408,9 +403,7 @@ class _BookmarkTab extends StatelessWidget {
                         ? context.appColors.textPrimary
                         : context.appColors.textMuted,
                     fontSize: 10,
-                    fontWeight: isActive
-                        ? FontWeight.w600
-                        : FontWeight.w500,
+                    fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
                   ),
                 ),
               ),
@@ -440,14 +433,19 @@ class _DropZoneOverlay extends StatelessWidget {
             DropZone.bottom => Alignment.bottomCenter,
           },
           child: FractionallySizedBox(
-            widthFactor:
-                (zone == DropZone.left || zone == DropZone.right) ? 0.5 : 1.0,
-            heightFactor:
-                (zone == DropZone.top || zone == DropZone.bottom) ? 0.5 : 1.0,
+            widthFactor: (zone == DropZone.left || zone == DropZone.right)
+                ? 0.5
+                : 1.0,
+            heightFactor: (zone == DropZone.top || zone == DropZone.bottom)
+                ? 0.5
+                : 1.0,
             child: Container(
               decoration: BoxDecoration(
                 color: context.appColors.accent.withAlpha(40),
-                border: Border.all(color: context.appColors.accent.withAlpha(80), width: 2),
+                border: Border.all(
+                  color: context.appColors.accent.withAlpha(80),
+                  width: 2,
+                ),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Center(
@@ -498,8 +496,11 @@ class _TerminalPaneHeader extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 8),
       child: Row(
         children: [
-          Icon(Icons.terminal_rounded,
-              color: context.appColors.textSecondary, size: 16),
+          Icon(
+            Icons.terminal_rounded,
+            color: context.appColors.textSecondary,
+            size: 16,
+          ),
           const SizedBox(width: 6),
           Expanded(
             child: Text(
@@ -517,8 +518,11 @@ class _TerminalPaneHeader extends StatelessWidget {
             height: 24,
             child: IconButton(
               padding: EdgeInsets.zero,
-              icon: Icon(Icons.close_rounded,
-                  color: context.appColors.textMuted, size: 16),
+              icon: Icon(
+                Icons.close_rounded,
+                color: context.appColors.textMuted,
+                size: 16,
+              ),
               onPressed: () => appState.closePane(paneId),
               tooltip: 'Close terminal pane',
               constraints: const BoxConstraints(maxWidth: 24, maxHeight: 24),

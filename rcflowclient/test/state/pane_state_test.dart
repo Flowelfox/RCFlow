@@ -41,8 +41,12 @@ class _StubPaneHost implements PaneHost {
   void refreshSessions() {}
 
   @override
-  void addSystemMessageToPane(String paneId, String text,
-      {bool isError = false, String? label}) {}
+  void addSystemMessageToPane(
+    String paneId,
+    String text, {
+    bool isError = false,
+    String? label,
+  }) {}
 
   @override
   void muteSessionSound(String sessionId) {}
@@ -54,10 +58,11 @@ class _StubPaneHost implements PaneHost {
   void requestUnsubscribe(String sessionId, String workerId) {}
 
   @override
-  void showNotification(
-      {required NotificationLevel level,
-      required String title,
-      String? body}) {}
+  void showNotification({
+    required NotificationLevel level,
+    required String title,
+    String? body,
+  }) {}
 
   @override
   bool workerSupportsAttachments(String? workerId) => false;
@@ -78,15 +83,14 @@ SessionInfo _session(
   String status, {
   String? mainProjectPath,
   String? selectedWorktreePath,
-}) =>
-    SessionInfo(
-      sessionId: id,
-      sessionType: 'conversational',
-      status: status,
-      workerId: 'worker1',
-      mainProjectPath: mainProjectPath,
-      selectedWorktreePath: selectedWorktreePath,
-    );
+}) => SessionInfo(
+  sessionId: id,
+  sessionType: 'conversational',
+  status: status,
+  workerId: 'worker1',
+  mainProjectPath: mainProjectPath,
+  selectedWorktreePath: selectedWorktreePath,
+);
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -98,8 +102,11 @@ void main() {
       final pane = PaneState(
         paneId: 'p1',
         host: _StubPaneHost([
-          _session('s1', 'active',
-              mainProjectPath: '/home/user/Projects/MyApp'),
+          _session(
+            's1',
+            'active',
+            mainProjectPath: '/home/user/Projects/MyApp',
+          ),
         ]),
       );
 
@@ -112,8 +119,11 @@ void main() {
       final pane = PaneState(
         paneId: 'p1',
         host: _StubPaneHost([
-          _session('s1', 'paused',
-              mainProjectPath: '/home/user/Projects/MyApp'),
+          _session(
+            's1',
+            'paused',
+            mainProjectPath: '/home/user/Projects/MyApp',
+          ),
         ]),
       );
 
@@ -122,27 +132,35 @@ void main() {
       expect(pane.activeRightPanel, 'project');
     });
 
-    test('opens project panel for completed (ended) session with mainProjectPath',
-        () {
-      final pane = PaneState(
-        paneId: 'p1',
-        host: _StubPaneHost([
-          _session('s1', 'completed',
-              mainProjectPath: '/home/user/Projects/MyApp'),
-        ]),
-      );
+    test(
+      'opens project panel for completed (ended) session with mainProjectPath',
+      () {
+        final pane = PaneState(
+          paneId: 'p1',
+          host: _StubPaneHost([
+            _session(
+              's1',
+              'completed',
+              mainProjectPath: '/home/user/Projects/MyApp',
+            ),
+          ]),
+        );
 
-      pane.switchSession('s1');
+        pane.switchSession('s1');
 
-      expect(pane.activeRightPanel, 'project');
-    });
+        expect(pane.activeRightPanel, 'project');
+      },
+    );
 
     test('opens project panel for cancelled session with mainProjectPath', () {
       final pane = PaneState(
         paneId: 'p1',
         host: _StubPaneHost([
-          _session('s1', 'cancelled',
-              mainProjectPath: '/home/user/Projects/MyApp'),
+          _session(
+            's1',
+            'cancelled',
+            mainProjectPath: '/home/user/Projects/MyApp',
+          ),
         ]),
       );
 
@@ -154,9 +172,7 @@ void main() {
     test('does not open project panel when session has no mainProjectPath', () {
       final pane = PaneState(
         paneId: 'p1',
-        host: _StubPaneHost([
-          _session('s1', 'completed'),
-        ]),
+        host: _StubPaneHost([_session('s1', 'completed')]),
       );
 
       pane.switchSession('s1');
@@ -168,25 +184,40 @@ void main() {
       final pane = PaneState(
         paneId: 'p1',
         host: _StubPaneHost([
-          _session('s1', 'completed',
-              mainProjectPath: '/home/user/Projects/Alpha'),
+          _session(
+            's1',
+            'completed',
+            mainProjectPath: '/home/user/Projects/Alpha',
+          ),
           _session('s2', 'completed'), // no project
-          _session('s3', 'completed',
-              mainProjectPath: '/home/user/Projects/Beta'),
+          _session(
+            's3',
+            'completed',
+            mainProjectPath: '/home/user/Projects/Beta',
+          ),
         ]),
       );
 
       pane.switchSession('s1');
-      expect(pane.activeRightPanel, 'project',
-          reason: 's1 has a project — panel should open');
+      expect(
+        pane.activeRightPanel,
+        'project',
+        reason: 's1 has a project — panel should open',
+      );
 
       pane.switchSession('s2');
-      expect(pane.activeRightPanel, isNull,
-          reason: 's2 has no project — panel should stay closed');
+      expect(
+        pane.activeRightPanel,
+        isNull,
+        reason: 's2 has no project — panel should stay closed',
+      );
 
       pane.switchSession('s3');
-      expect(pane.activeRightPanel, 'project',
-          reason: 's3 has a project — panel should reopen');
+      expect(
+        pane.activeRightPanel,
+        'project',
+        reason: 's3 has a project — panel should reopen',
+      );
     });
   });
 
@@ -195,16 +226,15 @@ void main() {
   // ---------------------------------------------------------------------------
 
   group('PaneState — project panel close and reopen', () {
-    PaneState _paneWithProject() => PaneState(
-          paneId: 'p1',
-          host: _StubPaneHost([
-            _session('s1', 'active',
-                mainProjectPath: '/home/user/Projects/MyApp'),
-          ]),
-        )..switchSession('s1');
+    PaneState paneWithProject() => PaneState(
+      paneId: 'p1',
+      host: _StubPaneHost([
+        _session('s1', 'active', mainProjectPath: '/home/user/Projects/MyApp'),
+      ]),
+    )..switchSession('s1');
 
     test('toggleRightPanel closes an open project panel', () {
-      final pane = _paneWithProject();
+      final pane = paneWithProject();
       expect(pane.activeRightPanel, 'project');
 
       pane.toggleRightPanel('project');
@@ -213,7 +243,7 @@ void main() {
     });
 
     test('toggleRightPanel reopens a closed project panel', () {
-      final pane = _paneWithProject();
+      final pane = paneWithProject();
       pane.toggleRightPanel('project'); // close
       expect(pane.activeRightPanel, isNull);
 
@@ -223,7 +253,7 @@ void main() {
     });
 
     test('openProjectPanel opens a closed panel', () {
-      final pane = _paneWithProject();
+      final pane = paneWithProject();
       pane.toggleRightPanel('project'); // close
       expect(pane.activeRightPanel, isNull);
 
@@ -233,22 +263,29 @@ void main() {
     });
 
     test('openProjectPanel is a no-op when panel is already open', () {
-      final pane = _paneWithProject();
+      final pane = paneWithProject();
       var notifyCount = 0;
       pane.addListener(() => notifyCount++);
 
       pane.openProjectPanel(); // already open — should not notify
 
       expect(pane.activeRightPanel, 'project');
-      expect(notifyCount, 0, reason: 'no rebuild needed when panel already open');
+      expect(
+        notifyCount,
+        0,
+        reason: 'no rebuild needed when panel already open',
+      );
     });
 
     test('closing then switching back to a project session reopens panel', () {
       final pane = PaneState(
         paneId: 'p1',
         host: _StubPaneHost([
-          _session('s1', 'active',
-              mainProjectPath: '/home/user/Projects/MyApp'),
+          _session(
+            's1',
+            'active',
+            mainProjectPath: '/home/user/Projects/MyApp',
+          ),
           _session('s2', 'active'), // no project
         ]),
       );
@@ -265,8 +302,11 @@ void main() {
       pane.switchSession('s1'); // return to project session
 
       // Auto-open fires again because switchSession re-evaluates mainProjectPath
-      expect(pane.activeRightPanel, 'project',
-          reason: 'panel should reopen when switching back to a project session');
+      expect(
+        pane.activeRightPanel,
+        'project',
+        reason: 'panel should reopen when switching back to a project session',
+      );
     });
   });
 
@@ -275,53 +315,63 @@ void main() {
     // the server's project list), the project panel can show real content
     // immediately — before any prompt is sent or session created.
 
-    test('effectiveProjectPath uses the pre-resolved path before any session', () {
-      final pane = PaneState(
-        paneId: 'p1',
-        host: _StubPaneHost([]),
-      );
+    test(
+      'effectiveProjectPath uses the pre-resolved path before any session',
+      () {
+        final pane = PaneState(paneId: 'p1', host: _StubPaneHost([]));
 
-      pane.setSelectedProject('MyProject', path: '/home/user/Projects/MyProject');
+        pane.setSelectedProject(
+          'MyProject',
+          path: '/home/user/Projects/MyProject',
+        );
 
-      expect(pane.selectedProjectName, 'MyProject',
-          reason: 'chip name must reflect the user selection immediately');
-      expect(pane.activeRightPanel, 'project',
-          reason: 'project panel must open on @-mention');
-      expect(pane.effectiveProjectPath, '/home/user/Projects/MyProject',
-          reason: 'panel must have the full path to fetch worktrees/artifacts '
-              'immediately without waiting for a session');
-    });
+        expect(
+          pane.selectedProjectName,
+          'MyProject',
+          reason: 'chip name must reflect the user selection immediately',
+        );
+        expect(
+          pane.activeRightPanel,
+          'project',
+          reason: 'project panel must open on @-mention',
+        );
+        expect(
+          pane.effectiveProjectPath,
+          '/home/user/Projects/MyProject',
+          reason:
+              'panel must have the full path to fetch worktrees/artifacts '
+              'immediately without waiting for a session',
+        );
+      },
+    );
 
     test('effectiveProjectPath is null when no project is selected', () {
-      final pane = PaneState(
-        paneId: 'p1',
-        host: _StubPaneHost([]),
-      );
+      final pane = PaneState(paneId: 'p1', host: _StubPaneHost([]));
 
       expect(pane.selectedProjectName, isNull);
       expect(pane.effectiveProjectPath, isNull);
     });
 
     test('effectiveProjectPath is null when path was not provided', () {
-      final pane = PaneState(
-        paneId: 'p1',
-        host: _StubPaneHost([]),
-      );
+      final pane = PaneState(paneId: 'p1', host: _StubPaneHost([]));
 
       pane.setSelectedProject('MyProject');
 
       expect(pane.selectedProjectName, 'MyProject');
-      expect(pane.effectiveProjectPath, isNull,
-          reason: 'no path provided — panel cannot fetch content yet');
+      expect(
+        pane.effectiveProjectPath,
+        isNull,
+        reason: 'no path provided — panel cannot fetch content yet',
+      );
     });
 
     test('clearing the chip clears both name and path', () {
-      final pane = PaneState(
-        paneId: 'p1',
-        host: _StubPaneHost([]),
-      );
+      final pane = PaneState(paneId: 'p1', host: _StubPaneHost([]));
 
-      pane.setSelectedProject('MyProject', path: '/home/user/Projects/MyProject');
+      pane.setSelectedProject(
+        'MyProject',
+        path: '/home/user/Projects/MyProject',
+      );
       expect(pane.effectiveProjectPath, '/home/user/Projects/MyProject');
 
       pane.setSelectedProject(null);
@@ -333,16 +383,25 @@ void main() {
       final pane = PaneState(
         paneId: 'p1',
         host: _StubPaneHost([
-          _session('s1', 'active',
-              mainProjectPath: '/home/user/Projects/MyProject'),
+          _session(
+            's1',
+            'active',
+            mainProjectPath: '/home/user/Projects/MyProject',
+          ),
         ]),
       );
 
-      pane.setSelectedProject('MyProject', path: '/home/user/Projects/MyProject');
+      pane.setSelectedProject(
+        'MyProject',
+        path: '/home/user/Projects/MyProject',
+      );
       pane.switchSession('s1');
 
-      expect(pane.effectiveProjectPath, '/home/user/Projects/MyProject',
-          reason: 'confirmed session path is returned once session is active');
+      expect(
+        pane.effectiveProjectPath,
+        '/home/user/Projects/MyProject',
+        reason: 'confirmed session path is returned once session is active',
+      );
     });
   });
 
@@ -351,26 +410,27 @@ void main() {
   // ---------------------------------------------------------------------------
 
   group('PaneState — runningSubprocess', () {
-    PaneState _pane() => PaneState(paneId: 'p1', host: _StubPaneHost([]));
+    PaneState makePaneState() =>
+        PaneState(paneId: 'p1', host: _StubPaneHost([]));
 
-    SubprocessInfo _info({String? tool}) => SubprocessInfo(
-          subprocessType: 'claude_code',
-          displayName: 'Claude Code',
-          workingDirectory: '/repo',
-          currentTool: tool,
-          startedAt: DateTime.utc(2026, 3, 20),
-        );
+    SubprocessInfo makeInfo({String? tool}) => SubprocessInfo(
+      subprocessType: 'claude_code',
+      displayName: 'Claude Code',
+      workingDirectory: '/repo',
+      currentTool: tool,
+      startedAt: DateTime.utc(2026, 3, 20),
+    );
 
     test('is null by default', () {
-      expect(_pane().runningSubprocess, isNull);
+      expect(makePaneState().runningSubprocess, isNull);
     });
 
     test('setRunningSubprocess updates state and notifies listeners', () {
-      final pane = _pane();
+      final pane = makePaneState();
       var notified = 0;
       pane.addListener(() => notified++);
 
-      pane.setRunningSubprocess(_info());
+      pane.setRunningSubprocess(makeInfo());
 
       expect(pane.runningSubprocess, isNotNull);
       expect(pane.runningSubprocess!.subprocessType, 'claude_code');
@@ -378,8 +438,8 @@ void main() {
     });
 
     test('setRunningSubprocess(null) clears state', () {
-      final pane = _pane();
-      pane.setRunningSubprocess(_info());
+      final pane = makePaneState();
+      pane.setRunningSubprocess(makeInfo());
       expect(pane.runningSubprocess, isNotNull);
 
       pane.setRunningSubprocess(null);
@@ -388,12 +448,12 @@ void main() {
     });
 
     test('currentTool is reflected in runningSubprocess', () {
-      final pane = _pane();
+      final pane = makePaneState();
 
-      pane.setRunningSubprocess(_info(tool: 'Bash'));
+      pane.setRunningSubprocess(makeInfo(tool: 'Bash'));
       expect(pane.runningSubprocess!.currentTool, 'Bash');
 
-      pane.setRunningSubprocess(_info(tool: null));
+      pane.setRunningSubprocess(makeInfo(tool: null));
       expect(pane.runningSubprocess!.currentTool, isNull);
     });
 
@@ -402,7 +462,7 @@ void main() {
         paneId: 'p1',
         host: _StubPaneHost([_session('s1', 'active')]),
       );
-      pane.setRunningSubprocess(_info());
+      pane.setRunningSubprocess(makeInfo());
       expect(pane.runningSubprocess, isNotNull);
 
       pane.switchSession('s1');
@@ -416,30 +476,31 @@ void main() {
   // ---------------------------------------------------------------------------
 
   group('PaneState — workerSettings', () {
-    PaneState _pane() => PaneState(paneId: 'p1', host: _StubPaneHost([]));
+    PaneState makePaneState() =>
+        PaneState(paneId: 'p1', host: _StubPaneHost([]));
 
     test('workerSettingsTool and section are null by default', () {
-      final pane = _pane();
+      final pane = makePaneState();
       expect(pane.workerSettingsTool, isNull);
       expect(pane.workerSettingsSection, isNull);
     });
 
     test('setWorkerSettings sets tool and default section', () {
-      final pane = _pane();
+      final pane = makePaneState();
       pane.setWorkerSettings('claude_code');
       expect(pane.workerSettingsTool, 'claude_code');
       expect(pane.workerSettingsSection, 'plugins');
     });
 
     test('setWorkerSettings accepts custom section', () {
-      final pane = _pane();
+      final pane = makePaneState();
       pane.setWorkerSettings('codex', section: 'config');
       expect(pane.workerSettingsTool, 'codex');
       expect(pane.workerSettingsSection, 'config');
     });
 
     test('setWorkerSettings notifies listeners', () {
-      final pane = _pane();
+      final pane = makePaneState();
       var notified = 0;
       pane.addListener(() => notified++);
       pane.setWorkerSettings('claude_code');
@@ -447,7 +508,7 @@ void main() {
     });
 
     test('clearWorkerSettings nulls out both fields', () {
-      final pane = _pane();
+      final pane = makePaneState();
       pane.setWorkerSettings('claude_code');
       pane.clearWorkerSettings();
       expect(pane.workerSettingsTool, isNull);
@@ -455,7 +516,7 @@ void main() {
     });
 
     test('clearWorkerSettings notifies listeners', () {
-      final pane = _pane();
+      final pane = makePaneState();
       pane.setWorkerSettings('claude_code');
       var notified = 0;
       pane.addListener(() => notified++);
@@ -469,14 +530,15 @@ void main() {
   // ---------------------------------------------------------------------------
 
   group('PaneState.setSelectedTool — tool mention chip', () {
-    PaneState _pane() => PaneState(paneId: 'p1', host: _StubPaneHost([]));
+    PaneState makePaneState() =>
+        PaneState(paneId: 'p1', host: _StubPaneHost([]));
 
     test('selectedToolMention is null by default', () {
-      expect(_pane().selectedToolMention, isNull);
+      expect(makePaneState().selectedToolMention, isNull);
     });
 
     test('setSelectedTool sets the tool name and notifies', () {
-      final pane = _pane();
+      final pane = makePaneState();
       var notified = 0;
       pane.addListener(() => notified++);
 
@@ -487,7 +549,7 @@ void main() {
     });
 
     test('setSelectedTool(null) clears the tool name', () {
-      final pane = _pane();
+      final pane = makePaneState();
       pane.setSelectedTool('ClaudeCode');
       expect(pane.selectedToolMention, 'ClaudeCode');
 
@@ -497,7 +559,7 @@ void main() {
     });
 
     test('goHome clears selectedToolMention', () {
-      final pane = _pane();
+      final pane = makePaneState();
       pane.setSelectedTool('ClaudeCode');
 
       pane.goHome();
@@ -506,7 +568,7 @@ void main() {
     });
 
     test('startNewChat clears selectedToolMention', () {
-      final pane = _pane();
+      final pane = makePaneState();
       pane.setSelectedTool('ClaudeCode');
 
       pane.startNewChat();
@@ -536,24 +598,33 @@ void main() {
       final pane = PaneState(
         paneId: 'p1',
         host: _StubPaneHost([
-          _session('s1', 'active',
-              mainProjectPath: '/home/user/Projects/MyApp',
-              selectedWorktreePath: '/home/user/Projects/MyApp/.worktrees/feat-login'),
+          _session(
+            's1',
+            'active',
+            mainProjectPath: '/home/user/Projects/MyApp',
+            selectedWorktreePath:
+                '/home/user/Projects/MyApp/.worktrees/feat-login',
+          ),
         ]),
       );
 
       pane.switchSession('s1');
 
-      expect(pane.currentSelectedWorktreePath,
-          '/home/user/Projects/MyApp/.worktrees/feat-login');
+      expect(
+        pane.currentSelectedWorktreePath,
+        '/home/user/Projects/MyApp/.worktrees/feat-login',
+      );
     });
 
     test('returns null for session without a selected worktree', () {
       final pane = PaneState(
         paneId: 'p1',
         host: _StubPaneHost([
-          _session('s1', 'active',
-              mainProjectPath: '/home/user/Projects/MyApp'),
+          _session(
+            's1',
+            'active',
+            mainProjectPath: '/home/user/Projects/MyApp',
+          ),
         ]),
       );
 
@@ -562,39 +633,57 @@ void main() {
       expect(pane.currentSelectedWorktreePath, isNull);
     });
 
-    test('updates when switching between sessions with different worktrees', () {
-      final pane = PaneState(
-        paneId: 'p1',
-        host: _StubPaneHost([
-          _session('s1', 'active',
+    test(
+      'updates when switching between sessions with different worktrees',
+      () {
+        final pane = PaneState(
+          paneId: 'p1',
+          host: _StubPaneHost([
+            _session(
+              's1',
+              'active',
               mainProjectPath: '/home/user/Projects/MyApp',
-              selectedWorktreePath: '/home/user/Projects/MyApp/.worktrees/feat-a'),
-          _session('s2', 'active',
+              selectedWorktreePath:
+                  '/home/user/Projects/MyApp/.worktrees/feat-a',
+            ),
+            _session(
+              's2',
+              'active',
               mainProjectPath: '/home/user/Projects/MyApp',
-              selectedWorktreePath: '/home/user/Projects/MyApp/.worktrees/feat-b'),
-          _session('s3', 'active',
-              mainProjectPath: '/home/user/Projects/MyApp'),
-        ]),
-      );
+              selectedWorktreePath:
+                  '/home/user/Projects/MyApp/.worktrees/feat-b',
+            ),
+            _session(
+              's3',
+              'active',
+              mainProjectPath: '/home/user/Projects/MyApp',
+            ),
+          ]),
+        );
 
-      pane.switchSession('s1');
-      expect(pane.currentSelectedWorktreePath,
-          '/home/user/Projects/MyApp/.worktrees/feat-a');
+        pane.switchSession('s1');
+        expect(
+          pane.currentSelectedWorktreePath,
+          '/home/user/Projects/MyApp/.worktrees/feat-a',
+        );
 
-      pane.switchSession('s2');
-      expect(pane.currentSelectedWorktreePath,
-          '/home/user/Projects/MyApp/.worktrees/feat-b');
+        pane.switchSession('s2');
+        expect(
+          pane.currentSelectedWorktreePath,
+          '/home/user/Projects/MyApp/.worktrees/feat-b',
+        );
 
-      pane.switchSession('s3');
-      expect(pane.currentSelectedWorktreePath, isNull,
-          reason: 's3 has no worktree — should return null');
-    });
+        pane.switchSession('s3');
+        expect(
+          pane.currentSelectedWorktreePath,
+          isNull,
+          reason: 's3 has no worktree — should return null',
+        );
+      },
+    );
 
     test('returns null when no session is active', () {
-      final pane = PaneState(
-        paneId: 'p1',
-        host: _StubPaneHost([]),
-      );
+      final pane = PaneState(paneId: 'p1', host: _StubPaneHost([]));
 
       expect(pane.currentSelectedWorktreePath, isNull);
     });

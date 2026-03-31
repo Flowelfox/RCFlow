@@ -22,10 +22,10 @@ class TerminalSessionTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isShownInPane = info.paneId != null && state.panes.containsKey(info.paneId);
-    final isActivePane = isShownInPane &&
-        !state.hasNoPanes &&
-        state.activePaneId == info.paneId;
+    final isShownInPane =
+        info.paneId != null && state.panes.containsKey(info.paneId);
+    final isActivePane =
+        isShownInPane && !state.hasNoPanes && state.activePaneId == info.paneId;
     final dimmed = !isConnected;
 
     final tile = GestureDetector(
@@ -38,18 +38,20 @@ class TerminalSessionTile extends StatelessWidget {
             color: isActivePane
                 ? context.appColors.accent.withAlpha(25)
                 : isShownInPane
-                    ? context.appColors.accent.withAlpha(12)
-                    : null,
+                ? context.appColors.accent.withAlpha(12)
+                : null,
             border: isActivePane
                 ? Border(
-                    left: BorderSide(
-                        color: context.appColors.accent, width: 3))
+                    left: BorderSide(color: context.appColors.accent, width: 3),
+                  )
                 : isShownInPane
-                    ? Border(
-                        left: BorderSide(
-                            color: context.appColors.accent.withAlpha(80),
-                            width: 2))
-                    : null,
+                ? Border(
+                    left: BorderSide(
+                      color: context.appColors.accent.withAlpha(80),
+                      width: 2,
+                    ),
+                  )
+                : null,
           ),
           child: ListTile(
             leading: Container(
@@ -84,19 +86,22 @@ class TerminalSessionTile extends StatelessWidget {
             subtitle: Text(
               _terminalSubtitle(info),
               style: TextStyle(
-                  color: context.appColors.textMuted, fontSize: 10),
+                color: context.appColors.textMuted,
+                fontSize: 10,
+              ),
             ),
             trailing: SizedBox(
               width: 26,
               height: 26,
               child: IconButton(
                 padding: EdgeInsets.zero,
-                icon: Icon(Icons.close_rounded,
-                    color: context.appColors.textSecondary, size: 16),
+                icon: Icon(
+                  Icons.close_rounded,
+                  color: context.appColors.textSecondary,
+                  size: 16,
+                ),
                 tooltip: 'Close terminal',
-                onPressed: dimmed
-                    ? null
-                    : () => _confirmCloseTerminal(context),
+                onPressed: dimmed ? null : () => _confirmCloseTerminal(context),
               ),
             ),
             dense: true,
@@ -108,8 +113,7 @@ class TerminalSessionTile extends StatelessWidget {
                     state.showTerminalInPane(info.terminalId);
                     onSessionSelected?.call();
                   },
-            onLongPress: () =>
-                _showTerminalRenameDialog(context),
+            onLongPress: () => _showTerminalRenameDialog(context),
           ),
         ),
       ),
@@ -128,8 +132,7 @@ class TerminalSessionTile extends StatelessWidget {
           decoration: BoxDecoration(
             color: context.appColors.bgElevated,
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-                color: context.appColors.accent.withAlpha(120)),
+            border: Border.all(color: context.appColors.accent.withAlpha(120)),
             boxShadow: [
               BoxShadow(
                 color: Colors.black.withAlpha(100),
@@ -141,8 +144,11 @@ class TerminalSessionTile extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.terminal_rounded,
-                  color: context.appColors.textSecondary, size: 14),
+              Icon(
+                Icons.terminal_rounded,
+                color: context.appColors.textSecondary,
+                size: 14,
+              ),
               SizedBox(width: 6),
               ConstrainedBox(
                 constraints: BoxConstraints(maxWidth: 180),
@@ -169,15 +175,15 @@ class TerminalSessionTile extends StatelessWidget {
 
   static String _terminalSubtitle(TerminalSessionInfo info) {
     final local = info.createdAt.toLocal();
-    final time = '${monthAbbr(local.month)} ${local.day}, '
+    final time =
+        '${monthAbbr(local.month)} ${local.day}, '
         '${local.hour.toString().padLeft(2, '0')}:'
         '${local.minute.toString().padLeft(2, '0')}';
     return '$time \u00B7 ${info.shortId}';
   }
 
   void _showTerminalContextMenu(BuildContext context, Offset position) {
-    final overlay =
-        Overlay.of(context).context.findRenderObject() as RenderBox;
+    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
     showMenu<String>(
       context: context,
       position: RelativeRect.fromRect(
@@ -191,11 +197,16 @@ class TerminalSessionTile extends StatelessWidget {
           value: 'rename',
           child: Row(
             children: [
-              Icon(Icons.edit_outlined,
-                  color: context.appColors.textSecondary, size: 18),
+              Icon(
+                Icons.edit_outlined,
+                color: context.appColors.textSecondary,
+                size: 18,
+              ),
               SizedBox(width: 8),
-              Text('Rename',
-                  style: TextStyle(color: context.appColors.textPrimary)),
+              Text(
+                'Rename',
+                style: TextStyle(color: context.appColors.textPrimary),
+              ),
             ],
           ),
         ),
@@ -203,11 +214,16 @@ class TerminalSessionTile extends StatelessWidget {
           value: 'close',
           child: Row(
             children: [
-              Icon(Icons.close_rounded,
-                  color: context.appColors.errorText, size: 18),
+              Icon(
+                Icons.close_rounded,
+                color: context.appColors.errorText,
+                size: 18,
+              ),
               SizedBox(width: 8),
-              Text('Close terminal',
-                  style: TextStyle(color: context.appColors.errorText)),
+              Text(
+                'Close terminal',
+                style: TextStyle(color: context.appColors.errorText),
+              ),
             ],
           ),
         ),
@@ -227,31 +243,35 @@ class TerminalSessionTile extends StatelessWidget {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: context.appColors.bgSurface,
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text('Close terminal?',
-            style: TextStyle(
-                color: context.appColors.textPrimary, fontSize: 18)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(
+          'Close terminal?',
+          style: TextStyle(color: context.appColors.textPrimary, fontSize: 18),
+        ),
         content: Text(
           'This will kill the terminal session on the server.',
           style: TextStyle(
-              color: context.appColors.textSecondary, fontSize: 14),
+            color: context.appColors.textSecondary,
+            fontSize: 14,
+          ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
-            child: Text('Keep',
-                style: TextStyle(color: context.appColors.textSecondary)),
+            child: Text(
+              'Keep',
+              style: TextStyle(color: context.appColors.textSecondary),
+            ),
           ),
           FilledButton(
             style: FilledButton.styleFrom(
-                backgroundColor: context.appColors.errorText),
+              backgroundColor: context.appColors.errorText,
+            ),
             onPressed: () {
               Navigator.of(ctx).pop();
               state.closeTerminalSession(info.terminalId);
             },
-            child: const Text('Close',
-                style: TextStyle(color: Colors.white)),
+            child: const Text('Close', style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
@@ -269,17 +289,16 @@ class TerminalSessionTile extends StatelessWidget {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: context.appColors.bgSurface,
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text('Rename terminal',
-            style: TextStyle(
-                color: context.appColors.textPrimary, fontSize: 18)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(
+          'Rename terminal',
+          style: TextStyle(color: context.appColors.textPrimary, fontSize: 18),
+        ),
         content: TextField(
           controller: controller,
           autofocus: true,
           maxLength: 200,
-          style: TextStyle(
-              color: context.appColors.textPrimary, fontSize: 14),
+          style: TextStyle(color: context.appColors.textPrimary, fontSize: 14),
           decoration: InputDecoration(
             hintText: 'Terminal name',
             hintStyle: TextStyle(color: context.appColors.textMuted),
@@ -289,15 +308,17 @@ class TerminalSessionTile extends StatelessWidget {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
-            child: Text('Cancel',
-                style: TextStyle(color: context.appColors.textSecondary)),
+            child: Text(
+              'Cancel',
+              style: TextStyle(color: context.appColors.textSecondary),
+            ),
           ),
           FilledButton(
             style: FilledButton.styleFrom(
-                backgroundColor: context.appColors.accent),
+              backgroundColor: context.appColors.accent,
+            ),
             onPressed: () => submit(ctx),
-            child: const Text('Rename',
-                style: TextStyle(color: Colors.white)),
+            child: const Text('Rename', style: TextStyle(color: Colors.white)),
           ),
         ],
       ),

@@ -115,13 +115,17 @@ class _WorkerGroupState extends State<WorkerGroup> {
                             height: 24,
                             child: IconButton(
                               padding: EdgeInsets.zero,
-                              icon: Icon(Icons.refresh_rounded,
-                                  color: context.appColors.textSecondary,
-                                  size: 14),
+                              icon: Icon(
+                                Icons.refresh_rounded,
+                                color: context.appColors.textSecondary,
+                                size: 14,
+                              ),
                               onPressed: () => worker?.refreshSessions(),
                               tooltip: 'Refresh sessions',
                               constraints: const BoxConstraints(
-                                  maxWidth: 24, maxHeight: 24),
+                                maxWidth: 24,
+                                maxHeight: 24,
+                              ),
                             ),
                           ),
                           SizedBox(
@@ -129,16 +133,20 @@ class _WorkerGroupState extends State<WorkerGroup> {
                             height: 24,
                             child: IconButton(
                               padding: EdgeInsets.zero,
-                              icon: Icon(Icons.terminal_rounded,
-                                  color: context.appColors.textSecondary,
-                                  size: 14),
+                              icon: Icon(
+                                Icons.terminal_rounded,
+                                color: context.appColors.textSecondary,
+                                size: 14,
+                              ),
                               onPressed: () {
                                 state.openTerminal(config.id);
                                 onSessionSelected?.call();
                               },
                               tooltip: 'Open terminal',
                               constraints: const BoxConstraints(
-                                  maxWidth: 24, maxHeight: 24),
+                                maxWidth: 24,
+                                maxHeight: 24,
+                              ),
                             ),
                           ),
                         ],
@@ -147,9 +155,11 @@ class _WorkerGroupState extends State<WorkerGroup> {
                           height: 24,
                           child: IconButton(
                             padding: EdgeInsets.zero,
-                            icon: Icon(Icons.add_rounded,
-                                color: context.appColors.textSecondary,
-                                size: 14),
+                            icon: Icon(
+                              Icons.add_rounded,
+                              color: context.appColors.textSecondary,
+                              size: 14,
+                            ),
                             onPressed: () {
                               final pane = state.ensureChatPane();
                               pane.setTargetWorker(config.id);
@@ -158,7 +168,9 @@ class _WorkerGroupState extends State<WorkerGroup> {
                             },
                             tooltip: 'New session',
                             constraints: const BoxConstraints(
-                                maxWidth: 24, maxHeight: 24),
+                              maxWidth: 24,
+                              maxHeight: 24,
+                            ),
                           ),
                         ),
                       ],
@@ -186,14 +198,16 @@ class _WorkerGroupState extends State<WorkerGroup> {
           },
         ),
         // Merged sessions and terminals, sorted by date
-        if (expanded)
-          ..._buildMergedSessionList(context, isConnected),
+        if (expanded) ..._buildMergedSessionList(context, isConnected),
         if (expanded && sessions.isEmpty && terminals.isEmpty)
           Padding(
             padding: EdgeInsets.only(left: 44, bottom: 4),
             child: Text(
               isConnected ? 'No sessions' : 'Disconnected',
-              style: TextStyle(color: context.appColors.textMuted, fontSize: 11),
+              style: TextStyle(
+                color: context.appColors.textMuted,
+                fontSize: 11,
+              ),
             ),
           ),
       ],
@@ -214,11 +228,7 @@ class _WorkerGroupState extends State<WorkerGroup> {
       ));
     }
     for (final t in terminals) {
-      entries.add((
-        time: t.createdAt,
-        isTerminal: true,
-        data: t,
-      ));
+      entries.add((time: t.createdAt, isTerminal: true, data: t));
     }
     entries.sort((a, b) => b.time.compareTo(a.time));
 
@@ -241,27 +251,32 @@ class _WorkerGroupState extends State<WorkerGroup> {
   /// Terminals are shown at the top (ungrouped). Sessions are organized into
   /// collapsible project sub-categories below.
   List<Widget> _buildProjectGroupedSessionList(
-      BuildContext context, bool isConnected) {
+    BuildContext context,
+    bool isConnected,
+  ) {
     final result = <Widget>[];
 
     // Terminals first, sorted by date
     final sortedTerminals = [...terminals]
       ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
     for (final t in sortedTerminals) {
-      result.add(TerminalSessionTile(
-        info: t,
-        state: state,
-        isConnected: isConnected,
-        onSessionSelected: onSessionSelected,
-      ));
+      result.add(
+        TerminalSessionTile(
+          info: t,
+          state: state,
+          isConnected: isConnected,
+          onSessionSelected: onSessionSelected,
+        ),
+      );
     }
 
     // Group sessions by project name (last path segment of mainProjectPath)
     final byProject = <String?, List<SessionInfo>>{};
     for (final s in sessions) {
-      final projectName = s.mainProjectPath != null
-          ? s.mainProjectPath!.split('/').where((p) => p.isNotEmpty).lastOrNull
-          : null;
+      final projectName = s.mainProjectPath
+          ?.split('/')
+          .where((p) => p.isNotEmpty)
+          .lastOrNull;
       byProject.putIfAbsent(projectName, () => []).add(s);
     }
 
@@ -276,30 +291,35 @@ class _WorkerGroupState extends State<WorkerGroup> {
 
     for (final projectName in projectNames) {
       final projectSessions = byProject[projectName]!
-        ..sort((a, b) =>
-            (b.createdAt ?? DateTime(2000)).compareTo(
-                a.createdAt ?? DateTime(2000)));
+        ..sort(
+          (a, b) => (b.createdAt ?? DateTime(2000)).compareTo(
+            a.createdAt ?? DateTime(2000),
+          ),
+        );
       final collapseKey = projectName ?? '\x00other';
       final collapsed = _collapsedProjects.contains(collapseKey);
 
-      result.add(_buildProjectSubHeader(
-        context,
-        projectName: projectName,
-        count: projectSessions.length,
-        collapsed: collapsed,
-        onToggle: () => setState(() {
-          if (collapsed) {
-            _collapsedProjects.remove(collapseKey);
-          } else {
-            _collapsedProjects.add(collapseKey);
-          }
-        }),
-      ));
+      result.add(
+        _buildProjectSubHeader(
+          context,
+          projectName: projectName,
+          count: projectSessions.length,
+          collapsed: collapsed,
+          onToggle: () => setState(() {
+            if (collapsed) {
+              _collapsedProjects.remove(collapseKey);
+            } else {
+              _collapsedProjects.add(collapseKey);
+            }
+          }),
+        ),
+      );
 
       if (!collapsed) {
         for (final s in projectSessions) {
-          result.add(_buildSessionTile(context, s, isConnected,
-              extraIndent: true));
+          result.add(
+            _buildSessionTile(context, s, isConnected, extraIndent: true),
+          );
         }
       }
     }
@@ -354,8 +374,12 @@ class _WorkerGroupState extends State<WorkerGroup> {
     );
   }
 
-  Widget _buildSessionTile(BuildContext context, SessionInfo s, bool isConnected,
-      {bool extraIndent = false}) {
+  Widget _buildSessionTile(
+    BuildContext context,
+    SessionInfo s,
+    bool isConnected, {
+    bool extraIndent = false,
+  }) {
     final isActiveSession =
         !state.hasNoPanes && s.sessionId == state.activePane.sessionId;
     final isViewedByAnyPane = state.isSessionViewed(s.sessionId);
@@ -366,8 +390,8 @@ class _WorkerGroupState extends State<WorkerGroup> {
       label: s.title ?? s.shortId,
     );
     final tile = GestureDetector(
-      onSecondaryTapUp: (details) => _showContextMenu(
-          context, details.globalPosition, state, s),
+      onSecondaryTapUp: (details) =>
+          _showContextMenu(context, details.globalPosition, state, s),
       child: Opacity(
         opacity: dimmed ? 0.5 : 1.0,
         child: LayoutBuilder(
@@ -381,18 +405,23 @@ class _WorkerGroupState extends State<WorkerGroup> {
                 color: isActiveSession
                     ? context.appColors.accent.withAlpha(25)
                     : isViewedByAnyPane
-                        ? context.appColors.accent.withAlpha(12)
-                        : null,
+                    ? context.appColors.accent.withAlpha(12)
+                    : null,
                 border: isActiveSession
                     ? Border(
-                        left:
-                            BorderSide(color: context.appColors.accent, width: 3))
+                        left: BorderSide(
+                          color: context.appColors.accent,
+                          width: 3,
+                        ),
+                      )
                     : isViewedByAnyPane
-                        ? Border(
-                            left: BorderSide(
-                                color: context.appColors.accent.withAlpha(80),
-                                width: 2))
-                        : null,
+                    ? Border(
+                        left: BorderSide(
+                          color: context.appColors.accent.withAlpha(80),
+                          width: 2,
+                        ),
+                      )
+                    : null,
               ),
               child: ListTile(
                 leading: SessionLeadingIcon(session: s),
@@ -403,8 +432,9 @@ class _WorkerGroupState extends State<WorkerGroup> {
                         ? context.appColors.accentLight
                         : context.appColors.textPrimary,
                     fontSize: 12,
-                    fontWeight:
-                        isActiveSession ? FontWeight.w600 : FontWeight.w400,
+                    fontWeight: isActiveSession
+                        ? FontWeight.w600
+                        : FontWeight.w400,
                     fontFamily: s.title != null ? null : 'monospace',
                   ),
                   maxLines: 1,
@@ -417,9 +447,11 @@ class _WorkerGroupState extends State<WorkerGroup> {
                     if (!isNarrow && state.isSessionAttachedToTask(s.sessionId))
                       Padding(
                         padding: const EdgeInsets.only(right: 2),
-                        child: Icon(Icons.link_rounded,
-                            color: context.appColors.accent.withAlpha(120),
-                            size: 14),
+                        child: Icon(
+                          Icons.link_rounded,
+                          color: context.appColors.accent.withAlpha(120),
+                          size: 14,
+                        ),
                       ),
                     if (isTerminalStatus(s.status))
                       SizedBox(
@@ -427,13 +459,18 @@ class _WorkerGroupState extends State<WorkerGroup> {
                         height: 26,
                         child: IconButton(
                           padding: EdgeInsets.zero,
-                          icon: Icon(Icons.restore_rounded,
-                              color: context.appColors.accentLight, size: 16),
+                          icon: Icon(
+                            Icons.restore_rounded,
+                            color: context.appColors.accentLight,
+                            size: 16,
+                          ),
                           tooltip: 'Restore session',
                           onPressed: dimmed
                               ? null
                               : () => state.restoreSessionDirect(
-                                  s.sessionId, s.workerId),
+                                  s.sessionId,
+                                  s.workerId,
+                                ),
                         ),
                       )
                     else ...[
@@ -446,14 +483,18 @@ class _WorkerGroupState extends State<WorkerGroup> {
                             height: 26,
                             child: IconButton(
                               padding: EdgeInsets.zero,
-                              icon: Icon(Icons.play_arrow_rounded,
-                                  color: context.appColors.accentLight,
-                                  size: 16),
+                              icon: Icon(
+                                Icons.play_arrow_rounded,
+                                color: context.appColors.accentLight,
+                                size: 16,
+                              ),
                               tooltip: 'Resume session',
                               onPressed: dimmed
                                   ? null
                                   : () => state.resumeSessionDirect(
-                                      s.sessionId, s.workerId),
+                                      s.sessionId,
+                                      s.workerId,
+                                    ),
                             ),
                           )
                         else
@@ -462,14 +503,18 @@ class _WorkerGroupState extends State<WorkerGroup> {
                             height: 26,
                             child: IconButton(
                               padding: EdgeInsets.zero,
-                              icon: Icon(Icons.pause_rounded,
-                                  color: context.appColors.textSecondary,
-                                  size: 16),
+                              icon: Icon(
+                                Icons.pause_rounded,
+                                color: context.appColors.textSecondary,
+                                size: 16,
+                              ),
                               tooltip: 'Pause session',
                               onPressed: dimmed
                                   ? null
                                   : () => state.pauseSessionDirect(
-                                      s.sessionId, s.workerId),
+                                      s.sessionId,
+                                      s.workerId,
+                                    ),
                             ),
                           ),
                       ],
@@ -478,13 +523,15 @@ class _WorkerGroupState extends State<WorkerGroup> {
                         height: 26,
                         child: IconButton(
                           padding: EdgeInsets.zero,
-                          icon: Icon(Icons.stop_circle_outlined,
-                              color: context.appColors.errorText, size: 16),
+                          icon: Icon(
+                            Icons.stop_circle_outlined,
+                            color: context.appColors.errorText,
+                            size: 16,
+                          ),
                           tooltip: 'End session',
                           onPressed: dimmed
                               ? null
-                              : () =>
-                                  _confirmCancelSession(context, state, s),
+                              : () => _confirmCancelSession(context, state, s),
                         ),
                       ),
                     ],
@@ -492,8 +539,10 @@ class _WorkerGroupState extends State<WorkerGroup> {
                 ),
                 dense: true,
                 visualDensity: const VisualDensity(vertical: -4),
-                contentPadding:
-                    EdgeInsets.only(left: extraIndent ? 48 : 36, right: 8),
+                contentPadding: EdgeInsets.only(
+                  left: extraIndent ? 48 : 36,
+                  right: 8,
+                ),
                 onTap: () => onSessionTap(s.sessionId),
                 onLongPress: () => _showRenameDialog(context, state, s),
               ),
@@ -507,8 +556,7 @@ class _WorkerGroupState extends State<WorkerGroup> {
       feedback: Material(
         color: Colors.transparent,
         child: Container(
-          padding:
-              EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           decoration: BoxDecoration(
             color: context.appColors.bgElevated,
             borderRadius: BorderRadius.circular(16),
@@ -524,8 +572,11 @@ class _WorkerGroupState extends State<WorkerGroup> {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.drag_indicator_rounded,
-                  color: context.appColors.textSecondary, size: 14),
+              Icon(
+                Icons.drag_indicator_rounded,
+                color: context.appColors.textSecondary,
+                size: 14,
+              ),
               SizedBox(width: 6),
               ConstrainedBox(
                 constraints: BoxConstraints(maxWidth: 180),
@@ -560,11 +611,15 @@ class _WorkerGroupState extends State<WorkerGroup> {
           }()
         : null;
 
-    final projectName = s.mainProjectPath != null
-        ? s.mainProjectPath!.split('/').where((p) => p.isNotEmpty).lastOrNull
-        : null;
+    final projectName = s.mainProjectPath
+        ?.split('/')
+        .where((p) => p.isNotEmpty)
+        .lastOrNull;
 
-    final mutedStyle = TextStyle(color: context.appColors.textMuted, fontSize: 10);
+    final mutedStyle = TextStyle(
+      color: context.appColors.textMuted,
+      fontSize: 10,
+    );
 
     if (projectName == null) {
       return Text(dateStr ?? '', style: mutedStyle);
@@ -579,7 +634,11 @@ class _WorkerGroupState extends State<WorkerGroup> {
             child: Text('\u00B7', style: mutedStyle),
           ),
         ],
-        Icon(Icons.folder_outlined, size: 9, color: context.appColors.textMuted),
+        Icon(
+          Icons.folder_outlined,
+          size: 9,
+          color: context.appColors.textMuted,
+        ),
         const SizedBox(width: 2),
         Flexible(
           child: Text(
@@ -595,11 +654,11 @@ class _WorkerGroupState extends State<WorkerGroup> {
   void _showWorkerContextMenu(BuildContext context, Offset position) {
     final status = worker?.status ?? WorkerConnectionStatus.disconnected;
     final isConnected = status == WorkerConnectionStatus.connected;
-    final isConnecting = status == WorkerConnectionStatus.connecting ||
+    final isConnecting =
+        status == WorkerConnectionStatus.connecting ||
         status == WorkerConnectionStatus.reconnecting;
 
-    final overlay =
-        Overlay.of(context).context.findRenderObject() as RenderBox;
+    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
     showMenu<String>(
       context: context,
       position: RelativeRect.fromRect(
@@ -614,9 +673,16 @@ class _WorkerGroupState extends State<WorkerGroup> {
             value: 'connect',
             child: Row(
               children: [
-                Icon(Icons.link_rounded, color: context.appColors.accentLight, size: 18),
+                Icon(
+                  Icons.link_rounded,
+                  color: context.appColors.accentLight,
+                  size: 18,
+                ),
                 SizedBox(width: 8),
-                Text('Connect', style: TextStyle(color: context.appColors.textPrimary)),
+                Text(
+                  'Connect',
+                  style: TextStyle(color: context.appColors.textPrimary),
+                ),
               ],
             ),
           ),
@@ -625,10 +691,16 @@ class _WorkerGroupState extends State<WorkerGroup> {
             value: 'disconnect',
             child: Row(
               children: [
-                Icon(Icons.link_off_rounded,
-                    color: context.appColors.textSecondary, size: 18),
+                Icon(
+                  Icons.link_off_rounded,
+                  color: context.appColors.textSecondary,
+                  size: 18,
+                ),
                 SizedBox(width: 8),
-                Text('Disconnect', style: TextStyle(color: context.appColors.textPrimary)),
+                Text(
+                  'Disconnect',
+                  style: TextStyle(color: context.appColors.textPrimary),
+                ),
               ],
             ),
           ),
@@ -639,8 +711,10 @@ class _WorkerGroupState extends State<WorkerGroup> {
               children: [
                 Icon(Icons.bar_chart_rounded, color: Colors.teal, size: 18),
                 SizedBox(width: 8),
-                Text('Stats',
-                    style: TextStyle(color: context.appColors.textPrimary)),
+                Text(
+                  'Stats',
+                  style: TextStyle(color: context.appColors.textPrimary),
+                ),
               ],
             ),
           ),
@@ -665,9 +739,16 @@ class _WorkerGroupState extends State<WorkerGroup> {
           value: 'remove',
           child: Row(
             children: [
-              Icon(Icons.delete_outline, color: context.appColors.errorText, size: 18),
+              Icon(
+                Icons.delete_outline,
+                color: context.appColors.errorText,
+                size: 18,
+              ),
               SizedBox(width: 8),
-              Text('Remove', style: TextStyle(color: context.appColors.errorText)),
+              Text(
+                'Remove',
+                style: TextStyle(color: context.appColors.errorText),
+              ),
             ],
           ),
         ),
@@ -688,8 +769,11 @@ class _WorkerGroupState extends State<WorkerGroup> {
             );
           }
         case 'edit':
-          final updated = await showWorkerEditDialog(context,
-              existing: config, worker: worker);
+          final updated = await showWorkerEditDialog(
+            context,
+            existing: config,
+            worker: worker,
+          );
           if (updated != null && context.mounted) {
             state.updateWorker(updated);
           }
@@ -704,38 +788,48 @@ class _WorkerGroupState extends State<WorkerGroup> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: context.appColors.bgSurface,
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text('Remove worker?',
-            style: TextStyle(color: context.appColors.textPrimary, fontSize: 18)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(
+          'Remove worker?',
+          style: TextStyle(color: context.appColors.textPrimary, fontSize: 18),
+        ),
         content: Text(
           'This will disconnect and remove "${config.name}".',
-          style: TextStyle(color: context.appColors.textSecondary, fontSize: 14),
+          style: TextStyle(
+            color: context.appColors.textSecondary,
+            fontSize: 14,
+          ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
-            child: Text('Cancel',
-                style: TextStyle(color: context.appColors.textSecondary)),
+            child: Text(
+              'Cancel',
+              style: TextStyle(color: context.appColors.textSecondary),
+            ),
           ),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: context.appColors.errorText),
+            style: FilledButton.styleFrom(
+              backgroundColor: context.appColors.errorText,
+            ),
             onPressed: () {
               Navigator.of(ctx).pop();
               state.removeWorker(config.id);
             },
-            child: const Text('Remove',
-                style: TextStyle(color: Colors.white)),
+            child: const Text('Remove', style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
     );
   }
 
-  void _showContextMenu(BuildContext context, Offset position,
-      AppState state, SessionInfo session) {
-    final overlay =
-        Overlay.of(context).context.findRenderObject() as RenderBox;
+  void _showContextMenu(
+    BuildContext context,
+    Offset position,
+    AppState state,
+    SessionInfo session,
+  ) {
+    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
     final linkedTasks = state.tasksForSession(session.sessionId);
     showMenu<String>(
       context: context,
@@ -750,9 +844,16 @@ class _WorkerGroupState extends State<WorkerGroup> {
           value: 'rename',
           child: Row(
             children: [
-              Icon(Icons.edit_outlined, color: context.appColors.textSecondary, size: 18),
+              Icon(
+                Icons.edit_outlined,
+                color: context.appColors.textSecondary,
+                size: 18,
+              ),
               SizedBox(width: 8),
-              Text('Rename', style: TextStyle(color: context.appColors.textPrimary)),
+              Text(
+                'Rename',
+                style: TextStyle(color: context.appColors.textPrimary),
+              ),
             ],
           ),
         ),
@@ -762,11 +863,17 @@ class _WorkerGroupState extends State<WorkerGroup> {
             value: 'open_task:${task.taskId}',
             child: Row(
               children: [
-                Icon(Icons.task_outlined, color: context.appColors.accentLight, size: 18),
+                Icon(
+                  Icons.task_outlined,
+                  color: context.appColors.accentLight,
+                  size: 18,
+                ),
                 SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    linkedTasks.length == 1 ? 'Open Task' : 'Open Task: ${task.title}',
+                    linkedTasks.length == 1
+                        ? 'Open Task'
+                        : 'Open Task: ${task.title}',
                     style: TextStyle(color: context.appColors.textPrimary),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -779,11 +886,17 @@ class _WorkerGroupState extends State<WorkerGroup> {
             value: 'open_task_split:${task.taskId}',
             child: Row(
               children: [
-                Icon(Icons.vertical_split_outlined, color: context.appColors.accentLight, size: 18),
+                Icon(
+                  Icons.vertical_split_outlined,
+                  color: context.appColors.accentLight,
+                  size: 18,
+                ),
                 SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    linkedTasks.length == 1 ? 'Open Task in Split' : 'Open Task in Split: ${task.title}',
+                    linkedTasks.length == 1
+                        ? 'Open Task in Split'
+                        : 'Open Task in Split: ${task.title}',
                     style: TextStyle(color: context.appColors.textPrimary),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -798,10 +911,16 @@ class _WorkerGroupState extends State<WorkerGroup> {
             value: 'pause',
             child: Row(
               children: [
-                Icon(Icons.pause_rounded, color: context.appColors.accentLight, size: 18),
+                Icon(
+                  Icons.pause_rounded,
+                  color: context.appColors.accentLight,
+                  size: 18,
+                ),
                 SizedBox(width: 8),
-                Text('Pause session',
-                    style: TextStyle(color: context.appColors.textPrimary)),
+                Text(
+                  'Pause session',
+                  style: TextStyle(color: context.appColors.textPrimary),
+                ),
               ],
             ),
           ),
@@ -810,11 +929,16 @@ class _WorkerGroupState extends State<WorkerGroup> {
             value: 'resume',
             child: Row(
               children: [
-                Icon(Icons.play_arrow_rounded,
-                    color: context.appColors.accentLight, size: 18),
+                Icon(
+                  Icons.play_arrow_rounded,
+                  color: context.appColors.accentLight,
+                  size: 18,
+                ),
                 SizedBox(width: 8),
-                Text('Resume session',
-                    style: TextStyle(color: context.appColors.textPrimary)),
+                Text(
+                  'Resume session',
+                  style: TextStyle(color: context.appColors.textPrimary),
+                ),
               ],
             ),
           ),
@@ -823,10 +947,16 @@ class _WorkerGroupState extends State<WorkerGroup> {
             value: 'restore',
             child: Row(
               children: [
-                Icon(Icons.restore_rounded, color: context.appColors.accentLight, size: 18),
+                Icon(
+                  Icons.restore_rounded,
+                  color: context.appColors.accentLight,
+                  size: 18,
+                ),
                 SizedBox(width: 8),
-                Text('Restore session',
-                    style: TextStyle(color: context.appColors.textPrimary)),
+                Text(
+                  'Restore session',
+                  style: TextStyle(color: context.appColors.textPrimary),
+                ),
               ],
             ),
           ),
@@ -835,11 +965,16 @@ class _WorkerGroupState extends State<WorkerGroup> {
             value: 'cancel',
             child: Row(
               children: [
-                Icon(Icons.stop_circle_outlined,
-                    color: context.appColors.errorText, size: 18),
+                Icon(
+                  Icons.stop_circle_outlined,
+                  color: context.appColors.errorText,
+                  size: 18,
+                ),
                 SizedBox(width: 8),
-                Text('End session',
-                    style: TextStyle(color: context.appColors.errorText)),
+                Text(
+                  'End session',
+                  style: TextStyle(color: context.appColors.errorText),
+                ),
               ],
             ),
           ),
@@ -858,11 +993,7 @@ class _WorkerGroupState extends State<WorkerGroup> {
         _confirmCancelSession(context, state, session);
       } else if (value.startsWith('open_task_split:')) {
         final taskId = value.substring('open_task_split:'.length);
-        state.splitPaneWithTask(
-          state.activePaneId,
-          DropZone.right,
-          taskId,
-        );
+        state.splitPaneWithTask(state.activePaneId, DropZone.right, taskId);
       } else if (value.startsWith('open_task:')) {
         final taskId = value.substring('open_task:'.length);
         state.openTaskInPane(taskId);
@@ -871,34 +1002,47 @@ class _WorkerGroupState extends State<WorkerGroup> {
   }
 
   void _confirmCancelSession(
-      BuildContext context, AppState state, SessionInfo session) {
+    BuildContext context,
+    AppState state,
+    SessionInfo session,
+  ) {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: context.appColors.bgSurface,
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text('End session?',
-            style: TextStyle(color: context.appColors.textPrimary, fontSize: 18)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(
+          'End session?',
+          style: TextStyle(color: context.appColors.textPrimary, fontSize: 18),
+        ),
         content: Text(
           'This will end session ${session.shortId} on the server.',
-          style: TextStyle(color: context.appColors.textSecondary, fontSize: 14),
+          style: TextStyle(
+            color: context.appColors.textSecondary,
+            fontSize: 14,
+          ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
-            child: Text('Keep',
-                style: TextStyle(color: context.appColors.textSecondary)),
+            child: Text(
+              'Keep',
+              style: TextStyle(color: context.appColors.textSecondary),
+            ),
           ),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: context.appColors.errorText),
+            style: FilledButton.styleFrom(
+              backgroundColor: context.appColors.errorText,
+            ),
             onPressed: () {
               Navigator.of(ctx).pop();
               onSessionSelected?.call();
               state.cancelSessionDirect(session.sessionId, session.workerId);
             },
-            child: const Text('End session',
-                style: TextStyle(color: Colors.white)),
+            child: const Text(
+              'End session',
+              style: TextStyle(color: Colors.white),
+            ),
           ),
         ],
       ),
@@ -906,22 +1050,29 @@ class _WorkerGroupState extends State<WorkerGroup> {
   }
 
   void _showRenameDialog(
-      BuildContext context, AppState state, SessionInfo session) {
+    BuildContext context,
+    AppState state,
+    SessionInfo session,
+  ) {
     final controller = TextEditingController(text: session.title ?? '');
     void submit(BuildContext ctx) {
       Navigator.of(ctx).pop();
       state.renameSessionDirect(
-          session.sessionId, session.workerId, controller.text);
+        session.sessionId,
+        session.workerId,
+        controller.text,
+      );
     }
 
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: context.appColors.bgSurface,
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text('Rename session',
-            style: TextStyle(color: context.appColors.textPrimary, fontSize: 18)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(
+          'Rename session',
+          style: TextStyle(color: context.appColors.textPrimary, fontSize: 18),
+        ),
         content: TextField(
           controller: controller,
           autofocus: true,
@@ -936,14 +1087,17 @@ class _WorkerGroupState extends State<WorkerGroup> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
-            child: Text('Cancel',
-                style: TextStyle(color: context.appColors.textSecondary)),
+            child: Text(
+              'Cancel',
+              style: TextStyle(color: context.appColors.textSecondary),
+            ),
           ),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: context.appColors.accent),
+            style: FilledButton.styleFrom(
+              backgroundColor: context.appColors.accent,
+            ),
             onPressed: () => submit(ctx),
-            child: const Text('Rename',
-                style: TextStyle(color: Colors.white)),
+            child: const Text('Rename', style: TextStyle(color: Colors.white)),
           ),
         ],
       ),

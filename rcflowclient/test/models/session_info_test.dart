@@ -3,12 +3,12 @@ import 'package:rcflowclient/models/session_info.dart';
 
 void main() {
   group('SessionInfo.agentType', () {
-    SessionInfo _base() => SessionInfo(
-          sessionId: 'abc123',
-          sessionType: 'conversational',
-          status: 'active',
-          workerId: 'w1',
-        );
+    SessionInfo base() => SessionInfo(
+      sessionId: 'abc123',
+      sessionType: 'conversational',
+      status: 'active',
+      workerId: 'w1',
+    );
 
     test('fromJson parses claude_code agent type', () {
       final info = SessionInfo.fromJson({
@@ -40,25 +40,25 @@ void main() {
     });
 
     test('toJson includes agent_type when non-null', () {
-      final info = _base().copyWith(agentType: 'claude_code');
+      final info = base().copyWith(agentType: 'claude_code');
       final json = info.toJson();
       expect(json['agent_type'], 'claude_code');
     });
 
     test('toJson omits agent_type when null', () {
-      final info = _base();
+      final info = base();
       expect(info.agentType, isNull);
       expect(info.toJson().containsKey('agent_type'), isFalse);
     });
 
     test('copyWith preserves agentType when not specified', () {
-      final original = _base().copyWith(agentType: 'claude_code');
+      final original = base().copyWith(agentType: 'claude_code');
       final copy = original.copyWith(status: 'paused');
       expect(copy.agentType, 'claude_code');
     });
 
     test('copyWith can clear agentType with explicit null', () {
-      final original = _base().copyWith(agentType: 'claude_code');
+      final original = base().copyWith(agentType: 'claude_code');
       final copy = original.copyWith(agentType: null);
       expect(copy.agentType, isNull);
     });

@@ -24,8 +24,9 @@ class TodoListBlock extends StatelessWidget {
     final todos = _todos;
     if (todos.isEmpty) return const SizedBox.shrink();
 
-    final completed =
-        todos.where((t) => t.status == TodoStatus.completed).length;
+    final completed = todos
+        .where((t) => t.status == TodoStatus.completed)
+        .length;
     final total = todos.length;
     final allDone = completed == total;
     final progress = total > 0 ? completed / total : 0.0;

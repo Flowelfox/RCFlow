@@ -19,15 +19,15 @@ class CustomTitleBar extends StatelessWidget {
 
     final connected = context.select<AppState, bool>((s) => s.connected);
     final connecting = context.select<AppState, bool>((s) => s.connecting);
-    final allConnected =
-        context.select<AppState, bool>((s) => s.allConnected);
-
+    final allConnected = context.select<AppState, bool>((s) => s.allConnected);
 
     return Container(
       height: 40,
       decoration: BoxDecoration(
         color: context.appColors.bgBase,
-        border: Border(bottom: BorderSide(color: context.appColors.divider, width: 1)),
+        border: Border(
+          bottom: BorderSide(color: context.appColors.divider, width: 1),
+        ),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -65,7 +65,9 @@ class CustomTitleBar extends StatelessWidget {
                         style: TextStyle(
                           fontSize: 15,
                           fontWeight: FontWeight.w600,
-                          color: connecting ? context.appColors.textSecondary : context.appColors.textPrimary,
+                          color: connecting
+                              ? context.appColors.textSecondary
+                              : context.appColors.textPrimary,
                         ),
                       ),
                     ],
@@ -100,7 +102,10 @@ class _StatusIndicator extends StatelessWidget {
       return SizedBox(
         width: 12,
         height: 12,
-        child: CircularProgressIndicator(strokeWidth: 1.5, color: context.appColors.accentLight),
+        child: CircularProgressIndicator(
+          strokeWidth: 1.5,
+          color: context.appColors.accentLight,
+        ),
       );
     }
     // Green: all workers connected, Amber: partial, Red: none
@@ -130,7 +135,6 @@ class _StatusIndicator extends StatelessWidget {
   }
 }
 
-
 class _WindowControls extends StatelessWidget {
   const _WindowControls();
 
@@ -146,7 +150,11 @@ class _WindowControls extends StatelessWidget {
         ),
         _MaximizeButton(),
         _WindowButton(
-          icon: Icon(Icons.close, size: 16, color: context.appColors.textSecondary),
+          icon: Icon(
+            Icons.close,
+            size: 16,
+            color: context.appColors.textSecondary,
+          ),
           hoverColor: context.appColors.errorText,
           hoverIconColor: Colors.white,
           onPressed: () => windowManager.close(),
@@ -197,9 +205,7 @@ class _MaximizeButtonState extends State<_MaximizeButton> with WindowListener {
   @override
   Widget build(BuildContext context) {
     return _WindowButton(
-      icon: _isMaximized
-          ? const _RestoreIcon()
-          : const _MaximizeIcon(),
+      icon: _isMaximized ? const _RestoreIcon() : const _MaximizeIcon(),
       onPressed: () async {
         if (await windowManager.isMaximized()) {
           windowManager.unmaximize();
@@ -249,7 +255,10 @@ class _WindowButtonState extends State<_WindowButton> {
             child: _hovering && isCloseButton
                 ? IconTheme(
                     data: IconThemeData(
-                        color: widget.hoverIconColor ?? context.appColors.textPrimary),
+                      color:
+                          widget.hoverIconColor ??
+                          context.appColors.textPrimary,
+                    ),
                     child: widget.icon,
                   )
                 : widget.icon,
@@ -269,7 +278,11 @@ class _MinimizeIcon extends StatelessWidget {
       width: 16,
       height: 16,
       child: Center(
-        child: Container(width: 10, height: 1, color: context.appColors.textSecondary),
+        child: Container(
+          width: 10,
+          height: 1,
+          color: context.appColors.textSecondary,
+        ),
       ),
     );
   }
@@ -288,7 +301,10 @@ class _MaximizeIcon extends StatelessWidget {
           width: 10,
           height: 10,
           decoration: BoxDecoration(
-            border: Border.all(color: context.appColors.textSecondary, width: 1),
+            border: Border.all(
+              color: context.appColors.textSecondary,
+              width: 1,
+            ),
           ),
         ),
       ),
@@ -314,7 +330,10 @@ class _RestoreIcon extends StatelessWidget {
                 width: 8,
                 height: 8,
                 decoration: BoxDecoration(
-                  border: Border.all(color: context.appColors.textSecondary, width: 1),
+                  border: Border.all(
+                    color: context.appColors.textSecondary,
+                    width: 1,
+                  ),
                 ),
               ),
             ),
@@ -326,7 +345,10 @@ class _RestoreIcon extends StatelessWidget {
                 height: 8,
                 decoration: BoxDecoration(
                   color: context.appColors.bgBase,
-                  border: Border.all(color: context.appColors.textSecondary, width: 1),
+                  border: Border.all(
+                    color: context.appColors.textSecondary,
+                    width: 1,
+                  ),
                 ),
               ),
             ),

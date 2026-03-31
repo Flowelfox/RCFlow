@@ -61,18 +61,20 @@ class LinearIssueTile extends StatelessWidget {
           color: isActive
               ? context.appColors.accent.withAlpha(25)
               : isViewed
-                  ? context.appColors.accent.withAlpha(12)
-                  : null,
+              ? context.appColors.accent.withAlpha(12)
+              : null,
           border: isActive
               ? Border(
-                  left:
-                      BorderSide(color: context.appColors.accent, width: 3))
+                  left: BorderSide(color: context.appColors.accent, width: 3),
+                )
               : isViewed
-                  ? Border(
-                      left: BorderSide(
-                          color: context.appColors.accent.withAlpha(80),
-                          width: 2))
-                  : null,
+              ? Border(
+                  left: BorderSide(
+                    color: context.appColors.accent.withAlpha(80),
+                    width: 2,
+                  ),
+                )
+              : null,
         ),
         child: ListTile(
           leading: Container(
@@ -92,7 +94,9 @@ class LinearIssueTile extends StatelessWidget {
                   color: context.appColors.bgElevated,
                   borderRadius: BorderRadius.circular(4),
                   border: Border.all(
-                      color: context.appColors.divider, width: 0.5),
+                    color: context.appColors.divider,
+                    width: 0.5,
+                  ),
                 ),
                 child: Text(
                   issue.identifier,
@@ -113,8 +117,7 @@ class LinearIssueTile extends StatelessWidget {
                         ? context.appColors.accentLight
                         : context.appColors.textPrimary,
                     fontSize: 12,
-                    fontWeight:
-                        isActive ? FontWeight.w600 : FontWeight.w400,
+                    fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
                   ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -124,14 +127,16 @@ class LinearIssueTile extends StatelessWidget {
           ),
           subtitle: Text(
             _subtitle(),
-            style:
-                TextStyle(color: context.appColors.textMuted, fontSize: 10),
+            style: TextStyle(color: context.appColors.textMuted, fontSize: 10),
           ),
           trailing: issue.taskId != null
               ? Tooltip(
                   message: 'Linked to task',
-                  child: Icon(Icons.link,
-                      color: context.appColors.textMuted, size: 14),
+                  child: Icon(
+                    Icons.link,
+                    color: context.appColors.textMuted,
+                    size: 14,
+                  ),
                 )
               : null,
           dense: true,
@@ -160,15 +165,15 @@ class LinearIssueTile extends StatelessWidget {
 
   String _subtitle() {
     final local = issue.updatedAt.toLocal();
-    final time = '${monthAbbr(local.month)} ${local.day}, '
+    final time =
+        '${monthAbbr(local.month)} ${local.day}, '
         '${local.hour.toString().padLeft(2, '0')}:'
         '${local.minute.toString().padLeft(2, '0')}';
     return '$time \u00B7 ${issue.stateName}';
   }
 
   void _showContextMenu(BuildContext context, Offset position) {
-    final overlay =
-        Overlay.of(context).context.findRenderObject() as RenderBox;
+    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
     showMenu<String>(
       context: context,
       position: RelativeRect.fromRect(
@@ -176,18 +181,22 @@ class LinearIssueTile extends StatelessWidget {
         Offset.zero & overlay.size,
       ),
       color: context.appColors.bgSurface,
-      shape:
-          RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       items: [
         PopupMenuItem(
           value: 'open',
           child: Row(
             children: [
-              Icon(Icons.open_in_new,
-                  color: context.appColors.textSecondary, size: 18),
+              Icon(
+                Icons.open_in_new,
+                color: context.appColors.textSecondary,
+                size: 18,
+              ),
               const SizedBox(width: 8),
-              Text('Open in Linear',
-                  style: TextStyle(color: context.appColors.textPrimary)),
+              Text(
+                'Open in Linear',
+                style: TextStyle(color: context.appColors.textPrimary),
+              ),
             ],
           ),
         ),

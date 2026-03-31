@@ -23,8 +23,8 @@ class AppNotification {
     this.onAction,
     DateTime? createdAt,
     this.duration = const Duration(seconds: 5),
-  })  : id = id ?? _generateId(),
-        createdAt = createdAt ?? DateTime.now();
+  }) : id = id ?? _generateId(),
+       createdAt = createdAt ?? DateTime.now();
 
   static String _generateId() {
     final rng = Random.secure();

@@ -26,9 +26,11 @@ class PaneNavEntry {
   final String? taskId;
   final String? artifactId;
   final String? linearIssueId;
+
   /// Tool name when [paneType] is [PaneType.workerSettings].
   /// One of ``"claude_code"``, ``"codex"``, or ``"opencode"``.
   final String? workerSettingsTool;
+
   /// Sub-section to show within the worker settings pane.
   /// Defaults to ``"plugins"``.
   final String? workerSettingsSection;
@@ -52,8 +54,12 @@ abstract class PaneHost {
   String? workerIdForSession(String sessionId);
   String? get defaultWorkerId;
   void refreshSessions();
-  void addSystemMessageToPane(String paneId, String text,
-      {bool isError = false, String? label});
+  void addSystemMessageToPane(
+    String paneId,
+    String text, {
+    bool isError = false,
+    String? label,
+  });
   void muteSessionSound(String sessionId);
   void markSubscribed(String sessionId, {required String workerId});
   void requestUnsubscribe(String sessionId, String workerId);
@@ -192,6 +198,7 @@ class PaneState extends ChangeNotifier {
   bool get sessionEnded => _sessionEnded;
   bool _sessionPaused = false;
   bool get sessionPaused => _sessionPaused;
+
   /// Reason why the session is paused, or null for a manual pause.
   /// "max_turns" means Claude Code hit its configured turn limit.
   String? _pausedReason;
@@ -269,30 +276,30 @@ class PaneState extends ChangeNotifier {
   /// The [WorktreeInfo] for the session currently shown in this pane, or null.
   WorktreeInfo? get currentWorktreeInfo {
     if (_sessionId == null) return null;
-    return _host.sessions.cast<SessionInfo?>().firstWhere(
-          (s) => s?.sessionId == _sessionId,
-          orElse: () => null,
-        )?.worktreeInfo;
+    return _host.sessions
+        .cast<SessionInfo?>()
+        .firstWhere((s) => s?.sessionId == _sessionId, orElse: () => null)
+        ?.worktreeInfo;
   }
 
   /// The selected worktree path for the session currently shown in this pane,
   /// or null when no worktree is explicitly selected.
   String? get currentSelectedWorktreePath {
     if (_sessionId == null) return null;
-    return _host.sessions.cast<SessionInfo?>().firstWhere(
-          (s) => s?.sessionId == _sessionId,
-          orElse: () => null,
-        )?.selectedWorktreePath;
+    return _host.sessions
+        .cast<SessionInfo?>()
+        .firstWhere((s) => s?.sessionId == _sessionId, orElse: () => null)
+        ?.selectedWorktreePath;
   }
 
   /// The main project path confirmed by the server for the current session,
   /// or null when no project is attached.
   String? get currentMainProjectPath {
     if (_sessionId == null) return null;
-    return _host.sessions.cast<SessionInfo?>().firstWhere(
-          (s) => s?.sessionId == _sessionId,
-          orElse: () => null,
-        )?.mainProjectPath;
+    return _host.sessions
+        .cast<SessionInfo?>()
+        .firstWhere((s) => s?.sessionId == _sessionId, orElse: () => null)
+        ?.mainProjectPath;
   }
 
   /// The effective project path for the Project panel to display.
@@ -365,7 +372,8 @@ class PaneState extends ChangeNotifier {
   static const _terminalStatuses = {'completed', 'failed', 'cancelled'};
 
   /// Whether the current session is driven by an agent that supports plugin slash commands.
-  bool get isClaudeCodeSession => _agentToolName == 'claude_code' || _agentToolName == 'opencode';
+  bool get isClaudeCodeSession =>
+      _agentToolName == 'claude_code' || _agentToolName == 'opencode';
 
   /// Whether the input area should allow sending messages.
   /// Sending while paused is allowed — the server auto-resumes the session.
@@ -376,9 +384,9 @@ class PaneState extends ChangeNotifier {
   bool get isSessionProcessing {
     if (_sessionId == null) return false;
     final session = _host.sessions.cast<SessionInfo?>().firstWhere(
-          (s) => s!.sessionId == _sessionId,
-          orElse: () => null,
-        );
+      (s) => s!.sessionId == _sessionId,
+      orElse: () => null,
+    );
     return session != null && session.isProcessing;
   }
 
@@ -401,10 +409,7 @@ class PaneState extends ChangeNotifier {
 
   // --- Session operations ---
 
-  void sendPrompt(
-    String text, {
-    List<Map<String, dynamic>>? attachments,
-  }) {
+  void sendPrompt(String text, {List<Map<String, dynamic>>? attachments}) {
     if (!_host.connected || text.trim().isEmpty) return;
     if (_sessionId == null && !_readyForNewChat) {
       _readyForNewChat = true;
@@ -420,13 +425,15 @@ class PaneState extends ChangeNotifier {
     final effectiveText = toolMention != null ? '#$toolMention $text' : text;
 
     _pendingLocalUserMessages++;
-    _messages.add(DisplayMessage(
-      type: DisplayMessageType.user,
-      content: text,
-      sessionId: _sessionId,
-      pendingLocalEcho: true,
-      attachments: attachments,
-    ));
+    _messages.add(
+      DisplayMessage(
+        type: DisplayMessageType.user,
+        content: text,
+        sessionId: _sessionId,
+        pendingLocalEcho: true,
+        attachments: attachments,
+      ),
+    );
     pendingAck = _sessionId == null; // new chat — expect ack
     notifyListeners();
 
@@ -447,10 +454,9 @@ class PaneState extends ChangeNotifier {
 
     // Push current session to nav history for back-navigation
     if (recordHistory && _sessionId != null) {
-      pushNavHistory(PaneNavEntry(
-        paneType: PaneType.chat,
-        sessionId: _sessionId,
-      ));
+      pushNavHistory(
+        PaneNavEntry(paneType: PaneType.chat, sessionId: _sessionId),
+      );
     }
 
     final oldSessionId = _sessionId;
@@ -472,9 +478,9 @@ class PaneState extends ChangeNotifier {
     _sessionId = sessionId;
 
     final session = _host.sessions.cast<SessionInfo?>().firstWhere(
-          (s) => s!.sessionId == sessionId,
-          orElse: () => null,
-        );
+      (s) => s!.sessionId == sessionId,
+      orElse: () => null,
+    );
 
     // Set workerId from session
     if (session != null) {
@@ -573,7 +579,9 @@ class PaneState extends ChangeNotifier {
     _pendingInputText = null;
     _selectedToolMention = null;
     // Apply the worker's default agent as the pre-selected tool for new chats.
-    final defaultAgent = _host.defaultAgentForWorker(_workerId ?? _host.defaultWorkerId);
+    final defaultAgent = _host.defaultAgentForWorker(
+      _workerId ?? _host.defaultWorkerId,
+    );
     if (defaultAgent != null) {
       _selectedToolMention = defaultAgent;
     }
@@ -763,8 +771,11 @@ class PaneState extends ChangeNotifier {
 
   /// Send a mid-turn interactive response to Claude Code (plan mode, etc.)
   /// without opening a new agent group or adding a user message.
-  void sendInteractiveResponse(DisplayMessage msg, String text,
-      {bool accepted = true}) {
+  void sendInteractiveResponse(
+    DisplayMessage msg,
+    String text, {
+    bool accepted = true,
+  }) {
     if (!_host.connected) return;
     msg.accepted = accepted;
     final sid = msg.sessionId ?? _sessionId;
@@ -844,7 +855,11 @@ class PaneState extends ChangeNotifier {
   DisplayMessage? get lastStreamMessage => _streamTarget;
 
   /// Enter agent mode — subsequent tool calls will be auto-grouped.
-  void startAgentGroup(String name, Map<String, dynamic>? input, {String? displayName}) {
+  void startAgentGroup(
+    String name,
+    Map<String, dynamic>? input, {
+    String? displayName,
+  }) {
     finalizeStream();
     _inAgentMode = true;
     _agentToolName = name;
@@ -926,7 +941,9 @@ class PaneState extends ChangeNotifier {
     final name = path.split('/').last;
     if (_selectedProjectName == name &&
         _selectedProjectPath == path &&
-        _activeRightPanel == 'project') return;
+        _activeRightPanel == 'project') {
+      return;
+    }
     _selectedProjectName = name;
     _selectedProjectPath = path;
     _activeRightPanel = 'project';
@@ -968,14 +985,16 @@ class PaneState extends ChangeNotifier {
   /// Ensure a tool sub-group exists (create one if needed).
   void _ensureAgentToolGroup() {
     if (_agentToolGroupIndex != null) return;
-    _messages.add(DisplayMessage(
-      type: DisplayMessageType.agentGroup,
-      sessionId: _sessionId,
-      toolName: _agentToolName,
-      displayName: _agentDisplayName,
-      children: [],
-      expanded: true,
-    ));
+    _messages.add(
+      DisplayMessage(
+        type: DisplayMessageType.agentGroup,
+        sessionId: _sessionId,
+        toolName: _agentToolName,
+        displayName: _agentDisplayName,
+        children: [],
+        expanded: true,
+      ),
+    );
     _agentToolGroupIndex = _messages.length - 1;
   }
 
@@ -1010,41 +1029,49 @@ class PaneState extends ChangeNotifier {
     if (_messages.isEmpty ||
         _messages.last.type != DisplayMessageType.assistant) {
       finalizeStream();
-      _messages.add(DisplayMessage(
-        type: DisplayMessageType.assistant,
-        sessionId: _sessionId,
-      ));
+      _messages.add(
+        DisplayMessage(
+          type: DisplayMessageType.assistant,
+          sessionId: _sessionId,
+        ),
+      );
       notifyListeners();
     }
     _enqueueText(text);
   }
 
-  void startToolBlock(String name, Map<String, dynamic>? input,
-      {String? displayName}) {
+  void startToolBlock(
+    String name,
+    Map<String, dynamic>? input, {
+    String? displayName,
+  }) {
     finalizeStream();
     _activeToolName = name;
     if (_inAgentMode) {
       _ensureAgentToolGroup();
     }
-    _streamTargetList.add(DisplayMessage(
-      type: DisplayMessageType.toolBlock,
-      sessionId: _sessionId,
-      toolName: name,
-      displayName: displayName,
-      toolInput: input,
-    ));
+    _streamTargetList.add(
+      DisplayMessage(
+        type: DisplayMessageType.toolBlock,
+        sessionId: _sessionId,
+        toolName: name,
+        displayName: displayName,
+        toolInput: input,
+      ),
+    );
     notifyListeners();
   }
 
   void appendToolOutput(String text, {bool isError = false}) {
     final target = _streamTargetList;
-    if (target.isEmpty ||
-        target.last.type != DisplayMessageType.toolBlock) {
-      target.add(DisplayMessage(
-        type: DisplayMessageType.toolBlock,
-        sessionId: _sessionId,
-        toolName: 'output',
-      ));
+    if (target.isEmpty || target.last.type != DisplayMessageType.toolBlock) {
+      target.add(
+        DisplayMessage(
+          type: DisplayMessageType.toolBlock,
+          sessionId: _sessionId,
+          toolName: 'output',
+        ),
+      );
       notifyListeners();
     }
     if (isError && target.isNotEmpty) {
@@ -1109,8 +1136,9 @@ class PaneState extends ChangeNotifier {
   void stripSessionEndAskTag() {
     for (int i = _messages.length - 1; i >= 0; i--) {
       if (_messages[i].type == DisplayMessageType.assistant) {
-        _messages[i].content =
-            _messages[i].content.replaceAll('[SessionEndAsk]', '').trimRight();
+        _messages[i].content = _messages[i].content
+            .replaceAll('[SessionEndAsk]', '')
+            .trimRight();
         break;
       }
     }
@@ -1177,10 +1205,12 @@ class PaneState extends ChangeNotifier {
   }
 
   void _addSystemMessage(String text, {bool isError = false}) {
-    _messages.add(DisplayMessage(
-      type: isError ? DisplayMessageType.error : DisplayMessageType.system,
-      content: text,
-    ));
+    _messages.add(
+      DisplayMessage(
+        type: isError ? DisplayMessageType.error : DisplayMessageType.system,
+        content: text,
+      ),
+    );
     notifyListeners();
   }
 
@@ -1194,8 +1224,10 @@ class PaneState extends ChangeNotifier {
         _addSystemMessage('Not connected to worker', isError: true);
         return;
       }
-      final response =
-          await ws.fetchSessionMessages(sessionId, limit: _pageSize);
+      final response = await ws.fetchSessionMessages(
+        sessionId,
+        limit: _pageSize,
+      );
       if (_sessionId != sessionId) return;
 
       if (_messages.isNotEmpty &&
@@ -1205,8 +1237,7 @@ class PaneState extends ChangeNotifier {
 
       final rawMessages = (response['messages'] as List<dynamic>? ?? [])
           .cast<Map<String, dynamic>>();
-      final pagination =
-          response['pagination'] as Map<String, dynamic>? ?? {};
+      final pagination = response['pagination'] as Map<String, dynamic>? ?? {};
       _totalMessageCount = pagination['total_count'] as int? ?? 0;
       final hasMore = pagination['has_more'] as bool? ?? false;
       _nextCursor = hasMore ? pagination['next_cursor'] as int? : null;
@@ -1240,8 +1271,7 @@ class PaneState extends ChangeNotifier {
 
       final rawMessages = (response['messages'] as List<dynamic>? ?? [])
           .cast<Map<String, dynamic>>();
-      final pagination =
-          response['pagination'] as Map<String, dynamic>? ?? {};
+      final pagination = response['pagination'] as Map<String, dynamic>? ?? {};
       final hasMore = pagination['has_more'] as bool? ?? false;
       _nextCursor = hasMore ? pagination['next_cursor'] as int? : null;
 
@@ -1284,14 +1314,16 @@ class PaneState extends ChangeNotifier {
 
     void ensureToolGroup() {
       if (toolGroupIdx != null) return;
-      target.add(DisplayMessage(
-        type: DisplayMessageType.agentGroup,
-        sessionId: sessionId,
-        toolName: agentToolName,
-        displayName: agentDisplayName,
-        children: [],
-        finished: false,
-      ));
+      target.add(
+        DisplayMessage(
+          type: DisplayMessageType.agentGroup,
+          sessionId: sessionId,
+          toolName: agentToolName,
+          displayName: agentDisplayName,
+          children: [],
+          finished: false,
+        ),
+      );
       toolGroupIdx = target.length - 1;
     }
 

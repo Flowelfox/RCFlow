@@ -11,70 +11,87 @@ class HotkeyService {
 
   static const _defaults = <HotkeyBinding>[
     HotkeyBinding(
-        action: HotkeyAction.closePane,
-        ctrl: true,
-        key: LogicalKeyboardKey.keyW),
+      action: HotkeyAction.closePane,
+      ctrl: true,
+      key: LogicalKeyboardKey.keyW,
+    ),
     HotkeyBinding(
-        action: HotkeyAction.newSession,
-        ctrl: true,
-        key: LogicalKeyboardKey.keyT),
+      action: HotkeyAction.newSession,
+      ctrl: true,
+      key: LogicalKeyboardKey.keyT,
+    ),
     HotkeyBinding(
-        action: HotkeyAction.openSettings,
-        ctrl: true,
-        alt: true,
-        key: LogicalKeyboardKey.keyS),
+      action: HotkeyAction.openSettings,
+      ctrl: true,
+      alt: true,
+      key: LogicalKeyboardKey.keyS,
+    ),
     HotkeyBinding(
-        action: HotkeyAction.focusPaneLeft,
-        alt: true,
-        key: LogicalKeyboardKey.arrowLeft),
+      action: HotkeyAction.focusPaneLeft,
+      alt: true,
+      key: LogicalKeyboardKey.arrowLeft,
+    ),
     HotkeyBinding(
-        action: HotkeyAction.focusPaneRight,
-        alt: true,
-        key: LogicalKeyboardKey.arrowRight),
+      action: HotkeyAction.focusPaneRight,
+      alt: true,
+      key: LogicalKeyboardKey.arrowRight,
+    ),
     HotkeyBinding(
-        action: HotkeyAction.focusPaneUp,
-        alt: true,
-        key: LogicalKeyboardKey.arrowUp),
+      action: HotkeyAction.focusPaneUp,
+      alt: true,
+      key: LogicalKeyboardKey.arrowUp,
+    ),
     HotkeyBinding(
-        action: HotkeyAction.focusPaneDown,
-        alt: true,
-        key: LogicalKeyboardKey.arrowDown),
+      action: HotkeyAction.focusPaneDown,
+      alt: true,
+      key: LogicalKeyboardKey.arrowDown,
+    ),
     HotkeyBinding(
-        action: HotkeyAction.toggleSidebar,
-        ctrl: true,
-        key: LogicalKeyboardKey.keyB),
+      action: HotkeyAction.toggleSidebar,
+      ctrl: true,
+      key: LogicalKeyboardKey.keyB,
+    ),
     HotkeyBinding(
-        action: HotkeyAction.focusInputArea,
-        key: LogicalKeyboardKey.escape),
+      action: HotkeyAction.focusInputArea,
+      key: LogicalKeyboardKey.escape,
+    ),
     HotkeyBinding(
-        action: HotkeyAction.nextPane,
-        ctrl: true,
-        key: LogicalKeyboardKey.tab),
+      action: HotkeyAction.nextPane,
+      ctrl: true,
+      key: LogicalKeyboardKey.tab,
+    ),
     HotkeyBinding(
-        action: HotkeyAction.previousPane,
-        ctrl: true,
-        shift: true,
-        key: LogicalKeyboardKey.tab),
+      action: HotkeyAction.previousPane,
+      ctrl: true,
+      shift: true,
+      key: LogicalKeyboardKey.tab,
+    ),
     HotkeyBinding(
-        action: HotkeyAction.splitRight,
-        ctrl: true,
-        key: LogicalKeyboardKey.backslash),
+      action: HotkeyAction.splitRight,
+      ctrl: true,
+      key: LogicalKeyboardKey.backslash,
+    ),
     HotkeyBinding(
-        action: HotkeyAction.splitDown,
-        ctrl: true,
-        shift: true,
-        key: LogicalKeyboardKey.backslash),
+      action: HotkeyAction.splitDown,
+      ctrl: true,
+      shift: true,
+      key: LogicalKeyboardKey.backslash,
+    ),
     HotkeyBinding(
-        action: HotkeyAction.openTerminal,
-        ctrl: true,
-        key: LogicalKeyboardKey.backquote),
+      action: HotkeyAction.openTerminal,
+      ctrl: true,
+      key: LogicalKeyboardKey.backquote,
+    ),
     HotkeyBinding(
-        action: HotkeyAction.refreshSessions, key: LogicalKeyboardKey.f5),
+      action: HotkeyAction.refreshSessions,
+      key: LogicalKeyboardKey.f5,
+    ),
     HotkeyBinding(
-        action: HotkeyAction.reopenLastClosedPane,
-        ctrl: true,
-        shift: true,
-        key: LogicalKeyboardKey.keyT),
+      action: HotkeyAction.reopenLastClosedPane,
+      ctrl: true,
+      shift: true,
+      key: LogicalKeyboardKey.keyT,
+    ),
   ];
 
   HotkeyService({required SettingsService settings}) : _settings = settings {
@@ -145,8 +162,7 @@ class HotkeyService {
         }
       }
       // Remove bindings for actions that no longer exist
-      loaded.removeWhere(
-          (b) => !HotkeyAction.values.contains(b.action));
+      loaded.removeWhere((b) => !HotkeyAction.values.contains(b.action));
       return loaded;
     } catch (_) {
       return List.of(_defaults);
@@ -154,7 +170,8 @@ class HotkeyService {
   }
 
   void _saveBindings() {
-    _settings.hotkeyBindings =
-        jsonEncode(_bindings.map((b) => b.toJson()).toList());
+    _settings.hotkeyBindings = jsonEncode(
+      _bindings.map((b) => b.toJson()).toList(),
+    );
   }
 }

@@ -68,20 +68,51 @@ class UserBubble extends StatelessWidget {
                   ),
                   codeblockPadding: EdgeInsets.all(12),
                   a: TextStyle(color: context.appColors.accentLight),
-                  listBullet: TextStyle(color: context.appColors.textPrimary, fontSize: 15),
-                  h1: TextStyle(color: context.appColors.textPrimary, fontSize: 20, fontWeight: FontWeight.bold),
-                  h2: TextStyle(color: context.appColors.textPrimary, fontSize: 18, fontWeight: FontWeight.bold),
-                  h3: TextStyle(color: context.appColors.textPrimary, fontSize: 16, fontWeight: FontWeight.bold),
+                  listBullet: TextStyle(
+                    color: context.appColors.textPrimary,
+                    fontSize: 15,
+                  ),
+                  h1: TextStyle(
+                    color: context.appColors.textPrimary,
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  h2: TextStyle(
+                    color: context.appColors.textPrimary,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  h3: TextStyle(
+                    color: context.appColors.textPrimary,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
                   blockquoteDecoration: BoxDecoration(
-                    border: Border(left: BorderSide(color: context.appColors.accentLight, width: 3)),
+                    border: Border(
+                      left: BorderSide(
+                        color: context.appColors.accentLight,
+                        width: 3,
+                      ),
+                    ),
                     color: Colors.black.withValues(alpha: 0.15),
                   ),
-                  blockquotePadding: EdgeInsets.only(left: 12, top: 4, bottom: 4),
-                  tableBorder: TableBorder.all(color: context.appColors.divider),
-                  tableHead: TextStyle(color: context.appColors.textPrimary, fontWeight: FontWeight.bold),
+                  blockquotePadding: EdgeInsets.only(
+                    left: 12,
+                    top: 4,
+                    bottom: 4,
+                  ),
+                  tableBorder: TableBorder.all(
+                    color: context.appColors.divider,
+                  ),
+                  tableHead: TextStyle(
+                    color: context.appColors.textPrimary,
+                    fontWeight: FontWeight.bold,
+                  ),
                   tableBody: TextStyle(color: context.appColors.textPrimary),
                   horizontalRuleDecoration: BoxDecoration(
-                    border: Border(top: BorderSide(color: context.appColors.divider)),
+                    border: Border(
+                      top: BorderSide(color: context.appColors.divider),
+                    ),
                   ),
                 ),
               ),
@@ -114,7 +145,9 @@ class _AttachmentChip extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(
-            _isImage(mimeType) ? Icons.image_rounded : Icons.insert_drive_file_rounded,
+            _isImage(mimeType)
+                ? Icons.image_rounded
+                : Icons.insert_drive_file_rounded,
             size: 13,
             color: context.appColors.textSecondary,
           ),
@@ -123,7 +156,10 @@ class _AttachmentChip extends StatelessWidget {
             constraints: const BoxConstraints(maxWidth: 160),
             child: Text(
               name,
-              style: TextStyle(color: context.appColors.textSecondary, fontSize: 12),
+              style: TextStyle(
+                color: context.appColors.textSecondary,
+                fontSize: 12,
+              ),
               overflow: TextOverflow.ellipsis,
             ),
           ),

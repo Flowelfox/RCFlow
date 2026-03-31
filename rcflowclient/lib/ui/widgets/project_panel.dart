@@ -29,16 +29,17 @@ class _ProjectPanelState extends State<ProjectPanel> {
 
   // Section order and collapse state
   final List<String> _sectionOrder = ['worktrees'];
-  final Map<String, bool> _sectionCollapsed = {
-    'worktrees': false,
-  };
+  final Map<String, bool> _sectionCollapsed = {'worktrees': false};
 
   // ---------------------------------------------------------------------------
   // Data fetching
   // ---------------------------------------------------------------------------
 
   Future<void> _refresh(
-      AppState appState, String workerId, String projectPath) async {
+    AppState appState,
+    String workerId,
+    String projectPath,
+  ) async {
     // Only show loading spinners for data not yet populated from cache.
     // When cached data is already present this becomes a silent background
     // refresh — the user sees the stale data immediately while fresh data
@@ -96,7 +97,10 @@ class _ProjectPanelState extends State<ProjectPanel> {
   }
 
   Future<void> _create(
-      AppState appState, String workerId, String projectPath) async {
+    AppState appState,
+    String workerId,
+    String projectPath,
+  ) async {
     final params = await _showCreateDialog(context);
     if (params == null) return;
     setState(() => _loadingWorktrees = true);
@@ -104,19 +108,26 @@ class _ProjectPanelState extends State<ProjectPanel> {
       final worker = appState.getWorker(workerId);
       if (worker == null) return;
       await worker.ws.createWorktree(
-          branch: params.branch, repoPath: projectPath, base: params.base);
+        branch: params.branch,
+        repoPath: projectPath,
+        base: params.base,
+      );
       await _refreshWorktrees(appState, workerId, projectPath);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Create failed: $e')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Create failed: $e')));
         setState(() => _loadingWorktrees = false);
       }
     }
   }
 
   Future<void> _refreshWorktrees(
-      AppState appState, String workerId, String projectPath) async {
+    AppState appState,
+    String workerId,
+    String projectPath,
+  ) async {
     setState(() {
       _loadingWorktrees = true;
       _worktreesError = null;
@@ -138,28 +149,40 @@ class _ProjectPanelState extends State<ProjectPanel> {
     }
   }
 
-  Future<void> _merge(AppState appState, String workerId, String projectPath,
-      String name) async {
+  Future<void> _merge(
+    AppState appState,
+    String workerId,
+    String projectPath,
+    String name,
+  ) async {
     final message = await _showMergeDialog(context, name);
     if (message == null) return;
     setState(() => _loadingWorktrees = true);
     try {
       final worker = appState.getWorker(workerId);
       if (worker == null) return;
-      await worker.ws
-          .mergeWorktree(name: name, message: message, repoPath: projectPath);
+      await worker.ws.mergeWorktree(
+        name: name,
+        message: message,
+        repoPath: projectPath,
+      );
       await _refreshWorktrees(appState, workerId, projectPath);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Merge failed: $e')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Merge failed: $e')));
         setState(() => _loadingWorktrees = false);
       }
     }
   }
 
-  Future<void> _remove(AppState appState, String workerId, String projectPath,
-      String name) async {
+  Future<void> _remove(
+    AppState appState,
+    String workerId,
+    String projectPath,
+    String name,
+  ) async {
     final confirmed = await _confirmRemove(context, name);
     if (!confirmed) return;
     setState(() => _loadingWorktrees = true);
@@ -170,15 +193,20 @@ class _ProjectPanelState extends State<ProjectPanel> {
       await _refreshWorktrees(appState, workerId, projectPath);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Remove failed: $e')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Remove failed: $e')));
         setState(() => _loadingWorktrees = false);
       }
     }
   }
 
-  Future<void> _setWorktree(AppState appState, String workerId,
-      String sessionId, Map<String, dynamic> wt) async {
+  Future<void> _setWorktree(
+    AppState appState,
+    String workerId,
+    String sessionId,
+    Map<String, dynamic> wt,
+  ) async {
     final path = wt['path'] as String? ?? '';
     final worker = appState.getWorker(workerId);
     if (worker == null) return;
@@ -188,7 +216,8 @@ class _ProjectPanelState extends State<ProjectPanel> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Failed to select worktree: $e')));
+          SnackBar(content: Text('Failed to select worktree: $e')),
+        );
       }
     } finally {
       if (mounted) setState(() => _loadingWorktrees = false);
@@ -196,7 +225,10 @@ class _ProjectPanelState extends State<ProjectPanel> {
   }
 
   Future<void> _clearWorktree(
-      AppState appState, String workerId, String sessionId) async {
+    AppState appState,
+    String workerId,
+    String sessionId,
+  ) async {
     final worker = appState.getWorker(workerId);
     if (worker == null) return;
     setState(() => _loadingWorktrees = true);
@@ -204,8 +236,9 @@ class _ProjectPanelState extends State<ProjectPanel> {
       await worker.ws.setSessionWorktree(sessionId, null);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Failed to clear worktree: $e')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to clear worktree: $e')));
       }
     } finally {
       if (mounted) setState(() => _loadingWorktrees = false);
@@ -233,8 +266,7 @@ class _ProjectPanelState extends State<ProjectPanel> {
     // Auto-refresh when project path, worker, OR worktree operation changes.
     final worktreeLastAction = pane.currentWorktreeInfo?.lastAction;
     if (mainProjectPath != null) {
-      final fetchKey =
-          '$workerId:$mainProjectPath:${worktreeLastAction ?? ''}';
+      final fetchKey = '$workerId:$mainProjectPath:${worktreeLastAction ?? ''}';
       final cacheKey = '$workerId:$mainProjectPath';
       if (fetchKey != _lastFetchedKey && !_loadingWorktrees) {
         _lastFetchedKey = fetchKey;
@@ -264,8 +296,14 @@ class _ProjectPanelState extends State<ProjectPanel> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           // Header
-          _buildHeader(context, pane, projectName, appState, workerId,
-              mainProjectPath),
+          _buildHeader(
+            context,
+            pane,
+            projectName,
+            appState,
+            workerId,
+            mainProjectPath,
+          ),
           // Sections — collapsible and reorderable
           for (final sectionId in _sectionOrder)
             Expanded(
@@ -331,11 +369,22 @@ class _ProjectPanelState extends State<ProjectPanel> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 if (selectedWorktreePath != null)
-                  _buildActiveWorktreeBar(context, appState, workerId,
-                      sessionId, selectedWorktreePath),
+                  _buildActiveWorktreeBar(
+                    context,
+                    appState,
+                    workerId,
+                    sessionId,
+                    selectedWorktreePath,
+                  ),
                 Expanded(
-                  child: _buildWorktreeList(context, appState, workerId,
-                      mainProjectPath, selectedWorktreePath, sessionId),
+                  child: _buildWorktreeList(
+                    context,
+                    appState,
+                    workerId,
+                    mainProjectPath,
+                    selectedWorktreePath,
+                    sessionId,
+                  ),
                 ),
               ],
             ),
@@ -354,23 +403,24 @@ class _ProjectPanelState extends State<ProjectPanel> {
     final collapsed = _sectionCollapsed[sectionId] ?? false;
 
     return GestureDetector(
-      onTap: () =>
-          setState(() => _sectionCollapsed[sectionId] = !collapsed),
+      onTap: () => setState(() => _sectionCollapsed[sectionId] = !collapsed),
       child: Container(
         height: 28,
         padding: const EdgeInsets.symmetric(horizontal: 10),
         decoration: BoxDecoration(
           color: context.appColors.accent.withAlpha(8),
-          border:
-              Border(bottom: BorderSide(color: context.appColors.divider)),
+          border: Border(bottom: BorderSide(color: context.appColors.divider)),
         ),
         child: Row(
           children: [
             AnimatedRotation(
               turns: collapsed ? -0.25 : 0,
               duration: const Duration(milliseconds: 150),
-              child: Icon(Icons.expand_more,
-                  size: 14, color: context.appColors.textMuted),
+              child: Icon(
+                Icons.expand_more,
+                size: 14,
+                color: context.appColors.textMuted,
+              ),
             ),
             const SizedBox(width: 4),
             Icon(icon, size: 12, color: context.appColors.textMuted),
@@ -385,26 +435,34 @@ class _ProjectPanelState extends State<ProjectPanel> {
               ),
             ),
             const Spacer(),
-            if (trailing != null) trailing,
+            ?trailing,
           ],
         ),
       ),
     );
   }
 
-  Widget _buildHeader(BuildContext context, PaneState pane, String projectName,
-      AppState appState, String workerId, String projectPath) {
+  Widget _buildHeader(
+    BuildContext context,
+    PaneState pane,
+    String projectName,
+    AppState appState,
+    String workerId,
+    String projectPath,
+  ) {
     return Container(
       height: 36,
       padding: const EdgeInsets.symmetric(horizontal: 12),
       decoration: BoxDecoration(
-        border:
-            Border(bottom: BorderSide(color: context.appColors.divider)),
+        border: Border(bottom: BorderSide(color: context.appColors.divider)),
       ),
       child: Row(
         children: [
-          Icon(Icons.folder_outlined,
-              color: context.appColors.accent, size: 16),
+          Icon(
+            Icons.folder_outlined,
+            color: context.appColors.accent,
+            size: 16,
+          ),
           const SizedBox(width: 6),
           Expanded(
             child: Text(
@@ -427,14 +485,18 @@ class _ProjectPanelState extends State<ProjectPanel> {
     );
   }
 
-  Widget _buildActiveWorktreeBar(BuildContext context, AppState appState,
-      String workerId, String? sessionId, String selectedWorktreePath) {
+  Widget _buildActiveWorktreeBar(
+    BuildContext context,
+    AppState appState,
+    String workerId,
+    String? sessionId,
+    String selectedWorktreePath,
+  ) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
       decoration: BoxDecoration(
         color: context.appColors.accent.withAlpha(10),
-        border:
-            Border(bottom: BorderSide(color: context.appColors.divider)),
+        border: Border(bottom: BorderSide(color: context.appColors.divider)),
       ),
       child: Row(
         children: [
@@ -466,12 +528,13 @@ class _ProjectPanelState extends State<ProjectPanel> {
   }
 
   Widget _buildWorktreeList(
-      BuildContext context,
-      AppState appState,
-      String workerId,
-      String projectPath,
-      String? selectedWorktreePath,
-      String? sessionId) {
+    BuildContext context,
+    AppState appState,
+    String workerId,
+    String projectPath,
+    String? selectedWorktreePath,
+    String? sessionId,
+  ) {
     if (_loadingWorktrees) {
       return Align(
         alignment: Alignment.topCenter,
@@ -486,9 +549,10 @@ class _ProjectPanelState extends State<ProjectPanel> {
     if (_worktreesError != null) {
       return Padding(
         padding: const EdgeInsets.all(12),
-        child: Text(_worktreesError!,
-            style: TextStyle(
-                color: context.appColors.errorText, fontSize: 11)),
+        child: Text(
+          _worktreesError!,
+          style: TextStyle(color: context.appColors.errorText, fontSize: 11),
+        ),
       );
     }
     if (_worktrees == null) {
@@ -502,9 +566,10 @@ class _ProjectPanelState extends State<ProjectPanel> {
     }
     if (_worktrees!.isEmpty) {
       return Center(
-        child: Text('No worktrees',
-            style: TextStyle(
-                color: context.appColors.textMuted, fontSize: 11)),
+        child: Text(
+          'No worktrees',
+          style: TextStyle(color: context.appColors.textMuted, fontSize: 11),
+        ),
       );
     }
     return ListView.builder(
@@ -521,13 +586,12 @@ class _ProjectPanelState extends State<ProjectPanel> {
         return InkWell(
           onTap: (sessionId != null && workerId.isNotEmpty)
               ? () => isSelected
-                  ? _clearWorktree(appState, workerId, sessionId)
-                  : _setWorktree(appState, workerId, sessionId, wt)
+                    ? _clearWorktree(appState, workerId, sessionId)
+                    : _setWorktree(appState, workerId, sessionId, wt)
               : null,
           child: Container(
             color: isSelected ? context.appColors.accent.withAlpha(18) : null,
-            padding:
-                const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
             child: Row(
               children: [
                 Icon(
@@ -542,21 +606,27 @@ class _ProjectPanelState extends State<ProjectPanel> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(name,
-                          style: TextStyle(
-                              color: isSelected
-                                  ? context.appColors.accent
-                                  : context.appColors.textPrimary,
-                              fontSize: 11,
-                              fontWeight: isSelected
-                                  ? FontWeight.w600
-                                  : FontWeight.w500),
-                          overflow: TextOverflow.ellipsis),
-                      Text('$branch → $base',
-                          style: TextStyle(
-                              color: context.appColors.textMuted,
-                              fontSize: 10),
-                          overflow: TextOverflow.ellipsis),
+                      Text(
+                        name,
+                        style: TextStyle(
+                          color: isSelected
+                              ? context.appColors.accent
+                              : context.appColors.textPrimary,
+                          fontSize: 11,
+                          fontWeight: isSelected
+                              ? FontWeight.w600
+                              : FontWeight.w500,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      Text(
+                        '$branch → $base',
+                        style: TextStyle(
+                          color: context.appColors.textMuted,
+                          fontSize: 10,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ],
                   ),
                 ),
@@ -564,16 +634,14 @@ class _ProjectPanelState extends State<ProjectPanel> {
                   icon: Icons.merge,
                   tooltip: 'Merge into $base',
                   iconSize: 13,
-                  onTap: () =>
-                      _merge(appState, workerId, projectPath, name),
+                  onTap: () => _merge(appState, workerId, projectPath, name),
                 ),
                 _SmallIconBtn(
                   icon: Icons.delete_outline,
                   tooltip: 'Remove (discard)',
                   iconSize: 13,
                   color: context.appColors.errorText,
-                  onTap: () =>
-                      _remove(appState, workerId, projectPath, name),
+                  onTap: () => _remove(appState, workerId, projectPath, name),
                 ),
               ],
             ),
@@ -599,12 +667,16 @@ class _ProjectPanelState extends State<ProjectPanel> {
             padding: const EdgeInsets.symmetric(horizontal: 12),
             decoration: BoxDecoration(
               border: Border(
-                  bottom: BorderSide(color: context.appColors.divider)),
+                bottom: BorderSide(color: context.appColors.divider),
+              ),
             ),
             child: Row(
               children: [
-                Icon(Icons.folder_outlined,
-                    color: context.appColors.accent, size: 16),
+                Icon(
+                  Icons.folder_outlined,
+                  color: context.appColors.accent,
+                  size: 16,
+                ),
                 const SizedBox(width: 6),
                 Expanded(
                   child: Text(
@@ -632,8 +704,11 @@ class _ProjectPanelState extends State<ProjectPanel> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.folder_open_outlined,
-                        color: context.appColors.textMuted, size: 36),
+                    Icon(
+                      Icons.folder_open_outlined,
+                      color: context.appColors.textMuted,
+                      size: 36,
+                    ),
                     const SizedBox(height: 12),
                     Text(
                       'No project attached',
@@ -683,8 +758,9 @@ class _ProjectPanelState extends State<ProjectPanel> {
               TextFormField(
                 controller: branchCtrl,
                 decoration: const InputDecoration(
-                    labelText: 'Branch',
-                    hintText: 'feature/PROJ-123/description'),
+                  labelText: 'Branch',
+                  hintText: 'feature/PROJ-123/description',
+                ),
                 validator: (v) =>
                     (v == null || v.trim().isEmpty) ? 'Required' : null,
                 autofocus: true,
@@ -692,8 +768,7 @@ class _ProjectPanelState extends State<ProjectPanel> {
               const SizedBox(height: 8),
               TextFormField(
                 controller: baseCtrl,
-                decoration:
-                    const InputDecoration(labelText: 'Base branch'),
+                decoration: const InputDecoration(labelText: 'Base branch'),
                 validator: (v) =>
                     (v == null || v.trim().isEmpty) ? 'Required' : null,
               ),
@@ -702,16 +777,19 @@ class _ProjectPanelState extends State<ProjectPanel> {
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel')),
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
           TextButton(
             onPressed: () {
               if (formKey.currentState!.validate()) {
                 Navigator.pop(
-                    ctx,
-                    _CreateParams(
-                        branch: branchCtrl.text.trim(),
-                        base: baseCtrl.text.trim()));
+                  ctx,
+                  _CreateParams(
+                    branch: branchCtrl.text.trim(),
+                    base: baseCtrl.text.trim(),
+                  ),
+                );
               }
             },
             child: const Text('Create'),
@@ -733,8 +811,7 @@ class _ProjectPanelState extends State<ProjectPanel> {
           key: formKey,
           child: TextFormField(
             controller: msgCtrl,
-            decoration:
-                const InputDecoration(labelText: 'Commit message'),
+            decoration: const InputDecoration(labelText: 'Commit message'),
             validator: (v) =>
                 (v == null || v.trim().isEmpty) ? 'Required' : null,
             autofocus: true,
@@ -743,8 +820,9 @@ class _ProjectPanelState extends State<ProjectPanel> {
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel')),
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
           TextButton(
             onPressed: () {
               if (formKey.currentState!.validate()) {
@@ -764,11 +842,13 @@ class _ProjectPanelState extends State<ProjectPanel> {
       builder: (ctx) => AlertDialog(
         title: const Text('Remove Worktree'),
         content: Text(
-            'Remove "$name" and delete its branch? This cannot be undone.'),
+          'Remove "$name" and delete its branch? This cannot be undone.',
+        ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel')),
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: TextButton.styleFrom(foregroundColor: Colors.red),
@@ -779,7 +859,6 @@ class _ProjectPanelState extends State<ProjectPanel> {
     );
     return result ?? false;
   }
-
 }
 
 // ---------------------------------------------------------------------------

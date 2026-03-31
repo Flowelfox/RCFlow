@@ -18,7 +18,12 @@ class VisibleWhen {
   final String? valueNot;
   final List<String>? valueIn;
 
-  const VisibleWhen({required this.key, this.value, this.valueNot, this.valueIn});
+  const VisibleWhen({
+    required this.key,
+    this.value,
+    this.valueNot,
+    this.valueIn,
+  });
 
   factory VisibleWhen.fromJson(Map<String, dynamic> json) {
     List<String>? valueIn;

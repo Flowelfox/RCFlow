@@ -27,7 +27,10 @@ class _WorktreeListPanelState extends State<WorktreeListPanel> {
   // -------------------------------------------------------------------------
 
   Future<void> _refresh(
-      AppState state, String workerId, String repoPath) async {
+    AppState state,
+    String workerId,
+    String repoPath,
+  ) async {
     final key = _key(workerId, repoPath);
     setState(() {
       _loading[key] = true;
@@ -47,8 +50,7 @@ class _WorktreeListPanelState extends State<WorktreeListPanel> {
     }
   }
 
-  Future<void> _create(
-      AppState state, String workerId, String repoPath) async {
+  Future<void> _create(AppState state, String workerId, String repoPath) async {
     final result = await _showCreateDialog(context, repoPath);
     if (result == null) return;
     final key = _key(workerId, repoPath);
@@ -64,16 +66,20 @@ class _WorktreeListPanelState extends State<WorktreeListPanel> {
       await _refresh(state, workerId, repoPath);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Create failed: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Create failed: $e')));
         setState(() => _loading[key] = false);
       }
     }
   }
 
-  Future<void> _merge(AppState state, String workerId, String repoPath,
-      String name) async {
+  Future<void> _merge(
+    AppState state,
+    String workerId,
+    String repoPath,
+    String name,
+  ) async {
     final message = await _showMergeDialog(context, name);
     if (message == null) return;
     final key = _key(workerId, repoPath);
@@ -82,20 +88,27 @@ class _WorktreeListPanelState extends State<WorktreeListPanel> {
       final worker = state.getWorker(workerId);
       if (worker == null) return;
       await worker.ws.mergeWorktree(
-          name: name, message: message, repoPath: repoPath);
+        name: name,
+        message: message,
+        repoPath: repoPath,
+      );
       await _refresh(state, workerId, repoPath);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Merge failed: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Merge failed: $e')));
         setState(() => _loading[key] = false);
       }
     }
   }
 
-  Future<void> _remove(AppState state, String workerId, String repoPath,
-      String name) async {
+  Future<void> _remove(
+    AppState state,
+    String workerId,
+    String repoPath,
+    String name,
+  ) async {
     final confirmed = await _confirmRemove(context, name);
     if (!confirmed) return;
     final key = _key(workerId, repoPath);
@@ -107,9 +120,9 @@ class _WorktreeListPanelState extends State<WorktreeListPanel> {
       await _refresh(state, workerId, repoPath);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Remove failed: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Remove failed: $e')));
         setState(() => _loading[key] = false);
       }
     }
@@ -140,19 +153,29 @@ class _WorktreeListPanelState extends State<WorktreeListPanel> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.device_hub_outlined,
-                    color: context.appColors.textMuted, size: 40),
+                Icon(
+                  Icons.device_hub_outlined,
+                  color: context.appColors.textMuted,
+                  size: 40,
+                ),
                 const SizedBox(height: 12),
-                Text('No worktrees yet',
-                    style: TextStyle(
-                        color: context.appColors.textSecondary,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600)),
+                Text(
+                  'No worktrees yet',
+                  style: TextStyle(
+                    color: context.appColors.textSecondary,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
                 const SizedBox(height: 4),
-                Text('Worktrees appear here once\na session uses worktree tools',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                        color: context.appColors.textMuted, fontSize: 13)),
+                Text(
+                  'Worktrees appear here once\na session uses worktree tools',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: context.appColors.textMuted,
+                    fontSize: 13,
+                  ),
+                ),
               ],
             ),
           );
@@ -171,7 +194,11 @@ class _WorktreeListPanelState extends State<WorktreeListPanel> {
   }
 
   Widget _buildGroup(
-      BuildContext context, AppState state, String workerId, String repoPath) {
+    BuildContext context,
+    AppState state,
+    String workerId,
+    String repoPath,
+  ) {
     final key = _key(workerId, repoPath);
     final isLoading = _loading[key] ?? false;
     final error = _errors[key];
@@ -194,17 +221,23 @@ class _WorktreeListPanelState extends State<WorktreeListPanel> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(workerName,
-                        style: TextStyle(
-                            color: context.appColors.textSecondary,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w500)),
-                    Text(shortRepo,
-                        style: TextStyle(
-                            color: context.appColors.textPrimary,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600),
-                        overflow: TextOverflow.ellipsis),
+                    Text(
+                      workerName,
+                      style: TextStyle(
+                        color: context.appColors.textSecondary,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    Text(
+                      shortRepo,
+                      style: TextStyle(
+                        color: context.appColors.textPrimary,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ],
                 ),
               ),
@@ -212,13 +245,17 @@ class _WorktreeListPanelState extends State<WorktreeListPanel> {
               _IconBtn(
                 icon: Icons.refresh,
                 tooltip: 'Refresh',
-                onTap: isLoading ? null : () => _refresh(state, workerId, repoPath),
+                onTap: isLoading
+                    ? null
+                    : () => _refresh(state, workerId, repoPath),
               ),
               // New worktree
               _IconBtn(
                 icon: Icons.add,
                 tooltip: 'New worktree',
-                onTap: isLoading ? null : () => _create(state, workerId, repoPath),
+                onTap: isLoading
+                    ? null
+                    : () => _create(state, workerId, repoPath),
               ),
             ],
           ),
@@ -231,9 +268,13 @@ class _WorktreeListPanelState extends State<WorktreeListPanel> {
         else if (error != null)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-            child: Text(error,
-                style: TextStyle(
-                    color: context.appColors.errorText, fontSize: 12)),
+            child: Text(
+              error,
+              style: TextStyle(
+                color: context.appColors.errorText,
+                fontSize: 12,
+              ),
+            ),
           )
         else if (list == null)
           Padding(
@@ -247,20 +288,30 @@ class _WorktreeListPanelState extends State<WorktreeListPanel> {
         else if (list.isEmpty)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-            child: Text('No worktrees',
-                style: TextStyle(
-                    color: context.appColors.textMuted, fontSize: 12)),
+            child: Text(
+              'No worktrees',
+              style: TextStyle(
+                color: context.appColors.textMuted,
+                fontSize: 12,
+              ),
+            ),
           )
         else
-          ...list.map((wt) => _buildWorktreeItem(
-              context, state, workerId, repoPath, wt)),
+          ...list.map(
+            (wt) => _buildWorktreeItem(context, state, workerId, repoPath, wt),
+          ),
         const Divider(height: 1),
       ],
     );
   }
 
-  Widget _buildWorktreeItem(BuildContext context, AppState state,
-      String workerId, String repoPath, Map<String, dynamic> wt) {
+  Widget _buildWorktreeItem(
+    BuildContext context,
+    AppState state,
+    String workerId,
+    String repoPath,
+    Map<String, dynamic> wt,
+  ) {
     final name = wt['name'] as String? ?? '';
     final branch = wt['branch'] as String? ?? '';
     final base = wt['base'] as String? ?? 'main';
@@ -275,16 +326,23 @@ class _WorktreeListPanelState extends State<WorktreeListPanel> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(name,
-                    style: TextStyle(
-                        color: context.appColors.textPrimary,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500),
-                    overflow: TextOverflow.ellipsis),
-                Text('$branch → $base',
-                    style: TextStyle(
-                        color: context.appColors.textMuted, fontSize: 11),
-                    overflow: TextOverflow.ellipsis),
+                Text(
+                  name,
+                  style: TextStyle(
+                    color: context.appColors.textPrimary,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+                Text(
+                  '$branch → $base',
+                  style: TextStyle(
+                    color: context.appColors.textMuted,
+                    fontSize: 11,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
               ],
             ),
           ),
@@ -313,7 +371,9 @@ class _WorktreeListPanelState extends State<WorktreeListPanel> {
   // -------------------------------------------------------------------------
 
   Future<_CreateParams?> _showCreateDialog(
-      BuildContext context, String repoPath) async {
+    BuildContext context,
+    String repoPath,
+  ) async {
     final branchCtrl = TextEditingController();
     final baseCtrl = TextEditingController(text: 'main');
     final formKey = GlobalKey<FormState>();
@@ -330,8 +390,9 @@ class _WorktreeListPanelState extends State<WorktreeListPanel> {
               TextFormField(
                 controller: branchCtrl,
                 decoration: const InputDecoration(
-                    labelText: 'Branch',
-                    hintText: 'feature/PROJ-123/description'),
+                  labelText: 'Branch',
+                  hintText: 'feature/PROJ-123/description',
+                ),
                 validator: (v) =>
                     (v == null || v.trim().isEmpty) ? 'Required' : null,
                 autofocus: true,
@@ -348,16 +409,19 @@ class _WorktreeListPanelState extends State<WorktreeListPanel> {
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel')),
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
           TextButton(
             onPressed: () {
               if (formKey.currentState!.validate()) {
                 Navigator.pop(
-                    ctx,
-                    _CreateParams(
-                        branch: branchCtrl.text.trim(),
-                        base: baseCtrl.text.trim()));
+                  ctx,
+                  _CreateParams(
+                    branch: branchCtrl.text.trim(),
+                    base: baseCtrl.text.trim(),
+                  ),
+                );
               }
             },
             child: const Text('Create'),
@@ -379,8 +443,7 @@ class _WorktreeListPanelState extends State<WorktreeListPanel> {
           key: formKey,
           child: TextFormField(
             controller: msgCtrl,
-            decoration:
-                const InputDecoration(labelText: 'Commit message'),
+            decoration: const InputDecoration(labelText: 'Commit message'),
             validator: (v) =>
                 (v == null || v.trim().isEmpty) ? 'Required' : null,
             autofocus: true,
@@ -389,8 +452,9 @@ class _WorktreeListPanelState extends State<WorktreeListPanel> {
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel')),
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
           TextButton(
             onPressed: () {
               if (formKey.currentState!.validate()) {
@@ -410,15 +474,16 @@ class _WorktreeListPanelState extends State<WorktreeListPanel> {
       builder: (ctx) => AlertDialog(
         title: const Text('Remove Worktree'),
         content: Text(
-            'Remove "$name" and delete its branch? This cannot be undone.'),
+          'Remove "$name" and delete its branch? This cannot be undone.',
+        ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel')),
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            style:
-                TextButton.styleFrom(foregroundColor: Colors.red),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
             child: const Text('Remove'),
           ),
         ],

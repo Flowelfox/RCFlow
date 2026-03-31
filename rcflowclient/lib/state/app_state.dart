@@ -56,7 +56,8 @@ class AppState extends ChangeNotifier implements PaneHost {
   @override
   String? get defaultWorkerId {
     // Return explicitly set default, or first connected worker
-    if (_defaultWorkerId != null && _workers[_defaultWorkerId]?.isConnected == true) {
+    if (_defaultWorkerId != null &&
+        _workers[_defaultWorkerId]?.isConnected == true) {
       return _defaultWorkerId;
     }
     for (final w in _workers.values) {
@@ -108,7 +109,11 @@ class AppState extends ChangeNotifier implements PaneHost {
 
   // --- Appearance settings (need notifyListeners for reactive rebuild) ---
 
-  void updateAppearance({String? themeMode, String? fontSize, bool? compactMode}) {
+  void updateAppearance({
+    String? themeMode,
+    String? fontSize,
+    bool? compactMode,
+  }) {
     if (themeMode != null) _settings.themeMode = themeMode;
     if (fontSize != null) _settings.fontSize = fontSize;
     if (compactMode != null) _settings.compactMode = compactMode;
@@ -196,7 +201,10 @@ class AppState extends ChangeNotifier implements PaneHost {
   }
 
   Future<void> renameSessionDirect(
-      String sessionId, String workerId, String newTitle) async {
+    String sessionId,
+    String workerId,
+    String newTitle,
+  ) async {
     final title = newTitle.trim().isEmpty ? null : newTitle.trim();
     try {
       await _wsForSession(workerId)?.renameSession(sessionId, title);
@@ -234,8 +242,7 @@ class AppState extends ChangeNotifier implements PaneHost {
   GlobalKey terminalPaneKey(String paneId) =>
       _terminalPaneKeys.putIfAbsent(paneId, () => GlobalKey());
 
-  PaneType getPaneType(String paneId) =>
-      _paneTypes[paneId] ?? PaneType.chat;
+  PaneType getPaneType(String paneId) => _paneTypes[paneId] ?? PaneType.chat;
 
   /// Find the terminal session info attached to a given pane.
   TerminalSessionInfo? getTerminalPaneInfo(String paneId) {
@@ -322,7 +329,11 @@ class AppState extends ChangeNotifier implements PaneHost {
         .firstWhere((w) => w.id == workerId, orElse: () => _workerConfigs.first)
         .name;
     final existing = _tasks[taskId];
-    final updated = TaskInfo.fromJson(msg, workerId: workerId, workerName: workerName);
+    final updated = TaskInfo.fromJson(
+      msg,
+      workerId: workerId,
+      workerName: workerName,
+    );
     _tasks[taskId] = updated;
 
     // N3: Task created (new task ID)
@@ -414,7 +425,11 @@ class AppState extends ChangeNotifier implements PaneHost {
     final workerName = _workerConfigs
         .firstWhere((w) => w.id == workerId, orElse: () => _workerConfigs.first)
         .name;
-    final updated = ArtifactInfo.fromJson(msg, workerId: workerId, workerName: workerName);
+    final updated = ArtifactInfo.fromJson(
+      msg,
+      workerId: workerId,
+      workerName: workerName,
+    );
     _artifacts[artifactId] = updated;
     notifyListeners();
   }
@@ -441,16 +456,19 @@ class AppState extends ChangeNotifier implements PaneHost {
   /// Populated by [ProjectPanel] after each successful fetch so that reopening
   /// the panel shows the last-known data immediately while a fresh fetch runs.
   final Map<
-      String,
-      ({
-        List<Map<String, dynamic>>? worktrees,
-        List<Map<String, dynamic>>? artifacts
-      })> _projectDataCache = {};
+    String,
+    ({
+      List<Map<String, dynamic>>? worktrees,
+      List<Map<String, dynamic>>? artifacts,
+    })
+  >
+  _projectDataCache = {};
 
   ({
     List<Map<String, dynamic>>? worktrees,
-    List<Map<String, dynamic>>? artifacts
-  })? getProjectDataCache(String key) => _projectDataCache[key];
+    List<Map<String, dynamic>>? artifacts,
+  })?
+  getProjectDataCache(String key) => _projectDataCache[key];
 
   void setProjectDataCache(
     String key, {
@@ -534,16 +552,16 @@ class AppState extends ChangeNotifier implements PaneHost {
 
   /// All Linear issues linked to the given task, sorted by updatedAt descending.
   List<LinearIssueInfo> linearIssuesForTask(String taskId) {
-    final result =
-        _linearIssues.values.where((i) => i.taskId == taskId).toList();
+    final result = _linearIssues.values
+        .where((i) => i.taskId == taskId)
+        .toList();
     result.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
     return result;
   }
 
   /// All Linear issues not yet linked to any task, sorted by updatedAt descending.
   List<LinearIssueInfo> get unlinkedLinearIssues {
-    final result =
-        _linearIssues.values.where((i) => i.taskId == null).toList();
+    final result = _linearIssues.values.where((i) => i.taskId == null).toList();
     result.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
     return result;
   }
@@ -570,7 +588,11 @@ class AppState extends ChangeNotifier implements PaneHost {
     final workerName = _workerConfigs
         .firstWhere((w) => w.id == workerId, orElse: () => _workerConfigs.first)
         .name;
-    final updated = LinearIssueInfo.fromJson(msg, workerId: workerId, workerName: workerName);
+    final updated = LinearIssueInfo.fromJson(
+      msg,
+      workerId: workerId,
+      workerName: workerName,
+    );
     _linearIssues[issueId] = updated;
     notifyListeners();
   }
@@ -785,9 +807,9 @@ class AppState extends ChangeNotifier implements PaneHost {
   int get totalMessageCount => hasNoPanes ? 0 : activePane.totalMessageCount;
 
   AppState({required SettingsService settings})
-      : _settings = settings,
-        _splitRoot = const PaneLeaf('pane_0'),
-        _activePaneId = 'pane_0' {
+    : _settings = settings,
+      _splitRoot = const PaneLeaf('pane_0'),
+      _activePaneId = 'pane_0' {
     _soundService = NotificationSoundService(settings: _settings);
     _notificationService = NotificationService();
     _hotkeyService = HotkeyService(settings: _settings);
@@ -878,7 +900,7 @@ class AppState extends ChangeNotifier implements PaneHost {
     // N5: Lost connection (was connected, now disconnected or reconnecting)
     if (prev == WorkerConnectionStatus.connected &&
         (curr == WorkerConnectionStatus.disconnected ||
-         curr == WorkerConnectionStatus.reconnecting)) {
+            curr == WorkerConnectionStatus.reconnecting)) {
       _notificationService.show(
         level: NotificationLevel.error,
         title: 'Lost Connection',
@@ -904,7 +926,8 @@ class AppState extends ChangeNotifier implements PaneHost {
       _notificationService.show(
         level: NotificationLevel.error,
         title: 'Reconnection Failed',
-        body: 'Could not reconnect to $name after ${WorkerConnection.maxRetries} attempts',
+        body:
+            'Could not reconnect to $name after ${WorkerConnection.maxRetries} attempts',
       );
       return;
     }
@@ -958,7 +981,9 @@ class AppState extends ChangeNotifier implements PaneHost {
           worker.clearPendingAutoLoad();
           final exists = worker.sessions.any((s) => s.sessionId == pendingId);
           if (exists) {
-            Future.microtask(() => activePane.switchSession(pendingId, recordHistory: false));
+            Future.microtask(
+              () => activePane.switchSession(pendingId, recordHistory: false),
+            );
           }
         }
       }
@@ -1004,7 +1029,10 @@ class AppState extends ChangeNotifier implements PaneHost {
 
     final old = _workerConfigs[idx];
     final needsReconnect =
-        old.host != config.host || old.port != config.port || old.apiKey != config.apiKey || old.useSSL != config.useSSL;
+        old.host != config.host ||
+        old.port != config.port ||
+        old.apiKey != config.apiKey ||
+        old.useSSL != config.useSSL;
 
     _workerConfigs[idx] = config;
     _settings.workers = _workerConfigs;
@@ -1146,7 +1174,9 @@ class AppState extends ChangeNotifier implements PaneHost {
   String? defaultAgentForWorker(String? workerId) {
     if (workerId == null) return null;
     try {
-      final agent = _workerConfigs.firstWhere((c) => c.id == workerId).defaultAgent;
+      final agent = _workerConfigs
+          .firstWhere((c) => c.id == workerId)
+          .defaultAgent;
       if (agent == null) return null;
       return kAgentMentionNames[agent] ?? agent;
     } catch (_) {
@@ -1163,8 +1193,12 @@ class AppState extends ChangeNotifier implements PaneHost {
   }
 
   @override
-  void addSystemMessageToPane(String paneId, String text,
-      {bool isError = false, String? label}) {
+  void addSystemMessageToPane(
+    String paneId,
+    String text, {
+    bool isError = false,
+    String? label,
+  }) {
     final pane = _panes[paneId];
     if (pane == null) return;
     pane.addSystemMessage(
@@ -1196,8 +1230,7 @@ class AppState extends ChangeNotifier implements PaneHost {
 
   /// Split [paneId] using a [DropZone] and immediately switch the new pane
   /// to [sessionId].
-  void splitPaneWithSession(
-      String paneId, DropZone zone, String sessionId) {
+  void splitPaneWithSession(String paneId, DropZone zone, String sessionId) {
     if (_splitRoot == null || !_panes.containsKey(paneId)) return;
     final newId = 'pane_${_nextPaneId++}';
     final newPane = PaneState(paneId: newId, host: this)
@@ -1257,7 +1290,11 @@ class AppState extends ChangeNotifier implements PaneHost {
         linearIssueId: pane.linearIssueId,
       );
       // Only record if the pane had meaningful state
-      if (record.sessionId != null || record.terminalId != null || record.taskId != null || record.artifactId != null || record.linearIssueId != null) {
+      if (record.sessionId != null ||
+          record.terminalId != null ||
+          record.taskId != null ||
+          record.artifactId != null ||
+          record.linearIssueId != null) {
         _closedPaneHistory.add(record);
         if (_closedPaneHistory.length > _maxClosedPaneHistory) {
           _closedPaneHistory.removeAt(0);
@@ -1343,7 +1380,8 @@ class AppState extends ChangeNotifier implements PaneHost {
     }
 
     // Linear issue pane: reopen if the issue still exists
-    if (record.paneType == PaneType.linearIssue && record.linearIssueId != null) {
+    if (record.paneType == PaneType.linearIssue &&
+        record.linearIssueId != null) {
       if (_linearIssues.containsKey(record.linearIssueId)) {
         if (hasNoPanes) {
           openLinearIssueInPane(record.linearIssueId!);
@@ -1555,10 +1593,7 @@ class AppState extends ChangeNotifier implements PaneHost {
       final worker = _workers[info.workerId];
       if (worker != null) {
         final service = worker.terminalService;
-        service.sendControl({
-          'type': 'close',
-          'terminal_id': terminalId,
-        });
+        service.sendControl({'type': 'close', 'terminal_id': terminalId});
       }
     }
 
@@ -1586,8 +1621,7 @@ class AppState extends ChangeNotifier implements PaneHost {
   }
 
   /// Split a pane with a terminal via drag-and-drop.
-  void splitPaneWithTerminal(
-      String paneId, DropZone zone, String terminalId) {
+  void splitPaneWithTerminal(String paneId, DropZone zone, String terminalId) {
     if (_splitRoot == null || !_panes.containsKey(paneId)) return;
     final info = _terminalSessions[terminalId];
     if (info == null) return;
@@ -1663,8 +1697,9 @@ class AppState extends ChangeNotifier implements PaneHost {
       case 'error':
         activePane.finalizeStream();
         activePane.addSystemMessage(
-            msg['content'] as String? ?? 'Unknown error',
-            isError: true);
+          msg['content'] as String? ?? 'Unknown error',
+          isError: true,
+        );
         break;
     }
   }
@@ -1747,7 +1782,8 @@ class AppState extends ChangeNotifier implements PaneHost {
     final sessionId = msg['session_id'] as String?;
     final muted = sessionId != null && _soundMutedSessions.contains(sessionId);
     if (!muted) {
-      final playForComplete = _settings.soundOnCompleteEnabled &&
+      final playForComplete =
+          _settings.soundOnCompleteEnabled &&
           _completionSoundTypes.contains(type);
       final playForMessage =
           _settings.soundEnabled && _messageSoundTypes.contains(type);
@@ -2007,23 +2043,27 @@ class AppState extends ChangeNotifier implements PaneHost {
         if (branch.axis == SplitAxis.horizontal) {
           final splitX = bounds.left + bounds.width * branch.ratio;
           _computePaneRects(
-              branch.first,
-              Rect.fromLTRB(bounds.left, bounds.top, splitX, bounds.bottom),
-              out);
+            branch.first,
+            Rect.fromLTRB(bounds.left, bounds.top, splitX, bounds.bottom),
+            out,
+          );
           _computePaneRects(
-              branch.second,
-              Rect.fromLTRB(splitX, bounds.top, bounds.right, bounds.bottom),
-              out);
+            branch.second,
+            Rect.fromLTRB(splitX, bounds.top, bounds.right, bounds.bottom),
+            out,
+          );
         } else {
           final splitY = bounds.top + bounds.height * branch.ratio;
           _computePaneRects(
-              branch.first,
-              Rect.fromLTRB(bounds.left, bounds.top, bounds.right, splitY),
-              out);
+            branch.first,
+            Rect.fromLTRB(bounds.left, bounds.top, bounds.right, splitY),
+            out,
+          );
           _computePaneRects(
-              branch.second,
-              Rect.fromLTRB(bounds.left, splitY, bounds.right, bounds.bottom),
-              out);
+            branch.second,
+            Rect.fromLTRB(bounds.left, splitY, bounds.right, bounds.bottom),
+            out,
+          );
         }
     }
   }
@@ -2062,18 +2102,30 @@ class AppState extends ChangeNotifier implements PaneHost {
 
 // Aliases to avoid name collision with the splitPane method on AppState
 SplitNode treeSplitPane(
-        SplitNode node, String targetId, String newPaneId, SplitAxis axis) =>
-    splitPane(node, targetId, newPaneId, axis);
+  SplitNode node,
+  String targetId,
+  String newPaneId,
+  SplitAxis axis,
+) => splitPane(node, targetId, newPaneId, axis);
 
 SplitNode? treeClosePane(SplitNode node, String targetId) =>
     closePane(node, targetId);
 
 int treePaneCount(SplitNode node) => paneCount(node);
 
-SplitNode treeSplitPaneAtPosition(SplitNode node, String targetId,
-        String newPaneId, SplitAxis axis, {required bool insertFirst}) =>
-    splitPaneAtPosition(node, targetId, newPaneId, axis,
-        insertFirst: insertFirst);
+SplitNode treeSplitPaneAtPosition(
+  SplitNode node,
+  String targetId,
+  String newPaneId,
+  SplitAxis axis, {
+  required bool insertFirst,
+}) => splitPaneAtPosition(
+  node,
+  targetId,
+  newPaneId,
+  axis,
+  insertFirst: insertFirst,
+);
 
 enum _ToastCategory { connection, task, session }
 

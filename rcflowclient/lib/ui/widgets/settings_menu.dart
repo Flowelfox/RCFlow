@@ -30,9 +30,9 @@ void showSettingsMenu(BuildContext context) {
       builder: (_) => const _DesktopSettingsDialog(),
     );
   } else if (Platform.isAndroid) {
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => _AndroidSettingsPage()),
-    );
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => _AndroidSettingsPage()));
   } else {
     showModalBottomSheet(
       context: context,
@@ -71,7 +71,9 @@ class _DesktopSettingsDialogState extends State<_DesktopSettingsDialog> {
               width: 160,
               decoration: BoxDecoration(
                 color: context.appColors.bgBase,
-                borderRadius: BorderRadius.horizontal(left: Radius.circular(16)),
+                borderRadius: BorderRadius.horizontal(
+                  left: Radius.circular(16),
+                ),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -100,9 +102,7 @@ class _DesktopSettingsDialogState extends State<_DesktopSettingsDialog> {
             Expanded(
               child: Padding(
                 padding: const EdgeInsets.all(24),
-                child: SingleChildScrollView(
-                  child: _buildSection(_selected),
-                ),
+                child: SingleChildScrollView(child: _buildSection(_selected)),
               ),
             ),
           ],
@@ -114,8 +114,8 @@ class _DesktopSettingsDialogState extends State<_DesktopSettingsDialog> {
   Widget _buildSection(_Section section) {
     return switch (section) {
       _Section.workers => _WorkersSection(
-          onClose: () => Navigator.of(context).pop(),
-        ),
+        onClose: () => Navigator.of(context).pop(),
+      ),
       _Section.appearance => const _AppearanceSection(),
       _Section.hotkeys => const _HotkeysSection(),
       _Section.notifications => const _NotificationsSection(),
@@ -157,14 +157,20 @@ class _SidebarItem extends StatelessWidget {
             padding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             child: Row(
               children: [
-                Icon(icon,
-                    size: 18,
-                    color: selected ? context.appColors.accentLight : context.appColors.textMuted),
+                Icon(
+                  icon,
+                  size: 18,
+                  color: selected
+                      ? context.appColors.accentLight
+                      : context.appColors.textMuted,
+                ),
                 SizedBox(width: 10),
                 Text(
                   label,
                   style: TextStyle(
-                    color: selected ? context.appColors.textPrimary : context.appColors.textSecondary,
+                    color: selected
+                        ? context.appColors.textPrimary
+                        : context.appColors.textSecondary,
                     fontSize: 14,
                     fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
                   ),
@@ -227,15 +233,10 @@ class _MobileSettingsSheet extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 24),
-              _WorkersSection(
-                onClose: () => Navigator.of(ctx).pop(),
-              ),
+              _WorkersSection(onClose: () => Navigator.of(ctx).pop()),
               _SectionDivider(),
               _AppearanceSection(),
-              if (_isDesktop) ...[
-                _SectionDivider(),
-                _HotkeysSection(),
-              ],
+              if (_isDesktop) ...[_SectionDivider(), _HotkeysSection()],
               _SectionDivider(),
               _NotificationsSection(),
               _SectionDivider(),
@@ -282,9 +283,7 @@ class _AndroidSettingsPage extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            _WorkersSection(
-              onClose: () => Navigator.of(context).pop(),
-            ),
+            _WorkersSection(onClose: () => Navigator.of(context).pop()),
             _SectionDivider(),
             _AppearanceSection(),
             _SectionDivider(),
@@ -383,7 +382,9 @@ class _WorkersSection extends StatelessWidget {
                         height: 10,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          color: conn > 0 ? context.appColors.successText : context.appColors.textMuted,
+                          color: conn > 0
+                              ? context.appColors.successText
+                              : context.appColors.textMuted,
                         ),
                       ),
                       SizedBox(width: 10),
@@ -431,13 +432,16 @@ class _WorkersSection extends StatelessWidget {
                           }
                         },
                         icon: Icon(Icons.add_rounded, size: 18),
-                        label: Text('Add Worker',
-                            style: TextStyle(fontSize: 13)),
+                        label: Text(
+                          'Add Worker',
+                          style: TextStyle(fontSize: 13),
+                        ),
                         style: OutlinedButton.styleFrom(
                           foregroundColor: context.appColors.textSecondary,
                           side: BorderSide(color: context.appColors.divider),
                           shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10)),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
                         ),
                       ),
                     ),
@@ -458,14 +462,19 @@ class _WorkersSection extends StatelessWidget {
                             });
                           },
                           icon: Icon(Icons.settings_outlined, size: 18),
-                          label: Text('Manage Workers',
-                              style: TextStyle(
-                                  fontSize: 14, fontWeight: FontWeight.w600)),
+                          label: Text(
+                            'Manage Workers',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
                           style: FilledButton.styleFrom(
                             backgroundColor: context.appColors.accent,
                             foregroundColor: Colors.white,
                             shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12)),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
                           ),
                         ),
                       ),
@@ -530,12 +539,14 @@ class _WorkerRow extends StatelessWidget {
             height: 28,
             child: IconButton(
               padding: EdgeInsets.zero,
-              icon: Icon(Icons.edit_outlined,
-                  color: context.appColors.textMuted, size: 16),
+              icon: Icon(
+                Icons.edit_outlined,
+                color: context.appColors.textMuted,
+                size: 16,
+              ),
               onPressed: onEdit,
               tooltip: 'Edit worker',
-              constraints: const BoxConstraints(
-                  maxWidth: 28, maxHeight: 28),
+              constraints: const BoxConstraints(maxWidth: 28, maxHeight: 28),
             ),
           ),
         ],
@@ -583,10 +594,14 @@ class _AppearanceSectionState extends State<_AppearanceSection> {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _SectionHeader(
-            title: 'Appearance', icon: Icons.palette_outlined),
-        Text('Theme',
-            style: TextStyle(color: context.appColors.textSecondary, fontSize: 13)),
+        _SectionHeader(title: 'Appearance', icon: Icons.palette_outlined),
+        Text(
+          'Theme',
+          style: TextStyle(
+            color: context.appColors.textSecondary,
+            fontSize: 13,
+          ),
+        ),
         const SizedBox(height: 8),
         _SegmentedSelector(
           options: const ['system', 'dark', 'light'],
@@ -598,8 +613,13 @@ class _AppearanceSectionState extends State<_AppearanceSection> {
           },
         ),
         SizedBox(height: 20),
-        Text('Message font size',
-            style: TextStyle(color: context.appColors.textSecondary, fontSize: 13)),
+        Text(
+          'Message font size',
+          style: TextStyle(
+            color: context.appColors.textSecondary,
+            fontSize: 13,
+          ),
+        ),
         const SizedBox(height: 8),
         _SegmentedSelector(
           options: const ['small', 'medium', 'large'],
@@ -612,10 +632,17 @@ class _AppearanceSectionState extends State<_AppearanceSection> {
         ),
         SizedBox(height: 16),
         SwitchListTile(
-          title: Text('Compact mode',
-              style: TextStyle(color: context.appColors.textPrimary, fontSize: 15)),
-          subtitle: Text('Reduce padding in message bubbles',
-              style: TextStyle(color: context.appColors.textMuted, fontSize: 12)),
+          title: Text(
+            'Compact mode',
+            style: TextStyle(
+              color: context.appColors.textPrimary,
+              fontSize: 15,
+            ),
+          ),
+          subtitle: Text(
+            'Reduce padding in message bubbles',
+            style: TextStyle(color: context.appColors.textMuted, fontSize: 12),
+          ),
           value: _compactMode,
           activeTrackColor: context.appColors.accent,
           contentPadding: EdgeInsets.zero,
@@ -713,13 +740,21 @@ class _NotificationsSectionState extends State<_NotificationsSection> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _SectionHeader(
-            title: 'Notifications', icon: Icons.notifications_outlined),
+          title: 'Notifications',
+          icon: Icons.notifications_outlined,
+        ),
         SwitchListTile(
-          title: Text('Sound when done',
-              style: TextStyle(color: context.appColors.textPrimary, fontSize: 15)),
+          title: Text(
+            'Sound when done',
+            style: TextStyle(
+              color: context.appColors.textPrimary,
+              fontSize: 15,
+            ),
+          ),
           subtitle: Text(
-              'Play a sound when work finishes and waiting for input',
-              style: TextStyle(color: context.appColors.textMuted, fontSize: 12)),
+            'Play a sound when work finishes and waiting for input',
+            style: TextStyle(color: context.appColors.textMuted, fontSize: 12),
+          ),
           value: _soundOnCompleteEnabled,
           activeTrackColor: context.appColors.accent,
           contentPadding: EdgeInsets.zero,
@@ -729,10 +764,17 @@ class _NotificationsSectionState extends State<_NotificationsSection> {
           },
         ),
         SwitchListTile(
-          title: Text('Sound on message',
-              style: TextStyle(color: context.appColors.textPrimary, fontSize: 15)),
-          subtitle: Text('Play a sound when a message arrives',
-              style: TextStyle(color: context.appColors.textMuted, fontSize: 12)),
+          title: Text(
+            'Sound on message',
+            style: TextStyle(
+              color: context.appColors.textPrimary,
+              fontSize: 15,
+            ),
+          ),
+          subtitle: Text(
+            'Play a sound when a message arrives',
+            style: TextStyle(color: context.appColors.textMuted, fontSize: 12),
+          ),
           value: _soundEnabled,
           activeTrackColor: context.appColors.accent,
           contentPadding: EdgeInsets.zero,
@@ -743,8 +785,13 @@ class _NotificationsSectionState extends State<_NotificationsSection> {
         ),
         if (_anySoundEnabled) ...[
           SizedBox(height: 12),
-          Text('Notification sound',
-              style: TextStyle(color: context.appColors.textSecondary, fontSize: 13)),
+          Text(
+            'Notification sound',
+            style: TextStyle(
+              color: context.appColors.textSecondary,
+              fontSize: 13,
+            ),
+          ),
           SizedBox(height: 8),
           Container(
             decoration: BoxDecoration(
@@ -784,8 +831,11 @@ class _NotificationsSectionState extends State<_NotificationsSection> {
                         ? () => _soundService?.previewSound('custom')
                         : null,
                     trailing: IconButton(
-                      icon: Icon(Icons.folder_open,
-                          color: context.appColors.textMuted, size: 20),
+                      icon: Icon(
+                        Icons.folder_open,
+                        color: context.appColors.textMuted,
+                        size: 20,
+                      ),
                       onPressed: () => _pickCustomSound(settings),
                       tooltip: 'Browse...',
                     ),
@@ -798,16 +848,29 @@ class _NotificationsSectionState extends State<_NotificationsSection> {
             SizedBox(height: 6),
             Text(
               _customSoundError!,
-              style: TextStyle(color: context.appColors.errorText, fontSize: 12),
+              style: TextStyle(
+                color: context.appColors.errorText,
+                fontSize: 12,
+              ),
             ),
           ],
         ],
         if (Platform.isAndroid || Platform.isIOS)
           SwitchListTile(
-            title: Text('Vibrate on message',
-                style: TextStyle(color: context.appColors.textPrimary, fontSize: 15)),
-            subtitle: Text('Vibrate when a message arrives',
-                style: TextStyle(color: context.appColors.textMuted, fontSize: 12)),
+            title: Text(
+              'Vibrate on message',
+              style: TextStyle(
+                color: context.appColors.textPrimary,
+                fontSize: 15,
+              ),
+            ),
+            subtitle: Text(
+              'Vibrate when a message arrives',
+              style: TextStyle(
+                color: context.appColors.textMuted,
+                fontSize: 12,
+              ),
+            ),
             value: _vibrateEnabled,
             activeTrackColor: context.appColors.accent,
             contentPadding: EdgeInsets.zero,
@@ -817,14 +880,26 @@ class _NotificationsSectionState extends State<_NotificationsSection> {
             },
           ),
         const SizedBox(height: 20),
-        Text('Toast Notifications',
-            style: TextStyle(color: context.appColors.textSecondary, fontSize: 13)),
+        Text(
+          'Toast Notifications',
+          style: TextStyle(
+            color: context.appColors.textSecondary,
+            fontSize: 13,
+          ),
+        ),
         const SizedBox(height: 4),
         SwitchListTile(
-          title: Text('Enable toast notifications',
-              style: TextStyle(color: context.appColors.textPrimary, fontSize: 15)),
-          subtitle: Text('Show popup alerts for important events',
-              style: TextStyle(color: context.appColors.textMuted, fontSize: 12)),
+          title: Text(
+            'Enable toast notifications',
+            style: TextStyle(
+              color: context.appColors.textPrimary,
+              fontSize: 15,
+            ),
+          ),
+          subtitle: Text(
+            'Show popup alerts for important events',
+            style: TextStyle(color: context.appColors.textMuted, fontSize: 12),
+          ),
           value: _toastEnabled,
           activeTrackColor: context.appColors.accent,
           contentPadding: EdgeInsets.zero,
@@ -835,10 +910,20 @@ class _NotificationsSectionState extends State<_NotificationsSection> {
         ),
         if (_toastEnabled) ...[
           SwitchListTile(
-            title: Text('Background session alerts',
-                style: TextStyle(color: context.appColors.textPrimary, fontSize: 15)),
-            subtitle: Text('Sessions waiting for input, errors, completions',
-                style: TextStyle(color: context.appColors.textMuted, fontSize: 12)),
+            title: Text(
+              'Background session alerts',
+              style: TextStyle(
+                color: context.appColors.textPrimary,
+                fontSize: 15,
+              ),
+            ),
+            subtitle: Text(
+              'Sessions waiting for input, errors, completions',
+              style: TextStyle(
+                color: context.appColors.textMuted,
+                fontSize: 12,
+              ),
+            ),
             value: _toastBackgroundSessions,
             activeTrackColor: context.appColors.accent,
             contentPadding: EdgeInsets.zero,
@@ -848,10 +933,20 @@ class _NotificationsSectionState extends State<_NotificationsSection> {
             },
           ),
           SwitchListTile(
-            title: Text('Task updates',
-                style: TextStyle(color: context.appColors.textPrimary, fontSize: 15)),
-            subtitle: Text('Task created or status changed',
-                style: TextStyle(color: context.appColors.textMuted, fontSize: 12)),
+            title: Text(
+              'Task updates',
+              style: TextStyle(
+                color: context.appColors.textPrimary,
+                fontSize: 15,
+              ),
+            ),
+            subtitle: Text(
+              'Task created or status changed',
+              style: TextStyle(
+                color: context.appColors.textMuted,
+                fontSize: 12,
+              ),
+            ),
             value: _toastTasks,
             activeTrackColor: context.appColors.accent,
             contentPadding: EdgeInsets.zero,
@@ -861,10 +956,20 @@ class _NotificationsSectionState extends State<_NotificationsSection> {
             },
           ),
           SwitchListTile(
-            title: Text('Connection alerts',
-                style: TextStyle(color: context.appColors.textPrimary, fontSize: 15)),
-            subtitle: Text('Worker connect/disconnect/reconnect events',
-                style: TextStyle(color: context.appColors.textMuted, fontSize: 12)),
+            title: Text(
+              'Connection alerts',
+              style: TextStyle(
+                color: context.appColors.textPrimary,
+                fontSize: 15,
+              ),
+            ),
+            subtitle: Text(
+              'Worker connect/disconnect/reconnect events',
+              style: TextStyle(
+                color: context.appColors.textMuted,
+                fontSize: 12,
+              ),
+            ),
             value: _toastConnections,
             activeTrackColor: context.appColors.accent,
             contentPadding: EdgeInsets.zero,
@@ -910,7 +1015,9 @@ class _SoundOption extends StatelessWidget {
                   selected
                       ? Icons.radio_button_checked
                       : Icons.radio_button_unchecked,
-                  color: selected ? context.appColors.accentLight : context.appColors.textMuted,
+                  color: selected
+                      ? context.appColors.accentLight
+                      : context.appColors.textMuted,
                   size: 20,
                 ),
                 SizedBox(width: 10),
@@ -918,7 +1025,9 @@ class _SoundOption extends StatelessWidget {
                   child: Text(
                     label,
                     style: TextStyle(
-                      color: selected ? context.appColors.textPrimary : context.appColors.textSecondary,
+                      color: selected
+                          ? context.appColors.textPrimary
+                          : context.appColors.textSecondary,
                       fontSize: 14,
                     ),
                     overflow: TextOverflow.ellipsis,
@@ -927,19 +1036,22 @@ class _SoundOption extends StatelessWidget {
                 ?trailing,
                 if (onPreview != null)
                   IconButton(
-                    icon: Icon(Icons.play_arrow_rounded,
-                        color: context.appColors.textMuted, size: 22),
+                    icon: Icon(
+                      Icons.play_arrow_rounded,
+                      color: context.appColors.textMuted,
+                      size: 22,
+                    ),
                     onPressed: onPreview,
                     tooltip: 'Preview',
-                    constraints:
-                        BoxConstraints(minWidth: 36, minHeight: 36),
+                    constraints: BoxConstraints(minWidth: 36, minHeight: 36),
                     padding: EdgeInsets.zero,
                   ),
               ],
             ),
           ),
         ),
-        if (!isLast) Divider(color: context.appColors.divider, height: 1, indent: 42),
+        if (!isLast)
+          Divider(color: context.appColors.divider, height: 1, indent: 42),
       ],
     );
   }
@@ -1040,10 +1152,13 @@ class _HotkeysSectionState extends State<_HotkeysSection> {
               foregroundColor: context.appColors.textSecondary,
               side: BorderSide(color: context.appColors.divider),
               shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10)),
+                borderRadius: BorderRadius.circular(10),
+              ),
             ),
-            child: Text('Reset All to Defaults',
-                style: TextStyle(fontSize: 12)),
+            child: Text(
+              'Reset All to Defaults',
+              style: TextStyle(fontSize: 12),
+            ),
           ),
         ),
       ],
@@ -1114,8 +1229,10 @@ class _HotkeyRow extends StatelessWidget {
                   borderRadius: BorderRadius.circular(6),
                   onTap: onStartRecording,
                   child: Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
                     decoration: BoxDecoration(
                       color: context.appColors.bgElevated,
                       borderRadius: BorderRadius.circular(6),
@@ -1139,12 +1256,16 @@ class _HotkeyRow extends StatelessWidget {
                     : IconButton(
                         padding: EdgeInsets.zero,
                         iconSize: 14,
-                        icon: Icon(Icons.restart_alt_rounded,
-                            color: context.appColors.textMuted),
+                        icon: Icon(
+                          Icons.restart_alt_rounded,
+                          color: context.appColors.textMuted,
+                        ),
                         tooltip: 'Reset to default',
                         onPressed: onReset,
-                        constraints:
-                            const BoxConstraints(maxWidth: 24, maxHeight: 24),
+                        constraints: const BoxConstraints(
+                          maxWidth: 24,
+                          maxHeight: 24,
+                        ),
                       ),
               ),
             ],
@@ -1225,23 +1346,29 @@ class _HotkeyRecorderState extends State<_HotkeyRecorder> {
     }
 
     final pressed = HardwareKeyboard.instance.logicalKeysPressed;
-    final isCtrl = pressed.contains(LogicalKeyboardKey.controlLeft) ||
+    final isCtrl =
+        pressed.contains(LogicalKeyboardKey.controlLeft) ||
         pressed.contains(LogicalKeyboardKey.controlRight);
-    final isAlt = pressed.contains(LogicalKeyboardKey.altLeft) ||
+    final isAlt =
+        pressed.contains(LogicalKeyboardKey.altLeft) ||
         pressed.contains(LogicalKeyboardKey.altRight);
-    final isShift = pressed.contains(LogicalKeyboardKey.shiftLeft) ||
+    final isShift =
+        pressed.contains(LogicalKeyboardKey.shiftLeft) ||
         pressed.contains(LogicalKeyboardKey.shiftRight);
-    final isMeta = pressed.contains(LogicalKeyboardKey.metaLeft) ||
+    final isMeta =
+        pressed.contains(LogicalKeyboardKey.metaLeft) ||
         pressed.contains(LogicalKeyboardKey.metaRight);
 
-    widget.onNewBinding(HotkeyBinding(
-      action: widget.action,
-      ctrl: isCtrl,
-      alt: isAlt,
-      shift: isShift,
-      meta: isMeta,
-      key: event.logicalKey,
-    ));
+    widget.onNewBinding(
+      HotkeyBinding(
+        action: widget.action,
+        ctrl: isCtrl,
+        alt: isAlt,
+        shift: isShift,
+        meta: isMeta,
+        key: event.logicalKey,
+      ),
+    );
 
     return KeyEventResult.handled;
   }
@@ -1256,10 +1383,7 @@ class _HotkeyRecorderState extends State<_HotkeyRecorder> {
         decoration: BoxDecoration(
           color: context.appColors.bgElevated,
           borderRadius: BorderRadius.circular(6),
-          border: Border.all(
-            color: context.appColors.accent,
-            width: 1.5,
-          ),
+          border: Border.all(color: context.appColors.accent, width: 1.5),
         ),
         child: Text(
           'Press keys...',
@@ -1324,13 +1448,19 @@ class _AboutSectionState extends State<_AboutSection> {
               SizedBox(height: 4),
               Text(
                 'v$_version',
-                style: TextStyle(color: context.appColors.accentLight, fontSize: 14),
+                style: TextStyle(
+                  color: context.appColors.accentLight,
+                  fontSize: 14,
+                ),
               ),
               SizedBox(height: 12),
               Text(
                 'A client for the RCFlow server — execute actions on your '
                 'host machine via natural language prompts.',
-                style: TextStyle(color: context.appColors.textSecondary, fontSize: 13),
+                style: TextStyle(
+                  color: context.appColors.textSecondary,
+                  fontSize: 13,
+                ),
               ),
               SizedBox(height: 16),
               Row(
@@ -1341,8 +1471,9 @@ class _AboutSectionState extends State<_AboutSection> {
                       final nav = Navigator.of(context);
                       nav.pop();
                       Future.delayed(const Duration(milliseconds: 200), () {
-                        if (nav.context.mounted) {
-                          showSetupWizard(nav.context);
+                        final ctx = nav.context;
+                        if (ctx.mounted) {
+                          showSetupWizard(ctx);
                         }
                       });
                     },
@@ -1352,9 +1483,12 @@ class _AboutSectionState extends State<_AboutSection> {
                       foregroundColor: context.appColors.textSecondary,
                       side: BorderSide(color: context.appColors.divider),
                       shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10)),
-                      padding:
-                          EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      padding: EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 10,
+                      ),
                     ),
                   ),
                   SizedBox(width: 8),
@@ -1369,11 +1503,14 @@ class _AboutSectionState extends State<_AboutSection> {
                       // Delayed so the dialog fully closes first. The
                       // captured overlay & settings stay valid.
                       Future.delayed(const Duration(milliseconds: 200), () {
-                        showOnboardingOverlay(
-                          overlay.context,
-                          overlay: overlay,
-                          settings: settings,
-                        );
+                        final ctx = overlay.context;
+                        if (ctx.mounted) {
+                          showOnboardingOverlay(
+                            ctx,
+                            overlay: overlay,
+                            settings: settings,
+                          );
+                        }
                       });
                     },
                     icon: Icon(Icons.tour_outlined, size: 18),
@@ -1382,9 +1519,12 @@ class _AboutSectionState extends State<_AboutSection> {
                       foregroundColor: context.appColors.textSecondary,
                       side: BorderSide(color: context.appColors.divider),
                       shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10)),
-                      padding:
-                          EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      padding: EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 10,
+                      ),
                     ),
                   ),
                 ],
@@ -1432,7 +1572,9 @@ class _SegmentedSelector extends StatelessWidget {
                   duration: Duration(milliseconds: 200),
                   padding: EdgeInsets.symmetric(vertical: 10),
                   decoration: BoxDecoration(
-                    color: selected == options[i] ? context.appColors.accent : Colors.transparent,
+                    color: selected == options[i]
+                        ? context.appColors.accent
+                        : Colors.transparent,
                     borderRadius: BorderRadius.circular(9),
                   ),
                   alignment: Alignment.center,

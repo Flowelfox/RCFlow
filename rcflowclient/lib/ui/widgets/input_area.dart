@@ -19,15 +19,49 @@ bool get _isDesktop =>
 /// Extensions allowed when the model does not support image attachments.
 /// Images (jpg, png, gif, webp) and binary formats (pdf) are excluded.
 const List<String> _kTextOnlyExtensions = [
-  'txt', 'log', 'rst', 'md', 'html', 'htm', 'css', 'csv',
-  'json', 'yaml', 'yml', 'toml', 'xml',
-  'py', 'js', 'ts', 'jsx', 'tsx', 'dart',
-  'java', 'kt', 'swift', 'go', 'rs', 'rb',
-  'c', 'cpp', 'h', 'hpp', 'cs', 'php',
-  'scss', 'less',
-  'sh', 'bash', 'zsh', 'fish', 'ps1',
-  'sql', 'graphql', 'proto',
-  'gitignore', 'env',
+  'txt',
+  'log',
+  'rst',
+  'md',
+  'html',
+  'htm',
+  'css',
+  'csv',
+  'json',
+  'yaml',
+  'yml',
+  'toml',
+  'xml',
+  'py',
+  'js',
+  'ts',
+  'jsx',
+  'tsx',
+  'dart',
+  'java',
+  'kt',
+  'swift',
+  'go',
+  'rs',
+  'rb',
+  'c',
+  'cpp',
+  'h',
+  'hpp',
+  'cs',
+  'php',
+  'scss',
+  'less',
+  'sh',
+  'bash',
+  'zsh',
+  'fish',
+  'ps1',
+  'sql',
+  'graphql',
+  'proto',
+  'gitignore',
+  'env',
 ];
 
 enum _MentionType { project, tool, file, slash }
@@ -111,9 +145,9 @@ class _InputAreaState extends State<InputArea> {
       await ws.setSessionWorktree(sessionId, path);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to set worktree: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to set worktree: $e')));
       }
     }
   }
@@ -163,10 +197,9 @@ class _InputAreaState extends State<InputArea> {
   }
 
   Future<void> _pickAttachments() async {
-    final supportsImages =
-        context.read<AppState>().workerSupportsImageAttachments(
-              context.read<PaneState>().workerId,
-            );
+    final supportsImages = context
+        .read<AppState>()
+        .workerSupportsImageAttachments(context.read<PaneState>().workerId);
     final result = await FilePicker.platform.pickFiles(
       allowMultiple: true,
       withData: true,
@@ -182,11 +215,9 @@ class _InputAreaState extends State<InputArea> {
         final name = f.name;
         final ext = f.extension?.toLowerCase() ?? '';
         final mime = _mimeForExtension(ext);
-        _pendingAttachments.add(_PendingAttachment(
-          name: name,
-          mimeType: mime,
-          bytes: bytes,
-        ));
+        _pendingAttachments.add(
+          _PendingAttachment(name: name, mimeType: mime, bytes: bytes),
+        );
       }
     });
   }
@@ -241,8 +272,12 @@ class _InputAreaState extends State<InputArea> {
     // Snapshot mention state before _checkForMention potentially dismisses it
     final prevMentionStart = _mentionStart;
     final prevMentionType = _mentionType;
-    final prevProjectSuggestions = List<Map<String, String>>.from(_projectSuggestions);
-    final prevToolSuggestions = List<Map<String, String>>.from(_toolSuggestions);
+    final prevProjectSuggestions = List<Map<String, String>>.from(
+      _projectSuggestions,
+    );
+    final prevToolSuggestions = List<Map<String, String>>.from(
+      _toolSuggestions,
+    );
 
     _checkForMention();
 
@@ -262,16 +297,25 @@ class _InputAreaState extends State<InputArea> {
                 orElse: () => {},
               );
               if (match.isNotEmpty) {
-                _confirmProjectMention(match['name']!, prevMentionStart, cursor,
-                    path: match['path']);
+                _confirmProjectMention(
+                  match['name']!,
+                  prevMentionStart,
+                  cursor,
+                  path: match['path'],
+                );
               }
             } else if (prevMentionType == _MentionType.tool) {
               final match = prevToolSuggestions.firstWhere(
-                (s) => s['mention_name']!.toLowerCase() == typedName.toLowerCase(),
+                (s) =>
+                    s['mention_name']!.toLowerCase() == typedName.toLowerCase(),
                 orElse: () => {},
               );
               if (match.isNotEmpty) {
-                _confirmToolMention(match['mention_name']!, prevMentionStart, cursor);
+                _confirmToolMention(
+                  match['mention_name']!,
+                  prevMentionStart,
+                  cursor,
+                );
               }
             }
           }
@@ -503,13 +547,21 @@ class _InputAreaState extends State<InputArea> {
     if (_mentionStart == null || _mentionType == null) return;
     // Project mentions go to the chip instead of inserting into the text field
     if (_mentionType == _MentionType.project) {
-      _confirmProjectMention(name, _mentionStart!, _controller.selection.baseOffset,
-          path: path);
+      _confirmProjectMention(
+        name,
+        _mentionStart!,
+        _controller.selection.baseOffset,
+        path: path,
+      );
       return;
     }
     // Tool mentions go to the chip instead of inserting into the text field
     if (_mentionType == _MentionType.tool) {
-      _confirmToolMention(name, _mentionStart!, _controller.selection.baseOffset);
+      _confirmToolMention(
+        name,
+        _mentionStart!,
+        _controller.selection.baseOffset,
+      );
       return;
     }
     final text = _controller.text;
@@ -575,11 +627,13 @@ class _InputAreaState extends State<InputArea> {
         return;
       }
       final results = await Future.wait(
-        toUpload.map((att) => ws.uploadAttachment(
-              bytes: att.bytes,
-              fileName: att.name,
-              mimeType: att.mimeType,
-            )),
+        toUpload.map(
+          (att) => ws.uploadAttachment(
+            bytes: att.bytes,
+            fileName: att.name,
+            mimeType: att.mimeType,
+          ),
+        ),
       );
       uploaded = [
         for (int i = 0; i < results.length; i++)
@@ -587,7 +641,7 @@ class _InputAreaState extends State<InputArea> {
             'id': results[i]['attachment_id'] as String,
             'name': toUpload[i].name,
             'mime_type': toUpload[i].mimeType,
-          }
+          },
       ];
     } catch (e) {
       // Upload failed — send text-only and surface an error in the pane
@@ -672,12 +726,10 @@ class _InputAreaState extends State<InputArea> {
     final sessionId = paneState.sessionId;
     String toolName = 'claude_code'; // default
     if (sessionId != null) {
-      final session = appState.sessions
-          .cast<dynamic>()
-          .firstWhere(
-            (s) => s?.sessionId == sessionId,
-            orElse: () => null,
-          );
+      final session = appState.sessions.cast<dynamic>().firstWhere(
+        (s) => s?.sessionId == sessionId,
+        orElse: () => null,
+      );
       final agentType = session?.agentType as String?;
       if (agentType != null) toolName = agentType;
     }
@@ -714,10 +766,13 @@ class _InputAreaState extends State<InputArea> {
             _selectSuggestion(item['name']!, path: item['path']);
           } else {
             final name = switch (_mentionType) {
-              _MentionType.tool => _toolSuggestions[_selectedIndex]['mention_name']!,
-              _MentionType.file => _fileSuggestions[_selectedIndex]['file_name']!,
-              _MentionType.project || _MentionType.slash || null =>
-                _projectSuggestions[_selectedIndex]['name']!,
+              _MentionType.tool =>
+                _toolSuggestions[_selectedIndex]['mention_name']!,
+              _MentionType.file =>
+                _fileSuggestions[_selectedIndex]['file_name']!,
+              _MentionType.project ||
+              _MentionType.slash ||
+              null => _projectSuggestions[_selectedIndex]['name']!,
             };
             _selectSuggestion(name);
           }
@@ -739,8 +794,12 @@ class _InputAreaState extends State<InputArea> {
               (s) => s['name']!.toLowerCase() == typedName.toLowerCase(),
               orElse: () => {},
             );
-            _confirmProjectMention(typedName, _mentionStart!, cursor,
-                path: match['path']);
+            _confirmProjectMention(
+              typedName,
+              _mentionStart!,
+              cursor,
+              path: match['path'],
+            );
             return KeyEventResult.handled;
           }
         }
@@ -751,11 +810,16 @@ class _InputAreaState extends State<InputArea> {
           final typedName = text.substring(_mentionStart! + 1, cursor);
           if (typedName.isNotEmpty) {
             final match = _toolSuggestions.firstWhere(
-              (s) => s['mention_name']!.toLowerCase() == typedName.toLowerCase(),
+              (s) =>
+                  s['mention_name']!.toLowerCase() == typedName.toLowerCase(),
               orElse: () => {},
             );
             if (match.isNotEmpty) {
-              _confirmToolMention(match['mention_name']!, _mentionStart!, cursor);
+              _confirmToolMention(
+                match['mention_name']!,
+                _mentionStart!,
+                cursor,
+              );
               return KeyEventResult.handled;
             }
           }
@@ -775,8 +839,8 @@ class _InputAreaState extends State<InputArea> {
       final group = cmd['source'] == 'rcflow'
           ? 'RCFlow'
           : cmd['source'] == 'claude_code_plugin'
-              ? 'Plugins'
-              : 'Claude Code';
+          ? 'Plugins'
+          : 'Claude Code';
       if (group != currentGroup) {
         if (currentGroup != null) {
           children.add(Divider(height: 1, thickness: 1));
@@ -784,14 +848,16 @@ class _InputAreaState extends State<InputArea> {
         currentGroup = group;
         children.add(_SlashGroupHeader(label: group));
       }
-      children.add(_SlashCommandItem(
-        name: cmd['name']!,
-        description: cmd['description']!,
-        source: cmd['source']!,
-        query: query,
-        selected: i == _selectedIndex,
-        onTap: () => _handleSlashSelected(cmd['name']!, cmd['source']!),
-      ));
+      children.add(
+        _SlashCommandItem(
+          name: cmd['name']!,
+          description: cmd['description']!,
+          source: cmd['source']!,
+          query: query,
+          selected: i == _selectedIndex,
+          onTap: () => _handleSlashSelected(cmd['name']!, cmd['source']!),
+        ),
+      );
     }
     return ConstrainedBox(
       constraints: const BoxConstraints(maxHeight: 380),
@@ -825,7 +891,10 @@ class _InputAreaState extends State<InputArea> {
             padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             child: Text(
               label,
-              style: TextStyle(color: context.appColors.textMuted, fontSize: 13),
+              style: TextStyle(
+                color: context.appColors.textMuted,
+                fontSize: 13,
+              ),
             ),
           );
         } else if (_mentionType == _MentionType.slash &&
@@ -954,69 +1023,79 @@ class _InputAreaState extends State<InputArea> {
 
   @override
   Widget build(BuildContext context) {
-    final pendingInput =
-        context.select<PaneState, String?>((s) => s.pendingInputText);
+    final pendingInput = context.select<PaneState, String?>(
+      (s) => s.pendingInputText,
+    );
     if (pendingInput != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _consumePendingInput();
       });
     }
 
-    final canSend =
-        context.select<PaneState, bool>((s) => s.canSendMessage);
-    final sessionEnded =
-        context.select<PaneState, bool>((s) => s.sessionEnded);
-    final sessionPaused =
-        context.select<PaneState, bool>((s) => s.sessionPaused);
-    final pausedReason =
-        context.select<PaneState, String?>((s) => s.pausedReason);
-    final sessionId =
-        context.select<PaneState, String?>((s) => s.sessionId);
-    final paneWorkerId =
-        context.select<PaneState, String?>((s) => s.workerId);
+    final canSend = context.select<PaneState, bool>((s) => s.canSendMessage);
+    final sessionEnded = context.select<PaneState, bool>((s) => s.sessionEnded);
+    final sessionPaused = context.select<PaneState, bool>(
+      (s) => s.sessionPaused,
+    );
+    final pausedReason = context.select<PaneState, String?>(
+      (s) => s.pausedReason,
+    );
+    final sessionId = context.select<PaneState, String?>((s) => s.sessionId);
+    final paneWorkerId = context.select<PaneState, String?>((s) => s.workerId);
     final bottom = MediaQuery.of(context).viewPadding.bottom;
-    final showPauseResume =
-        _isDesktop && sessionId != null && !sessionEnded;
+    final showPauseResume = _isDesktop && sessionId != null && !sessionEnded;
     final modelSupportsAttachments = context.select<AppState, bool>(
       (s) => s.workerSupportsAttachments(paneWorkerId),
     );
-    final canAttach = canSend && !_uploadingAttachments && modelSupportsAttachments;
+    final canAttach =
+        canSend && !_uploadingAttachments && modelSupportsAttachments;
 
     // Worker selector chip for new chats
     final state = context.watch<AppState>();
     final connectedWorkers = state.workerConfigs
         .where((c) => state.getWorker(c.id)?.isConnected == true)
         .toList();
-    final showWorkerChip =
-        sessionId == null && connectedWorkers.length > 1;
+    final showWorkerChip = sessionId == null && connectedWorkers.length > 1;
     final selectedWorkerName = _resolveWorkerName(
-        paneWorkerId, state.defaultWorkerId, connectedWorkers);
+      paneWorkerId,
+      state.defaultWorkerId,
+      connectedWorkers,
+    );
 
     // Project chip
-    final selectedProject =
-        context.select<PaneState, String?>((s) => s.selectedProjectName);
-    final projectNameError =
-        context.select<PaneState, String?>((s) => s.projectNameError);
+    final selectedProject = context.select<PaneState, String?>(
+      (s) => s.selectedProjectName,
+    );
+    final projectNameError = context.select<PaneState, String?>(
+      (s) => s.projectNameError,
+    );
 
     // Tool chip
-    final selectedTool =
-        context.select<PaneState, String?>((s) => s.selectedToolMention);
+    final selectedTool = context.select<PaneState, String?>(
+      (s) => s.selectedToolMention,
+    );
 
     // Pre-session worktree chip — shown when a project is selected and no
     // session exists yet, so the user can pre-select a worktree before sending.
-    final pendingWorktreePath =
-        context.select<PaneState, String?>((s) => s.pendingWorktreePath);
-    final selectedProjectPath =
-        context.select<PaneState, String?>((s) => s.effectiveProjectPath);
+    final pendingWorktreePath = context.select<PaneState, String?>(
+      (s) => s.pendingWorktreePath,
+    );
+    final selectedProjectPath = context.select<PaneState, String?>(
+      (s) => s.effectiveProjectPath,
+    );
     final showWorktreeChip =
-        sessionId == null && selectedProject != null && selectedProjectPath != null;
+        sessionId == null &&
+        selectedProject != null &&
+        selectedProjectPath != null;
 
     // Active-session worktree chip — shown when the current session has a
     // project attached, so the user can see / change the active worktree.
     final activeWorktreePath = context.select<PaneState, String?>(
-        (s) => s.currentSelectedWorktreePath);
+      (s) => s.currentSelectedWorktreePath,
+    );
     final activeSessionProjectPath = context.select<PaneState, String?>(
-        (s) => s.currentMainProjectPath);
+      (s) => s.currentMainProjectPath,
+    );
     final showActiveWorktreeChip =
         sessionId != null && activeSessionProjectPath != null;
 
@@ -1033,7 +1112,8 @@ class _InputAreaState extends State<InputArea> {
 
     // Subprocess status bar
     final runningSubprocess = context.select<PaneState, SubprocessInfo?>(
-        (s) => s.runningSubprocess);
+      (s) => s.runningSubprocess,
+    );
 
     final String hintText;
     final IconData? prefixIcon;
@@ -1061,15 +1141,20 @@ class _InputAreaState extends State<InputArea> {
         prefixIcon: prefixIcon != null
             ? Icon(prefixIcon, size: 18, color: context.appColors.textMuted)
             : null,
-        prefixIconConstraints:
-            const BoxConstraints(minWidth: 40, minHeight: 0),
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+        prefixIconConstraints: const BoxConstraints(minWidth: 40, minHeight: 0),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 20,
+          vertical: 12,
+        ),
       ),
       maxLines: _isDesktop ? 8 : 4,
       minLines: 1,
-      textInputAction: _isDesktop ? TextInputAction.newline : TextInputAction.send,
-      onSubmitted: _isDesktop ? null : (_) => _send(), // unawaited — intentional
+      textInputAction: _isDesktop
+          ? TextInputAction.newline
+          : TextInputAction.send,
+      onSubmitted: _isDesktop
+          ? null
+          : (_) => _send(), // unawaited — intentional
     );
 
     if (_isDesktop) {
@@ -1117,7 +1202,9 @@ class _InputAreaState extends State<InputArea> {
                         error: projectNameError,
                         onClear: () {
                           context.read<PaneState>().setSelectedProject(null);
-                          context.read<PaneState>().setPendingWorktreePath(null);
+                          context.read<PaneState>().setPendingWorktreePath(
+                            null,
+                          );
                         },
                       ),
                     if (selectedTool != null)
@@ -1133,11 +1220,15 @@ class _InputAreaState extends State<InputArea> {
                         getWorktrees: () => _preSessionWorktrees,
                         loading: _loadingWorktrees,
                         onOpen: () => _fetchWorktrees(
-                            selectedProjectPath!, paneWorkerId ?? state.defaultWorkerId ?? ''),
-                        onSelect: (path) =>
-                            context.read<PaneState>().setPendingWorktreePath(path),
-                        onClear: () =>
-                            context.read<PaneState>().setPendingWorktreePath(null),
+                          selectedProjectPath,
+                          paneWorkerId ?? state.defaultWorkerId ?? '',
+                        ),
+                        onSelect: (path) => context
+                            .read<PaneState>()
+                            .setPendingWorktreePath(path),
+                        onClear: () => context
+                            .read<PaneState>()
+                            .setPendingWorktreePath(null),
                       ),
                     if (showActiveWorktreeChip)
                       _WorktreeChip(
@@ -1145,9 +1236,12 @@ class _InputAreaState extends State<InputArea> {
                         getWorktrees: () => _preSessionWorktrees,
                         loading: _loadingWorktrees,
                         onOpen: () => _fetchWorktrees(
-                            activeSessionProjectPath!, paneWorkerId ?? state.defaultWorkerId ?? ''),
-                        onSelect: (path) => _setSessionWorktree(sessionId!, path),
-                        onClear: () => _setSessionWorktree(sessionId!, null),
+                          activeSessionProjectPath,
+                          paneWorkerId ?? state.defaultWorkerId ?? '',
+                        ),
+                        onSelect: (path) =>
+                            _setSessionWorktree(sessionId, path),
+                        onClear: () => _setSessionWorktree(sessionId, null),
                       ),
                     for (int i = 0; i < _pendingAttachments.length; i++)
                       _AttachmentChip(
@@ -1176,148 +1270,159 @@ class _InputAreaState extends State<InputArea> {
                 ),
               ),
             Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            AnimatedContainer(
-              duration: Duration(milliseconds: 200),
-              width: showPauseResume ? 46 : 0,
-              height: 46,
-              clipBehavior: Clip.hardEdge,
-              decoration: BoxDecoration(),
-              child: Tooltip(
-                message:
-                    sessionPaused ? 'Resume session' : 'Pause session',
-                child: Material(
-                  color: context.appColors.bgElevated,
-                  shape: const CircleBorder(),
-                  clipBehavior: Clip.antiAlias,
-                  child: InkWell(
-                    onTap: showPauseResume
-                        ? () {
-                            final pane = context.read<PaneState>();
-                            if (sessionPaused) {
-                              pane.resumeSession(sessionId);
-                            } else {
-                              pane.pauseSession(sessionId);
-                            }
-                          }
-                        : null,
-                    child: Center(
-                      child: Icon(
-                        sessionPaused
-                            ? Icons.play_arrow_rounded
-                            : Icons.pause_rounded,
-                        color: sessionPaused
-                            ? context.appColors.accentLight
-                            : context.appColors.textSecondary,
-                        size: 22,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              width: showPauseResume ? 8 : 0,
-            ),
-            // Attach file button
-            Tooltip(
-              message: modelSupportsAttachments
-                  ? 'Attach file'
-                  : 'Attachments are not supported by the current model',
-              child: Material(
-                color: Colors.transparent,
-                shape: const CircleBorder(),
-                clipBehavior: Clip.antiAlias,
-                child: InkWell(
-                  onTap: canAttach ? _pickAttachments : null,
-                  child: Padding(
-                    padding: const EdgeInsets.all(10),
-                    child: Icon(
-                      Icons.attach_file_rounded,
-                      size: 20,
-                      color: canAttach
-                          ? context.appColors.textSecondary
-                          : context.appColors.textMuted,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(width: 2),
-            Expanded(child: textField),
-            SizedBox(width: 8),
-            if (sessionEnded && sessionId != null)
-              Tooltip(
-                message: 'Restore session',
-                child: SizedBox(
-                  width: 46,
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                AnimatedContainer(
+                  duration: Duration(milliseconds: 200),
+                  width: showPauseResume ? 46 : 0,
                   height: 46,
-                  child: Material(
-                    color: context.appColors.accent,
-                    shape: CircleBorder(),
-                    clipBehavior: Clip.antiAlias,
-                    child: InkWell(
-                      onTap: () =>
-                          context.read<PaneState>().restoreSession(sessionId),
-                      child: const Center(
-                        child: Icon(
-                          Icons.restore_rounded,
-                          color: Colors.white,
-                          size: 22,
+                  clipBehavior: Clip.hardEdge,
+                  decoration: BoxDecoration(),
+                  child: Tooltip(
+                    message: sessionPaused ? 'Resume session' : 'Pause session',
+                    child: Material(
+                      color: context.appColors.bgElevated,
+                      shape: const CircleBorder(),
+                      clipBehavior: Clip.antiAlias,
+                      child: InkWell(
+                        onTap: showPauseResume
+                            ? () {
+                                final pane = context.read<PaneState>();
+                                if (sessionPaused) {
+                                  pane.resumeSession(sessionId);
+                                } else {
+                                  pane.pauseSession(sessionId);
+                                }
+                              }
+                            : null,
+                        child: Center(
+                          child: Icon(
+                            sessionPaused
+                                ? Icons.play_arrow_rounded
+                                : Icons.pause_rounded,
+                            color: sessionPaused
+                                ? context.appColors.accentLight
+                                : context.appColors.textSecondary,
+                            size: 22,
+                          ),
                         ),
                       ),
                     ),
                   ),
                 ),
-              )
-            else
-              AnimatedContainer(
-                duration: Duration(milliseconds: 200),
-                width: 46,
-                height: 46,
-                child: Material(
-                  color: (_hasText || _pendingAttachments.isNotEmpty) && canSend
-                      ? context.appColors.accent
-                      : context.appColors.bgElevated,
-                  shape: CircleBorder(),
-                  clipBehavior: Clip.antiAlias,
-                  child: InkWell(
-                    onTap: (_hasText || _pendingAttachments.isNotEmpty) && canSend
-                        ? () => _send() // unawaited — intentional
-                        : null,
-                    child: Center(
-                      child: _uploadingAttachments
-                          ? SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white,
-                              ),
-                            )
-                          : Icon(
-                              Icons.arrow_upward_rounded,
-                              color: (_hasText || _pendingAttachments.isNotEmpty) && canSend
-                                  ? Colors.white
-                                  : context.appColors.textMuted,
-                              size: 22,
-                            ),
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  width: showPauseResume ? 8 : 0,
+                ),
+                // Attach file button
+                Tooltip(
+                  message: modelSupportsAttachments
+                      ? 'Attach file'
+                      : 'Attachments are not supported by the current model',
+                  child: Material(
+                    color: Colors.transparent,
+                    shape: const CircleBorder(),
+                    clipBehavior: Clip.antiAlias,
+                    child: InkWell(
+                      onTap: canAttach ? _pickAttachments : null,
+                      child: Padding(
+                        padding: const EdgeInsets.all(10),
+                        child: Icon(
+                          Icons.attach_file_rounded,
+                          size: 20,
+                          color: canAttach
+                              ? context.appColors.textSecondary
+                              : context.appColors.textMuted,
+                        ),
+                      ),
                     ),
                   ),
                 ),
-              ),
-          ],
-        ),
+                const SizedBox(width: 2),
+                Expanded(child: textField),
+                SizedBox(width: 8),
+                if (sessionEnded && sessionId != null)
+                  Tooltip(
+                    message: 'Restore session',
+                    child: SizedBox(
+                      width: 46,
+                      height: 46,
+                      child: Material(
+                        color: context.appColors.accent,
+                        shape: CircleBorder(),
+                        clipBehavior: Clip.antiAlias,
+                        child: InkWell(
+                          onTap: () => context.read<PaneState>().restoreSession(
+                            sessionId,
+                          ),
+                          child: const Center(
+                            child: Icon(
+                              Icons.restore_rounded,
+                              color: Colors.white,
+                              size: 22,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  )
+                else
+                  AnimatedContainer(
+                    duration: Duration(milliseconds: 200),
+                    width: 46,
+                    height: 46,
+                    child: Material(
+                      color:
+                          (_hasText || _pendingAttachments.isNotEmpty) &&
+                              canSend
+                          ? context.appColors.accent
+                          : context.appColors.bgElevated,
+                      shape: CircleBorder(),
+                      clipBehavior: Clip.antiAlias,
+                      child: InkWell(
+                        onTap:
+                            (_hasText || _pendingAttachments.isNotEmpty) &&
+                                canSend
+                            ? () =>
+                                  _send() // unawaited — intentional
+                            : null,
+                        child: Center(
+                          child: _uploadingAttachments
+                              ? SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                )
+                              : Icon(
+                                  Icons.arrow_upward_rounded,
+                                  color:
+                                      (_hasText ||
+                                              _pendingAttachments.isNotEmpty) &&
+                                          canSend
+                                      ? Colors.white
+                                      : context.appColors.textMuted,
+                                  size: 22,
+                                ),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
           ],
         ),
       ),
     );
   }
 
-  String? _resolveWorkerName(String? paneWorkerId, String? defaultWorkerId,
-      List<WorkerConfig> connectedWorkers) {
+  String? _resolveWorkerName(
+    String? paneWorkerId,
+    String? defaultWorkerId,
+    List<WorkerConfig> connectedWorkers,
+  ) {
     final id = paneWorkerId ?? defaultWorkerId;
     if (id == null) return null;
     for (final c in connectedWorkers) {
@@ -1339,8 +1444,7 @@ class _AttachmentChip extends StatelessWidget {
     this.onRemove,
   });
 
-  static bool _isImage(String mime) =>
-      mime.startsWith('image/');
+  static bool _isImage(String mime) => mime.startsWith('image/');
 
   @override
   Widget build(BuildContext context) {
@@ -1367,7 +1471,9 @@ class _AttachmentChip extends StatelessWidget {
             child: Text(
               name,
               style: TextStyle(
-                  color: context.appColors.textSecondary, fontSize: 12),
+                color: context.appColors.textSecondary,
+                fontSize: 12,
+              ),
               overflow: TextOverflow.ellipsis,
             ),
           ),
@@ -1375,8 +1481,11 @@ class _AttachmentChip extends StatelessWidget {
             const SizedBox(width: 4),
             GestureDetector(
               onTap: onRemove,
-              child: Icon(Icons.close_rounded,
-                  size: 13, color: context.appColors.textMuted),
+              child: Icon(
+                Icons.close_rounded,
+                size: 13,
+                color: context.appColors.textMuted,
+              ),
             ),
           ],
         ],
@@ -1411,16 +1520,23 @@ class _WorkerChip extends StatelessWidget {
             offset.dy,
           ),
           color: context.appColors.bgSurface,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
           items: workers
-              .map((w) => PopupMenuItem<String>(
-                    value: w.id,
-                    height: 40,
-                    child: Text(w.name,
-                        style: TextStyle(
-                            color: context.appColors.textPrimary, fontSize: 13)),
-                  ))
+              .map(
+                (w) => PopupMenuItem<String>(
+                  value: w.id,
+                  height: 40,
+                  child: Text(
+                    w.name,
+                    style: TextStyle(
+                      color: context.appColors.textPrimary,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+              )
               .toList(),
         ).then((id) {
           if (id != null) onSelected(id);
@@ -1436,12 +1552,25 @@ class _WorkerChip extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.dns_outlined, size: 14, color: context.appColors.textMuted),
+            Icon(
+              Icons.dns_outlined,
+              size: 14,
+              color: context.appColors.textMuted,
+            ),
             SizedBox(width: 6),
-            Text(label,
-                style: TextStyle(color: context.appColors.textSecondary, fontSize: 12)),
+            Text(
+              label,
+              style: TextStyle(
+                color: context.appColors.textSecondary,
+                fontSize: 12,
+              ),
+            ),
             SizedBox(width: 4),
-            Icon(Icons.arrow_drop_down, size: 16, color: context.appColors.textMuted),
+            Icon(
+              Icons.arrow_drop_down,
+              size: 16,
+              color: context.appColors.textMuted,
+            ),
           ],
         ),
       ),
@@ -1454,11 +1583,7 @@ class _ProjectChip extends StatelessWidget {
   final String? error;
   final VoidCallback onClear;
 
-  const _ProjectChip({
-    required this.name,
-    this.error,
-    required this.onClear,
-  });
+  const _ProjectChip({required this.name, this.error, required this.onClear});
 
   @override
   Widget build(BuildContext context) {
@@ -1612,7 +1737,9 @@ class _WorktreeChip extends StatelessWidget {
               child: Text(
                 'No worktree (default)',
                 style: TextStyle(
-                    color: context.appColors.textMuted, fontSize: 12),
+                  color: context.appColors.textMuted,
+                  fontSize: 12,
+                ),
               ),
             ),
             const PopupMenuDivider(),
@@ -1623,7 +1750,9 @@ class _WorktreeChip extends StatelessWidget {
                 child: Text(
                   currentWorktrees == null ? 'Loading…' : 'No worktrees',
                   style: TextStyle(
-                      color: context.appColors.textMuted, fontSize: 12),
+                    color: context.appColors.textMuted,
+                    fontSize: 12,
+                  ),
                 ),
               )
             else
@@ -1667,8 +1796,9 @@ class _WorktreeChip extends StatelessWidget {
                               Text(
                                 branch,
                                 style: TextStyle(
-                                    color: context.appColors.textMuted,
-                                    fontSize: 10),
+                                  color: context.appColors.textMuted,
+                                  fontSize: 10,
+                                ),
                                 overflow: TextOverflow.ellipsis,
                               ),
                           ],
@@ -1690,7 +1820,8 @@ class _WorktreeChip extends StatelessWidget {
             ),
             color: context.appColors.bgSurface,
             shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10)),
+              borderRadius: BorderRadius.circular(10),
+            ),
             items: items,
           ).then((value) {
             if (value == null) return;
@@ -1758,13 +1889,18 @@ class _WorktreeChip extends StatelessWidget {
                 GestureDetector(
                   onTap: onClear,
                   behavior: HitTestBehavior.opaque,
-                  child: Icon(Icons.close_rounded,
-                      size: 13,
-                      color: context.appColors.accent.withAlpha(180)),
+                  child: Icon(
+                    Icons.close_rounded,
+                    size: 13,
+                    color: context.appColors.accent.withAlpha(180),
+                  ),
                 )
               else
-                Icon(Icons.arrow_drop_down,
-                    size: 16, color: context.appColors.textMuted),
+                Icon(
+                  Icons.arrow_drop_down,
+                  size: 16,
+                  color: context.appColors.textMuted,
+                ),
             ],
           ],
         ),
@@ -1795,7 +1931,11 @@ class _MentionItem extends StatelessWidget {
         color: selected ? context.appColors.bgOverlay : Colors.transparent,
         child: Row(
           children: [
-            Icon(Icons.folder_rounded, size: 16, color: context.appColors.textMuted),
+            Icon(
+              Icons.folder_rounded,
+              size: 16,
+              color: context.appColors.textMuted,
+            ),
             const SizedBox(width: 8),
             Expanded(child: _buildHighlightedName(context)),
           ],
@@ -1826,22 +1966,34 @@ class _MentionItem extends StatelessWidget {
     }
 
     return Text.rich(
-      TextSpan(children: [
-        if (matchIndex > 0)
+      TextSpan(
+        children: [
+          if (matchIndex > 0)
+            TextSpan(
+              text: name.substring(0, matchIndex),
+              style: TextStyle(
+                color: context.appColors.textPrimary,
+                fontSize: 13,
+              ),
+            ),
           TextSpan(
-            text: name.substring(0, matchIndex),
-            style: TextStyle(color: context.appColors.textPrimary, fontSize: 13),
+            text: name.substring(matchIndex, matchIndex + query.length),
+            style: TextStyle(
+              color: context.appColors.accentLight,
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
           ),
-        TextSpan(
-          text: name.substring(matchIndex, matchIndex + query.length),
-          style: TextStyle(color: context.appColors.accentLight, fontSize: 13, fontWeight: FontWeight.w600),
-        ),
-        if (matchIndex + query.length < name.length)
-          TextSpan(
-            text: name.substring(matchIndex + query.length),
-            style: TextStyle(color: context.appColors.textPrimary, fontSize: 13),
-          ),
-      ]),
+          if (matchIndex + query.length < name.length)
+            TextSpan(
+              text: name.substring(matchIndex + query.length),
+              style: TextStyle(
+                color: context.appColors.textPrimary,
+                fontSize: 13,
+              ),
+            ),
+        ],
+      ),
       overflow: TextOverflow.ellipsis,
     );
   }
@@ -1871,7 +2023,11 @@ class _ToolMentionItem extends StatelessWidget {
         color: selected ? context.appColors.bgOverlay : Colors.transparent,
         child: Row(
           children: [
-            Icon(Icons.build_rounded, size: 16, color: context.appColors.textMuted),
+            Icon(
+              Icons.build_rounded,
+              size: 16,
+              color: context.appColors.textMuted,
+            ),
             SizedBox(width: 8),
             Expanded(
               child: Column(
@@ -1880,7 +2036,10 @@ class _ToolMentionItem extends StatelessWidget {
                   _buildHighlightedName(context),
                   Text(
                     description,
-                    style: TextStyle(color: context.appColors.textMuted, fontSize: 11),
+                    style: TextStyle(
+                      color: context.appColors.textMuted,
+                      fontSize: 11,
+                    ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -1915,23 +2074,34 @@ class _ToolMentionItem extends StatelessWidget {
     }
 
     return Text.rich(
-      TextSpan(children: [
-        if (matchIndex > 0)
+      TextSpan(
+        children: [
+          if (matchIndex > 0)
+            TextSpan(
+              text: name.substring(0, matchIndex),
+              style: TextStyle(
+                color: context.appColors.textPrimary,
+                fontSize: 13,
+              ),
+            ),
           TextSpan(
-            text: name.substring(0, matchIndex),
-            style: TextStyle(color: context.appColors.textPrimary, fontSize: 13),
+            text: name.substring(matchIndex, matchIndex + query.length),
+            style: TextStyle(
+              color: context.appColors.accentLight,
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
           ),
-        TextSpan(
-          text: name.substring(matchIndex, matchIndex + query.length),
-          style: TextStyle(
-              color: context.appColors.accentLight, fontSize: 13, fontWeight: FontWeight.w600),
-        ),
-        if (matchIndex + query.length < name.length)
-          TextSpan(
-            text: name.substring(matchIndex + query.length),
-            style: TextStyle(color: context.appColors.textPrimary, fontSize: 13),
-          ),
-      ]),
+          if (matchIndex + query.length < name.length)
+            TextSpan(
+              text: name.substring(matchIndex + query.length),
+              style: TextStyle(
+                color: context.appColors.textPrimary,
+                fontSize: 13,
+              ),
+            ),
+        ],
+      ),
       overflow: TextOverflow.ellipsis,
     );
   }
@@ -2008,7 +2178,21 @@ class _FileMentionItem extends StatelessWidget {
 
   static IconData _iconForExtension(String ext) {
     final e = ext.toLowerCase();
-    if (const ['.py', '.js', '.ts', '.dart', '.java', '.cpp', '.c', '.go', '.rs', '.rb', '.php', '.swift', '.kt'].contains(e)) {
+    if (const [
+      '.py',
+      '.js',
+      '.ts',
+      '.dart',
+      '.java',
+      '.cpp',
+      '.c',
+      '.go',
+      '.rs',
+      '.rb',
+      '.php',
+      '.swift',
+      '.kt',
+    ].contains(e)) {
       return Icons.code_rounded;
     }
     if (const ['.md', '.txt', '.rst', '.log'].contains(e)) {
@@ -2046,25 +2230,34 @@ class _FileMentionItem extends StatelessWidget {
     }
 
     return Text.rich(
-      TextSpan(children: [
-        if (matchIndex > 0)
+      TextSpan(
+        children: [
+          if (matchIndex > 0)
+            TextSpan(
+              text: fileName.substring(0, matchIndex),
+              style: TextStyle(
+                color: context.appColors.textPrimary,
+                fontSize: 13,
+              ),
+            ),
           TextSpan(
-            text: fileName.substring(0, matchIndex),
-            style: TextStyle(color: context.appColors.textPrimary, fontSize: 13),
-          ),
-        TextSpan(
-          text: fileName.substring(matchIndex, matchIndex + query.length),
-          style: TextStyle(
+            text: fileName.substring(matchIndex, matchIndex + query.length),
+            style: TextStyle(
               color: context.appColors.accentLight,
               fontSize: 13,
-              fontWeight: FontWeight.w600),
-        ),
-        if (matchIndex + query.length < fileName.length)
-          TextSpan(
-            text: fileName.substring(matchIndex + query.length),
-            style: TextStyle(color: context.appColors.textPrimary, fontSize: 13),
+              fontWeight: FontWeight.w600,
+            ),
           ),
-      ]),
+          if (matchIndex + query.length < fileName.length)
+            TextSpan(
+              text: fileName.substring(matchIndex + query.length),
+              style: TextStyle(
+                color: context.appColors.textPrimary,
+                fontSize: 13,
+              ),
+            ),
+        ],
+      ),
       overflow: TextOverflow.ellipsis,
     );
   }
@@ -2077,10 +2270,7 @@ class _SubprocessStatusBar extends StatefulWidget {
   final SubprocessInfo subprocess;
   final VoidCallback onKill;
 
-  const _SubprocessStatusBar({
-    required this.subprocess,
-    required this.onKill,
-  });
+  const _SubprocessStatusBar({required this.subprocess, required this.onKill});
 
   @override
   State<_SubprocessStatusBar> createState() => _SubprocessStatusBarState();
@@ -2263,7 +2453,9 @@ class _SlashCommandItem extends StatelessWidget {
                     Text(
                       description,
                       style: TextStyle(
-                          color: context.appColors.textMuted, fontSize: 11),
+                        color: context.appColors.textMuted,
+                        fontSize: 11,
+                      ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -2281,9 +2473,10 @@ class _SlashCommandItem extends StatelessWidget {
       return Text(
         '/$name',
         style: TextStyle(
-            color: context.appColors.textPrimary,
-            fontSize: 13,
-            fontWeight: FontWeight.w500),
+          color: context.appColors.textPrimary,
+          fontSize: 13,
+          fontWeight: FontWeight.w500,
+        ),
         overflow: TextOverflow.ellipsis,
       );
     }
@@ -2296,46 +2489,53 @@ class _SlashCommandItem extends StatelessWidget {
       return Text(
         '/$name',
         style: TextStyle(
-            color: context.appColors.textPrimary,
-            fontSize: 13,
-            fontWeight: FontWeight.w500),
+          color: context.appColors.textPrimary,
+          fontSize: 13,
+          fontWeight: FontWeight.w500,
+        ),
         overflow: TextOverflow.ellipsis,
       );
     }
 
     return Text.rich(
-      TextSpan(children: [
-        TextSpan(
-          text: '/',
-          style: TextStyle(
+      TextSpan(
+        children: [
+          TextSpan(
+            text: '/',
+            style: TextStyle(
               color: context.appColors.textSecondary,
               fontSize: 13,
-              fontWeight: FontWeight.w500),
-        ),
-        if (matchIndex > 0)
-          TextSpan(
-            text: name.substring(0, matchIndex),
-            style: TextStyle(
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          if (matchIndex > 0)
+            TextSpan(
+              text: name.substring(0, matchIndex),
+              style: TextStyle(
                 color: context.appColors.textPrimary,
                 fontSize: 13,
-                fontWeight: FontWeight.w500),
-          ),
-        TextSpan(
-          text: name.substring(matchIndex, matchIndex + query.length),
-          style: TextStyle(
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          TextSpan(
+            text: name.substring(matchIndex, matchIndex + query.length),
+            style: TextStyle(
               color: context.appColors.accentLight,
               fontSize: 13,
-              fontWeight: FontWeight.w600),
-        ),
-        if (matchIndex + query.length < name.length)
-          TextSpan(
-            text: name.substring(matchIndex + query.length),
-            style: TextStyle(
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          if (matchIndex + query.length < name.length)
+            TextSpan(
+              text: name.substring(matchIndex + query.length),
+              style: TextStyle(
                 color: context.appColors.textPrimary,
                 fontSize: 13,
-                fontWeight: FontWeight.w500),
-          ),
-      ]),
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+        ],
+      ),
       overflow: TextOverflow.ellipsis,
     );
   }

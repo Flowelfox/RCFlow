@@ -53,7 +53,10 @@ void main() {
         info.startedAt.isAfter(before.subtract(const Duration(seconds: 1))),
         isTrue,
       );
-      expect(info.startedAt.isBefore(after.add(const Duration(seconds: 1))), isTrue);
+      expect(
+        info.startedAt.isBefore(after.add(const Duration(seconds: 1))),
+        isTrue,
+      );
     });
   });
 

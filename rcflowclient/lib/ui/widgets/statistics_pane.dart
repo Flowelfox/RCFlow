@@ -64,7 +64,8 @@ class _StatisticsPaneState extends State<StatisticsPane> {
       if (sessionId != null) {
         final summary = await worker.fetchSessionTelemetry(sessionId);
         _state.setSessionSummary(
-            summary != null ? SessionTelemetrySummary.fromJson(summary) : null);
+          summary != null ? SessionTelemetrySummary.fromJson(summary) : null,
+        );
       }
     } catch (e) {
       _state.setError(e.toString());
@@ -79,16 +80,15 @@ class _StatisticsPaneState extends State<StatisticsPane> {
         builder: (context, state, _) {
           return Column(
             children: [
-              _FilterBar(
-                state: state,
-                onRefresh: _refresh,
-              ),
+              _FilterBar(state: state, onRefresh: _refresh),
               Expanded(
                 child: state.loading
-                    ? const Center(child: CircularProgressIndicator(strokeWidth: 2))
+                    ? const Center(
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
                     : state.error != null
-                        ? _ErrorView(error: state.error!)
-                        : _ChartsBody(state: state),
+                    ? _ErrorView(error: state.error!)
+                    : _ChartsBody(state: state),
               ),
             ],
           );
@@ -148,8 +148,11 @@ class _FilterBar extends StatelessWidget {
             height: 24,
             child: IconButton(
               padding: EdgeInsets.zero,
-              icon: Icon(Icons.refresh_rounded,
-                  size: 14, color: context.appColors.textMuted),
+              icon: Icon(
+                Icons.refresh_rounded,
+                size: 14,
+                color: context.appColors.textMuted,
+              ),
               onPressed: onRefresh,
               constraints: const BoxConstraints(maxWidth: 24, maxHeight: 24),
             ),
@@ -165,8 +168,11 @@ class _ZoomChip extends StatelessWidget {
   final bool active;
   final VoidCallback onTap;
 
-  const _ZoomChip(
-      {required this.label, required this.active, required this.onTap});
+  const _ZoomChip({
+    required this.label,
+    required this.active,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -309,9 +315,10 @@ class _ChartSection extends StatelessWidget {
         Text(
           title,
           style: TextStyle(
-              color: context.appColors.textSecondary,
-              fontSize: 11,
-              fontWeight: FontWeight.w600),
+            color: context.appColors.textSecondary,
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+          ),
         ),
         const SizedBox(height: 6),
         child,
@@ -337,9 +344,10 @@ class _SessionSummaryCard extends StatelessWidget {
         Text(
           'Session Summary',
           style: TextStyle(
-              color: context.appColors.textSecondary,
-              fontSize: 11,
-              fontWeight: FontWeight.w600),
+            color: context.appColors.textSecondary,
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+          ),
         ),
         const SizedBox(height: 6),
         // Stat pills
@@ -349,27 +357,30 @@ class _SessionSummaryCard extends StatelessWidget {
           children: [
             _StatPill(label: 'Turns', value: '${summary.turnCount}'),
             _StatPill(
-                label: 'In tokens',
-                value: _fmt(summary.totalInputTokens)),
+              label: 'In tokens',
+              value: _fmt(summary.totalInputTokens),
+            ),
             _StatPill(
-                label: 'Out tokens',
-                value: _fmt(summary.totalOutputTokens)),
-            _StatPill(
-                label: 'Tool calls',
-                value: '${summary.totalToolCalls}'),
+              label: 'Out tokens',
+              value: _fmt(summary.totalOutputTokens),
+            ),
+            _StatPill(label: 'Tool calls', value: '${summary.totalToolCalls}'),
             if (summary.avgLlmDurationMs != null)
               _StatPill(
-                  label: 'Avg LLM',
-                  value: '${summary.avgLlmDurationMs!.round()}ms'),
+                label: 'Avg LLM',
+                value: '${summary.avgLlmDurationMs!.round()}ms',
+              ),
             if (summary.p95LlmDurationMs != null)
               _StatPill(
-                  label: 'p95 LLM',
-                  value: '${summary.p95LlmDurationMs!.round()}ms'),
+                label: 'p95 LLM',
+                value: '${summary.p95LlmDurationMs!.round()}ms',
+              ),
             if (summary.errorRate > 0)
               _StatPill(
-                  label: 'Error rate',
-                  value: '${(summary.errorRate * 100).toStringAsFixed(1)}%',
-                  isWarning: true),
+                label: 'Error rate',
+                value: '${(summary.errorRate * 100).toStringAsFixed(1)}%',
+                isWarning: true,
+              ),
           ],
         ),
         const SizedBox(height: 8),
@@ -378,9 +389,10 @@ class _SessionSummaryCard extends StatelessWidget {
           Text(
             'Turns',
             style: TextStyle(
-                color: context.appColors.textMuted,
-                fontSize: 10,
-                fontWeight: FontWeight.w500),
+              color: context.appColors.textMuted,
+              fontSize: 10,
+              fontWeight: FontWeight.w500,
+            ),
           ),
           const SizedBox(height: 4),
           ...summary.turns.map((t) => _TurnRow(turn: t)),
@@ -401,8 +413,11 @@ class _StatPill extends StatelessWidget {
   final String value;
   final bool isWarning;
 
-  const _StatPill(
-      {required this.label, required this.value, this.isWarning = false});
+  const _StatPill({
+    required this.label,
+    required this.value,
+    this.isWarning = false,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -422,17 +437,19 @@ class _StatPill extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(label,
-              style: TextStyle(
-                  color: context.appColors.textMuted, fontSize: 10)),
+          Text(
+            label,
+            style: TextStyle(color: context.appColors.textMuted, fontSize: 10),
+          ),
           const SizedBox(width: 4),
-          Text(value,
-              style: TextStyle(
-                  color: isWarning
-                      ? Colors.orange
-                      : context.appColors.textPrimary,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w600)),
+          Text(
+            value,
+            style: TextStyle(
+              color: isWarning ? Colors.orange : context.appColors.textPrimary,
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
         ],
       ),
     );
@@ -455,9 +472,10 @@ class _TurnRow extends StatelessWidget {
             child: Text(
               '#${turn.turnIndex}',
               style: TextStyle(
-                  color: context.appColors.textMuted,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w600),
+                color: context.appColors.textMuted,
+                fontSize: 10,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
           Expanded(
@@ -466,13 +484,18 @@ class _TurnRow extends StatelessWidget {
               ' · ${turn.toolCalls} tools'
               '${turn.llmDurationMs != null ? ' · ${turn.llmDurationMs}ms' : ''}',
               style: TextStyle(
-                  color: context.appColors.textSecondary, fontSize: 10),
+                color: context.appColors.textSecondary,
+                fontSize: 10,
+              ),
               overflow: TextOverflow.ellipsis,
             ),
           ),
           if (turn.interrupted)
-            Icon(Icons.warning_amber_rounded,
-                size: 10, color: Colors.orange.withAlpha(180)),
+            Icon(
+              Icons.warning_amber_rounded,
+              size: 10,
+              color: Colors.orange.withAlpha(180),
+            ),
         ],
       ),
     );
@@ -496,8 +519,7 @@ class _ErrorView extends StatelessWidget {
         padding: const EdgeInsets.all(16),
         child: Text(
           error,
-          style:
-              TextStyle(color: context.appColors.textMuted, fontSize: 11),
+          style: TextStyle(color: context.appColors.textMuted, fontSize: 11),
           textAlign: TextAlign.center,
         ),
       ),

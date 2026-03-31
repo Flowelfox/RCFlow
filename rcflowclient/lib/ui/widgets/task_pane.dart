@@ -79,8 +79,10 @@ class _TaskPaneState extends State<TaskPane> {
         ),
         Expanded(
           child: Center(
-            child: Text('Task not found',
-                style: TextStyle(color: context.appColors.textMuted)),
+            child: Text(
+              'Task not found',
+              style: TextStyle(color: context.appColors.textMuted),
+            ),
           ),
         ),
       ],
@@ -113,8 +115,7 @@ class _TaskPaneHeader extends StatelessWidget {
         color: isActive
             ? context.appColors.accent.withAlpha(20)
             : context.appColors.bgSurface,
-        border: Border(
-            bottom: BorderSide(color: context.appColors.divider)),
+        border: Border(bottom: BorderSide(color: context.appColors.divider)),
       ),
       padding: const EdgeInsets.symmetric(horizontal: 8),
       child: Row(
@@ -125,8 +126,11 @@ class _TaskPaneHeader extends StatelessWidget {
               height: 26,
               child: IconButton(
                 padding: EdgeInsets.zero,
-                icon: Icon(Icons.arrow_back_rounded,
-                    color: context.appColors.textMuted, size: 14),
+                icon: Icon(
+                  Icons.arrow_back_rounded,
+                  color: context.appColors.textMuted,
+                  size: 14,
+                ),
                 tooltip: 'Back',
                 onPressed: () => appState.goBack(paneId),
               ),
@@ -141,8 +145,11 @@ class _TaskPaneHeader extends StatelessWidget {
                 shape: BoxShape.circle,
               ),
             ),
-          Icon(Icons.task_outlined,
-              color: context.appColors.textMuted, size: 14),
+          Icon(
+            Icons.task_outlined,
+            color: context.appColors.textMuted,
+            size: 14,
+          ),
           const SizedBox(width: 6),
           Expanded(
             child: Text(
@@ -162,8 +169,11 @@ class _TaskPaneHeader extends StatelessWidget {
               height: 26,
               child: IconButton(
                 padding: EdgeInsets.zero,
-                icon: Icon(Icons.edit_outlined,
-                    color: context.appColors.textMuted, size: 14),
+                icon: Icon(
+                  Icons.edit_outlined,
+                  color: context.appColors.textMuted,
+                  size: 14,
+                ),
                 tooltip: 'Edit',
                 onPressed: onEditPressed,
               ),
@@ -173,8 +183,11 @@ class _TaskPaneHeader extends StatelessWidget {
               height: 26,
               child: IconButton(
                 padding: EdgeInsets.zero,
-                icon: Icon(Icons.delete_outline,
-                    color: context.appColors.textMuted, size: 14),
+                icon: Icon(
+                  Icons.delete_outline,
+                  color: context.appColors.textMuted,
+                  size: 14,
+                ),
                 tooltip: 'Delete',
                 onPressed: () => _confirmDeleteTask(context, t, appState),
               ),
@@ -186,8 +199,11 @@ class _TaskPaneHeader extends StatelessWidget {
               height: 26,
               child: IconButton(
                 padding: EdgeInsets.zero,
-                icon: Icon(Icons.vertical_split_outlined,
-                    color: context.appColors.textMuted, size: 14),
+                icon: Icon(
+                  Icons.vertical_split_outlined,
+                  color: context.appColors.textMuted,
+                  size: 14,
+                ),
                 tooltip: 'Split',
                 onPressed: () =>
                     appState.splitPane(paneId, SplitAxis.horizontal),
@@ -198,8 +214,11 @@ class _TaskPaneHeader extends StatelessWidget {
               height: 26,
               child: IconButton(
                 padding: EdgeInsets.zero,
-                icon: Icon(Icons.close_rounded,
-                    color: context.appColors.textMuted, size: 14),
+                icon: Icon(
+                  Icons.close_rounded,
+                  color: context.appColors.textMuted,
+                  size: 14,
+                ),
                 tooltip: 'Close',
                 onPressed: () => appState.closePane(paneId),
               ),
@@ -210,8 +229,11 @@ class _TaskPaneHeader extends StatelessWidget {
               height: 26,
               child: IconButton(
                 padding: EdgeInsets.zero,
-                icon: Icon(Icons.close_rounded,
-                    color: context.appColors.textMuted, size: 14),
+                icon: Icon(
+                  Icons.close_rounded,
+                  color: context.appColors.textMuted,
+                  size: 14,
+                ),
                 tooltip: 'Close task view',
                 onPressed: () => appState.closeTaskView(paneId),
               ),
@@ -222,25 +244,33 @@ class _TaskPaneHeader extends StatelessWidget {
   }
 
   void _confirmDeleteTask(
-      BuildContext context, TaskInfo task, AppState appState) async {
+    BuildContext context,
+    TaskInfo task,
+    AppState appState,
+  ) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: context.appColors.bgSurface,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        title: Text('Delete Task',
-            style: TextStyle(
-                color: context.appColors.textPrimary, fontSize: 16)),
+        title: Text(
+          'Delete Task',
+          style: TextStyle(color: context.appColors.textPrimary, fontSize: 16),
+        ),
         content: Text(
           'Delete "${task.title}"? This cannot be undone.',
           style: TextStyle(
-              color: context.appColors.textSecondary, fontSize: 14),
+            color: context.appColors.textSecondary,
+            fontSize: 14,
+          ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
-            child: Text('Cancel',
-                style: TextStyle(color: context.appColors.textSecondary)),
+            child: Text(
+              'Cancel',
+              style: TextStyle(color: context.appColors.textSecondary),
+            ),
           ),
           FilledButton(
             style: FilledButton.styleFrom(
@@ -386,8 +416,10 @@ class _TaskDetailContentState extends State<_TaskDetailContent> {
       );
     } catch (e) {
       if (mounted) {
-        widget.appState
-            .addSystemMessage('Failed to update task: $e', isError: true);
+        widget.appState.addSystemMessage(
+          'Failed to update task: $e',
+          isError: true,
+        );
       }
     }
     if (mounted) _exitEditMode();
@@ -446,7 +478,9 @@ class _TaskDetailContentState extends State<_TaskDetailContent> {
             Text(
               'Created by ${task.source == 'ai' ? 'AI' : 'User'} \u00B7 ${_formatDate(task.createdAt)}',
               style: TextStyle(
-                  color: context.appColors.textMuted, fontSize: 12),
+                color: context.appColors.textMuted,
+                fontSize: 12,
+              ),
             ),
           ],
         ),
@@ -456,134 +490,147 @@ class _TaskDetailContentState extends State<_TaskDetailContent> {
         _editingDescription
             ? _buildDescriptionEditor(context)
             : (task.description != null && task.description!.isNotEmpty)
-                ? Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Description',
-                        style: TextStyle(
-                          color: context.appColors.textSecondary,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          letterSpacing: 0.5,
+            ? Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Description',
+                    style: TextStyle(
+                      color: context.appColors.textSecondary,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: context.appColors.bgElevated,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: MarkdownBody(
+                      data: task.description!,
+                      shrinkWrap: true,
+                      selectable: true,
+                      styleSheet: MarkdownStyleSheet(
+                        p: TextStyle(
+                          color: context.appColors.textPrimary,
+                          fontSize: 13,
+                          height: 1.5,
+                        ),
+                        code: TextStyle(
+                          color: context.appColors.textPrimary,
+                          backgroundColor: context.appColors.toolBg.withValues(
+                            alpha: 0.6,
+                          ),
+                          fontSize: 12.5,
+                          fontFamily: 'monospace',
+                        ),
+                        codeblockDecoration: BoxDecoration(
+                          color: context.appColors.toolBg,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        codeblockPadding: EdgeInsets.all(12),
+                        a: TextStyle(color: context.appColors.accentLight),
+                        listBullet: TextStyle(
+                          color: context.appColors.textPrimary,
+                          fontSize: 13,
+                        ),
+                        h1: TextStyle(
+                          color: context.appColors.textPrimary,
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        h2: TextStyle(
+                          color: context.appColors.textPrimary,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        h3: TextStyle(
+                          color: context.appColors.textPrimary,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        blockquoteDecoration: BoxDecoration(
+                          border: Border(
+                            left: BorderSide(
+                              color: context.appColors.accentDim,
+                              width: 3,
+                            ),
+                          ),
+                          color: context.appColors.toolBg.withValues(
+                            alpha: 0.3,
+                          ),
+                        ),
+                        blockquotePadding: EdgeInsets.only(
+                          left: 12,
+                          top: 4,
+                          bottom: 4,
+                        ),
+                        tableBorder: TableBorder.all(
+                          color: context.appColors.divider,
+                        ),
+                        tableHead: TextStyle(
+                          color: context.appColors.textPrimary,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        tableBody: TextStyle(
+                          color: context.appColors.textPrimary,
+                        ),
+                        horizontalRuleDecoration: BoxDecoration(
+                          border: Border(
+                            top: BorderSide(color: context.appColors.divider),
+                          ),
                         ),
                       ),
-                      const SizedBox(height: 6),
-                      Container(
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                ],
+              )
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  GestureDetector(
+                    onDoubleTap: () {
+                      setState(() {
+                        _editingDescription = true;
+                        _descCtrl.text = '';
+                      });
+                      WidgetsBinding.instance.addPostFrameCallback((_) {
+                        _descFocus.requestFocus();
+                      });
+                    },
+                    child: Tooltip(
+                      message: 'Double-click to add description',
+                      waitDuration: const Duration(milliseconds: 600),
+                      child: Container(
                         width: double.infinity,
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
                           color: context.appColors.bgElevated,
                           borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: context.appColors.divider,
+                            style: BorderStyle.solid,
+                          ),
                         ),
-                        child: MarkdownBody(
-                          data: task.description!,
-                          shrinkWrap: true,
-                          selectable: true,
-                          styleSheet: MarkdownStyleSheet(
-                            p: TextStyle(
-                              color: context.appColors.textPrimary,
-                              fontSize: 13,
-                              height: 1.5,
-                            ),
-                            code: TextStyle(
-                              color: context.appColors.textPrimary,
-                              backgroundColor: context.appColors.toolBg
-                                  .withValues(alpha: 0.6),
-                              fontSize: 12.5,
-                              fontFamily: 'monospace',
-                            ),
-                            codeblockDecoration: BoxDecoration(
-                              color: context.appColors.toolBg,
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            codeblockPadding: EdgeInsets.all(12),
-                            a: TextStyle(
-                                color: context.appColors.accentLight),
-                            listBullet: TextStyle(
-                                color: context.appColors.textPrimary,
-                                fontSize: 13),
-                            h1: TextStyle(
-                                color: context.appColors.textPrimary,
-                                fontSize: 20,
-                                fontWeight: FontWeight.bold),
-                            h2: TextStyle(
-                                color: context.appColors.textPrimary,
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold),
-                            h3: TextStyle(
-                                color: context.appColors.textPrimary,
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold),
-                            blockquoteDecoration: BoxDecoration(
-                              border: Border(
-                                  left: BorderSide(
-                                      color: context.appColors.accentDim,
-                                      width: 3)),
-                              color: context.appColors.toolBg
-                                  .withValues(alpha: 0.3),
-                            ),
-                            blockquotePadding:
-                                EdgeInsets.only(left: 12, top: 4, bottom: 4),
-                            tableBorder: TableBorder.all(
-                                color: context.appColors.divider),
-                            tableHead: TextStyle(
-                                color: context.appColors.textPrimary,
-                                fontWeight: FontWeight.bold),
-                            tableBody: TextStyle(
-                                color: context.appColors.textPrimary),
-                            horizontalRuleDecoration: BoxDecoration(
-                              border: Border(
-                                  top: BorderSide(
-                                      color: context.appColors.divider)),
-                            ),
+                        child: Text(
+                          'Add description...',
+                          style: TextStyle(
+                            color: context.appColors.textMuted,
+                            fontSize: 13,
+                            fontStyle: FontStyle.italic,
                           ),
                         ),
                       ),
-                      const SizedBox(height: 16),
-                    ],
-                  )
-                : Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      GestureDetector(
-                        onDoubleTap: () {
-                          setState(() {
-                            _editingDescription = true;
-                            _descCtrl.text = '';
-                          });
-                          WidgetsBinding.instance.addPostFrameCallback((_) {
-                            _descFocus.requestFocus();
-                          });
-                        },
-                        child: Tooltip(
-                          message: 'Double-click to add description',
-                          waitDuration: const Duration(milliseconds: 600),
-                          child: Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              color: context.appColors.bgElevated,
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(
-                                color: context.appColors.divider,
-                                style: BorderStyle.solid,
-                              ),
-                            ),
-                            child: Text(
-                              'Add description...',
-                              style: TextStyle(
-                                color: context.appColors.textMuted,
-                                fontSize: 13,
-                                fontStyle: FontStyle.italic,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                    ],
+                    ),
                   ),
+                  const SizedBox(height: 16),
+                ],
+              ),
 
         // Save / Cancel row when editing
         if (_isEditing) ...[
@@ -613,7 +660,9 @@ class _TaskDetailContentState extends State<_TaskDetailContent> {
                 style: FilledButton.styleFrom(
                   backgroundColor: context.appColors.accent,
                   padding: const EdgeInsets.symmetric(
-                      horizontal: 16, vertical: 8),
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
                 ),
                 onPressed: _saveChanges,
                 child: const Text(
@@ -641,7 +690,9 @@ class _TaskDetailContentState extends State<_TaskDetailContent> {
                   borderRadius: BorderRadius.circular(10),
                 ),
                 padding: const EdgeInsets.symmetric(
-                    horizontal: 14, vertical: 10),
+                  horizontal: 14,
+                  vertical: 10,
+                ),
                 textStyle: const TextStyle(fontSize: 13),
               ),
             ),
@@ -649,37 +700,53 @@ class _TaskDetailContentState extends State<_TaskDetailContent> {
             if (task.status != 'done')
               OutlinedButton.icon(
                 onPressed: () => _updateStatus(context, 'done'),
-                icon: Icon(Icons.check_circle_outline,
-                    size: 18, color: const Color(0xFF10B981)),
-                label: Text('Mark Complete',
-                    style: TextStyle(
-                        color: context.appColors.textSecondary,
-                        fontSize: 13)),
+                icon: Icon(
+                  Icons.check_circle_outline,
+                  size: 18,
+                  color: const Color(0xFF10B981),
+                ),
+                label: Text(
+                  'Mark Complete',
+                  style: TextStyle(
+                    color: context.appColors.textSecondary,
+                    fontSize: 13,
+                  ),
+                ),
                 style: OutlinedButton.styleFrom(
                   side: BorderSide(color: context.appColors.divider),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(10),
                   ),
                   padding: const EdgeInsets.symmetric(
-                      horizontal: 14, vertical: 10),
+                    horizontal: 14,
+                    vertical: 10,
+                  ),
                 ),
               )
             else
               OutlinedButton.icon(
                 onPressed: () => _updateStatus(context, 'todo'),
-                icon: Icon(Icons.replay_rounded,
-                    size: 18, color: context.appColors.textSecondary),
-                label: Text('Reopen',
-                    style: TextStyle(
-                        color: context.appColors.textSecondary,
-                        fontSize: 13)),
+                icon: Icon(
+                  Icons.replay_rounded,
+                  size: 18,
+                  color: context.appColors.textSecondary,
+                ),
+                label: Text(
+                  'Reopen',
+                  style: TextStyle(
+                    color: context.appColors.textSecondary,
+                    fontSize: 13,
+                  ),
+                ),
                 style: OutlinedButton.styleFrom(
                   side: BorderSide(color: context.appColors.divider),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(10),
                   ),
                   padding: const EdgeInsets.symmetric(
-                      horizontal: 14, vertical: 10),
+                    horizontal: 14,
+                    vertical: 10,
+                  ),
                 ),
               ),
           ],
@@ -707,7 +774,9 @@ class _TaskDetailContentState extends State<_TaskDetailContent> {
             child: Text(
               'No sessions linked yet',
               style: TextStyle(
-                  color: context.appColors.textMuted, fontSize: 13),
+                color: context.appColors.textMuted,
+                fontSize: 13,
+              ),
             ),
           )
         else
@@ -757,8 +826,10 @@ class _TaskDetailContentState extends State<_TaskDetailContent> {
         decoration: InputDecoration(
           isDense: true,
           counterText: '',
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 8,
+            vertical: 6,
+          ),
           fillColor: context.appColors.bgElevated,
           filled: true,
           border: OutlineInputBorder(
@@ -822,8 +893,10 @@ class _TaskDetailContentState extends State<_TaskDetailContent> {
               ),
               focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(8),
-                borderSide:
-                    BorderSide(color: context.appColors.accent, width: 1.5),
+                borderSide: BorderSide(
+                  color: context.appColors.accent,
+                  width: 1.5,
+                ),
               ),
             ),
           ),
@@ -869,8 +942,10 @@ class _TaskDetailContentState extends State<_TaskDetailContent> {
       await worker.ws.updateTask(widget.task.taskId, status: newStatus);
     } catch (e) {
       if (context.mounted) {
-        widget.appState
-            .addSystemMessage('Failed to update task: $e', isError: true);
+        widget.appState.addSystemMessage(
+          'Failed to update task: $e',
+          isError: true,
+        );
       }
     }
   }
@@ -878,8 +953,18 @@ class _TaskDetailContentState extends State<_TaskDetailContent> {
   String _formatDate(DateTime dt) {
     final local = dt.toLocal();
     final months = [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
     ];
     return '${months[local.month - 1]} ${local.day}, '
         '${local.hour.toString().padLeft(2, '0')}:'
@@ -887,7 +972,10 @@ class _TaskDetailContentState extends State<_TaskDetailContent> {
   }
 
   Widget _buildLinkedIssuesSection(
-      BuildContext context, AppState appState, TaskInfo task) {
+    BuildContext context,
+    AppState appState,
+    TaskInfo task,
+  ) {
     final linkedIssues = appState.linearIssuesForTask(task.taskId);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -907,14 +995,18 @@ class _TaskDetailContentState extends State<_TaskDetailContent> {
             SizedBox(
               height: 24,
               child: TextButton.icon(
-                onPressed: () =>
-                    _showLinkIssuePicker(context, appState, task),
-                icon: Icon(Icons.add_link_rounded,
-                    size: 14, color: context.appColors.accent),
+                onPressed: () => _showLinkIssuePicker(context, appState, task),
+                icon: Icon(
+                  Icons.add_link_rounded,
+                  size: 14,
+                  color: context.appColors.accent,
+                ),
                 label: Text(
                   'Link Issue',
                   style: TextStyle(
-                      color: context.appColors.accent, fontSize: 11),
+                    color: context.appColors.accent,
+                    fontSize: 11,
+                  ),
                 ),
                 style: TextButton.styleFrom(
                   padding: const EdgeInsets.symmetric(horizontal: 6),
@@ -936,27 +1028,31 @@ class _TaskDetailContentState extends State<_TaskDetailContent> {
             child: Text(
               'No Linear issues linked',
               style: TextStyle(
-                  color: context.appColors.textMuted, fontSize: 13),
+                color: context.appColors.textMuted,
+                fontSize: 13,
+              ),
             ),
           )
         else
-          ...linkedIssues.map((issue) => _LinkedIssueTile(
-                issue: issue,
-                appState: appState,
-                taskId: task.taskId,
-              )),
+          ...linkedIssues.map(
+            (issue) => _LinkedIssueTile(
+              issue: issue,
+              appState: appState,
+              taskId: task.taskId,
+            ),
+          ),
       ],
     );
   }
 
   Future<void> _showLinkIssuePicker(
-      BuildContext context, AppState appState, TaskInfo task) async {
+    BuildContext context,
+    AppState appState,
+    TaskInfo task,
+  ) async {
     await showDialog<void>(
       context: context,
-      builder: (ctx) => _LinkIssueDialog(
-        appState: appState,
-        task: task,
-      ),
+      builder: (ctx) => _LinkIssueDialog(appState: appState, task: task),
     );
   }
 }
@@ -1018,7 +1114,11 @@ class _SessionRefTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final title = ref.title ?? _shortId(ref.sessionId);
-    final isTerminal = {'completed', 'failed', 'cancelled'}.contains(ref.status);
+    final isTerminal = {
+      'completed',
+      'failed',
+      'cancelled',
+    }.contains(ref.status);
 
     return GestureDetector(
       onSecondaryTapUp: (details) =>
@@ -1051,8 +1151,7 @@ class _SessionRefTile extends StatelessWidget {
           ),
           subtitle: Text(
             ref.status,
-            style: TextStyle(
-                color: context.appColors.textMuted, fontSize: 10),
+            style: TextStyle(color: context.appColors.textMuted, fontSize: 10),
           ),
           onTap: () {
             appState.ensureChatPane().switchSession(ref.sessionId);
@@ -1063,8 +1162,7 @@ class _SessionRefTile extends StatelessWidget {
   }
 
   void _showContextMenu(BuildContext context, Offset position) {
-    final overlay =
-        Overlay.of(context).context.findRenderObject() as RenderBox;
+    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
     showMenu<String>(
       context: context,
       position: RelativeRect.fromRect(
@@ -1078,11 +1176,16 @@ class _SessionRefTile extends StatelessWidget {
           value: 'open',
           child: Row(
             children: [
-              Icon(Icons.open_in_new_rounded,
-                  color: context.appColors.textSecondary, size: 18),
+              Icon(
+                Icons.open_in_new_rounded,
+                color: context.appColors.textSecondary,
+                size: 18,
+              ),
               const SizedBox(width: 8),
-              Text('Open',
-                  style: TextStyle(color: context.appColors.textPrimary)),
+              Text(
+                'Open',
+                style: TextStyle(color: context.appColors.textPrimary),
+              ),
             ],
           ),
         ),
@@ -1090,11 +1193,16 @@ class _SessionRefTile extends StatelessWidget {
           value: 'open_split',
           child: Row(
             children: [
-              Icon(Icons.vertical_split_outlined,
-                  color: context.appColors.textSecondary, size: 18),
+              Icon(
+                Icons.vertical_split_outlined,
+                color: context.appColors.textSecondary,
+                size: 18,
+              ),
               const SizedBox(width: 8),
-              Text('Open in Split',
-                  style: TextStyle(color: context.appColors.textPrimary)),
+              Text(
+                'Open in Split',
+                style: TextStyle(color: context.appColors.textPrimary),
+              ),
             ],
           ),
         ),
@@ -1102,11 +1210,16 @@ class _SessionRefTile extends StatelessWidget {
           value: 'detach',
           child: Row(
             children: [
-              Icon(Icons.link_off_rounded,
-                  color: context.appColors.errorText, size: 18),
+              Icon(
+                Icons.link_off_rounded,
+                color: context.appColors.errorText,
+                size: 18,
+              ),
               const SizedBox(width: 8),
-              Text('Detach session',
-                  style: TextStyle(color: context.appColors.errorText)),
+              Text(
+                'Detach session',
+                style: TextStyle(color: context.appColors.errorText),
+              ),
             ],
           ),
         ),
@@ -1135,7 +1248,9 @@ class _SessionRefTile extends StatelessWidget {
     } catch (e) {
       if (context.mounted) {
         appState.addSystemMessage(
-            'Failed to detach session: $e', isError: true);
+          'Failed to detach session: $e',
+          isError: true,
+        );
       }
     }
   }
@@ -1186,8 +1301,7 @@ class _LinkedIssueTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final priorityIcon =
-        _priorityIcons[issue.priority] ?? Icons.remove;
+    final priorityIcon = _priorityIcons[issue.priority] ?? Icons.remove;
     final priorityColor =
         _priorityColors[issue.priority] ?? context.appColors.textMuted;
     final stateColor =
@@ -1217,13 +1331,14 @@ class _LinkedIssueTile extends StatelessWidget {
           title: Row(
             children: [
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
                 decoration: BoxDecoration(
                   color: context.appColors.bgBase,
                   borderRadius: BorderRadius.circular(4),
                   border: Border.all(
-                      color: context.appColors.divider, width: 0.5),
+                    color: context.appColors.divider,
+                    width: 0.5,
+                  ),
                 ),
                 child: Text(
                   issue.identifier,
@@ -1252,8 +1367,7 @@ class _LinkedIssueTile extends StatelessWidget {
           ),
           subtitle: Text(
             issue.stateName,
-            style:
-                TextStyle(color: context.appColors.textMuted, fontSize: 10),
+            style: TextStyle(color: context.appColors.textMuted, fontSize: 10),
           ),
           onTap: () => appState.openLinearIssueInPane(issue.id),
         ),
@@ -1262,8 +1376,7 @@ class _LinkedIssueTile extends StatelessWidget {
   }
 
   void _showContextMenu(BuildContext context, Offset position) {
-    final overlay =
-        Overlay.of(context).context.findRenderObject() as RenderBox;
+    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
     showMenu<String>(
       context: context,
       position: RelativeRect.fromRect(
@@ -1271,18 +1384,22 @@ class _LinkedIssueTile extends StatelessWidget {
         Offset.zero & overlay.size,
       ),
       color: context.appColors.bgSurface,
-      shape:
-          RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       items: [
         PopupMenuItem(
           value: 'open',
           child: Row(
             children: [
-              Icon(Icons.open_in_new_rounded,
-                  color: context.appColors.textSecondary, size: 18),
+              Icon(
+                Icons.open_in_new_rounded,
+                color: context.appColors.textSecondary,
+                size: 18,
+              ),
               const SizedBox(width: 8),
-              Text('Open issue',
-                  style: TextStyle(color: context.appColors.textPrimary)),
+              Text(
+                'Open issue',
+                style: TextStyle(color: context.appColors.textPrimary),
+              ),
             ],
           ),
         ),
@@ -1290,11 +1407,16 @@ class _LinkedIssueTile extends StatelessWidget {
           value: 'unlink',
           child: Row(
             children: [
-              Icon(Icons.link_off_rounded,
-                  color: context.appColors.errorText, size: 18),
+              Icon(
+                Icons.link_off_rounded,
+                color: context.appColors.errorText,
+                size: 18,
+              ),
               const SizedBox(width: 8),
-              Text('Unlink from task',
-                  style: TextStyle(color: context.appColors.errorText)),
+              Text(
+                'Unlink from task',
+                style: TextStyle(color: context.appColors.errorText),
+              ),
             ],
           ),
         ),
@@ -1316,8 +1438,7 @@ class _LinkedIssueTile extends StatelessWidget {
       await worker.ws.unlinkLinearIssueFromTask(issue.id);
     } catch (e) {
       if (context.mounted) {
-        appState.addSystemMessage(
-            'Failed to unlink issue: $e', isError: true);
+        appState.addSystemMessage('Failed to unlink issue: $e', isError: true);
       }
     }
   }
@@ -1352,9 +1473,11 @@ class _LinkIssueDialogState extends State<_LinkIssueDialog> {
     if (_query.isEmpty) return issues;
     final q = _query.toLowerCase();
     return issues
-        .where((i) =>
-            i.title.toLowerCase().contains(q) ||
-            i.identifier.toLowerCase().contains(q))
+        .where(
+          (i) =>
+              i.title.toLowerCase().contains(q) ||
+              i.identifier.toLowerCase().contains(q),
+        )
         .toList();
   }
 
@@ -1366,13 +1489,14 @@ class _LinkIssueDialogState extends State<_LinkIssueDialog> {
       return;
     }
     try {
-      await worker.ws
-          .linkLinearIssueToTask(issue.id, widget.task.taskId);
+      await worker.ws.linkLinearIssueToTask(issue.id, widget.task.taskId);
       if (mounted) Navigator.of(context).pop();
     } catch (e) {
       if (mounted) {
-        widget.appState
-            .addSystemMessage('Failed to link issue: $e', isError: true);
+        widget.appState.addSystemMessage(
+          'Failed to link issue: $e',
+          isError: true,
+        );
         setState(() => _linking = false);
       }
     }
@@ -1411,17 +1535,26 @@ class _LinkIssueDialogState extends State<_LinkIssueDialog> {
                     onChanged: (v) => setState(() => _query = v),
                     autofocus: true,
                     style: TextStyle(
-                        color: context.appColors.textPrimary, fontSize: 13),
+                      color: context.appColors.textPrimary,
+                      fontSize: 13,
+                    ),
                     decoration: InputDecoration(
                       hintText: 'Search issues...',
                       hintStyle: TextStyle(
-                          color: context.appColors.textMuted, fontSize: 13),
-                      prefixIcon: Icon(Icons.search_rounded,
-                          color: context.appColors.textMuted, size: 16),
+                        color: context.appColors.textMuted,
+                        fontSize: 13,
+                      ),
+                      prefixIcon: Icon(
+                        Icons.search_rounded,
+                        color: context.appColors.textMuted,
+                        size: 16,
+                      ),
                       filled: true,
                       fillColor: context.appColors.bgElevated,
                       contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 8),
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
                       border: OutlineInputBorder(
                         borderSide: BorderSide.none,
                         borderRadius: BorderRadius.circular(8),
@@ -1432,7 +1565,9 @@ class _LinkIssueDialogState extends State<_LinkIssueDialog> {
                       ),
                       focusedBorder: OutlineInputBorder(
                         borderSide: BorderSide(
-                            color: context.appColors.accent, width: 1),
+                          color: context.appColors.accent,
+                          width: 1,
+                        ),
                         borderRadius: BorderRadius.circular(8),
                       ),
                     ),
@@ -1449,7 +1584,9 @@ class _LinkIssueDialogState extends State<_LinkIssueDialog> {
                     'No unlinked issues available.\nSync from Linear first.',
                     textAlign: TextAlign.center,
                     style: TextStyle(
-                        color: context.appColors.textMuted, fontSize: 13),
+                      color: context.appColors.textMuted,
+                      fontSize: 13,
+                    ),
                   ),
                 ),
               )
@@ -1457,9 +1594,13 @@ class _LinkIssueDialogState extends State<_LinkIssueDialog> {
               Padding(
                 padding: const EdgeInsets.all(24),
                 child: Center(
-                  child: Text('No issues match your search.',
-                      style: TextStyle(
-                          color: context.appColors.textMuted, fontSize: 13)),
+                  child: Text(
+                    'No issues match your search.',
+                    style: TextStyle(
+                      color: context.appColors.textMuted,
+                      fontSize: 13,
+                    ),
+                  ),
                 ),
               )
             else
@@ -1477,12 +1618,16 @@ class _LinkIssueDialogState extends State<_LinkIssueDialog> {
                       enabled: !_linking,
                       leading: Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 5, vertical: 2),
+                          horizontal: 5,
+                          vertical: 2,
+                        ),
                         decoration: BoxDecoration(
                           color: context.appColors.bgElevated,
                           borderRadius: BorderRadius.circular(4),
                           border: Border.all(
-                              color: context.appColors.divider, width: 0.5),
+                            color: context.appColors.divider,
+                            width: 0.5,
+                          ),
                         ),
                         child: Text(
                           issue.identifier,
@@ -1497,15 +1642,18 @@ class _LinkIssueDialogState extends State<_LinkIssueDialog> {
                       title: Text(
                         issue.title,
                         style: TextStyle(
-                            color: context.appColors.textPrimary,
-                            fontSize: 13),
+                          color: context.appColors.textPrimary,
+                          fontSize: 13,
+                        ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
                       subtitle: Text(
                         issue.stateName,
                         style: TextStyle(
-                            color: context.appColors.textMuted, fontSize: 11),
+                          color: context.appColors.textMuted,
+                          fontSize: 11,
+                        ),
                       ),
                       onTap: () => _link(issue),
                     );
@@ -1519,11 +1667,13 @@ class _LinkIssueDialogState extends State<_LinkIssueDialog> {
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
                   TextButton(
-                    onPressed:
-                        _linking ? null : () => Navigator.of(context).pop(),
-                    child: Text('Cancel',
-                        style: TextStyle(
-                            color: context.appColors.textSecondary)),
+                    onPressed: _linking
+                        ? null
+                        : () => Navigator.of(context).pop(),
+                    child: Text(
+                      'Cancel',
+                      style: TextStyle(color: context.appColors.textSecondary),
+                    ),
                   ),
                 ],
               ),

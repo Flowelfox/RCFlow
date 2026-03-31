@@ -36,7 +36,7 @@ class _QuestionBlockState extends State<QuestionBlock> {
           'header': input['header'] as String?,
           'options': _normalizeOptions(input['options']),
           'multiSelect': input['multiSelect'] ?? false,
-        }
+        },
       ];
     }
 
@@ -156,9 +156,10 @@ class _QuestionBlockState extends State<QuestionBlock> {
                   ),
                   padding: const EdgeInsets.symmetric(vertical: 12),
                 ),
-                child: const Text('Submit',
-                    style: TextStyle(
-                        fontSize: 14, fontWeight: FontWeight.w600)),
+                child: const Text(
+                  'Submit',
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                ),
               ),
             ),
           ],
@@ -183,37 +184,46 @@ class _QuestionBlockState extends State<QuestionBlock> {
               color: context.appColors.accent.withAlpha(40),
               borderRadius: BorderRadius.circular(6),
             ),
-            child: Text(header,
-                style: TextStyle(
-                    color: context.appColors.accentLight,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600)),
+            child: Text(
+              header,
+              style: TextStyle(
+                color: context.appColors.accentLight,
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
           ),
           SizedBox(height: 6),
         ],
-        Text(question,
-            style: TextStyle(
-                color: context.appColors.textPrimary,
-                fontSize: 14,
-                fontWeight: FontWeight.w500)),
+        Text(
+          question,
+          style: TextStyle(
+            color: context.appColors.textPrimary,
+            fontSize: 14,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
         if (multi)
           Padding(
             padding: EdgeInsets.only(top: 2),
-            child: Text('Select all that apply',
-                style: TextStyle(color: context.appColors.textMuted, fontSize: 11)),
+            child: Text(
+              'Select all that apply',
+              style: TextStyle(
+                color: context.appColors.textMuted,
+                fontSize: 11,
+              ),
+            ),
           ),
         const SizedBox(height: 10),
         for (final opt in options)
-          if (opt is Map<String, dynamic>)
-            _buildOption(question, opt, multi),
+          if (opt is Map<String, dynamic>) _buildOption(question, opt, multi),
         _buildOtherOption(question),
         const SizedBox(height: 4),
       ],
     );
   }
 
-  Widget _buildOption(
-      String question, Map<String, dynamic> opt, bool multi) {
+  Widget _buildOption(String question, Map<String, dynamic> opt, bool multi) {
     final label = opt['label'] as String? ?? '';
     final desc = opt['description'] as String?;
 
@@ -248,10 +258,14 @@ class _QuestionBlockState extends State<QuestionBlock> {
           width: double.infinity,
           padding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           decoration: BoxDecoration(
-            color: selected ? context.appColors.accent.withAlpha(30) : context.appColors.bgElevated,
+            color: selected
+                ? context.appColors.accent.withAlpha(30)
+                : context.appColors.bgElevated,
             borderRadius: BorderRadius.circular(8),
             border: Border.all(
-              color: selected ? context.appColors.accent : context.appColors.divider,
+              color: selected
+                  ? context.appColors.accent
+                  : context.appColors.divider,
               width: selected ? 1.5 : 1,
             ),
           ),
@@ -260,12 +274,14 @@ class _QuestionBlockState extends State<QuestionBlock> {
               Icon(
                 multi
                     ? (selected
-                        ? Icons.check_box_rounded
-                        : Icons.check_box_outline_blank_rounded)
+                          ? Icons.check_box_rounded
+                          : Icons.check_box_outline_blank_rounded)
                     : (selected
-                        ? Icons.radio_button_checked_rounded
-                        : Icons.radio_button_off_rounded),
-                color: selected ? context.appColors.accent : context.appColors.textMuted,
+                          ? Icons.radio_button_checked_rounded
+                          : Icons.radio_button_off_rounded),
+                color: selected
+                    ? context.appColors.accent
+                    : context.appColors.textMuted,
                 size: 18,
               ),
               SizedBox(width: 10),
@@ -273,18 +289,26 @@ class _QuestionBlockState extends State<QuestionBlock> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(label,
-                        style: TextStyle(
-                          color: selected ? context.appColors.textPrimary : context.appColors.textSecondary,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w500,
-                        )),
+                    Text(
+                      label,
+                      style: TextStyle(
+                        color: selected
+                            ? context.appColors.textPrimary
+                            : context.appColors.textSecondary,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
                     if (desc != null && desc.isNotEmpty)
                       Padding(
                         padding: EdgeInsets.only(top: 2),
-                        child: Text(desc,
-                            style: TextStyle(
-                                color: context.appColors.textMuted, fontSize: 11)),
+                        child: Text(
+                          desc,
+                          style: TextStyle(
+                            color: context.appColors.textMuted,
+                            fontSize: 11,
+                          ),
+                        ),
                       ),
                   ],
                 ),
@@ -315,10 +339,14 @@ class _QuestionBlockState extends State<QuestionBlock> {
           width: double.infinity,
           padding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           decoration: BoxDecoration(
-            color: isOther ? context.appColors.accent.withAlpha(30) : context.appColors.bgElevated,
+            color: isOther
+                ? context.appColors.accent.withAlpha(30)
+                : context.appColors.bgElevated,
             borderRadius: BorderRadius.circular(8),
             border: Border.all(
-              color: isOther ? context.appColors.accent : context.appColors.divider,
+              color: isOther
+                  ? context.appColors.accent
+                  : context.appColors.divider,
               width: isOther ? 1.5 : 1,
             ),
           ),
@@ -331,29 +359,39 @@ class _QuestionBlockState extends State<QuestionBlock> {
                     isOther
                         ? Icons.radio_button_checked_rounded
                         : Icons.radio_button_off_rounded,
-                    color: isOther ? context.appColors.accent : context.appColors.textMuted,
+                    color: isOther
+                        ? context.appColors.accent
+                        : context.appColors.textMuted,
                     size: 18,
                   ),
                   SizedBox(width: 10),
-                  Text('Other',
-                      style: TextStyle(
-                        color: isOther ? context.appColors.textPrimary : context.appColors.textSecondary,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500,
-                      )),
+                  Text(
+                    'Other',
+                    style: TextStyle(
+                      color: isOther
+                          ? context.appColors.textPrimary
+                          : context.appColors.textSecondary,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
                 ],
               ),
               if (isOther) ...[
                 SizedBox(height: 8),
                 TextField(
                   controller: _otherControllers[question],
-                  style:
-                      TextStyle(color: context.appColors.textPrimary, fontSize: 13),
+                  style: TextStyle(
+                    color: context.appColors.textPrimary,
+                    fontSize: 13,
+                  ),
                   decoration: InputDecoration(
                     hintText: 'Type your answer...',
                     isDense: true,
                     contentPadding: EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 10),
+                      horizontal: 12,
+                      vertical: 10,
+                    ),
                     fillColor: context.appColors.bgOverlay,
                     border: OutlineInputBorder(
                       borderSide: BorderSide.none,
@@ -384,8 +422,11 @@ class _QuestionBlockState extends State<QuestionBlock> {
         padding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         child: Row(
           children: [
-            Icon(Icons.check_circle_outline_rounded,
-                color: context.appColors.successText, size: 16),
+            Icon(
+              Icons.check_circle_outline_rounded,
+              color: context.appColors.successText,
+              size: 16,
+            ),
             const SizedBox(width: 8),
             Expanded(
               child: Column(
@@ -395,20 +436,25 @@ class _QuestionBlockState extends State<QuestionBlock> {
                     Padding(
                       padding: EdgeInsets.only(bottom: 2),
                       child: Text.rich(
-                        TextSpan(children: [
-                          TextSpan(
-                            text: '${entry.key}: ',
-                            style: TextStyle(
-                                color: context.appColors.textMuted, fontSize: 12),
-                          ),
-                          TextSpan(
-                            text: entry.value,
-                            style: TextStyle(
+                        TextSpan(
+                          children: [
+                            TextSpan(
+                              text: '${entry.key}: ',
+                              style: TextStyle(
+                                color: context.appColors.textMuted,
+                                fontSize: 12,
+                              ),
+                            ),
+                            TextSpan(
+                              text: entry.value,
+                              style: TextStyle(
                                 color: context.appColors.textPrimary,
                                 fontSize: 12,
-                                fontWeight: FontWeight.w500),
-                          ),
-                        ]),
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
+                        ),
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                       ),

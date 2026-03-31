@@ -31,6 +31,7 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
   // --- Config / setup state ---
   /// Null = not yet checked; false = not configured; true = configured.
   bool? _linearKeySet;
+
   /// Worker ID for which the config was last loaded; avoid redundant fetches.
   String? _lastConfigWorkerId;
 
@@ -71,15 +72,6 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
     'cancelled': Color(0xFF9CA3AF),
   };
 
-  static const _priorityOrder = [1, 2, 3, 4, 0];
-  static const _priorityLabels = {
-    0: 'No Priority',
-    1: 'Urgent',
-    2: 'High',
-    3: 'Medium',
-    4: 'Low',
-  };
-
   @override
   void dispose() {
     _searchController.dispose();
@@ -103,10 +95,12 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
     if (_searchQuery.isNotEmpty) {
       final q = _searchQuery.toLowerCase();
       filtered = filtered
-          .where((i) =>
-              i.title.toLowerCase().contains(q) ||
-              i.identifier.toLowerCase().contains(q) ||
-              (i.assigneeName?.toLowerCase().contains(q) ?? false))
+          .where(
+            (i) =>
+                i.title.toLowerCase().contains(q) ||
+                i.identifier.toLowerCase().contains(q) ||
+                (i.assigneeName?.toLowerCase().contains(q) ?? false),
+          )
           .toList();
     }
     return filtered;
@@ -180,8 +174,9 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
           final group = grouped[stateType] ?? [];
           if (group.isEmpty) continue;
           final collapsed = _collapsedGroups.contains(stateType);
-          sections.add(_buildStateGroup(
-              context, state, stateType, group, collapsed));
+          sections.add(
+            _buildStateGroup(context, state, stateType, group, collapsed),
+          );
         }
 
         return Column(
@@ -251,8 +246,11 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
         children: [
           Row(
             children: [
-              Icon(Icons.extension_outlined,
-                  color: context.appColors.accent, size: 20),
+              Icon(
+                Icons.extension_outlined,
+                color: context.appColors.accent,
+                size: 20,
+              ),
               const SizedBox(width: 8),
               Text(
                 'Connect Linear',
@@ -287,11 +285,15 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
             decoration: InputDecoration(
               hintText: 'lin_api_...',
               hintStyle: TextStyle(
-                  color: context.appColors.textMuted, fontSize: 13),
+                color: context.appColors.textMuted,
+                fontSize: 13,
+              ),
               filled: true,
               fillColor: context.appColors.bgElevated,
-              contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 10,
+              ),
               border: OutlineInputBorder(
                 borderSide: BorderSide.none,
                 borderRadius: BorderRadius.circular(8),
@@ -302,7 +304,9 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
               ),
               focusedBorder: OutlineInputBorder(
                 borderSide: BorderSide(
-                    color: context.appColors.accent, width: 1),
+                  color: context.appColors.accent,
+                  width: 1,
+                ),
                 borderRadius: BorderRadius.circular(8),
               ),
               suffixIcon: IconButton(
@@ -321,15 +325,13 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
           const SizedBox(height: 6),
           Text(
             'Create a personal API token at linear.app → Settings → API.',
-            style: TextStyle(
-                color: context.appColors.textMuted, fontSize: 11),
+            style: TextStyle(color: context.appColors.textMuted, fontSize: 11),
           ),
 
           if (_setupError != null) ...[
             const SizedBox(height: 10),
             Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               decoration: BoxDecoration(
                 color: Colors.red.withAlpha(25),
                 borderRadius: BorderRadius.circular(8),
@@ -347,12 +349,15 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
           // "Test Connection" button.
           if (!showTeamStep)
             FilledButton(
-              onPressed: _testing ? null : () => _testConnection(context, state),
+              onPressed: _testing
+                  ? null
+                  : () => _testConnection(context, state),
               style: FilledButton.styleFrom(
                 backgroundColor: context.appColors.accent,
                 foregroundColor: Colors.white,
                 shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8)),
+                  borderRadius: BorderRadius.circular(8),
+                ),
                 padding: const EdgeInsets.symmetric(vertical: 10),
               ),
               child: _testing
@@ -360,8 +365,14 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
                       width: 16,
                       height: 16,
                       child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.white))
-                  : const Text('Test Connection', style: TextStyle(fontSize: 13)),
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Text(
+                      'Test Connection',
+                      style: TextStyle(fontSize: 13),
+                    ),
             ),
 
           // Step 2: Team selection (shown after successful test).
@@ -369,8 +380,7 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
             const SizedBox(height: 20),
             Row(
               children: [
-                Icon(Icons.check_circle_outline,
-                    color: Colors.green, size: 16),
+                Icon(Icons.check_circle_outline, color: Colors.green, size: 16),
                 const SizedBox(width: 6),
                 Text(
                   'Connection successful',
@@ -404,15 +414,18 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
                 underline: const SizedBox.shrink(),
                 dropdownColor: context.appColors.bgElevated,
                 style: TextStyle(
-                    color: context.appColors.textPrimary, fontSize: 13),
+                  color: context.appColors.textPrimary,
+                  fontSize: 13,
+                ),
                 items: [
                   DropdownMenuItem<String?>(
                     value: null,
                     child: Text(
                       'All teams',
                       style: TextStyle(
-                          color: context.appColors.textSecondary,
-                          fontSize: 13),
+                        color: context.appColors.textSecondary,
+                        fontSize: 13,
+                      ),
                     ),
                   ),
                   ..._testedTeams.map(
@@ -429,7 +442,9 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
             Text(
               'Leave on "All teams" to sync issues from every accessible team.',
               style: TextStyle(
-                  color: context.appColors.textMuted, fontSize: 11),
+                color: context.appColors.textMuted,
+                fontSize: 11,
+              ),
             ),
             const SizedBox(height: 14),
             Row(
@@ -439,15 +454,15 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
                     onPressed: _saving
                         ? null
                         : () => setState(() {
-                              _testedTeams = [];
-                              _setupError = null;
-                            }),
+                            _testedTeams = [];
+                            _setupError = null;
+                          }),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: context.appColors.textSecondary,
-                      side: BorderSide(
-                          color: context.appColors.divider),
+                      side: BorderSide(color: context.appColors.divider),
                       shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8)),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
                       padding: const EdgeInsets.symmetric(vertical: 10),
                     ),
                     child: const Text('Back', style: TextStyle(fontSize: 13)),
@@ -463,7 +478,8 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
                       backgroundColor: context.appColors.accent,
                       foregroundColor: Colors.white,
                       shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8)),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
                       padding: const EdgeInsets.symmetric(vertical: 10),
                     ),
                     child: _saving
@@ -471,7 +487,10 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
                             width: 16,
                             height: 16,
                             child: CircularProgressIndicator(
-                                strokeWidth: 2, color: Colors.white))
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
                         : const Text('Save', style: TextStyle(fontSize: 13)),
                   ),
                 ),
@@ -562,20 +581,28 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.inbox_outlined,
-                color: context.appColors.textMuted, size: 40),
+            Icon(
+              Icons.inbox_outlined,
+              color: context.appColors.textMuted,
+              size: 40,
+            ),
             const SizedBox(height: 12),
-            Text('No issues synced',
-                style: TextStyle(
-                    color: context.appColors.textSecondary,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600)),
+            Text(
+              'No issues synced',
+              style: TextStyle(
+                color: context.appColors.textSecondary,
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
             const SizedBox(height: 4),
             Text(
               'Sync your Linear issues to get started.',
               textAlign: TextAlign.center,
               style: TextStyle(
-                  color: context.appColors.textMuted, fontSize: 13),
+                color: context.appColors.textMuted,
+                fontSize: 13,
+              ),
             ),
             const SizedBox(height: 16),
             FilledButton.icon(
@@ -585,16 +612,22 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
                       width: 14,
                       height: 14,
                       child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.white))
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
                   : const Icon(Icons.sync, size: 18),
               label: const Text('Sync Now'),
               style: FilledButton.styleFrom(
                 backgroundColor: context.appColors.accent,
                 foregroundColor: Colors.white,
                 shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10)),
+                  borderRadius: BorderRadius.circular(10),
+                ),
                 padding: const EdgeInsets.symmetric(
-                    horizontal: 16, vertical: 10),
+                  horizontal: 16,
+                  vertical: 10,
+                ),
               ),
             ),
           ],
@@ -618,19 +651,27 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
                     controller: _searchController,
                     onChanged: (v) => setState(() => _searchQuery = v),
                     style: TextStyle(
-                        color: context.appColors.textPrimary, fontSize: 12),
+                      color: context.appColors.textPrimary,
+                      fontSize: 12,
+                    ),
                     decoration: InputDecoration(
                       hintText: 'Search issues...',
                       hintStyle: TextStyle(
-                          color: context.appColors.textMuted, fontSize: 12),
-                      prefixIcon: Padding(
-                        padding:
-                            const EdgeInsets.only(left: 8, right: 4),
-                        child: Icon(Icons.search_rounded,
-                            color: context.appColors.textMuted, size: 16),
+                        color: context.appColors.textMuted,
+                        fontSize: 12,
                       ),
-                      prefixIconConstraints:
-                          const BoxConstraints(maxWidth: 28, maxHeight: 30),
+                      prefixIcon: Padding(
+                        padding: const EdgeInsets.only(left: 8, right: 4),
+                        child: Icon(
+                          Icons.search_rounded,
+                          color: context.appColors.textMuted,
+                          size: 16,
+                        ),
+                      ),
+                      prefixIconConstraints: const BoxConstraints(
+                        maxWidth: 28,
+                        maxHeight: 30,
+                      ),
                       suffixIcon: _searchQuery.isNotEmpty
                           ? GestureDetector(
                               onTap: () {
@@ -639,18 +680,24 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
                               },
                               child: Padding(
                                 padding: const EdgeInsets.only(right: 6),
-                                child: Icon(Icons.close_rounded,
-                                    color: context.appColors.textMuted,
-                                    size: 14),
+                                child: Icon(
+                                  Icons.close_rounded,
+                                  color: context.appColors.textMuted,
+                                  size: 14,
+                                ),
                               ),
                             )
                           : null,
-                      suffixIconConstraints:
-                          const BoxConstraints(maxWidth: 24, maxHeight: 30),
+                      suffixIconConstraints: const BoxConstraints(
+                        maxWidth: 24,
+                        maxHeight: 30,
+                      ),
                       filled: true,
                       fillColor: context.appColors.bgElevated,
                       contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 0),
+                        horizontal: 8,
+                        vertical: 0,
+                      ),
                       border: OutlineInputBorder(
                         borderSide: BorderSide.none,
                         borderRadius: BorderRadius.circular(8),
@@ -661,7 +708,9 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
                       ),
                       focusedBorder: OutlineInputBorder(
                         borderSide: BorderSide(
-                            color: context.appColors.accent, width: 1),
+                          color: context.appColors.accent,
+                          width: 1,
+                        ),
                         borderRadius: BorderRadius.circular(8),
                       ),
                     ),
@@ -674,15 +723,18 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
                   child: _syncing
                       ? const Center(
                           child: SizedBox(
-                              width: 14,
-                              height: 14,
-                              child: CircularProgressIndicator(
-                                  strokeWidth: 2)))
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                        )
                       : IconButton(
                           padding: EdgeInsets.zero,
-                          icon: Icon(Icons.sync,
-                              color: context.appColors.textSecondary,
-                              size: 18),
+                          icon: Icon(
+                            Icons.sync,
+                            color: context.appColors.textSecondary,
+                            size: 18,
+                          ),
                           tooltip: 'Sync from Linear',
                           onPressed: () => _sync(context, state),
                         ),
@@ -706,10 +758,10 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
                           child: _buildFilterChip(
                             context,
                             label: _stateLabels[stateType] ?? stateType,
-                            color: _stateColors[stateType] ??
+                            color:
+                                _stateColors[stateType] ??
                                 context.appColors.textMuted,
-                            selected:
-                                _activeStateFilters.contains(stateType),
+                            selected: _activeStateFilters.contains(stateType),
                             onTap: () => setState(() {
                               if (_activeStateFilters.contains(stateType)) {
                                 _activeStateFilters.remove(stateType);
@@ -727,8 +779,11 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
                     onTap: _clearFilters,
                     child: Padding(
                       padding: const EdgeInsets.only(left: 4),
-                      child: Icon(Icons.filter_alt_off_outlined,
-                          color: context.appColors.textMuted, size: 16),
+                      child: Icon(
+                        Icons.filter_alt_off_outlined,
+                        color: context.appColors.textMuted,
+                        size: 16,
+                      ),
                     ),
                   ),
               ],
@@ -764,8 +819,7 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
           style: TextStyle(
             color: selected ? color : context.appColors.textMuted,
             fontSize: 10,
-            fontWeight:
-                selected ? FontWeight.w600 : FontWeight.w400,
+            fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
           ),
         ),
       ),
@@ -779,8 +833,7 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
     List<LinearIssueInfo> issues,
     bool collapsed,
   ) {
-    final color =
-        _stateColors[stateType] ?? context.appColors.textMuted;
+    final color = _stateColors[stateType] ?? context.appColors.textMuted;
     final label = _stateLabels[stateType] ?? stateType;
 
     return Column(
@@ -795,8 +848,7 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
             }
           }),
           child: Padding(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
             child: Row(
               children: [
                 Container(
@@ -827,9 +879,7 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
                 ),
                 const Spacer(),
                 Icon(
-                  collapsed
-                      ? Icons.chevron_right
-                      : Icons.expand_more,
+                  collapsed ? Icons.chevron_right : Icons.expand_more,
                   color: context.appColors.textMuted,
                   size: 16,
                 ),
@@ -838,11 +888,13 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
           ),
         ),
         if (!collapsed)
-          ...issues.map((issue) => LinearIssueTile(
-                issue: issue,
-                state: state,
-                onSelected: widget.onIssueSelected,
-              )),
+          ...issues.map(
+            (issue) => LinearIssueTile(
+              issue: issue,
+              state: state,
+              onSelected: widget.onIssueSelected,
+            ),
+          ),
         const Divider(height: 1),
       ],
     );
@@ -853,17 +905,19 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.search_off,
-              color: context.appColors.textMuted, size: 32),
+          Icon(Icons.search_off, color: context.appColors.textMuted, size: 32),
           const SizedBox(height: 8),
-          Text('No issues match filters',
-              style: TextStyle(
-                  color: context.appColors.textMuted, fontSize: 13)),
+          Text(
+            'No issues match filters',
+            style: TextStyle(color: context.appColors.textMuted, fontSize: 13),
+          ),
           const SizedBox(height: 8),
           TextButton(
             onPressed: _clearFilters,
-            child: Text('Clear filters',
-                style: TextStyle(color: context.appColors.accent)),
+            child: Text(
+              'Clear filters',
+              style: TextStyle(color: context.appColors.accent),
+            ),
           ),
         ],
       ),
@@ -899,7 +953,8 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
     final jsonStart = raw.indexOf('{');
     if (jsonStart >= 0) {
       try {
-        final decoded = jsonDecode(raw.substring(jsonStart)) as Map<String, dynamic>;
+        final decoded =
+            jsonDecode(raw.substring(jsonStart)) as Map<String, dynamic>;
         final detail = decoded['detail'] as String?;
         if (detail != null) return detail;
       } catch (_) {}

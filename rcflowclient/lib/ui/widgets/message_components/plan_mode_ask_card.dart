@@ -34,7 +34,11 @@ class PlanModeAskCard extends StatelessWidget {
       children: [
         Row(
           children: [
-            Icon(Icons.edit_note_rounded, color: context.appColors.accentLight, size: 18),
+            Icon(
+              Icons.edit_note_rounded,
+              color: context.appColors.accentLight,
+              size: 18,
+            ),
             SizedBox(width: 8),
             Expanded(
               child: Text(
@@ -54,9 +58,11 @@ class PlanModeAskCard extends StatelessWidget {
             Expanded(
               child: OutlinedButton(
                 onPressed: () {
-                  context
-                      .read<PaneState>()
-                      .sendInteractiveResponse(message, 'no', accepted: false);
+                  context.read<PaneState>().sendInteractiveResponse(
+                    message,
+                    'no',
+                    accepted: false,
+                  );
                 },
                 style: OutlinedButton.styleFrom(
                   foregroundColor: context.appColors.textSecondary,
@@ -66,18 +72,20 @@ class PlanModeAskCard extends StatelessWidget {
                   ),
                   padding: const EdgeInsets.symmetric(vertical: 12),
                 ),
-                child: const Text('Deny',
-                    style:
-                        TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                child: const Text(
+                  'Deny',
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                ),
               ),
             ),
             SizedBox(width: 10),
             Expanded(
               child: FilledButton(
                 onPressed: () {
-                  context
-                      .read<PaneState>()
-                      .sendInteractiveResponse(message, 'yes');
+                  context.read<PaneState>().sendInteractiveResponse(
+                    message,
+                    'yes',
+                  );
                 },
                 style: FilledButton.styleFrom(
                   backgroundColor: context.appColors.accent,
@@ -86,9 +94,10 @@ class PlanModeAskCard extends StatelessWidget {
                   ),
                   padding: const EdgeInsets.symmetric(vertical: 12),
                 ),
-                child: const Text('Allow',
-                    style:
-                        TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                child: const Text(
+                  'Allow',
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                ),
               ),
             ),
           ],
@@ -103,7 +112,9 @@ class PlanModeAskCard extends StatelessWidget {
       children: [
         Icon(
           allowed ? Icons.edit_note_rounded : Icons.block_rounded,
-          color: allowed ? context.appColors.accentLight : context.appColors.textSecondary,
+          color: allowed
+              ? context.appColors.accentLight
+              : context.appColors.textSecondary,
           size: 18,
         ),
         SizedBox(width: 8),
@@ -111,7 +122,9 @@ class PlanModeAskCard extends StatelessWidget {
           child: Text(
             allowed ? 'Plan mode allowed' : 'Plan mode denied',
             style: TextStyle(
-              color: allowed ? context.appColors.textPrimary : context.appColors.textSecondary,
+              color: allowed
+                  ? context.appColors.textPrimary
+                  : context.appColors.textSecondary,
               fontSize: 14,
               fontWeight: FontWeight.w500,
             ),

@@ -14,15 +14,15 @@ enum DropZone { left, right, top, bottom }
 
 /// Returns the [SplitAxis] for a given [DropZone].
 SplitAxis dropZoneAxis(DropZone zone) => switch (zone) {
-      DropZone.left || DropZone.right => SplitAxis.horizontal,
-      DropZone.top || DropZone.bottom => SplitAxis.vertical,
-    };
+  DropZone.left || DropZone.right => SplitAxis.horizontal,
+  DropZone.top || DropZone.bottom => SplitAxis.vertical,
+};
 
 /// Whether the new pane should be inserted as the first child.
 bool dropZoneIsFirst(DropZone zone) => switch (zone) {
-      DropZone.left || DropZone.top => true,
-      DropZone.right || DropZone.bottom => false,
-    };
+  DropZone.left || DropZone.top => true,
+  DropZone.right || DropZone.bottom => false,
+};
 
 sealed class SplitNode {
   const SplitNode();
@@ -57,7 +57,11 @@ class SplitBranch extends SplitNode {
 /// Replace the leaf identified by [targetId] with a branch containing it and a
 /// new leaf [newPaneId], split along [axis].
 SplitNode splitPane(
-    SplitNode node, String targetId, String newPaneId, SplitAxis axis) {
+  SplitNode node,
+  String targetId,
+  String newPaneId,
+  SplitAxis axis,
+) {
   switch (node) {
     case PaneLeaf leaf:
       if (leaf.paneId == targetId) {
@@ -86,8 +90,13 @@ SplitNode splitPane(
 
 /// Like [splitPane] but allows inserting the new pane as either first or second
 /// child, controlled by [insertFirst].
-SplitNode splitPaneAtPosition(SplitNode node, String targetId,
-    String newPaneId, SplitAxis axis, {required bool insertFirst}) {
+SplitNode splitPaneAtPosition(
+  SplitNode node,
+  String targetId,
+  String newPaneId,
+  SplitAxis axis, {
+  required bool insertFirst,
+}) {
   switch (node) {
     case PaneLeaf leaf:
       if (leaf.paneId == targetId) {
@@ -101,9 +110,19 @@ SplitNode splitPaneAtPosition(SplitNode node, String targetId,
       return leaf;
     case SplitBranch branch:
       final newFirst = splitPaneAtPosition(
-          branch.first, targetId, newPaneId, axis, insertFirst: insertFirst);
+        branch.first,
+        targetId,
+        newPaneId,
+        axis,
+        insertFirst: insertFirst,
+      );
       final newSecond = splitPaneAtPosition(
-          branch.second, targetId, newPaneId, axis, insertFirst: insertFirst);
+        branch.second,
+        targetId,
+        newPaneId,
+        axis,
+        insertFirst: insertFirst,
+      );
       if (identical(newFirst, branch.first) &&
           identical(newSecond, branch.second)) {
         return branch;
@@ -158,8 +177,7 @@ bool containsPane(SplitNode node, String id) {
     case PaneLeaf leaf:
       return leaf.paneId == id;
     case SplitBranch branch:
-      return containsPane(branch.first, id) ||
-          containsPane(branch.second, id);
+      return containsPane(branch.first, id) || containsPane(branch.second, id);
   }
 }
 

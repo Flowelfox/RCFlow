@@ -16,25 +16,24 @@ LinearIssueInfo _issue({
   String identifier = 'ENG-1',
   String title = 'Test issue',
   String? assigneeName,
-}) =>
-    LinearIssueInfo(
-      id: id,
-      linearId: 'lin-$id',
-      identifier: identifier,
-      title: title,
-      priority: 0,
-      stateName: 'Todo',
-      stateType: 'unstarted',
-      teamId: 'team1',
-      url: 'https://linear.app/issue/$id',
-      labels: [],
-      createdAt: DateTime(2025),
-      updatedAt: DateTime(2025),
-      syncedAt: DateTime(2025),
-      assigneeName: assigneeName,
-      workerId: 'w1',
-      workerName: 'Worker',
-    );
+}) => LinearIssueInfo(
+  id: id,
+  linearId: 'lin-$id',
+  identifier: identifier,
+  title: title,
+  priority: 0,
+  stateName: 'Todo',
+  stateType: 'unstarted',
+  teamId: 'team1',
+  url: 'https://linear.app/issue/$id',
+  labels: [],
+  createdAt: DateTime(2025),
+  updatedAt: DateTime(2025),
+  syncedAt: DateTime(2025),
+  assigneeName: assigneeName,
+  workerId: 'w1',
+  workerName: 'Worker',
+);
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -92,10 +91,7 @@ void main() {
 
     test('null assigneeName does not throw', () {
       final issues = [_issue(id: '1', assigneeName: null)];
-      expect(
-        () => filterLinearIssuesByQuery(issues, 'alice'),
-        returnsNormally,
-      );
+      expect(() => filterLinearIssuesByQuery(issues, 'alice'), returnsNormally);
     });
   });
 }

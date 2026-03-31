@@ -38,19 +38,22 @@ class _ServerConfigPage extends StatelessWidget {
           AppBar(
             backgroundColor: context.appColors.bgBase,
             leading: IconButton(
-              icon: Icon(Icons.arrow_back, color: context.appColors.textPrimary),
+              icon: Icon(
+                Icons.arrow_back,
+                color: context.appColors.textPrimary,
+              ),
               onPressed: () => Navigator.of(context).pop(),
             ),
             title: Text(
               '$workerName Settings',
-              style: TextStyle(color: context.appColors.textPrimary, fontSize: 18),
+              style: TextStyle(
+                color: context.appColors.textPrimary,
+                fontSize: 18,
+              ),
             ),
           ),
           Expanded(
-            child: ServerConfigContent(
-              ws: ws,
-              workerName: workerName,
-            ),
+            child: ServerConfigContent(ws: ws, workerName: workerName),
           ),
         ],
       ),
@@ -66,9 +69,11 @@ class ServerConfigContent extends StatefulWidget {
   final WebSocketService ws;
   final String workerName;
   final ScrollController? scrollController;
+
   /// When true, hides internal save buttons (used when embedded in a dialog
   /// that provides its own save action).
   final bool embedded;
+
   /// When set, renders only options in this config group (e.g. 'LLM')
   /// without the sidebar navigation.
   final String? sectionFilter;
@@ -117,7 +122,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
   // Whether the Tools group in the sidebar is expanded to show sub-items.
   bool _toolsSidebarExpanded = true;
   final Map<String, Map<String, TextEditingController>>
-      _toolSettingsControllers = {};
+  _toolSettingsControllers = {};
 
   // Codex ChatGPT login state
   bool? _codexLoggedIn;
@@ -135,7 +140,8 @@ class ServerConfigContentState extends State<ServerConfigContent> {
   String? _claudeCodeLoginError;
   String? _claudeCodeEmail;
   String? _claudeCodeSubscription;
-  final TextEditingController _claudeCodeAuthCodeController = TextEditingController();
+  final TextEditingController _claudeCodeAuthCodeController =
+      TextEditingController();
 
   @override
   void initState() {
@@ -175,8 +181,9 @@ class ServerConfigContentState extends State<ServerConfigContent> {
     final toolsResult = results[1];
 
     if (configResult is List<Map<String, dynamic>>) {
-      final options =
-          configResult.map((o) => ConfigOption.fromJson(o)).toList();
+      final options = configResult
+          .map((o) => ConfigOption.fromJson(o))
+          .toList();
       setState(() {
         _options = options;
         _loading = false;
@@ -310,10 +317,17 @@ class ServerConfigContentState extends State<ServerConfigContent> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: context.appColors.bgSurface,
-        title: Text('Uninstall $displayName?',
-            style: TextStyle(color: context.appColors.textPrimary, fontSize: 16)),
-        content: Text('The managed binary will be removed. Settings will be preserved.',
-            style: TextStyle(color: context.appColors.textSecondary, fontSize: 13)),
+        title: Text(
+          'Uninstall $displayName?',
+          style: TextStyle(color: context.appColors.textPrimary, fontSize: 16),
+        ),
+        content: Text(
+          'The managed binary will be removed. Settings will be preserved.',
+          style: TextStyle(
+            color: context.appColors.textSecondary,
+            fontSize: 13,
+          ),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
@@ -321,7 +335,9 @@ class ServerConfigContentState extends State<ServerConfigContent> {
           ),
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(true),
-            style: TextButton.styleFrom(foregroundColor: context.appColors.errorText),
+            style: TextButton.styleFrom(
+              foregroundColor: context.appColors.errorText,
+            ),
             child: const Text('Uninstall'),
           ),
         ],
@@ -593,7 +609,9 @@ class ServerConfigContentState extends State<ServerConfigContent> {
   }
 
   void _initToolSettingsControllers(
-      String toolName, List<Map<String, dynamic>> fields) {
+    String toolName,
+    List<Map<String, dynamic>> fields,
+  ) {
     final existing = _toolSettingsControllers[toolName];
     if (existing != null) {
       for (final c in existing.values) {
@@ -605,8 +623,9 @@ class ServerConfigContentState extends State<ServerConfigContent> {
       final type = field['type'] as String;
       final key = field['key'] as String;
       if (type == 'string' || type == 'model_select') {
-        controllers[key] =
-            TextEditingController(text: field['value']?.toString() ?? '');
+        controllers[key] = TextEditingController(
+          text: field['value']?.toString() ?? '',
+        );
       } else if (type == 'string_list') {
         final list = field['value'];
         final text = list is List ? list.join('\n') : '';
@@ -626,12 +645,19 @@ class ServerConfigContentState extends State<ServerConfigContent> {
     }
     _textControllers.clear();
     for (final opt in options) {
-      if (opt.type == 'string' || opt.type == 'secret' || opt.type == 'textarea' || opt.type == 'number' || opt.type == 'model_select') {
-        _textControllers[opt.key] =
-            TextEditingController(text: opt.value?.toString() ?? '');
+      if (opt.type == 'string' ||
+          opt.type == 'secret' ||
+          opt.type == 'textarea' ||
+          opt.type == 'number' ||
+          opt.type == 'model_select') {
+        _textControllers[opt.key] = TextEditingController(
+          text: opt.value?.toString() ?? '',
+        );
       } else if (opt.type == 'string_list') {
         final list = opt.value;
-        final text = list is List ? list.join('\n') : (opt.value?.toString() ?? '');
+        final text = list is List
+            ? list.join('\n')
+            : (opt.value?.toString() ?? '');
         _textControllers[opt.key] = TextEditingController(text: text);
       }
     }
@@ -670,13 +696,14 @@ class ServerConfigContentState extends State<ServerConfigContent> {
     });
     try {
       final rawOptions = await widget.ws.updateConfig(_editedValues);
-      final options =
-          rawOptions.map((o) => ConfigOption.fromJson(o)).toList();
+      final options = rawOptions.map((o) => ConfigOption.fromJson(o)).toList();
       if (!mounted) return;
 
       final hadRestartRequired = _editedValues.keys.any((key) {
-        final opt = _options?.firstWhere((o) => o.key == key,
-            orElse: () => _options!.first);
+        final opt = _options?.firstWhere(
+          (o) => o.key == key,
+          orElse: () => _options!.first,
+        );
         return opt?.restartRequired ?? false;
       });
 
@@ -743,17 +770,28 @@ class ServerConfigContentState extends State<ServerConfigContent> {
 
   static IconData _iconForSection(String section) {
     switch (section) {
-      case 'Tools':           return Icons.handyman_outlined;
-      case 'LLM':             return Icons.psychology_outlined;
-      case 'Prompt':          return Icons.edit_note_outlined;
-      case 'Codex':           return Icons.menu_book_outlined;
-      case 'Paths':           return Icons.folder_outlined;
-      case 'Tool Management': return Icons.tune_outlined;
-      case 'Session Limits':  return Icons.hourglass_empty_outlined;
-      case 'Artifacts':       return Icons.inventory_2_outlined;
-      case 'Linear':          return Icons.dashboard_outlined;
-      case 'Logging':         return Icons.receipt_long_outlined;
-      default:                return Icons.settings_outlined;
+      case 'Tools':
+        return Icons.handyman_outlined;
+      case 'LLM':
+        return Icons.psychology_outlined;
+      case 'Prompt':
+        return Icons.edit_note_outlined;
+      case 'Codex':
+        return Icons.menu_book_outlined;
+      case 'Paths':
+        return Icons.folder_outlined;
+      case 'Tool Management':
+        return Icons.tune_outlined;
+      case 'Session Limits':
+        return Icons.hourglass_empty_outlined;
+      case 'Artifacts':
+        return Icons.inventory_2_outlined;
+      case 'Linear':
+        return Icons.dashboard_outlined;
+      case 'Logging':
+        return Icons.receipt_long_outlined;
+      default:
+        return Icons.settings_outlined;
     }
   }
 
@@ -769,15 +807,26 @@ class ServerConfigContentState extends State<ServerConfigContent> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.error_outline, color: context.appColors.errorText, size: 40),
+            Icon(
+              Icons.error_outline,
+              color: context.appColors.errorText,
+              size: 40,
+            ),
             SizedBox(height: 12),
-            Text(_error!,
-                style: TextStyle(color: context.appColors.errorText, fontSize: 13)),
+            Text(
+              _error!,
+              style: TextStyle(
+                color: context.appColors.errorText,
+                fontSize: 13,
+              ),
+            ),
             SizedBox(height: 16),
             TextButton(
               onPressed: _loadConfig,
-              child: Text('Retry',
-                  style: TextStyle(color: context.appColors.accentLight)),
+              child: Text(
+                'Retry',
+                style: TextStyle(color: context.appColors.accentLight),
+              ),
             ),
           ],
         ),
@@ -801,7 +850,9 @@ class ServerConfigContentState extends State<ServerConfigContent> {
         Container(
           width: 180,
           decoration: BoxDecoration(
-            border: Border(right: BorderSide(color: context.appColors.divider, width: 1)),
+            border: Border(
+              right: BorderSide(color: context.appColors.divider, width: 1),
+            ),
           ),
           child: ListView(
             padding: const EdgeInsets.symmetric(vertical: 8),
@@ -814,7 +865,8 @@ class ServerConfigContentState extends State<ServerConfigContent> {
                     label: 'Tools',
                     icon: Icons.handyman_outlined,
                     selected: section == 'Tools',
-                    hasModified: _options != null &&
+                    hasModified:
+                        _options != null &&
                         _options!
                             .where((o) => _mergedIntoTools.contains(o.group))
                             .any((o) => _editedValues.containsKey(o.key)),
@@ -832,15 +884,15 @@ class ServerConfigContentState extends State<ServerConfigContent> {
                       _ConfigSidebarSubItem(
                         label: _toolDisplayNames[toolKey] ?? toolKey,
                         selected: section == toolKey,
-                        onTap: () =>
-                            setState(() => _selectedSection = toolKey),
+                        onTap: () => setState(() => _selectedSection = toolKey),
                       ),
                 ] else
                   _ConfigSidebarItem(
                     label: s,
                     icon: _iconForSection(s),
                     selected: section == s,
-                    hasModified: _options != null &&
+                    hasModified:
+                        _options != null &&
                         _options!
                             .where((o) => o.group == s)
                             .any((o) => _editedValues.containsKey(o.key)),
@@ -856,7 +908,8 @@ class ServerConfigContentState extends State<ServerConfigContent> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if (!widget.embedded && (_hasChanges || _saveMessage != null)) ...[
+                if (!widget.embedded &&
+                    (_hasChanges || _saveMessage != null)) ...[
                   Row(
                     mainAxisAlignment: MainAxisAlignment.end,
                     children: [
@@ -879,9 +932,12 @@ class ServerConfigContentState extends State<ServerConfigContent> {
                             backgroundColor: context.appColors.accent,
                             foregroundColor: Colors.white,
                             padding: const EdgeInsets.symmetric(
-                                horizontal: 16, vertical: 8),
+                              horizontal: 16,
+                              vertical: 8,
+                            ),
                             shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(10)),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
                           ),
                           child: _saving
                               ? const SizedBox(
@@ -918,13 +974,15 @@ class ServerConfigContentState extends State<ServerConfigContent> {
     // Tool sub-item selected — show that tool's detail view.
     if (_tools != null && _tools!.containsKey(section)) {
       return _buildToolDetailSection(
-          section, _tools![section] as Map<String, dynamic>);
+        section,
+        _tools![section] as Map<String, dynamic>,
+      );
     }
 
-    final groupOpts =
-        _options!.where((o) => o.group == section && _isVisible(o)).toList();
-    final hasModified =
-        groupOpts.any((o) => _editedValues.containsKey(o.key));
+    final groupOpts = _options!
+        .where((o) => o.group == section && _isVisible(o))
+        .toList();
+    final hasModified = groupOpts.any((o) => _editedValues.containsKey(o.key));
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1001,8 +1059,8 @@ class ServerConfigContentState extends State<ServerConfigContent> {
                 accent: true,
                 onPressed:
                     (_toolsUpdating || _toolsUpdatingIndividual.isNotEmpty)
-                        ? null
-                        : _updateTools,
+                    ? null
+                    : _updateTools,
               ),
             ],
           ],
@@ -1010,9 +1068,13 @@ class ServerConfigContentState extends State<ServerConfigContent> {
         if (_toolsError != null)
           Padding(
             padding: const EdgeInsets.only(top: 8),
-            child: Text(_toolsError!,
-                style:
-                    TextStyle(color: context.appColors.errorText, fontSize: 12)),
+            child: Text(
+              _toolsError!,
+              style: TextStyle(
+                color: context.appColors.errorText,
+                fontSize: 12,
+              ),
+            ),
           ),
         // Options from groups merged into Tools (e.g. "Tool Management")
         ..._buildMergedToolsOptions(),
@@ -1033,8 +1095,9 @@ class ServerConfigContentState extends State<ServerConfigContent> {
     if (_options == null) return [];
     final widgets = <Widget>[];
     for (final group in _mergedIntoTools) {
-      final groupOpts =
-          _options!.where((o) => o.group == group && _isVisible(o)).toList();
+      final groupOpts = _options!
+          .where((o) => o.group == group && _isVisible(o))
+          .toList();
       if (groupOpts.isEmpty) continue;
       widgets.add(const SizedBox(height: 20));
       widgets.add(Divider(color: context.appColors.divider, height: 1));
@@ -1053,8 +1116,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
   /// [_buildToolSubsectionBody] for the full install/settings content.
   Widget _buildToolDetailSection(String key, Map<String, dynamic> tool) {
     // Kick off settings load the first time this tool's detail view is shown.
-    if (_toolSettings[key] == null &&
-        !(_toolSettingsLoading[key] ?? false)) {
+    if (_toolSettings[key] == null && !(_toolSettingsLoading[key] ?? false)) {
       Future.microtask(() => _loadToolSettings(key));
     }
 
@@ -1128,21 +1190,36 @@ class ServerConfigContentState extends State<ServerConfigContent> {
         Row(
           children: [
             if (!installed)
-              Text('Not installed',
-                  style: TextStyle(
-                      color: context.appColors.textMuted, fontSize: 12))
+              Text(
+                'Not installed',
+                style: TextStyle(
+                  color: context.appColors.textMuted,
+                  fontSize: 12,
+                ),
+              )
             else ...[
-              Text('v$currentVersion',
-                  style: TextStyle(
-                      color: context.appColors.textSecondary, fontSize: 12)),
+              Text(
+                'v$currentVersion',
+                style: TextStyle(
+                  color: context.appColors.textSecondary,
+                  fontSize: 12,
+                ),
+              ),
               if (updateAvailable && latestVersion != null) ...[
                 const SizedBox(width: 6),
-                Icon(Icons.arrow_forward_rounded,
-                    color: context.appColors.textMuted, size: 12),
+                Icon(
+                  Icons.arrow_forward_rounded,
+                  color: context.appColors.textMuted,
+                  size: 12,
+                ),
                 const SizedBox(width: 6),
-                Text('v$latestVersion',
-                    style: TextStyle(
-                        color: context.appColors.accentLight, fontSize: 12)),
+                Text(
+                  'v$latestVersion',
+                  style: TextStyle(
+                    color: context.appColors.accentLight,
+                    fontSize: 12,
+                  ),
+                ),
               ],
             ],
             const Spacer(),
@@ -1153,8 +1230,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
                 label: installed ? 'Install managed' : 'Install',
                 loading: isInstalling,
                 accent: !installed,
-                onPressed:
-                    isInstalling ? null : () => _installManagedTool(key),
+                onPressed: isInstalling ? null : () => _installManagedTool(key),
               ),
             ],
             // Uninstall when a managed install exists
@@ -1164,8 +1240,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
                 label: 'Uninstall',
                 loading: isUninstalling,
                 accent: false,
-                onPressed:
-                    isUninstalling ? null : () => _confirmUninstall(key),
+                onPressed: isUninstalling ? null : () => _confirmUninstall(key),
               ),
             ],
           ],
@@ -1174,9 +1249,13 @@ class ServerConfigContentState extends State<ServerConfigContent> {
         if (error != null)
           Padding(
             padding: const EdgeInsets.only(top: 4),
-            child: Text(error,
-                style: TextStyle(
-                    color: context.appColors.errorText, fontSize: 11)),
+            child: Text(
+              error,
+              style: TextStyle(
+                color: context.appColors.errorText,
+                fontSize: 11,
+              ),
+            ),
           ),
         // Progress bar for install/update operations
         if (progress != null)
@@ -1242,7 +1321,9 @@ class ServerConfigContentState extends State<ServerConfigContent> {
 
   Widget _buildCodexLoginSection() {
     // Fetch status on first render
-    if (_codexLoggedIn == null && !_codexLoggingIn && _codexLoginError == null) {
+    if (_codexLoggedIn == null &&
+        !_codexLoggingIn &&
+        _codexLoginError == null) {
       Future.microtask(() => _checkCodexLoginStatus());
     }
 
@@ -1278,17 +1359,31 @@ class ServerConfigContentState extends State<ServerConfigContent> {
                   ),
                 ),
                 SizedBox(width: 8),
-                Text('Checking status...',
-                    style: TextStyle(color: context.appColors.textMuted, fontSize: 11)),
+                Text(
+                  'Checking status...',
+                  style: TextStyle(
+                    color: context.appColors.textMuted,
+                    fontSize: 11,
+                  ),
+                ),
               ],
             )
           else if (_codexLoggedIn == true && !_codexLoggingIn)
             Row(
               children: [
-                Icon(Icons.check_circle, color: context.appColors.successText, size: 14),
+                Icon(
+                  Icons.check_circle,
+                  color: context.appColors.successText,
+                  size: 14,
+                ),
                 SizedBox(width: 6),
-                Text('Logged in',
-                    style: TextStyle(color: context.appColors.successText, fontSize: 11)),
+                Text(
+                  'Logged in',
+                  style: TextStyle(
+                    color: context.appColors.successText,
+                    fontSize: 11,
+                  ),
+                ),
                 const Spacer(),
                 _ToolActionButton(
                   label: 'Re-login',
@@ -1301,11 +1396,19 @@ class ServerConfigContentState extends State<ServerConfigContent> {
           else if (!_codexLoggingIn) ...[
             Row(
               children: [
-                Icon(Icons.cancel_outlined,
-                    color: context.appColors.textMuted, size: 14),
+                Icon(
+                  Icons.cancel_outlined,
+                  color: context.appColors.textMuted,
+                  size: 14,
+                ),
                 SizedBox(width: 6),
-                Text('Not logged in',
-                    style: TextStyle(color: context.appColors.textMuted, fontSize: 11)),
+                Text(
+                  'Not logged in',
+                  style: TextStyle(
+                    color: context.appColors.textMuted,
+                    fontSize: 11,
+                  ),
+                ),
               ],
             ),
             const SizedBox(height: 8),
@@ -1347,12 +1450,18 @@ class ServerConfigContentState extends State<ServerConfigContent> {
                   children: [
                     Text(
                       'Complete sign-in in your browser.',
-                      style: TextStyle(color: context.appColors.textSecondary, fontSize: 11),
+                      style: TextStyle(
+                        color: context.appColors.textSecondary,
+                        fontSize: 11,
+                      ),
                     ),
                     SizedBox(height: 6),
                     Text(
                       'If the browser did not open, click the link:',
-                      style: TextStyle(color: context.appColors.textMuted, fontSize: 10),
+                      style: TextStyle(
+                        color: context.appColors.textMuted,
+                        fontSize: 10,
+                      ),
                     ),
                     const SizedBox(height: 4),
                     GestureDetector(
@@ -1382,17 +1491,23 @@ class ServerConfigContentState extends State<ServerConfigContent> {
                     width: 12,
                     height: 12,
                     child: CircularProgressIndicator(
-                      strokeWidth: 1.5, color: context.appColors.accent),
+                      strokeWidth: 1.5,
+                      color: context.appColors.accent,
+                    ),
                   ),
                   SizedBox(width: 8),
-                  Text('Waiting for browser authentication...',
-                      style: TextStyle(color: context.appColors.textMuted, fontSize: 11)),
+                  Text(
+                    'Waiting for browser authentication...',
+                    style: TextStyle(
+                      color: context.appColors.textMuted,
+                      fontSize: 11,
+                    ),
+                  ),
                 ],
               ),
             ]
             // Device code flow
-            else if (_codexDeviceCode != null &&
-                _codexDeviceUrl != null) ...[
+            else if (_codexDeviceCode != null && _codexDeviceUrl != null) ...[
               SizedBox(height: 8),
               Container(
                 width: double.infinity,
@@ -1405,7 +1520,10 @@ class ServerConfigContentState extends State<ServerConfigContent> {
                   children: [
                     Text(
                       'Enter this code in your browser:',
-                      style: TextStyle(color: context.appColors.textSecondary, fontSize: 11),
+                      style: TextStyle(
+                        color: context.appColors.textSecondary,
+                        fontSize: 11,
+                      ),
                     ),
                     SizedBox(height: 6),
                     SelectableText(
@@ -1443,11 +1561,18 @@ class ServerConfigContentState extends State<ServerConfigContent> {
                     width: 12,
                     height: 12,
                     child: CircularProgressIndicator(
-                      strokeWidth: 1.5, color: context.appColors.accent),
+                      strokeWidth: 1.5,
+                      color: context.appColors.accent,
+                    ),
                   ),
                   SizedBox(width: 8),
-                  Text('Waiting for browser authentication...',
-                      style: TextStyle(color: context.appColors.textMuted, fontSize: 11)),
+                  Text(
+                    'Waiting for browser authentication...',
+                    style: TextStyle(
+                      color: context.appColors.textMuted,
+                      fontSize: 11,
+                    ),
+                  ),
                 ],
               ),
             ] else ...[
@@ -1458,11 +1583,18 @@ class ServerConfigContentState extends State<ServerConfigContent> {
                     width: 12,
                     height: 12,
                     child: CircularProgressIndicator(
-                      strokeWidth: 1.5, color: context.appColors.accent),
+                      strokeWidth: 1.5,
+                      color: context.appColors.accent,
+                    ),
                   ),
                   SizedBox(width: 8),
-                  Text('Starting login...',
-                      style: TextStyle(color: context.appColors.textMuted, fontSize: 11)),
+                  Text(
+                    'Starting login...',
+                    style: TextStyle(
+                      color: context.appColors.textMuted,
+                      fontSize: 11,
+                    ),
+                  ),
                 ],
               ),
             ],
@@ -1470,8 +1602,13 @@ class ServerConfigContentState extends State<ServerConfigContent> {
           if (_codexLoginError != null)
             Padding(
               padding: EdgeInsets.only(top: 4),
-              child: Text(_codexLoginError!,
-                  style: TextStyle(color: context.appColors.errorText, fontSize: 10)),
+              child: Text(
+                _codexLoginError!,
+                style: TextStyle(
+                  color: context.appColors.errorText,
+                  fontSize: 10,
+                ),
+              ),
             ),
         ],
       ),
@@ -1480,7 +1617,9 @@ class ServerConfigContentState extends State<ServerConfigContent> {
 
   Widget _buildClaudeCodeLoginSection() {
     // Fetch status on first render
-    if (_claudeCodeLoggedIn == null && !_claudeCodeLoggingIn && _claudeCodeLoginError == null) {
+    if (_claudeCodeLoggedIn == null &&
+        !_claudeCodeLoggingIn &&
+        _claudeCodeLoginError == null) {
       Future.microtask(() => _checkClaudeCodeLoginStatus());
     }
 
@@ -1504,7 +1643,9 @@ class ServerConfigContentState extends State<ServerConfigContent> {
           ),
           const SizedBox(height: 6),
           // Status indicator
-          if (_claudeCodeLoggedIn == null && _claudeCodeLoginError == null && !_claudeCodeLoggingIn)
+          if (_claudeCodeLoggedIn == null &&
+              _claudeCodeLoginError == null &&
+              !_claudeCodeLoggingIn)
             Row(
               children: [
                 SizedBox(
@@ -1516,8 +1657,13 @@ class ServerConfigContentState extends State<ServerConfigContent> {
                   ),
                 ),
                 SizedBox(width: 8),
-                Text('Checking status...',
-                    style: TextStyle(color: context.appColors.textMuted, fontSize: 11)),
+                Text(
+                  'Checking status...',
+                  style: TextStyle(
+                    color: context.appColors.textMuted,
+                    fontSize: 11,
+                  ),
+                ),
               ],
             )
           else if (_claudeCodeLoggedIn == true && !_claudeCodeLoggingIn)
@@ -1526,14 +1672,21 @@ class ServerConfigContentState extends State<ServerConfigContent> {
               children: [
                 Row(
                   children: [
-                    Icon(Icons.check_circle, color: context.appColors.successText, size: 14),
+                    Icon(
+                      Icons.check_circle,
+                      color: context.appColors.successText,
+                      size: 14,
+                    ),
                     SizedBox(width: 6),
                     Expanded(
                       child: Text(
                         _claudeCodeEmail != null
                             ? 'Logged in as $_claudeCodeEmail'
                             : 'Logged in',
-                        style: TextStyle(color: context.appColors.successText, fontSize: 11),
+                        style: TextStyle(
+                          color: context.appColors.successText,
+                          fontSize: 11,
+                        ),
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
@@ -1545,7 +1698,10 @@ class ServerConfigContentState extends State<ServerConfigContent> {
                     padding: EdgeInsets.only(left: 20),
                     child: Text(
                       'Subscription: ${_claudeCodeSubscription!}',
-                      style: TextStyle(color: context.appColors.textMuted, fontSize: 10),
+                      style: TextStyle(
+                        color: context.appColors.textMuted,
+                        fontSize: 10,
+                      ),
                     ),
                   ),
                 ],
@@ -1572,11 +1728,19 @@ class ServerConfigContentState extends State<ServerConfigContent> {
           else if (!_claudeCodeLoggingIn) ...[
             Row(
               children: [
-                Icon(Icons.cancel_outlined,
-                    color: context.appColors.textMuted, size: 14),
+                Icon(
+                  Icons.cancel_outlined,
+                  color: context.appColors.textMuted,
+                  size: 14,
+                ),
                 SizedBox(width: 6),
-                Text('Not logged in',
-                    style: TextStyle(color: context.appColors.textMuted, fontSize: 11)),
+                Text(
+                  'Not logged in',
+                  style: TextStyle(
+                    color: context.appColors.textMuted,
+                    fontSize: 11,
+                  ),
+                ),
               ],
             ),
             const SizedBox(height: 8),
@@ -1609,7 +1773,10 @@ class ServerConfigContentState extends State<ServerConfigContent> {
                   children: [
                     Text(
                       'Sign in via your browser, then paste the code below.',
-                      style: TextStyle(color: context.appColors.textSecondary, fontSize: 11),
+                      style: TextStyle(
+                        color: context.appColors.textSecondary,
+                        fontSize: 11,
+                      ),
                     ),
                     SizedBox(height: 6),
                     GestureDetector(
@@ -1644,18 +1811,27 @@ class ServerConfigContentState extends State<ServerConfigContent> {
                                   color: context.appColors.textMuted,
                                   fontSize: 12,
                                 ),
-                                contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                                contentPadding: EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 6,
+                                ),
                                 border: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(4),
-                                  borderSide: BorderSide(color: context.appColors.bgOverlay),
+                                  borderSide: BorderSide(
+                                    color: context.appColors.bgOverlay,
+                                  ),
                                 ),
                                 enabledBorder: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(4),
-                                  borderSide: BorderSide(color: context.appColors.bgOverlay),
+                                  borderSide: BorderSide(
+                                    color: context.appColors.bgOverlay,
+                                  ),
                                 ),
                                 focusedBorder: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(4),
-                                  borderSide: BorderSide(color: context.appColors.accent),
+                                  borderSide: BorderSide(
+                                    color: context.appColors.accent,
+                                  ),
                                 ),
                                 filled: true,
                                 fillColor: context.appColors.bgSurface,
@@ -1686,11 +1862,18 @@ class ServerConfigContentState extends State<ServerConfigContent> {
                     width: 12,
                     height: 12,
                     child: CircularProgressIndicator(
-                      strokeWidth: 1.5, color: context.appColors.accent),
+                      strokeWidth: 1.5,
+                      color: context.appColors.accent,
+                    ),
                   ),
                   SizedBox(width: 8),
-                  Text('Starting login...',
-                      style: TextStyle(color: context.appColors.textMuted, fontSize: 11)),
+                  Text(
+                    'Starting login...',
+                    style: TextStyle(
+                      color: context.appColors.textMuted,
+                      fontSize: 11,
+                    ),
+                  ),
                 ],
               ),
             ],
@@ -1698,8 +1881,13 @@ class ServerConfigContentState extends State<ServerConfigContent> {
           if (_claudeCodeLoginError != null)
             Padding(
               padding: EdgeInsets.only(top: 4),
-              child: Text(_claudeCodeLoginError!,
-                  style: TextStyle(color: context.appColors.errorText, fontSize: 10)),
+              child: Text(
+                _claudeCodeLoginError!,
+                style: TextStyle(
+                  color: context.appColors.errorText,
+                  fontSize: 10,
+                ),
+              ),
             ),
         ],
       ),
@@ -1725,15 +1913,22 @@ class ServerConfigContentState extends State<ServerConfigContent> {
                 width: 16,
                 height: 16,
                 child: CircularProgressIndicator(
-                    strokeWidth: 2, color: context.appColors.accent),
+                  strokeWidth: 2,
+                  color: context.appColors.accent,
+                ),
               ),
             ),
           )
         else if (error != null && fields == null)
           Padding(
             padding: EdgeInsets.symmetric(vertical: 4),
-            child: Text(error,
-                style: TextStyle(color: context.appColors.errorText, fontSize: 11)),
+            child: Text(
+              error,
+              style: TextStyle(
+                color: context.appColors.errorText,
+                fontSize: 11,
+              ),
+            ),
           )
         else if (fields != null) ...[
           for (final field in fields) ...[
@@ -1773,16 +1968,20 @@ class ServerConfigContentState extends State<ServerConfigContent> {
           if (error != null)
             Padding(
               padding: EdgeInsets.only(top: 4),
-              child: Text(error,
-                  style: TextStyle(color: context.appColors.errorText, fontSize: 11)),
+              child: Text(
+                error,
+                style: TextStyle(
+                  color: context.appColors.errorText,
+                  fontSize: 11,
+                ),
+              ),
             ),
         ],
       ],
     );
   }
 
-  Widget _buildToolSettingField(
-      String toolName, Map<String, dynamic> field) {
+  Widget _buildToolSettingField(String toolName, Map<String, dynamic> field) {
     final key = field['key'] as String;
     final label = field['label'] as String;
     final type = field['type'] as String;
@@ -1812,9 +2011,13 @@ class ServerConfigContentState extends State<ServerConfigContent> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             SwitchListTile(
-              title: Text(label,
-                  style:
-                      TextStyle(color: context.appColors.textPrimary, fontSize: 13)),
+              title: Text(
+                label,
+                style: TextStyle(
+                  color: context.appColors.textPrimary,
+                  fontSize: 13,
+                ),
+              ),
               value: currentValue is bool ? currentValue : currentValue == true,
               activeTrackColor: context.appColors.accent,
               contentPadding: EdgeInsets.zero,
@@ -1822,12 +2025,18 @@ class ServerConfigContentState extends State<ServerConfigContent> {
               onChanged: (v) => onChanged(v),
             ),
             if (description.isNotEmpty)
-              Text(description,
-                  style: TextStyle(color: context.appColors.textMuted, fontSize: 10)),
+              Text(
+                description,
+                style: TextStyle(
+                  color: context.appColors.textMuted,
+                  fontSize: 10,
+                ),
+              ),
           ],
         );
       case 'select':
-        final options = (field['options'] as List<dynamic>?)
+        final options =
+            (field['options'] as List<dynamic>?)
                 ?.cast<Map<String, dynamic>>() ??
             [];
         final values = options.map((o) => o['value'] as String).toList();
@@ -1844,11 +2053,17 @@ class ServerConfigContentState extends State<ServerConfigContent> {
                   : null,
               isExpanded: true,
               dropdownColor: context.appColors.bgSurface,
-              style: TextStyle(color: context.appColors.textPrimary, fontSize: 13),
+              style: TextStyle(
+                color: context.appColors.textPrimary,
+                fontSize: 13,
+              ),
               items: options
-                  .map((o) => DropdownMenuItem(
+                  .map(
+                    (o) => DropdownMenuItem(
                       value: o['value'] as String,
-                      child: Text(o['label'] as String)))
+                      child: Text(o['label'] as String),
+                    ),
+                  )
                   .toList(),
               onChanged: (v) {
                 if (v != null) onChanged(v);
@@ -1883,7 +2098,10 @@ class ServerConfigContentState extends State<ServerConfigContent> {
           },
           decoration: InputDecoration(
             hintText: 'One entry per line',
-            hintStyle: TextStyle(color: context.appColors.textMuted, fontSize: 12),
+            hintStyle: TextStyle(
+              color: context.appColors.textMuted,
+              fontSize: 12,
+            ),
             fillColor: context.appColors.bgElevated,
             filled: true,
             isDense: true,
@@ -1891,8 +2109,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
               borderSide: BorderSide.none,
               borderRadius: BorderRadius.circular(8),
             ),
-            contentPadding:
-                EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
           ),
         );
       case 'model_select':
@@ -1908,8 +2125,8 @@ class ServerConfigContentState extends State<ServerConfigContent> {
             : null;
         final modelOptions = providerModels != null
             ? (providerModels['options'] as List<dynamic>?)
-                    ?.cast<Map<String, dynamic>>() ??
-                []
+                      ?.cast<Map<String, dynamic>>() ??
+                  []
             : <Map<String, dynamic>>[];
         final allowCustom = providerModels?['allow_custom'] == true;
 
@@ -1918,12 +2135,18 @@ class ServerConfigContentState extends State<ServerConfigContent> {
           final controller = _toolSettingsControllers[toolName]?[key];
           input = TextField(
             controller: controller,
-            style: TextStyle(color: context.appColors.textPrimary, fontSize: 13),
+            style: TextStyle(
+              color: context.appColors.textPrimary,
+              fontSize: 13,
+            ),
             textAlignVertical: TextAlignVertical.center,
             onChanged: (v) => onChanged(v),
             decoration: InputDecoration(
               hintText: label,
-              hintStyle: TextStyle(color: context.appColors.textMuted, fontSize: 12),
+              hintStyle: TextStyle(
+                color: context.appColors.textMuted,
+                fontSize: 12,
+              ),
               fillColor: context.appColors.bgElevated,
               filled: true,
               isDense: true,
@@ -1937,13 +2160,16 @@ class ServerConfigContentState extends State<ServerConfigContent> {
         } else {
           // Dropdown with optional custom entry.
           final entries = modelOptions
-              .map((o) => DropdownMenuEntry<String>(
-                    value: o['value'] as String,
-                    label: o['label'] as String,
-                  ))
+              .map(
+                (o) => DropdownMenuEntry<String>(
+                  value: o['value'] as String,
+                  label: o['label'] as String,
+                ),
+              )
               .toList();
           input = DropdownMenu<String>(
-            initialSelection: entries.any((e) => e.value == currentValue?.toString())
+            initialSelection:
+                entries.any((e) => e.value == currentValue?.toString())
                 ? currentValue?.toString()
                 : null,
             dropdownMenuEntries: entries,
@@ -1951,9 +2177,14 @@ class ServerConfigContentState extends State<ServerConfigContent> {
             enableSearch: true,
             requestFocusOnTap: true,
             expandedInsets: EdgeInsets.zero,
-            textStyle: TextStyle(color: context.appColors.textPrimary, fontSize: 13),
+            textStyle: TextStyle(
+              color: context.appColors.textPrimary,
+              fontSize: 13,
+            ),
             menuStyle: MenuStyle(
-              backgroundColor: WidgetStatePropertyAll(context.appColors.bgSurface),
+              backgroundColor: WidgetStatePropertyAll(
+                context.appColors.bgSurface,
+              ),
             ),
             inputDecorationTheme: InputDecorationTheme(
               fillColor: context.appColors.bgElevated,
@@ -1963,7 +2194,10 @@ class ServerConfigContentState extends State<ServerConfigContent> {
                 borderRadius: BorderRadius.circular(8),
               ),
               contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-              hintStyle: TextStyle(color: context.appColors.textMuted, fontSize: 12),
+              hintStyle: TextStyle(
+                color: context.appColors.textMuted,
+                fontSize: 12,
+              ),
               isDense: true,
             ),
             onSelected: (v) {
@@ -1980,7 +2214,10 @@ class ServerConfigContentState extends State<ServerConfigContent> {
           onChanged: (v) => onChanged(v),
           decoration: InputDecoration(
             hintText: label,
-            hintStyle: TextStyle(color: context.appColors.textMuted, fontSize: 12),
+            hintStyle: TextStyle(
+              color: context.appColors.textMuted,
+              fontSize: 12,
+            ),
             fillColor: context.appColors.bgElevated,
             filled: true,
             isDense: true,
@@ -1988,8 +2225,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
               borderSide: BorderSide.none,
               borderRadius: BorderRadius.circular(8),
             ),
-            contentPadding:
-                EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
           ),
         );
     }
@@ -1997,15 +2233,25 @@ class ServerConfigContentState extends State<ServerConfigContent> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label,
-            style: TextStyle(color: context.appColors.textSecondary, fontSize: 11)),
+        Text(
+          label,
+          style: TextStyle(
+            color: context.appColors.textSecondary,
+            fontSize: 11,
+          ),
+        ),
         SizedBox(height: 4),
         input,
         if (description.isNotEmpty)
           Padding(
             padding: EdgeInsets.only(top: 3),
-            child: Text(description,
-                style: TextStyle(color: context.appColors.textMuted, fontSize: 10)),
+            child: Text(
+              description,
+              style: TextStyle(
+                color: context.appColors.textMuted,
+                fontSize: 10,
+              ),
+            ),
           ),
       ],
     );
@@ -2051,13 +2297,14 @@ class ServerConfigContentState extends State<ServerConfigContent> {
         final providerKey = opt.providerKey;
         String providerValue = '';
         if (providerKey != null) {
-          providerValue = (_editedValues.containsKey(providerKey)
-                  ? _editedValues[providerKey]
-                  : _options
-                      ?.where((o) => o.key == providerKey)
-                      .firstOrNull
-                      ?.value)
-              ?.toString() ??
+          providerValue =
+              (_editedValues.containsKey(providerKey)
+                      ? _editedValues[providerKey]
+                      : _options
+                            ?.where((o) => o.key == providerKey)
+                            .firstOrNull
+                            ?.value)
+                  ?.toString() ??
               '';
         }
         final modelsMap = opt.models;
@@ -2066,8 +2313,8 @@ class ServerConfigContentState extends State<ServerConfigContent> {
             : null;
         final modelOptions = providerModels != null
             ? (providerModels['options'] as List<dynamic>?)
-                    ?.cast<Map<String, dynamic>>() ??
-                []
+                      ?.cast<Map<String, dynamic>>() ??
+                  []
             : <Map<String, dynamic>>[];
         final allowCustom = providerModels?['allow_custom'] == true;
         return _ModelSelectField(
@@ -2133,8 +2380,13 @@ class _SectionHeader extends StatelessWidget {
           if (hasModified)
             Padding(
               padding: EdgeInsets.only(left: 8),
-              child: Text('\u2022 modified',
-                  style: TextStyle(color: context.appColors.accentLight, fontSize: 10)),
+              child: Text(
+                '\u2022 modified',
+                style: TextStyle(
+                  color: context.appColors.accentLight,
+                  fontSize: 10,
+                ),
+              ),
             ),
         ],
       ),
@@ -2173,11 +2425,13 @@ class _ConfigSidebarItem extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             child: Row(
               children: [
-                Icon(icon,
-                    size: 18,
-                    color: selected
-                        ? context.appColors.accentLight
-                        : context.appColors.textMuted),
+                Icon(
+                  icon,
+                  size: 18,
+                  color: selected
+                      ? context.appColors.accentLight
+                      : context.appColors.textMuted,
+                ),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
@@ -2187,8 +2441,9 @@ class _ConfigSidebarItem extends StatelessWidget {
                           ? context.appColors.textPrimary
                           : context.appColors.textSecondary,
                       fontSize: 14,
-                      fontWeight:
-                          selected ? FontWeight.w600 : FontWeight.normal,
+                      fontWeight: selected
+                          ? FontWeight.w600
+                          : FontWeight.normal,
                     ),
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -2204,8 +2459,11 @@ class _ConfigSidebarItem extends StatelessWidget {
                   ),
                 if (trailingIcon != null) ...[
                   const SizedBox(width: 4),
-                  Icon(trailingIcon,
-                      size: 16, color: context.appColors.textMuted),
+                  Icon(
+                    trailingIcon,
+                    size: 16,
+                    color: context.appColors.textMuted,
+                  ),
                 ],
               ],
             ),
@@ -2240,8 +2498,7 @@ class _ConfigSidebarSubItem extends StatelessWidget {
           borderRadius: BorderRadius.circular(8),
           onTap: onTap,
           child: Padding(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             child: Row(
               children: [
                 Container(
@@ -2263,8 +2520,9 @@ class _ConfigSidebarSubItem extends StatelessWidget {
                           ? context.appColors.textPrimary
                           : context.appColors.textSecondary,
                       fontSize: 13,
-                      fontWeight:
-                          selected ? FontWeight.w600 : FontWeight.normal,
+                      fontWeight: selected
+                          ? FontWeight.w600
+                          : FontWeight.normal,
                     ),
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -2311,8 +2569,10 @@ class _TextField extends StatelessWidget {
             borderSide: BorderSide.none,
             borderRadius: BorderRadius.circular(10),
           ),
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 12,
+            vertical: 10,
+          ),
         ),
       ),
     );
@@ -2351,8 +2611,10 @@ class _TextAreaField extends StatelessWidget {
             borderSide: BorderSide.none,
             borderRadius: BorderRadius.circular(10),
           ),
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 12,
+            vertical: 10,
+          ),
         ),
       ),
     );
@@ -2389,7 +2651,10 @@ class _SecretFieldState extends State<_SecretField> {
           ? TextField(
               controller: widget.controller,
               obscureText: _obscure,
-              style: TextStyle(color: context.appColors.textPrimary, fontSize: 14),
+              style: TextStyle(
+                color: context.appColors.textPrimary,
+                fontSize: 14,
+              ),
               onChanged: widget.onChanged,
               decoration: InputDecoration(
                 hintText: 'Enter new value',
@@ -2398,8 +2663,10 @@ class _SecretFieldState extends State<_SecretField> {
                   borderSide: BorderSide.none,
                   borderRadius: BorderRadius.circular(10),
                 ),
-                contentPadding:
-                    EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                contentPadding: EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
                 suffixIcon: IconButton(
                   icon: Icon(
                     _obscure
@@ -2416,16 +2683,17 @@ class _SecretFieldState extends State<_SecretField> {
               children: [
                 Expanded(
                   child: Container(
-                    padding: EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 10),
+                    padding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                     decoration: BoxDecoration(
                       color: context.appColors.bgElevated,
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: Text(
                       widget.option.value?.toString() ?? '',
-                      style:
-                          TextStyle(color: context.appColors.textSecondary, fontSize: 14),
+                      style: TextStyle(
+                        color: context.appColors.textSecondary,
+                        fontSize: 14,
+                      ),
                     ),
                   ),
                 ),
@@ -2435,8 +2703,13 @@ class _SecretFieldState extends State<_SecretField> {
                     widget.controller.clear();
                     setState(() => _editing = true);
                   },
-                  child: Text('Change',
-                      style: TextStyle(color: context.appColors.accentLight, fontSize: 12)),
+                  child: Text(
+                    'Change',
+                    style: TextStyle(
+                      color: context.appColors.accentLight,
+                      fontSize: 12,
+                    ),
+                  ),
                 ),
               ],
             ),
@@ -2475,12 +2748,21 @@ class _SelectField extends StatelessWidget {
             value: values.contains(value) ? value : null,
             isExpanded: true,
             dropdownColor: context.appColors.bgSurface,
-            style: TextStyle(color: context.appColors.textPrimary, fontSize: 14),
-            hint: Text(option.label,
-                style: TextStyle(color: context.appColors.textMuted, fontSize: 14)),
+            style: TextStyle(
+              color: context.appColors.textPrimary,
+              fontSize: 14,
+            ),
+            hint: Text(
+              option.label,
+              style: TextStyle(
+                color: context.appColors.textMuted,
+                fontSize: 14,
+              ),
+            ),
             items: items
-                .map((o) =>
-                    DropdownMenuItem(value: o.value, child: Text(o.label)))
+                .map(
+                  (o) => DropdownMenuItem(value: o.value, child: Text(o.label)),
+                )
                 .toList(),
             onChanged: (v) {
               if (v != null) onChanged(v);
@@ -2529,17 +2811,22 @@ class _ModelSelectField extends StatelessWidget {
               borderSide: BorderSide.none,
               borderRadius: BorderRadius.circular(10),
             ),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 12,
+              vertical: 10,
+            ),
           ),
         ),
       );
     }
 
     final entries = modelOptions
-        .map((o) => DropdownMenuEntry<String>(
-              value: o['value'] as String,
-              label: o['label'] as String,
-            ))
+        .map(
+          (o) => DropdownMenuEntry<String>(
+            value: o['value'] as String,
+            label: o['label'] as String,
+          ),
+        )
         .toList();
 
     return _FieldWrapper(
@@ -2552,7 +2839,10 @@ class _ModelSelectField extends StatelessWidget {
         enableSearch: true,
         requestFocusOnTap: true,
         expandedInsets: EdgeInsets.zero,
-        textStyle: TextStyle(color: context.appColors.textPrimary, fontSize: 14),
+        textStyle: TextStyle(
+          color: context.appColors.textPrimary,
+          fontSize: 14,
+        ),
         menuStyle: MenuStyle(
           backgroundColor: WidgetStatePropertyAll(context.appColors.bgElevated),
         ),
@@ -2563,8 +2853,14 @@ class _ModelSelectField extends StatelessWidget {
             borderSide: BorderSide.none,
             borderRadius: BorderRadius.circular(10),
           ),
-          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          hintStyle: TextStyle(color: context.appColors.textMuted, fontSize: 14),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 12,
+            vertical: 10,
+          ),
+          hintStyle: TextStyle(
+            color: context.appColors.textMuted,
+            fontSize: 14,
+          ),
           isDense: true,
         ),
         onSelected: (v) {
@@ -2594,8 +2890,10 @@ class _BoolField extends StatelessWidget {
       option: option,
       isModified: isModified,
       child: SwitchListTile(
-        title: Text(option.label,
-            style: TextStyle(color: context.appColors.textPrimary, fontSize: 14)),
+        title: Text(
+          option.label,
+          style: TextStyle(color: context.appColors.textPrimary, fontSize: 14),
+        ),
         value: value,
         activeTrackColor: context.appColors.accent,
         contentPadding: EdgeInsets.zero,
@@ -2717,22 +3015,27 @@ class _StringListFieldState extends State<_StringListField> {
               padding: const EdgeInsets.only(bottom: 6),
               child: Row(
                 children: [
-                  Icon(Icons.folder_outlined,
-                      color: context.appColors.textMuted, size: 18),
+                  Icon(
+                    Icons.folder_outlined,
+                    color: context.appColors.textMuted,
+                    size: 18,
+                  ),
                   const SizedBox(width: 8),
                   Expanded(
                     child: TextField(
                       controller: _controllers[i],
                       focusNode: _focusNodes[i],
                       style: TextStyle(
-                          color: context.appColors.textPrimary,
-                          fontSize: 14),
+                        color: context.appColors.textPrimary,
+                        fontSize: 14,
+                      ),
                       onChanged: (_) => _emit(),
                       decoration: InputDecoration(
                         hintText: '~/Projects',
                         hintStyle: TextStyle(
-                            color: context.appColors.textMuted,
-                            fontSize: 13),
+                          color: context.appColors.textMuted,
+                          fontSize: 13,
+                        ),
                         fillColor: context.appColors.bgElevated,
                         filled: true,
                         border: OutlineInputBorder(
@@ -2740,7 +3043,9 @@ class _StringListFieldState extends State<_StringListField> {
                           borderRadius: BorderRadius.circular(10),
                         ),
                         contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 10),
+                          horizontal: 12,
+                          vertical: 10,
+                        ),
                       ),
                     ),
                   ),
@@ -2752,8 +3057,10 @@ class _StringListFieldState extends State<_StringListField> {
                       padding: EdgeInsets.zero,
                       iconSize: 18,
                       tooltip: 'Remove folder',
-                      icon: Icon(Icons.delete_outline,
-                          color: context.appColors.textMuted),
+                      icon: Icon(
+                        Icons.delete_outline,
+                        color: context.appColors.textMuted,
+                      ),
                       onPressed: () => _removeEntry(i),
                     ),
                   ),
@@ -2765,16 +3072,23 @@ class _StringListFieldState extends State<_StringListField> {
             height: 32,
             child: TextButton.icon(
               onPressed: _addEntry,
-              icon: Icon(Icons.add_rounded, size: 18,
-                  color: context.appColors.accentLight),
-              label: Text('Add folder',
-                  style: TextStyle(
-                      color: context.appColors.accentLight, fontSize: 12)),
+              icon: Icon(
+                Icons.add_rounded,
+                size: 18,
+                color: context.appColors.accentLight,
+              ),
+              label: Text(
+                'Add folder',
+                style: TextStyle(
+                  color: context.appColors.accentLight,
+                  fontSize: 12,
+                ),
+              ),
               style: TextButton.styleFrom(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10),
+                padding: const EdgeInsets.symmetric(horizontal: 10),
                 shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8)),
+                  borderRadius: BorderRadius.circular(8),
+                ),
               ),
             ),
           ),
@@ -2818,8 +3132,13 @@ class _ToolSecretFieldState extends State<_ToolSecretField> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(widget.label,
-            style: TextStyle(color: context.appColors.textSecondary, fontSize: 11)),
+        Text(
+          widget.label,
+          style: TextStyle(
+            color: context.appColors.textSecondary,
+            fontSize: 11,
+          ),
+        ),
         SizedBox(height: 4),
         if (!_editing) ...[
           Row(
@@ -2828,7 +3147,9 @@ class _ToolSecretFieldState extends State<_ToolSecretField> {
                 child: Text(
                   hasValue ? widget.maskedValue : 'Not set',
                   style: TextStyle(
-                    color: hasValue ? context.appColors.textPrimary : context.appColors.textMuted,
+                    color: hasValue
+                        ? context.appColors.textPrimary
+                        : context.appColors.textMuted,
                     fontSize: 13,
                     fontFamily: 'monospace',
                   ),
@@ -2846,10 +3167,13 @@ class _ToolSecretFieldState extends State<_ToolSecretField> {
                     foregroundColor: context.appColors.accent,
                     padding: const EdgeInsets.symmetric(horizontal: 8),
                     shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(6)),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
                   ),
-                  child: Text(hasValue ? 'Change' : 'Set',
-                      style: TextStyle(fontSize: 11)),
+                  child: Text(
+                    hasValue ? 'Change' : 'Set',
+                    style: TextStyle(fontSize: 11),
+                  ),
                 ),
               ),
             ],
@@ -2858,19 +3182,24 @@ class _ToolSecretFieldState extends State<_ToolSecretField> {
           TextField(
             controller: widget.controller,
             obscureText: _obscure,
-            style: TextStyle(color: context.appColors.textPrimary, fontSize: 13),
+            style: TextStyle(
+              color: context.appColors.textPrimary,
+              fontSize: 13,
+            ),
             onChanged: (v) => widget.onChanged(v),
             decoration: InputDecoration(
               hintText: 'Enter new value',
-              hintStyle: TextStyle(color: context.appColors.textMuted, fontSize: 12),
+              hintStyle: TextStyle(
+                color: context.appColors.textMuted,
+                fontSize: 12,
+              ),
               fillColor: context.appColors.bgSurface,
               filled: true,
               border: OutlineInputBorder(
                 borderSide: BorderSide.none,
                 borderRadius: BorderRadius.circular(8),
               ),
-              contentPadding:
-                  EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
               suffixIcon: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -2884,7 +3213,11 @@ class _ToolSecretFieldState extends State<_ToolSecretField> {
                     splashRadius: 16,
                   ),
                   IconButton(
-                    icon: Icon(Icons.close, size: 18, color: context.appColors.textMuted),
+                    icon: Icon(
+                      Icons.close,
+                      size: 18,
+                      color: context.appColors.textMuted,
+                    ),
                     onPressed: () => setState(() {
                       _editing = false;
                       widget.controller?.clear();
@@ -2901,8 +3234,13 @@ class _ToolSecretFieldState extends State<_ToolSecretField> {
         if (widget.description.isNotEmpty)
           Padding(
             padding: EdgeInsets.only(top: 3),
-            child: Text(widget.description,
-                style: TextStyle(color: context.appColors.textMuted, fontSize: 10)),
+            child: Text(
+              widget.description,
+              style: TextStyle(
+                color: context.appColors.textMuted,
+                fontSize: 10,
+              ),
+            ),
           ),
       ],
     );
@@ -2931,18 +3269,23 @@ class _ToolActionButton extends StatelessWidget {
       child: TextButton(
         onPressed: onPressed,
         style: TextButton.styleFrom(
-          backgroundColor: accent ? context.appColors.accent : context.appColors.bgElevated,
-          foregroundColor: accent ? Colors.white : context.appColors.textSecondary,
+          backgroundColor: accent
+              ? context.appColors.accent
+              : context.appColors.bgElevated,
+          foregroundColor: accent
+              ? Colors.white
+              : context.appColors.textSecondary,
           padding: EdgeInsets.symmetric(horizontal: 12),
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         ),
         child: loading
             ? SizedBox(
                 width: 14,
                 height: 14,
                 child: CircularProgressIndicator(
-                    strokeWidth: 2, color: context.appColors.textSecondary),
+                  strokeWidth: 2,
+                  color: context.appColors.textSecondary,
+                ),
               )
             : Text(label, style: const TextStyle(fontSize: 12)),
       ),
@@ -2963,8 +3306,7 @@ class _ToolProgressBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final message = progress['message'] as String? ?? '';
     final progressValue = progress['progress'];
-    final double? pct =
-        progressValue is num ? progressValue.toDouble() : null;
+    final double? pct = progressValue is num ? progressValue.toDouble() : null;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -2977,21 +3319,28 @@ class _ToolProgressBar extends StatelessWidget {
                 ? LinearProgressIndicator(
                     value: pct,
                     backgroundColor: context.appColors.bgOverlay,
-                    valueColor:
-                        AlwaysStoppedAnimation<Color>(context.appColors.accent),
+                    valueColor: AlwaysStoppedAnimation<Color>(
+                      context.appColors.accent,
+                    ),
                   )
                 : LinearProgressIndicator(
                     backgroundColor: context.appColors.bgOverlay,
-                    valueColor:
-                        AlwaysStoppedAnimation<Color>(context.appColors.accent),
+                    valueColor: AlwaysStoppedAnimation<Color>(
+                      context.appColors.accent,
+                    ),
                   ),
           ),
         ),
         if (message.isNotEmpty)
           Padding(
             padding: EdgeInsets.only(top: 3),
-            child: Text(message,
-                style: TextStyle(color: context.appColors.textMuted, fontSize: 10)),
+            child: Text(
+              message,
+              style: TextStyle(
+                color: context.appColors.textMuted,
+                fontSize: 10,
+              ),
+            ),
           ),
       ],
     );
@@ -3013,14 +3362,20 @@ class _SourceBadge extends StatelessWidget {
     return Container(
       padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
-        color: accent ? context.appColors.accentDim : context.appColors.bgOverlay,
+        color: accent
+            ? context.appColors.accentDim
+            : context.appColors.bgOverlay,
         borderRadius: BorderRadius.circular(4),
       ),
-      child: Text(label,
-          style: TextStyle(
-            color: accent ? context.appColors.accentLight : context.appColors.textMuted,
-            fontSize: 9,
-          )),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: accent
+              ? context.appColors.accentLight
+              : context.appColors.textMuted,
+          fontSize: 9,
+        ),
+      ),
     );
   }
 }
@@ -3046,7 +3401,10 @@ class _SourceToggle extends StatelessWidget {
       return SizedBox(
         width: 14,
         height: 14,
-        child: CircularProgressIndicator(strokeWidth: 2, color: context.appColors.accentLight),
+        child: CircularProgressIndicator(
+          strokeWidth: 2,
+          color: context.appColors.accentLight,
+        ),
       );
     }
     return Container(
@@ -3065,7 +3423,12 @@ class _SourceToggle extends StatelessWidget {
     );
   }
 
-  Widget _toggleOption(BuildContext context, String label, bool active, VoidCallback onTap) {
+  Widget _toggleOption(
+    BuildContext context,
+    String label,
+    bool active,
+    VoidCallback onTap,
+  ) {
     return GestureDetector(
       onTap: active ? null : onTap,
       child: Container(
@@ -3074,12 +3437,16 @@ class _SourceToggle extends StatelessWidget {
           color: active ? context.appColors.accentDim : Colors.transparent,
           borderRadius: BorderRadius.circular(4),
         ),
-        child: Text(label,
-            style: TextStyle(
-              color: active ? context.appColors.accentLight : context.appColors.textMuted,
-              fontSize: 9,
-              fontWeight: active ? FontWeight.w600 : FontWeight.normal,
-            )),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: active
+                ? context.appColors.accentLight
+                : context.appColors.textMuted,
+            fontSize: 9,
+            fontWeight: active ? FontWeight.w600 : FontWeight.normal,
+          ),
+        ),
       ),
     );
   }
@@ -3111,23 +3478,34 @@ class _FieldWrapper extends StatelessWidget {
               Text(
                 option.label,
                 style: TextStyle(
-                  color: isModified ? context.appColors.accentLight : context.appColors.textSecondary,
+                  color: isModified
+                      ? context.appColors.accentLight
+                      : context.appColors.textSecondary,
                   fontSize: 12,
-                  fontWeight:
-                      isModified ? FontWeight.w600 : FontWeight.normal,
+                  fontWeight: isModified ? FontWeight.w600 : FontWeight.normal,
                 ),
               ),
               if (option.restartRequired)
                 Padding(
                   padding: EdgeInsets.only(left: 6),
-                  child: Text('restart required',
-                      style: TextStyle(color: context.appColors.toolAccent, fontSize: 10)),
+                  child: Text(
+                    'restart required',
+                    style: TextStyle(
+                      color: context.appColors.toolAccent,
+                      fontSize: 10,
+                    ),
+                  ),
                 ),
               if (isModified)
                 Padding(
                   padding: EdgeInsets.only(left: 6),
-                  child: Text('\u2022 modified',
-                      style: TextStyle(color: context.appColors.accentLight, fontSize: 10)),
+                  child: Text(
+                    '\u2022 modified',
+                    style: TextStyle(
+                      color: context.appColors.accentLight,
+                      fontSize: 10,
+                    ),
+                  ),
                 ),
             ],
           ),
@@ -3138,7 +3516,10 @@ class _FieldWrapper extends StatelessWidget {
             padding: EdgeInsets.only(top: 4),
             child: Text(
               option.description,
-              style: TextStyle(color: context.appColors.textMuted, fontSize: 11),
+              style: TextStyle(
+                color: context.appColors.textMuted,
+                fontSize: 11,
+              ),
             ),
           ),
       ],

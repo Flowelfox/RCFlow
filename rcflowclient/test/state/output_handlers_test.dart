@@ -1,7 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rcflowclient/models/app_notification.dart';
 import 'package:rcflowclient/models/session_info.dart';
-import 'package:rcflowclient/models/subprocess_info.dart';
 import 'package:rcflowclient/models/ws_messages.dart';
 import 'package:rcflowclient/services/websocket_service.dart';
 import 'package:rcflowclient/state/output_handlers.dart';
@@ -18,8 +17,7 @@ class _FakePaneHost implements PaneHost {
   List<SessionInfo> get sessions => [];
 
   @override
-  WebSocketService wsForWorker(String workerId) =>
-      throw UnimplementedError();
+  WebSocketService wsForWorker(String workerId) => throw UnimplementedError();
 
   @override
   String? workerIdForSession(String sessionId) => null;
@@ -31,8 +29,12 @@ class _FakePaneHost implements PaneHost {
   void refreshSessions() {}
 
   @override
-  void addSystemMessageToPane(String paneId, String text,
-      {bool isError = false, String? label}) {}
+  void addSystemMessageToPane(
+    String paneId,
+    String text, {
+    bool isError = false,
+    String? label,
+  }) {}
 
   @override
   void muteSessionSound(String sessionId) {}
@@ -44,16 +46,20 @@ class _FakePaneHost implements PaneHost {
   void requestUnsubscribe(String sessionId, String workerId) {}
 
   @override
-  void showNotification(
-      {required NotificationLevel level,
-      required String title,
-      String? body}) {}
+  void showNotification({
+    required NotificationLevel level,
+    required String title,
+    String? body,
+  }) {}
 
   @override
   bool workerSupportsAttachments(String? workerId) => false;
 
   @override
   bool workerSupportsImageAttachments(String? workerId) => false;
+
+  @override
+  String? defaultAgentForWorker(String? workerId) => null;
 }
 
 void main() {
@@ -64,15 +70,22 @@ void main() {
       pane = PaneState(paneId: 'test', host: _FakePaneHost());
     });
 
-    test('user text_chunk without attachments creates message with null attachments', () {
-      handleTextChunk({'role': 'user', 'content': 'hello', 'session_id': 's1'}, pane);
+    test(
+      'user text_chunk without attachments creates message with null attachments',
+      () {
+        handleTextChunk({
+          'role': 'user',
+          'content': 'hello',
+          'session_id': 's1',
+        }, pane);
 
-      expect(pane.messages.length, 1);
-      final msg = pane.messages.first;
-      expect(msg.type, DisplayMessageType.user);
-      expect(msg.content, 'hello');
-      expect(msg.attachments, isNull);
-    });
+        expect(pane.messages.length, 1);
+        final msg = pane.messages.first;
+        expect(msg.type, DisplayMessageType.user);
+        expect(msg.content, 'hello');
+        expect(msg.attachments, isNull);
+      },
+    );
 
     test('user text_chunk with attachments propagates attachment metadata', () {
       handleTextChunk({
@@ -112,11 +125,17 @@ void main() {
 
     test('local echo with attachments is consumed and not duplicated', () {
       // Use a connected host so sendPrompt actually enqueues the local message.
-      final connectedPane = PaneState(paneId: 'p2', host: _FakePaneHost(connected: true));
+      final connectedPane = PaneState(
+        paneId: 'p2',
+        host: _FakePaneHost(connected: true),
+      );
       // Simulate local message added by sendPrompt (with attachments already set)
-      connectedPane.sendPrompt('hello', attachments: [
-        {'id': 'att1', 'name': 'photo.png', 'mime_type': 'image/png'},
-      ]);
+      connectedPane.sendPrompt(
+        'hello',
+        attachments: [
+          {'id': 'att1', 'name': 'photo.png', 'mime_type': 'image/png'},
+        ],
+      );
       expect(connectedPane.messages.length, 1);
       expect(connectedPane.messages.first.attachments, isNotNull);
 
@@ -331,9 +350,7 @@ void main() {
     });
 
     test('empty content when plan_input is absent', () {
-      handlePlanReviewAsk({
-        'session_id': 's1',
-      }, pane);
+      handlePlanReviewAsk({'session_id': 's1'}, pane);
 
       expect(pane.messages.first.content, '');
     });

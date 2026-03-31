@@ -13,8 +13,11 @@ class ServerUrl {
   final String apiKey;
   final bool secure;
 
-  ServerUrl({required String rawHost, required this.apiKey, this.secure = false})
-      : host = _stripScheme(rawHost);
+  ServerUrl({
+    required String rawHost,
+    required this.apiKey,
+    this.secure = false,
+  }) : host = _stripScheme(rawHost);
 
   static String _stripScheme(String input) {
     var h = input.trim();
@@ -40,7 +43,8 @@ class ServerUrl {
 
   Uri http(String path, [Map<String, String>? queryParams]) {
     final params = {'api_key': apiKey, ...?queryParams};
-    return Uri.parse('$_httpScheme://$host$path')
-        .replace(queryParameters: params);
+    return Uri.parse(
+      '$_httpScheme://$host$path',
+    ).replace(queryParameters: params);
   }
 }

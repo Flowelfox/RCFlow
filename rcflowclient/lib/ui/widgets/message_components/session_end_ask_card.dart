@@ -34,8 +34,11 @@ class SessionEndAskCard extends StatelessWidget {
       children: [
         Row(
           children: [
-            Icon(Icons.check_circle_rounded,
-                color: context.appColors.successText, size: 18),
+            Icon(
+              Icons.check_circle_rounded,
+              color: context.appColors.successText,
+              size: 18,
+            ),
             SizedBox(width: 8),
             Expanded(
               child: Text(
@@ -65,9 +68,10 @@ class SessionEndAskCard extends StatelessWidget {
                   ),
                   padding: const EdgeInsets.symmetric(vertical: 12),
                 ),
-                child: const Text('Continue',
-                    style:
-                        TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                child: const Text(
+                  'Continue',
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                ),
               ),
             ),
             const SizedBox(width: 10),
@@ -87,9 +91,10 @@ class SessionEndAskCard extends StatelessWidget {
                   ),
                   padding: const EdgeInsets.symmetric(vertical: 12),
                 ),
-                child: const Text('End Session',
-                    style:
-                        TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                child: const Text(
+                  'End Session',
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                ),
               ),
             ),
           ],
@@ -104,7 +109,9 @@ class SessionEndAskCard extends StatelessWidget {
       children: [
         Icon(
           ended ? Icons.check_circle_rounded : Icons.arrow_forward_rounded,
-          color: ended ? context.appColors.successText : context.appColors.textSecondary,
+          color: ended
+              ? context.appColors.successText
+              : context.appColors.textSecondary,
           size: 18,
         ),
         SizedBox(width: 8),
@@ -112,7 +119,9 @@ class SessionEndAskCard extends StatelessWidget {
           child: Text(
             ended ? 'Session ended by user' : 'User continued the session',
             style: TextStyle(
-              color: ended ? context.appColors.textPrimary : context.appColors.textSecondary,
+              color: ended
+                  ? context.appColors.textPrimary
+                  : context.appColors.textSecondary,
               fontSize: 14,
               fontWeight: FontWeight.w500,
             ),

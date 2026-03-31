@@ -24,8 +24,11 @@ class SummaryBubble extends StatelessWidget {
           children: [
             Padding(
               padding: EdgeInsets.only(top: 2),
-              child: Icon(Icons.auto_awesome_rounded,
-                  color: context.appColors.summaryText, size: 16),
+              child: Icon(
+                Icons.auto_awesome_rounded,
+                color: context.appColors.summaryText,
+                size: 16,
+              ),
             ),
             SizedBox(width: 10),
             Expanded(
