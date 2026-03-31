@@ -85,6 +85,13 @@ void main() async {
 
   _migrateToWorkers(settings);
 
+  // Existing users (who already have workers configured) should not see the
+  // setup wizard. Mark setup as complete for them.
+  if (settings.workers.isNotEmpty && !settings.setupComplete) {
+    settings.setupComplete = true;
+    settings.onboardingComplete = true;
+  }
+
   runApp(
     ChangeNotifierProvider(
       create: (_) => AppState(settings: settings),

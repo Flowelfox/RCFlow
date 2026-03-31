@@ -13,8 +13,10 @@ import '../../services/settings_service.dart';
 import '../../state/app_state.dart';
 import '../../theme.dart';
 import '../../services/worker_connection.dart';
+import '../dialogs/setup_wizard.dart';
 import '../dialogs/worker_edit_dialog.dart';
 import '../screens/workers_screen.dart';
+import 'onboarding_overlay.dart';
 
 bool get _isDesktop =>
     Platform.isWindows || Platform.isLinux || Platform.isMacOS;
@@ -1329,6 +1331,63 @@ class _AboutSectionState extends State<_AboutSection> {
                 'A client for the RCFlow server — execute actions on your '
                 'host machine via natural language prompts.',
                 style: TextStyle(color: context.appColors.textSecondary, fontSize: 13),
+              ),
+              SizedBox(height: 16),
+              Row(
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: () {
+                      // Capture navigator before pop — dialog context dies.
+                      final nav = Navigator.of(context);
+                      nav.pop();
+                      Future.delayed(const Duration(milliseconds: 200), () {
+                        if (nav.context.mounted) {
+                          showSetupWizard(nav.context);
+                        }
+                      });
+                    },
+                    icon: Icon(Icons.rocket_launch_outlined, size: 18),
+                    label: Text('Setup Wizard'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: context.appColors.textSecondary,
+                      side: BorderSide(color: context.appColors.divider),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10)),
+                      padding:
+                          EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    ),
+                  ),
+                  SizedBox(width: 8),
+                  OutlinedButton.icon(
+                    onPressed: () {
+                      // Capture overlay + settings before pop — the dialog
+                      // context becomes unmounted once Navigator.pop() runs.
+                      final overlay = Overlay.of(context);
+                      final settings = context.read<AppState>().settings;
+                      settings.onboardingComplete = false;
+                      Navigator.of(context).pop();
+                      // Delayed so the dialog fully closes first. The
+                      // captured overlay & settings stay valid.
+                      Future.delayed(const Duration(milliseconds: 200), () {
+                        showOnboardingOverlay(
+                          overlay.context,
+                          overlay: overlay,
+                          settings: settings,
+                        );
+                      });
+                    },
+                    icon: Icon(Icons.tour_outlined, size: 18),
+                    label: Text('Replay Tour'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: context.appColors.textSecondary,
+                      side: BorderSide(color: context.appColors.divider),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10)),
+                      padding:
+                          EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),

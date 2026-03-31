@@ -9,10 +9,13 @@ import '../../models/split_tree.dart';
 import '../../state/app_state.dart';
 import '../../state/pane_state.dart';
 import '../../theme.dart';
+import '../dialogs/setup_wizard.dart';
+import '../onboarding_keys.dart' as onboarding;
 import '../widgets/connection_bar.dart';
 import '../widgets/custom_title_bar.dart';
 import '../widgets/hotkey_listener.dart';
 import '../widgets/input_area.dart';
+import '../widgets/onboarding_overlay.dart';
 import '../widgets/output_display.dart';
 import '../widgets/session_panel.dart';
 import '../widgets/settings_menu.dart';
@@ -40,6 +43,23 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
   void initState() {
     super.initState();
     if (_isDesktop) windowManager.addListener(this);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _checkFirstRun());
+  }
+
+  Future<void> _checkFirstRun() async {
+    final settings = context.read<AppState>().settings;
+    if (!settings.setupComplete) {
+      final completed = await showSetupWizard(context);
+      if (completed && mounted && !settings.onboardingComplete) {
+        _startOnboardingTour();
+      }
+    } else if (!settings.onboardingComplete) {
+      _startOnboardingTour();
+    }
+  }
+
+  void _startOnboardingTour() {
+    showOnboardingOverlay(context);
   }
 
   @override
@@ -82,6 +102,7 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
                           children: [
                             if (showSidebar) ...[
                               SizedBox(
+                                key: onboarding.sidebarKey,
                                 width: sidebarWidth,
                                 child: const SessionListPanel(),
                               ),
@@ -97,6 +118,7 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
                               ),
                             ],
                             Expanded(
+                              key: onboarding.mainContentKey,
                               child: Builder(
                                 builder: (context) {
                                   final root = appState.splitRoot;
