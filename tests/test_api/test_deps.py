@@ -6,7 +6,6 @@ Covers:
 - ``handle_ws_first_message_auth`` — first-message auth (close on failure)
 """
 
-import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
