@@ -24,7 +24,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # uv manages the virtual-env and Python installation.
       # enable-cache stores the uv download cache between runs.
@@ -69,7 +69,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # Set up the stable Flutter channel.  The pub-cache directory is
       # cached between runs to speed up subsequent pub-get invocations.
