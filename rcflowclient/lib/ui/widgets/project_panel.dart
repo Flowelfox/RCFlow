@@ -267,25 +267,18 @@ class _ProjectPanelState extends State<ProjectPanel> {
           _buildHeader(context, pane, projectName, appState, workerId,
               mainProjectPath),
           // Sections — collapsible and reorderable
-          Expanded(
-            child: SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  for (final sectionId in _sectionOrder)
-                    _buildSection(
-                      context,
-                      sectionId: sectionId,
-                      appState: appState,
-                      workerId: workerId,
-                      mainProjectPath: mainProjectPath,
-                      selectedWorktreePath: selectedWorktreePath,
-                      sessionId: sessionId,
-                    ),
-                ],
+          for (final sectionId in _sectionOrder)
+            Expanded(
+              child: _buildSection(
+                context,
+                sectionId: sectionId,
+                appState: appState,
+                workerId: workerId,
+                mainProjectPath: mainProjectPath,
+                selectedWorktreePath: selectedWorktreePath,
+                sessionId: sessionId,
               ),
             ),
-          ),
         ],
       ),
     );
@@ -322,23 +315,7 @@ class _ProjectPanelState extends State<ProjectPanel> {
         ),
       ],
     );
-    final Widget body = Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        if (selectedWorktreePath != null)
-          _buildActiveWorktreeBar(
-              context, appState, workerId, sessionId, selectedWorktreePath),
-        SizedBox(
-          height: 160,
-          child: _buildWorktreeList(context, appState, workerId,
-              mainProjectPath, selectedWorktreePath, sessionId),
-        ),
-      ],
-    );
-
     return Column(
-      mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _buildCollapsibleSectionHeader(
@@ -348,12 +325,21 @@ class _ProjectPanelState extends State<ProjectPanel> {
           sectionId: sectionId,
           trailing: trailing,
         ),
-        AnimatedSize(
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeInOut,
-          child: collapsed ? const SizedBox.shrink() : body,
-        ),
-        Divider(height: 1, color: context.appColors.divider),
+        if (!collapsed)
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (selectedWorktreePath != null)
+                  _buildActiveWorktreeBar(context, appState, workerId,
+                      sessionId, selectedWorktreePath),
+                Expanded(
+                  child: _buildWorktreeList(context, appState, workerId,
+                      mainProjectPath, selectedWorktreePath, sessionId),
+                ),
+              ],
+            ),
+          ),
       ],
     );
   }
