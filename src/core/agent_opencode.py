@@ -48,8 +48,8 @@ class OpenCodeAgentMixin:
         extra_env: dict[str, str] = {}
 
         tool_settings: dict[str, Any] = {}
-        if self._tool_settings:
-            tool_settings = self._tool_settings.get_settings("opencode")
+        if self._tool_settings:  # ty:ignore[unresolved-attribute]
+            tool_settings = self._tool_settings.get_settings("opencode")  # ty:ignore[unresolved-attribute]
 
         tool_provider = tool_settings.get("provider", "")
 
@@ -58,8 +58,8 @@ class OpenCodeAgentMixin:
             if isinstance(tool_env, dict):
                 extra_env.update(tool_env)
 
-        if self._tool_settings:
-            config_dir = self._tool_settings.get_config_dir("opencode")
+        if self._tool_settings:  # ty:ignore[unresolved-attribute]
+            config_dir = self._tool_settings.get_config_dir("opencode")  # ty:ignore[unresolved-attribute]
             config_dir.mkdir(parents=True, exist_ok=True)
             extra_env["OPENCODE_HOME"] = str(config_dir)
 
@@ -76,7 +76,7 @@ class OpenCodeAgentMixin:
         selected_wt = session.metadata.get("selected_worktree_path")
         if selected_wt:
             working_dir = selected_wt
-        working_path = self._resolve_working_directory(working_dir)
+        working_path = self._resolve_working_directory(working_dir)  # ty:ignore[unresolved-attribute]
         try:
             is_dir = working_path.is_dir()
         except OSError as e:
@@ -104,7 +104,7 @@ class OpenCodeAgentMixin:
 
         tool_call.tool_input["working_directory"] = str(working_path)
 
-        executor = self._get_executor(tool_def.executor, tool_def)
+        executor = self._get_executor(tool_def.executor, tool_def)  # ty:ignore[unresolved-attribute]
         assert isinstance(executor, OpenCodeExecutor)
 
         session.opencode_executor = executor
@@ -197,7 +197,7 @@ class OpenCodeAgentMixin:
                             "finished": False,
                         },
                     )
-                    self._fire_text_artifact_scan(session, [text])
+                    self._fire_text_artifact_scan(session, [text])  # ty:ignore[unresolved-attribute]
 
             elif event_type == "tool_use":
                 # Single event carries both tool invocation and result
@@ -245,7 +245,7 @@ class OpenCodeAgentMixin:
                                 "stream": "stdout",
                             },
                         )
-                        self._fire_text_artifact_scan(session, [output])
+                        self._fire_text_artifact_scan(session, [output])  # ty:ignore[unresolved-attribute]
                     session.subprocess_current_tool = None
                     if session.subprocess_started_at is not None:
                         session.buffer.push_ephemeral(
@@ -277,8 +277,8 @@ class OpenCodeAgentMixin:
                     _completed_successfully = True
                     session.set_activity(ActivityState.IDLE)
                     summary_text = "".join(post_tool_text_chunks).strip() or "OpenCode task completed"
-                    self._fire_summary_task(session, summary_text, push_session_end_ask=True)
-                    self._fire_task_update_task(session, summary_text)
+                    self._fire_summary_task(session, summary_text, push_session_end_ask=True)  # ty:ignore[unresolved-attribute]
+                    self._fire_task_update_task(session, summary_text)  # ty:ignore[unresolved-attribute]
 
             elif event_type in ("error", "session.error"):
                 error = event.get("error") or {}
@@ -380,7 +380,7 @@ class OpenCodeAgentMixin:
             },
         )
         session.complete()
-        self._fire_archive_task(session.id)
+        self._fire_archive_task(session.id)  # ty:ignore[unresolved-attribute]
 
     async def _forward_to_opencode(self, session: ActiveSession, text: str) -> None:
         """Forward a follow-up message to the active OpenCode session.
@@ -400,7 +400,7 @@ class OpenCodeAgentMixin:
         if session.subprocess_started_at is None:
             session.subprocess_started_at = datetime.now(UTC)
             session.subprocess_type = "opencode"
-            opencode_def_for_name = self._tool_registry.get("opencode")
+            opencode_def_for_name = self._tool_registry.get("opencode")  # ty:ignore[unresolved-attribute]
             session.subprocess_display_name = (
                 opencode_def_for_name.display_name
                 if opencode_def_for_name and opencode_def_for_name.display_name
@@ -420,7 +420,7 @@ class OpenCodeAgentMixin:
             },
         )
 
-        opencode_def = self._tool_registry.get("opencode")
+        opencode_def = self._tool_registry.get("opencode")  # ty:ignore[unresolved-attribute]
         session.buffer.push_text(
             MessageType.AGENT_GROUP_START,
             {

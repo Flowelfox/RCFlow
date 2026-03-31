@@ -146,7 +146,7 @@ class ContextMixin:
         resolved: list[tuple[str, str, str]] = []  # (name, description, executor)
         seen: set[str] = set()
         for name in mentions:
-            tool = self._tool_registry.get(name)
+            tool = self._tool_registry.get(name)  # ty:ignore[unresolved-attribute]
             if tool is not None and tool.name not in seen:
                 seen.add(tool.name)
                 resolved.append((tool.name, tool.description, tool.executor))
@@ -223,9 +223,9 @@ class ContextMixin:
         Searches each configured projects_dir for a subdirectory matching ``name``.
         Returns None when no match is found.
         """
-        if not self._settings:
+        if not self._settings:  # ty:ignore[unresolved-attribute]
             return None
-        for projects_dir in self._settings.projects_dirs:
+        for projects_dir in self._settings.projects_dirs:  # ty:ignore[unresolved-attribute]
             project_path = projects_dir / name
             if project_path.is_dir():
                 return project_path
@@ -245,13 +245,13 @@ class ContextMixin:
 
         Returns None if no references resolve to valid artifacts.
         """
-        if not self._db_session_factory or not self._settings:
+        if not self._db_session_factory or not self._settings:  # ty:ignore[unresolved-attribute]
             return None
 
         context_parts: list[str] = []
         seen: set[str] = set()
 
-        async with self._db_session_factory() as db:
+        async with self._db_session_factory() as db:  # ty:ignore[unresolved-attribute]
             for ref_name in references:
                 lower_ref = ref_name.lower()
                 if lower_ref in seen:
@@ -260,7 +260,7 @@ class ContextMixin:
                 # Look up artifact by file_name (case-insensitive)
                 stmt = (
                     select(ArtifactModel)
-                    .where(ArtifactModel.backend_id == self._settings.RCFLOW_BACKEND_ID)
+                    .where(ArtifactModel.backend_id == self._settings.RCFLOW_BACKEND_ID)  # ty:ignore[unresolved-attribute]
                     .where(func.lower(ArtifactModel.file_name) == lower_ref)
                     .order_by(ArtifactModel.modified_at.desc())
                     .limit(1)
@@ -390,7 +390,7 @@ class ContextMixin:
         # Resolve the first valid tool mention
         tool_def: ToolDefinition | None = None
         for mention in tool_mentions:
-            candidate = self._tool_registry.get(mention)
+            candidate = self._tool_registry.get(mention)  # ty:ignore[unresolved-attribute]
             if candidate is not None:
                 tool_def = candidate
                 break
@@ -423,21 +423,21 @@ class ContextMixin:
         # Find #tool mention anywhere in text
         tool_mentions = self._TOOL_MENTION_RE.findall(text)
         if not tool_mentions:
-            available = [t.name for t in self._tool_registry.list_tools()]
+            available = [t.name for t in self._tool_registry.list_tools()]  # ty:ignore[unresolved-attribute]
             return f"Direct tool mode requires #tool_name syntax. Available tools: {', '.join(available)}"
 
         # Resolve the first valid tool mention
         tool_def: ToolDefinition | None = None
         tool_mention_used: str = ""
         for mention in tool_mentions:
-            candidate = self._tool_registry.get(mention)
+            candidate = self._tool_registry.get(mention)  # ty:ignore[unresolved-attribute]
             if candidate is not None:
                 tool_def = candidate
                 tool_mention_used = mention
                 break
 
         if tool_def is None:
-            available = [t.name for t in self._tool_registry.list_tools()]
+            available = [t.name for t in self._tool_registry.list_tools()]  # ty:ignore[unresolved-attribute]
             return f"Unknown tool: #{tool_mentions[0]}. Available tools: {', '.join(available)}"
 
         # Strip the matched #tool from text
@@ -461,8 +461,8 @@ class ContextMixin:
             tool_input["prompt"] = display_text or "Ready for instructions."
             if working_dir:
                 tool_input["working_directory"] = working_dir
-            elif self._settings and self._settings.projects_dirs:
-                tool_input["working_directory"] = str(self._settings.projects_dirs[0])
+            elif self._settings and self._settings.projects_dirs:  # ty:ignore[unresolved-attribute]
+                tool_input["working_directory"] = str(self._settings.projects_dirs[0])  # ty:ignore[unresolved-attribute]
         elif tool_def.executor == "shell":
             tool_input["command"] = display_text
         else:
@@ -507,7 +507,7 @@ class ContextMixin:
         )
 
         try:
-            await self._execute_tool(session, tool_call)
+            await self._execute_tool(session, tool_call)  # ty:ignore[unresolved-attribute]
         except Exception as e:
             logger.exception("Error executing direct tool in session %s", session.id)
             session.buffer.push_text(

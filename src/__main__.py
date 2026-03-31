@@ -126,25 +126,27 @@ def _cmd_run(args: argparse.Namespace) -> None:
 
     _check_port_available(settings.RCFLOW_HOST, settings.RCFLOW_PORT)
 
-    ssl_kwargs: dict[str, str] = {}
+    ssl_certfile: str | None = None
+    ssl_keyfile: str | None = None
     if settings.WSS_ENABLED:
         from src.paths import get_install_dir  # noqa: PLC0415
 
         certfile = Path(settings.SSL_CERTFILE) if settings.SSL_CERTFILE else get_install_dir() / "certs" / "cert.pem"
         keyfile = Path(settings.SSL_KEYFILE) if settings.SSL_KEYFILE else get_install_dir() / "certs" / "key.pem"
         _ensure_self_signed_certs(certfile, keyfile)
-        ssl_kwargs["ssl_certfile"] = str(certfile)
-        ssl_kwargs["ssl_keyfile"] = str(keyfile)
+        ssl_certfile = str(certfile)
+        ssl_keyfile = str(keyfile)
     elif settings.SSL_CERTFILE and settings.SSL_KEYFILE:
-        ssl_kwargs["ssl_certfile"] = settings.SSL_CERTFILE
-        ssl_kwargs["ssl_keyfile"] = settings.SSL_KEYFILE
+        ssl_certfile = settings.SSL_CERTFILE
+        ssl_keyfile = settings.SSL_KEYFILE
 
     uvicorn.run(
         "src.main:app",
         host=settings.RCFLOW_HOST,
         port=settings.RCFLOW_PORT,
         reload=False,
-        **ssl_kwargs,
+        ssl_certfile=ssl_certfile,
+        ssl_keyfile=ssl_keyfile,
     )
 
 

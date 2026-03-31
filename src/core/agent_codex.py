@@ -54,8 +54,8 @@ class CodexAgentMixin:
         # settings.json via CLAUDE_CONFIG_DIR), Codex CLI only reads API
         # keys from actual environment variables, so we must inject them.
         tool_settings: dict[str, Any] = {}
-        if self._tool_settings:
-            tool_settings = self._tool_settings.get_settings("codex")
+        if self._tool_settings:  # ty:ignore[unresolved-attribute]
+            tool_settings = self._tool_settings.get_settings("codex")  # ty:ignore[unresolved-attribute]
 
         tool_provider = tool_settings.get("provider", "")
 
@@ -68,11 +68,11 @@ class CodexAgentMixin:
             tool_env = tool_settings.get("env", {})
             if isinstance(tool_env, dict):
                 extra_env.update(tool_env)
-        elif self._settings and self._settings.CODEX_API_KEY:
-            extra_env["CODEX_API_KEY"] = self._settings.CODEX_API_KEY
+        elif self._settings and self._settings.CODEX_API_KEY:  # ty:ignore[unresolved-attribute]
+            extra_env["CODEX_API_KEY"] = self._settings.CODEX_API_KEY  # ty:ignore[unresolved-attribute]
 
-        if self._tool_settings:
-            config_dir = self._tool_settings.get_config_dir("codex")
+        if self._tool_settings:  # ty:ignore[unresolved-attribute]
+            config_dir = self._tool_settings.get_config_dir("codex")  # ty:ignore[unresolved-attribute]
             config_dir.mkdir(parents=True, exist_ok=True)
             extra_env["CODEX_HOME"] = str(config_dir)
 
@@ -129,7 +129,7 @@ class CodexAgentMixin:
         selected_wt = session.metadata.get("selected_worktree_path")
         if selected_wt:
             working_dir = selected_wt
-        working_path = self._resolve_working_directory(working_dir)
+        working_path = self._resolve_working_directory(working_dir)  # ty:ignore[unresolved-attribute]
         try:
             is_dir = working_path.is_dir()
         except OSError as e:
@@ -158,7 +158,7 @@ class CodexAgentMixin:
         # Replace the working_directory in tool_input with the resolved absolute path
         tool_call.tool_input["working_directory"] = str(working_path)
 
-        executor = self._get_executor(tool_def.executor, tool_def)
+        executor = self._get_executor(tool_def.executor, tool_def)  # ty:ignore[unresolved-attribute]
         assert isinstance(executor, CodexExecutor)
 
         session.codex_executor = executor
@@ -356,7 +356,7 @@ class CodexAgentMixin:
                     last_agent_text.pop(item_id, None)
                     # Scan the complete agent message text for artifacts
                     if full_text:
-                        self._fire_text_artifact_scan(session, [full_text])
+                        self._fire_text_artifact_scan(session, [full_text])  # ty:ignore[unresolved-attribute]
                 elif item_type == "command_execution":
                     output = _truncate_tool_output(item.get("aggregated_output", ""))
                     exit_code = item.get("exit_code")
@@ -371,7 +371,7 @@ class CodexAgentMixin:
                                 "is_error": exit_code is not None and exit_code != 0,
                             },
                         )
-                        self._fire_text_artifact_scan(session, [output])
+                        self._fire_text_artifact_scan(session, [output])  # ty:ignore[unresolved-attribute]
                     session.subprocess_current_tool = None
                     if session.subprocess_started_at is not None:
                         session.buffer.push_ephemeral(
@@ -399,7 +399,7 @@ class CodexAgentMixin:
                                 "stream": "stdout",
                             },
                         )
-                        self._fire_text_artifact_scan(session, [content])
+                        self._fire_text_artifact_scan(session, [content])  # ty:ignore[unresolved-attribute]
                     session.subprocess_current_tool = None
                     if session.subprocess_started_at is not None:
                         session.buffer.push_ephemeral(
@@ -429,7 +429,7 @@ class CodexAgentMixin:
                                 "stream": "stdout",
                             },
                         )
-                        self._fire_text_artifact_scan(session, [output])
+                        self._fire_text_artifact_scan(session, [output])  # ty:ignore[unresolved-attribute]
                     session.subprocess_current_tool = None
                     if session.subprocess_started_at is not None:
                         session.buffer.push_ephemeral(
@@ -456,8 +456,8 @@ class CodexAgentMixin:
                     if session._on_update:
                         session._on_update()
                 summary_text = "".join(post_tool_text_chunks).strip() or "Codex task completed"
-                self._fire_summary_task(session, summary_text, push_session_end_ask=True)
-                self._fire_task_update_task(session, summary_text)
+                self._fire_summary_task(session, summary_text, push_session_end_ask=True)  # ty:ignore[unresolved-attribute]
+                self._fire_task_update_task(session, summary_text)  # ty:ignore[unresolved-attribute]
 
             elif event_type == "turn.failed":
                 error = event.get("error", {})
@@ -546,7 +546,7 @@ class CodexAgentMixin:
             },
         )
         session.complete()
-        self._fire_archive_task(session.id)
+        self._fire_archive_task(session.id)  # ty:ignore[unresolved-attribute]
 
     async def _forward_to_codex(self, session: ActiveSession, text: str) -> None:
         """Forward a follow-up message to the active Codex session.
@@ -567,7 +567,7 @@ class CodexAgentMixin:
         if session.subprocess_started_at is None:
             session.subprocess_started_at = datetime.now(UTC)
             session.subprocess_type = "codex"
-            codex_def_for_name = self._tool_registry.get("codex")
+            codex_def_for_name = self._tool_registry.get("codex")  # ty:ignore[unresolved-attribute]
             session.subprocess_display_name = (
                 codex_def_for_name.display_name if codex_def_for_name and codex_def_for_name.display_name else "Codex"
             )
@@ -586,7 +586,7 @@ class CodexAgentMixin:
         )
 
         # Open a new agent group for this follow-up turn
-        codex_def = self._tool_registry.get("codex")
+        codex_def = self._tool_registry.get("codex")  # ty:ignore[unresolved-attribute]
         session.buffer.push_text(
             MessageType.AGENT_GROUP_START,
             {

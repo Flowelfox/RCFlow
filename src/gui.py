@@ -430,10 +430,10 @@ class RCFlowGUI:
                     sessions = data.get("active_sessions")
                     backend_id = data.get("backend_id", "")
                     if sessions is not None:
-                        self._sessions_var.set(str(sessions))
+                        self._sessions_var.set(str(sessions))  # ty:ignore[unresolved-attribute]
                     if backend_id:
                         display = backend_id[:8] + "..." if len(backend_id) > 12 else backend_id
-                        self._backend_id_var.set(display)
+                        self._backend_id_var.set(display)  # ty:ignore[unresolved-attribute]
             except Exception:
                 pass
 
@@ -455,8 +455,8 @@ class RCFlowGUI:
                 elapsed = time.monotonic() - self._start_time
                 h, rem = divmod(int(elapsed), 3600)
                 m, s = divmod(rem, 60)
-                self._uptime_var.set(f"{h:02d}:{m:02d}:{s:02d}")
-            self._bound_addr_var.set(f"{self._ip_var.get()}:{self._port_var.get()}")
+                self._uptime_var.set(f"{h:02d}:{m:02d}:{s:02d}")  # ty:ignore[unresolved-attribute]
+            self._bound_addr_var.set(f"{self._ip_var.get()}:{self._port_var.get()}")  # ty:ignore[unresolved-attribute]
         else:
             if self._toggle_btn.cget("text") == "Stop":
                 # Server exited unexpectedly or was stopped
@@ -473,10 +473,10 @@ class RCFlowGUI:
                     self._log_append(f"Server exited with code {rc}")
                 else:
                     self._set_status("Stopped")
-                self._uptime_var.set("\u2014")
-                self._bound_addr_var.set("\u2014")
-                self._sessions_var.set("\u2014")
-                self._backend_id_var.set("\u2014")
+                self._uptime_var.set("\u2014")  # ty:ignore[unresolved-attribute]
+                self._bound_addr_var.set("\u2014")  # ty:ignore[unresolved-attribute]
+                self._sessions_var.set("\u2014")  # ty:ignore[unresolved-attribute]
+                self._backend_id_var.set("\u2014")  # ty:ignore[unresolved-attribute]
                 self._update_tray_status()
 
         self._root.after(_POLL_MS, self._update_ui)
@@ -486,8 +486,8 @@ class RCFlowGUI:
     def _setup_tray(self) -> bool:
         """Set up the system tray icon. Returns True on success."""
         try:
-            import pystray  # noqa: PLC0415
-            from PIL import Image  # noqa: PLC0415
+            import pystray  # noqa: PLC0415  # ty:ignore[unresolved-import]
+            from PIL import Image  # noqa: PLC0415  # ty:ignore[unresolved-import]
         except ImportError:
             logger.debug("pystray/Pillow not available — running without tray icon")
             return False
@@ -531,12 +531,12 @@ class RCFlowGUI:
             icon_path = Path(__file__).resolve().parent.parent / "assets" / "tray_icon.ico"
 
         if icon_path.exists():
-            return Image.open(str(icon_path))
+            return Image.open(str(icon_path))  # ty:ignore[unresolved-attribute]
 
         # Fallback: generate a simple icon
-        from PIL import ImageDraw  # noqa: PLC0415
+        from PIL import ImageDraw  # noqa: PLC0415  # ty:ignore[unresolved-import]
 
-        img = Image.new("RGBA", (64, 64), (15, 23, 42, 255))
+        img = Image.new("RGBA", (64, 64), (15, 23, 42, 255))  # ty:ignore[unresolved-attribute]
         draw = ImageDraw.Draw(img)
         draw.rounded_rectangle([4, 4, 59, 59], radius=8, fill=(56, 189, 248, 255))
         draw.text((14, 16), "RC", fill=(15, 23, 42, 255))
@@ -545,7 +545,7 @@ class RCFlowGUI:
     def _update_tray_status(self) -> None:
         if self._tray_icon is not None:
             with contextlib.suppress(Exception):
-                self._tray_icon.update_menu()  # type: ignore[attr-defined]
+                self._tray_icon.update_menu()  # type: ignore[attr-defined]  # ty:ignore[unresolved-attribute]
 
     def _on_tray_open(self, icon: object = None, item: object = None) -> None:
         """Restore the GUI window from the tray."""
@@ -568,7 +568,7 @@ class RCFlowGUI:
 
         if self._tray_icon is not None:
             with contextlib.suppress(Exception):
-                self._tray_icon.stop()  # type: ignore[attr-defined]
+                self._tray_icon.stop()  # type: ignore[attr-defined]  # ty:ignore[unresolved-attribute]
 
         # Destroy the tkinter window from the main thread
         self._root.after(0, self._root.destroy)
