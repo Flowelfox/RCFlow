@@ -58,8 +58,8 @@ jobs:
       # ── Tests ───────────────────────────────────────────────────────────
 
       # RCFLOW_API_KEY is auto-generated at server startup; not needed here.
-      - name: Run tests
-        run: uv run pytest tests/ -v --tb=short
+      - name: Run tests with coverage
+        run: uv run pytest tests/ -v --tb=short --cov --cov-report=term-missing
 
   # ---------------------------------------------------------------------------
   # Flutter client — analyze · test
