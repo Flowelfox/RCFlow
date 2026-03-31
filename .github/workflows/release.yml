@@ -486,7 +486,7 @@ jobs:
           merge-multiple: true
 
       - name: Import GPG key for checksums
-        if: "${{ secrets.GPG_PRIVATE_KEY != '' }}"
+        if: env.GPG_PRIVATE_KEY != ''
         env:
           GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
