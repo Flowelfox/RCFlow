@@ -519,7 +519,9 @@ class LLMClient:
             system=system,
             messages=[{"role": "user", "content": content}],
         )
-        return response.content[0].text.strip()
+        block = response.content[0]
+        assert isinstance(block, anthropic.types.TextBlock), f"Expected TextBlock, got {type(block)}"
+        return block.text.strip()
 
     async def _openai_create(self, system: str, content: str, max_tokens: int, *, model: str | None = None) -> str:
         """Make a non-streaming OpenAI call and return the text."""

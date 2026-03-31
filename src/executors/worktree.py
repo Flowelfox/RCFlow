@@ -215,7 +215,7 @@ class WorktreeExecutor(BaseExecutor):
     ) -> AsyncGenerator[ExecutionChunk, None]:
         """Worktree operations are non-interactive; streaming wraps execute()."""
         result = await self.execute(tool, parameters)
-        content = result.error if result.exit_code != 0 else result.output
+        content = result.error or "" if result.exit_code != 0 else result.output
         yield ExecutionChunk(stream="stdout", content=content)
 
     async def send_input(self, data: str) -> None:

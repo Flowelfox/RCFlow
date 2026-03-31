@@ -41,7 +41,7 @@ class SessionLifecycleMixin:
     @property
     def is_direct_tool_mode(self) -> bool:
         """Whether the router is in direct tool mode (no LLM)."""
-        return self._llm is None
+        return self._llm is None  # ty:ignore[unresolved-attribute]
 
     async def cancel_pending_tasks(self) -> None:
         """Cancel and await all pending background tasks.
@@ -50,12 +50,12 @@ class SessionLifecycleMixin:
         """
         all_pending: set[asyncio.Task[None]] = set()
         for task_set in (
-            self._pending_log_tasks,
-            self._pending_summary_tasks,
-            self._pending_title_tasks,
-            self._pending_archive_tasks,
-            self._pending_task_creation_tasks,
-            self._pending_task_update_tasks,
+            self._pending_log_tasks,  # ty:ignore[unresolved-attribute]
+            self._pending_summary_tasks,  # ty:ignore[unresolved-attribute]
+            self._pending_title_tasks,  # ty:ignore[unresolved-attribute]
+            self._pending_archive_tasks,  # ty:ignore[unresolved-attribute]
+            self._pending_task_creation_tasks,  # ty:ignore[unresolved-attribute]
+            self._pending_task_update_tasks,  # ty:ignore[unresolved-attribute]
         ):
             all_pending.update(task_set)
 
@@ -71,7 +71,7 @@ class SessionLifecycleMixin:
         """Get an existing session or create a new one. Returns the session ID."""
         session: ActiveSession | None = None
         if session_id:
-            session = self._session_manager.get_session(session_id)
+            session = self._session_manager.get_session(session_id)  # ty:ignore[unresolved-attribute]
             if session is None:
                 logger.warning("Session %s not found, will create new session", session_id)
             elif session.status in (
@@ -83,7 +83,7 @@ class SessionLifecycleMixin:
                 )
                 session = None
         if session is None:
-            session = self._session_manager.create_session(SessionType.CONVERSATIONAL)
+            session = self._session_manager.create_session(SessionType.CONVERSATIONAL)  # ty:ignore[unresolved-attribute]
         return session.id
 
     async def cancel_session(self, session_id: str) -> ActiveSession:
@@ -95,7 +95,7 @@ class SessionLifecycleMixin:
             ValueError: If the session does not exist.
             RuntimeError: If the session is already in a terminal state.
         """
-        session = self._session_manager.get_session(session_id)
+        session = self._session_manager.get_session(session_id)  # ty:ignore[unresolved-attribute]
         if session is None:
             raise ValueError(f"Session not found: {session_id}")
 
@@ -175,10 +175,10 @@ class SessionLifecycleMixin:
         )
 
         # Update attached task statuses if not already triggered by a tool result
-        self._fire_task_update_on_session_end(session)
+        self._fire_task_update_on_session_end(session)  # ty:ignore[unresolved-attribute]
 
         session.cancel()
-        self._fire_archive_task(session_id)
+        self._fire_archive_task(session_id)  # ty:ignore[unresolved-attribute]
         logger.info("Cancelled session %s", session_id)
         return session
 
@@ -194,7 +194,7 @@ class SessionLifecycleMixin:
             RuntimeError: If the session is in a non-completable terminal state
                           (failed or cancelled).
         """
-        session = self._session_manager.get_session(session_id)
+        session = self._session_manager.get_session(session_id)  # ty:ignore[unresolved-attribute]
         if session is None:
             raise ValueError(f"Session not found: {session_id}")
 
@@ -272,10 +272,10 @@ class SessionLifecycleMixin:
             session.paused_at = None
 
         # Update attached task statuses if not already triggered by a tool result
-        self._fire_task_update_on_session_end(session)
+        self._fire_task_update_on_session_end(session)  # ty:ignore[unresolved-attribute]
 
         session.complete()
-        self._fire_archive_task(session_id)
+        self._fire_archive_task(session_id)  # ty:ignore[unresolved-attribute]
         logger.info("Ended session %s (user confirmed)", session_id)
         return session
 
@@ -288,7 +288,7 @@ class SessionLifecycleMixin:
         Raises:
             ValueError: If the session does not exist.
         """
-        session = self._session_manager.get_session(session_id)
+        session = self._session_manager.get_session(session_id)  # ty:ignore[unresolved-attribute]
         if session is None:
             raise ValueError(f"Session not found: {session_id}")
         self._resolve_session_end_ask(session, accepted=False)
@@ -308,7 +308,7 @@ class SessionLifecycleMixin:
             RuntimeError: If the session does not have interactive permissions
                 enabled, or the request_id is unknown.
         """
-        session = self._session_manager.get_session(session_id)
+        session = self._session_manager.get_session(session_id)  # ty:ignore[unresolved-attribute]
         if session is None:
             raise ValueError(f"Session not found: {session_id}")
         if session.permission_manager is None:
@@ -360,7 +360,7 @@ class SessionLifecycleMixin:
         Raises:
             ValueError: If the session does not exist.
         """
-        session = self._session_manager.get_session(session_id)
+        session = self._session_manager.get_session(session_id)  # ty:ignore[unresolved-attribute]
         if session is None:
             raise ValueError(f"Session not found: {session_id}")
 
@@ -398,7 +398,7 @@ class SessionLifecycleMixin:
             return
 
         # Fallback: process is gone — treat as a regular follow-up prompt
-        await self.handle_prompt(text, session_id)
+        await self.handle_prompt(text, session_id)  # ty:ignore[unresolved-attribute]
 
     async def pause_session(self, session_id: str) -> ActiveSession:
         """Pause an active session.
@@ -413,7 +413,7 @@ class SessionLifecycleMixin:
             ValueError: If the session does not exist.
             RuntimeError: If the session cannot be paused (terminal or already paused).
         """
-        session = self._session_manager.get_session(session_id)
+        session = self._session_manager.get_session(session_id)  # ty:ignore[unresolved-attribute]
         if session is None:
             raise ValueError(f"Session not found: {session_id}")
 
@@ -512,7 +512,7 @@ class SessionLifecycleMixin:
             ValueError: If the session does not exist.
             RuntimeError: If the session is in a terminal or paused state.
         """
-        session = self._session_manager.get_session(session_id)
+        session = self._session_manager.get_session(session_id)  # ty:ignore[unresolved-attribute]
         if session is None:
             raise ValueError(f"Session not found: {session_id}")
 
@@ -596,7 +596,7 @@ class SessionLifecycleMixin:
             ValueError: If the session does not exist.
             RuntimeError: If the session is not paused.
         """
-        session = self._session_manager.get_session(session_id)
+        session = self._session_manager.get_session(session_id)  # ty:ignore[unresolved-attribute]
         if session is None:
             raise ValueError(f"Session not found: {session_id}")
 
@@ -610,11 +610,11 @@ class SessionLifecycleMixin:
         # If the underlying work completed while paused, finalize now.
         if session.metadata.pop("completed_while_paused", False):
             if session.codex_executor is not None:
-                await self._end_codex_session(session)
+                await self._end_codex_session(session)  # ty:ignore[unresolved-attribute]
             elif session.opencode_executor is not None:
-                await self._end_opencode_session(session)
+                await self._end_opencode_session(session)  # ty:ignore[unresolved-attribute]
             else:
-                await self._end_claude_code_session(session)
+                await self._end_claude_code_session(session)  # ty:ignore[unresolved-attribute]
             logger.info("Resumed session %s", session_id)
             return session
 
@@ -628,20 +628,20 @@ class SessionLifecycleMixin:
             cc_session_id = session.metadata.get("claude_code_session_id")
             cc_tool_name = session.metadata.get("claude_code_tool_name")
             if cc_session_id and cc_tool_name:
-                tool_def = self._tool_registry.get(cc_tool_name)
+                tool_def = self._tool_registry.get(cc_tool_name)  # ty:ignore[unresolved-attribute]
                 if tool_def is not None and tool_def.executor == "claude_code":
                     binary_path = "claude"
                     config = tool_def.get_claude_code_config()
                     binary_path = config.binary_path
-                    if self._tool_manager:
-                        resolved = self._tool_manager.get_binary_path("claude_code")
+                    if self._tool_manager:  # ty:ignore[unresolved-attribute]
+                        resolved = self._tool_manager.get_binary_path("claude_code")  # ty:ignore[unresolved-attribute]
                         if resolved:
                             binary_path = resolved
                     executor = ClaudeCodeExecutor(
                         binary_path=binary_path,
                         session_id=cc_session_id,
-                        extra_env=self._build_claude_code_extra_env(),
-                        config_overrides=self._get_managed_config_overrides("claude_code"),
+                        extra_env=self._build_claude_code_extra_env(),  # ty:ignore[unresolved-attribute]
+                        config_overrides=self._get_managed_config_overrides("claude_code"),  # ty:ignore[unresolved-attribute]
                     )
                     executor._tool_def = tool_def
                     cc_params = session.metadata.get("claude_code_parameters", {})
@@ -653,20 +653,20 @@ class SessionLifecycleMixin:
             codex_thread_id = session.metadata.get("codex_thread_id")
             codex_tool_name = session.metadata.get("codex_tool_name")
             if codex_thread_id and codex_tool_name:
-                tool_def = self._tool_registry.get(codex_tool_name)
+                tool_def = self._tool_registry.get(codex_tool_name)  # ty:ignore[unresolved-attribute]
                 if tool_def is not None and tool_def.executor == "codex":
                     binary_path = "codex"
                     config = tool_def.get_codex_config()
                     binary_path = config.binary_path
-                    if self._tool_manager:
-                        resolved = self._tool_manager.get_binary_path("codex")
+                    if self._tool_manager:  # ty:ignore[unresolved-attribute]
+                        resolved = self._tool_manager.get_binary_path("codex")  # ty:ignore[unresolved-attribute]
                         if resolved:
                             binary_path = resolved
                     codex_executor = CodexExecutor(
                         binary_path=binary_path,
                         thread_id=codex_thread_id,
-                        extra_env=self._build_codex_extra_env(),
-                        config_overrides=self._get_managed_config_overrides("codex"),
+                        extra_env=self._build_codex_extra_env(),  # ty:ignore[unresolved-attribute]
+                        config_overrides=self._get_managed_config_overrides("codex"),  # ty:ignore[unresolved-attribute]
                     )
                     codex_executor._tool_def = tool_def
                     codex_params = session.metadata.get("codex_parameters", {})
@@ -678,20 +678,20 @@ class SessionLifecycleMixin:
             oc_session_id = session.metadata.get("opencode_session_id")
             oc_tool_name = session.metadata.get("opencode_tool_name")
             if oc_session_id and oc_tool_name:
-                tool_def = self._tool_registry.get(oc_tool_name)
+                tool_def = self._tool_registry.get(oc_tool_name)  # ty:ignore[unresolved-attribute]
                 if tool_def is not None and tool_def.executor == "opencode":
                     binary_path = "opencode"
                     config = tool_def.get_opencode_config()
                     binary_path = config.binary_path
-                    if self._tool_manager:
-                        resolved = self._tool_manager.get_binary_path("opencode")
+                    if self._tool_manager:  # ty:ignore[unresolved-attribute]
+                        resolved = self._tool_manager.get_binary_path("opencode")  # ty:ignore[unresolved-attribute]
                         if resolved:
                             binary_path = resolved
                     oc_executor = OpenCodeExecutor(
                         binary_path=binary_path,
                         session_id=oc_session_id,
-                        extra_env=self._build_opencode_extra_env(),
-                        config_overrides=self._get_managed_config_overrides("opencode"),
+                        extra_env=self._build_opencode_extra_env(),  # ty:ignore[unresolved-attribute]
+                        config_overrides=self._get_managed_config_overrides("opencode"),  # ty:ignore[unresolved-attribute]
                     )
                     oc_executor._tool_def = tool_def
                     oc_params = session.metadata.get("opencode_parameters", {})
@@ -714,31 +714,31 @@ class SessionLifecycleMixin:
             ValueError: If the session is not found in the DB.
             RuntimeError: If the session is already active or DB is unavailable.
         """
-        if self._db_session_factory is None:
+        if self._db_session_factory is None:  # ty:ignore[unresolved-attribute]
             raise RuntimeError("Database is not configured; cannot restore sessions")
 
-        async with self._db_session_factory() as db:
-            session = await self._session_manager.restore_session(session_id, db)
+        async with self._db_session_factory() as db:  # ty:ignore[unresolved-attribute]
+            session = await self._session_manager.restore_session(session_id, db)  # ty:ignore[unresolved-attribute]
 
         # If this was a Claude Code session, set up executor for lazy restart
         cc_session_id = session.metadata.get("claude_code_session_id")
         cc_tool_name = session.metadata.get("claude_code_tool_name")
         if cc_session_id and cc_tool_name:
-            tool_def = self._tool_registry.get(cc_tool_name)
+            tool_def = self._tool_registry.get(cc_tool_name)  # ty:ignore[unresolved-attribute]
             if tool_def is not None and tool_def.executor == "claude_code":
                 binary_path = "claude"
                 config = tool_def.get_claude_code_config()
                 binary_path = config.binary_path
-                if self._tool_manager:
-                    resolved = self._tool_manager.get_binary_path("claude_code")
+                if self._tool_manager:  # ty:ignore[unresolved-attribute]
+                    resolved = self._tool_manager.get_binary_path("claude_code")  # ty:ignore[unresolved-attribute]
                     if resolved:
                         binary_path = resolved
 
                 executor = ClaudeCodeExecutor(
                     binary_path=binary_path,
                     session_id=cc_session_id,
-                    extra_env=self._build_claude_code_extra_env(),
-                    config_overrides=self._get_managed_config_overrides("claude_code"),
+                    extra_env=self._build_claude_code_extra_env(),  # ty:ignore[unresolved-attribute]
+                    config_overrides=self._get_managed_config_overrides("claude_code"),  # ty:ignore[unresolved-attribute]
                 )
                 # Pre-set the tool_def and last_parameters so restart_with_prompt works
                 executor._tool_def = tool_def
@@ -759,21 +759,21 @@ class SessionLifecycleMixin:
         codex_thread_id = session.metadata.get("codex_thread_id")
         codex_tool_name = session.metadata.get("codex_tool_name")
         if codex_thread_id and codex_tool_name:
-            tool_def = self._tool_registry.get(codex_tool_name)
+            tool_def = self._tool_registry.get(codex_tool_name)  # ty:ignore[unresolved-attribute]
             if tool_def is not None and tool_def.executor == "codex":
                 binary_path = "codex"
                 config = tool_def.get_codex_config()
                 binary_path = config.binary_path
-                if self._tool_manager:
-                    resolved = self._tool_manager.get_binary_path("codex")
+                if self._tool_manager:  # ty:ignore[unresolved-attribute]
+                    resolved = self._tool_manager.get_binary_path("codex")  # ty:ignore[unresolved-attribute]
                     if resolved:
                         binary_path = resolved
 
                 codex_executor = CodexExecutor(
                     binary_path=binary_path,
                     thread_id=codex_thread_id,
-                    extra_env=self._build_codex_extra_env(),
-                    config_overrides=self._get_managed_config_overrides("codex"),
+                    extra_env=self._build_codex_extra_env(),  # ty:ignore[unresolved-attribute]
+                    config_overrides=self._get_managed_config_overrides("codex"),  # ty:ignore[unresolved-attribute]
                 )
                 codex_executor._tool_def = tool_def
                 codex_params = session.metadata.get("codex_parameters", {})
@@ -786,21 +786,21 @@ class SessionLifecycleMixin:
         oc_session_id = session.metadata.get("opencode_session_id")
         oc_tool_name = session.metadata.get("opencode_tool_name")
         if oc_session_id and oc_tool_name:
-            tool_def = self._tool_registry.get(oc_tool_name)
+            tool_def = self._tool_registry.get(oc_tool_name)  # ty:ignore[unresolved-attribute]
             if tool_def is not None and tool_def.executor == "opencode":
                 binary_path = "opencode"
                 config = tool_def.get_opencode_config()
                 binary_path = config.binary_path
-                if self._tool_manager:
-                    resolved = self._tool_manager.get_binary_path("opencode")
+                if self._tool_manager:  # ty:ignore[unresolved-attribute]
+                    resolved = self._tool_manager.get_binary_path("opencode")  # ty:ignore[unresolved-attribute]
                     if resolved:
                         binary_path = resolved
 
                 oc_executor = OpenCodeExecutor(
                     binary_path=binary_path,
                     session_id=oc_session_id,
-                    extra_env=self._build_opencode_extra_env(),
-                    config_overrides=self._get_managed_config_overrides("opencode"),
+                    extra_env=self._build_opencode_extra_env(),  # ty:ignore[unresolved-attribute]
+                    config_overrides=self._get_managed_config_overrides("opencode"),  # ty:ignore[unresolved-attribute]
                 )
                 oc_executor._tool_def = tool_def
                 oc_params = session.metadata.get("opencode_parameters", {})
@@ -810,9 +810,9 @@ class SessionLifecycleMixin:
                 session.session_type = SessionType.LONG_RUNNING
 
         # Repopulate attached task IDs from task_sessions table
-        if self._db_session_factory is not None:
+        if self._db_session_factory is not None:  # ty:ignore[unresolved-attribute]
             try:
-                async with self._db_session_factory() as db:
+                async with self._db_session_factory() as db:  # ty:ignore[unresolved-attribute]
                     stmt = select(TaskSessionModel.task_id).where(TaskSessionModel.session_id == uuid.UUID(session_id))
                     result = await db.execute(stmt)
                     task_ids = [str(row[0]) for row in result.all()]
@@ -853,13 +853,13 @@ class SessionLifecycleMixin:
 
         If exceeded, pushes an error message to the buffer and returns True.
         """
-        if self._settings is None:
+        if self._settings is None:  # ty:ignore[unresolved-attribute]
             return False
 
         total_in = session.input_tokens + session.tool_input_tokens
         total_out = session.output_tokens + session.tool_output_tokens
-        input_limit = self._settings.SESSION_INPUT_TOKEN_LIMIT
-        output_limit = self._settings.SESSION_OUTPUT_TOKEN_LIMIT
+        input_limit = self._settings.SESSION_INPUT_TOKEN_LIMIT  # ty:ignore[unresolved-attribute]
+        output_limit = self._settings.SESSION_OUTPUT_TOKEN_LIMIT  # ty:ignore[unresolved-attribute]
 
         if input_limit > 0 and total_in >= input_limit:
             session.buffer.push_text(
@@ -920,7 +920,7 @@ class SessionLifecycleMixin:
         """End all active sessions that exceed the inactivity timeout."""
         now = datetime.now(UTC)
         terminal = (SessionStatus.COMPLETED, SessionStatus.FAILED, SessionStatus.CANCELLED)
-        for session in self._session_manager.list_all_sessions():
+        for session in self._session_manager.list_all_sessions():  # ty:ignore[unresolved-attribute]
             if session.status in terminal:
                 continue
             if session.status == SessionStatus.PAUSED:

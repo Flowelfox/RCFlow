@@ -48,7 +48,7 @@ class BackgroundTasksMixin:
         response_text: str | None,
     ) -> None:
         """Schedule a fire-and-forget background task to log an LLM call to the database."""
-        if self._db_session_factory is None or self._llm is None:
+        if self._db_session_factory is None or self._llm is None:  # ty:ignore[unresolved-attribute]
             return
         task = asyncio.create_task(
             self._log_llm_call(
@@ -59,8 +59,8 @@ class BackgroundTasksMixin:
                 response_text=response_text,
             )
         )
-        self._pending_log_tasks.add(task)
-        task.add_done_callback(self._pending_log_tasks.discard)
+        self._pending_log_tasks.add(task)  # ty:ignore[unresolved-attribute]
+        task.add_done_callback(self._pending_log_tasks.discard)  # ty:ignore[unresolved-attribute]
 
     async def _log_llm_call(
         self,
@@ -72,9 +72,9 @@ class BackgroundTasksMixin:
         response_text: str | None,
     ) -> None:
         """Write a single LLM call record to the database. Never raises."""
-        assert self._db_session_factory is not None
+        assert self._db_session_factory is not None  # ty:ignore[unresolved-attribute]
         try:
-            async with self._db_session_factory() as db:
+            async with self._db_session_factory() as db:  # ty:ignore[unresolved-attribute]
                 row = LLMCall(
                     session_id=uuid.UUID(session_id),
                     message_id=usage.message_id,
@@ -112,12 +112,12 @@ class BackgroundTasksMixin:
         The archive_session path updates all fields on completion, so the stub
         row is always superseded by the final values.
         """
-        if self._db_session_factory is None:
+        if self._db_session_factory is None:  # ty:ignore[unresolved-attribute]
             return
         session_uuid = uuid.UUID(session.id)
-        backend_id = self._settings.RCFLOW_BACKEND_ID if self._settings else ""
+        backend_id = self._settings.RCFLOW_BACKEND_ID if self._settings else ""  # ty:ignore[unresolved-attribute]
         try:
-            async with self._db_session_factory() as db:
+            async with self._db_session_factory() as db:  # ty:ignore[unresolved-attribute]
                 existing = await db.get(SessionModel, session_uuid)
                 if existing is None:
                     db.add(SessionModel(
@@ -142,27 +142,27 @@ class BackgroundTasksMixin:
     def _fire_archive_task(self, session_id: str) -> None:
         """Schedule a fire-and-forget background task to archive a session to the database."""
         # Snapshot permission rules into metadata before archiving
-        session = self._session_manager.get_session(session_id)
+        session = self._session_manager.get_session(session_id)  # ty:ignore[unresolved-attribute]
         if session is not None and session.permission_manager is not None:
             session.metadata["permission_rules"] = session.permission_manager.get_rules_snapshot()
 
-        if self._db_session_factory is None:
+        if self._db_session_factory is None:  # ty:ignore[unresolved-attribute]
             return
         task = asyncio.create_task(self._archive_session(session_id))
-        self._pending_archive_tasks.add(task)
-        task.add_done_callback(self._pending_archive_tasks.discard)
+        self._pending_archive_tasks.add(task)  # ty:ignore[unresolved-attribute]
+        task.add_done_callback(self._pending_archive_tasks.discard)  # ty:ignore[unresolved-attribute]
 
     async def _archive_session(self, session_id: str) -> None:
         """Archive a completed session to the database and optionally extract artifacts. Never raises."""
-        assert self._db_session_factory is not None
+        assert self._db_session_factory is not None  # ty:ignore[unresolved-attribute]
         try:
-            async with self._db_session_factory() as db:
-                await self._session_manager.archive_session(session_id, db)
+            async with self._db_session_factory() as db:  # ty:ignore[unresolved-attribute]
+                await self._session_manager.archive_session(session_id, db)  # ty:ignore[unresolved-attribute]
 
             # Extract artifacts from session messages if auto-scan is enabled
-            if self._artifact_scanner and self._settings and self._settings.ARTIFACT_AUTO_SCAN:
+            if self._artifact_scanner and self._settings and self._settings.ARTIFACT_AUTO_SCAN:  # ty:ignore[unresolved-attribute]
                 try:
-                    new_count = await self._artifact_scanner.scan(session_id)
+                    new_count = await self._artifact_scanner.scan(session_id)  # ty:ignore[unresolved-attribute]
                     if new_count > 0:
                         await self._broadcast_artifact_list()
                 except Exception:
@@ -174,7 +174,7 @@ class BackgroundTasksMixin:
 
     def _fire_summary_task(self, session: ActiveSession, text: str, *, push_session_end_ask: bool = False) -> None:
         """Schedule a background task to summarize Claude Code result text."""
-        if self._llm is None:
+        if self._llm is None:  # ty:ignore[unresolved-attribute]
             # No LLM — skip summary, but still push SESSION_END_ASK if requested
             if push_session_end_ask:
                 session.buffer.push_text(
@@ -183,15 +183,15 @@ class BackgroundTasksMixin:
                 )
             return
         task = asyncio.create_task(self._summarize_and_push(session, text, push_session_end_ask=push_session_end_ask))
-        self._pending_summary_tasks.add(task)
-        task.add_done_callback(self._pending_summary_tasks.discard)
+        self._pending_summary_tasks.add(task)  # ty:ignore[unresolved-attribute]
+        task.add_done_callback(self._pending_summary_tasks.discard)  # ty:ignore[unresolved-attribute]
 
     async def _summarize_and_push(
         self, session: ActiveSession, text: str, *, push_session_end_ask: bool = False
     ) -> None:
         """Generate a concise summary and push it to the session buffer."""
         try:
-            summary = await self._llm.summarize(text)
+            summary = await self._llm.summarize(text)  # ty:ignore[unresolved-attribute]
             session.buffer.push_text(
                 MessageType.SUMMARY,
                 {
@@ -212,7 +212,7 @@ class BackgroundTasksMixin:
 
     def _fire_title_task(self, session: ActiveSession, user_text: str, assistant_text: str) -> None:
         """Schedule a background task to generate a session title."""
-        if self._llm is None:
+        if self._llm is None:  # ty:ignore[unresolved-attribute]
             # Direct tool mode: set title from truncated user text
             title = user_text[:50]
             if len(user_text) > 50:
@@ -223,14 +223,14 @@ class BackgroundTasksMixin:
             session.title = title
             return
         task = asyncio.create_task(self._generate_and_set_title(session, user_text, assistant_text))
-        self._pending_title_tasks.add(task)
-        task.add_done_callback(self._pending_title_tasks.discard)
+        self._pending_title_tasks.add(task)  # ty:ignore[unresolved-attribute]
+        task.add_done_callback(self._pending_title_tasks.discard)  # ty:ignore[unresolved-attribute]
 
     async def _generate_and_set_title(self, session: ActiveSession, user_text: str, assistant_text: str) -> None:
         """Generate a title and assign it to the session. Never raises."""
-        assert self._llm is not None
+        assert self._llm is not None  # ty:ignore[unresolved-attribute]
         try:
-            title = await self._llm.generate_title(user_text, assistant_text)
+            title = await self._llm.generate_title(user_text, assistant_text)  # ty:ignore[unresolved-attribute]
             session.title = title
             logger.info("Generated title for session %s: %s", session.id, title)
         except Exception:
@@ -240,11 +240,11 @@ class BackgroundTasksMixin:
 
     def _fire_task_creation_task(self, session: ActiveSession, user_text: str, assistant_text: str) -> None:
         """Schedule a background task to extract or match tasks from the session."""
-        if self._llm is None:
+        if self._llm is None:  # ty:ignore[unresolved-attribute]
             return
         task = asyncio.create_task(self._create_tasks_from_session(session, user_text, assistant_text))
-        self._pending_task_creation_tasks.add(task)
-        task.add_done_callback(self._pending_task_creation_tasks.discard)
+        self._pending_task_creation_tasks.add(task)  # ty:ignore[unresolved-attribute]
+        task.add_done_callback(self._pending_task_creation_tasks.discard)  # ty:ignore[unresolved-attribute]
 
     async def _create_tasks_from_session(
         self,
@@ -254,13 +254,13 @@ class BackgroundTasksMixin:
     ) -> None:
         """Extract or match tasks for this session. Never raises."""
         try:
-            if self._db_session_factory is None or self._settings is None:
+            if self._db_session_factory is None or self._settings is None:  # ty:ignore[unresolved-attribute]
                 return
 
-            backend_id = self._settings.RCFLOW_BACKEND_ID
+            backend_id = self._settings.RCFLOW_BACKEND_ID  # ty:ignore[unresolved-attribute]
 
             # Fetch existing non-done tasks for matching
-            async with self._db_session_factory() as db:
+            async with self._db_session_factory() as db:  # ty:ignore[unresolved-attribute]
                 stmt = select(TaskModel).where(
                     TaskModel.backend_id == backend_id,
                     TaskModel.status.in_(["todo", "in_progress", "review"]),
@@ -277,7 +277,7 @@ class BackgroundTasksMixin:
                 ]
 
             # Ask LLM to extract/match
-            llm_result = await self._llm.extract_or_match_tasks(user_text, assistant_text, existing)
+            llm_result = await self._llm.extract_or_match_tasks(user_text, assistant_text, existing)  # ty:ignore[unresolved-attribute]
             new_tasks = llm_result.get("new_tasks") or []
             attach_ids = llm_result.get("attach_task_ids") or []
 
@@ -285,7 +285,7 @@ class BackgroundTasksMixin:
             from datetime import UTC  # noqa: PLC0415
             from datetime import datetime as dt  # noqa: PLC0415
 
-            async with self._db_session_factory() as db:
+            async with self._db_session_factory() as db:  # ty:ignore[unresolved-attribute]
                 # Ensure session row exists in DB (it may not be archived yet)
                 session_uuid = uuid.UUID(session.id)
                 existing_session = await db.get(SessionModel, session_uuid)
@@ -392,7 +392,7 @@ class BackgroundTasksMixin:
                                 "updated_at": task.updated_at.isoformat() if task.updated_at else "",
                                 "sessions": sessions_data,
                             }
-                            self._session_manager.broadcast_task_update(task_data)
+                            self._session_manager.broadcast_task_update(task_data)  # ty:ignore[unresolved-attribute]
                     except Exception:
                         logger.exception("Failed to broadcast task update for %s", tid)
 
@@ -410,19 +410,19 @@ class BackgroundTasksMixin:
 
     def _fire_task_update_task(self, session: ActiveSession, session_result_text: str) -> None:
         """Schedule a background task to update tasks based on session results."""
-        if self._llm is None:
+        if self._llm is None:  # ty:ignore[unresolved-attribute]
             return
         task_ids = session.metadata.get("attached_task_ids", [])
         if not task_ids:
             return
         session.metadata["_task_update_fired"] = True
         task = asyncio.create_task(self._update_tasks_from_session(session, session_result_text, task_ids))
-        self._pending_task_update_tasks.add(task)
-        task.add_done_callback(self._pending_task_update_tasks.discard)
+        self._pending_task_update_tasks.add(task)  # ty:ignore[unresolved-attribute]
+        task.add_done_callback(self._pending_task_update_tasks.discard)  # ty:ignore[unresolved-attribute]
 
     def _fire_task_update_on_session_end(self, session: ActiveSession) -> None:
         """Fire task update when a session ends, if not already fired by a tool result."""
-        if self._llm is None:
+        if self._llm is None:  # ty:ignore[unresolved-attribute]
             return
         if session.metadata.get("_task_update_fired"):
             return
@@ -463,13 +463,13 @@ class BackgroundTasksMixin:
         from sqlite3 import OperationalError as SQLiteOperationalError  # noqa: PLC0415
 
         try:
-            if self._db_session_factory is None:
+            if self._db_session_factory is None:  # ty:ignore[unresolved-attribute]
                 return
 
             from datetime import UTC  # noqa: PLC0415
             from datetime import datetime as dt  # noqa: PLC0415
 
-            async with self._db_session_factory() as db:
+            async with self._db_session_factory() as db:  # ty:ignore[unresolved-attribute]
                 for tid in task_ids:
                     try:
                         task_uuid = uuid.UUID(tid)
@@ -481,7 +481,7 @@ class BackgroundTasksMixin:
                         continue
 
                     # Ask LLM to evaluate
-                    result = await self._llm.evaluate_task_status(
+                    result = await self._llm.evaluate_task_status(  # ty:ignore[unresolved-attribute]
                         task.title,
                         task.description,
                         task.status,
@@ -534,7 +534,7 @@ class BackgroundTasksMixin:
                             "updated_at": task.updated_at.isoformat() if task.updated_at else "",
                             "sessions": sessions_data,
                         }
-                        self._session_manager.broadcast_task_update(task_data)
+                        self._session_manager.broadcast_task_update(task_data)  # ty:ignore[unresolved-attribute]
 
             logger.info("Task update for session %s: checked %d tasks", session.id, len(task_ids))
 
@@ -547,13 +547,13 @@ class BackgroundTasksMixin:
 
     def _fire_realtime_artifact_scan(self, session: ActiveSession) -> None:
         """Schedule a fire-and-forget background task to scan conversation history for artifacts."""
-        if self._artifact_scanner is None:
+        if self._artifact_scanner is None:  # ty:ignore[unresolved-attribute]
             return
         history = list(session.conversation_history)
         project_path = Path(session.main_project_path) if session.main_project_path else None
         task = asyncio.create_task(self._realtime_artifact_scan(session.id, history, project_path))
-        self._pending_archive_tasks.add(task)
-        task.add_done_callback(self._pending_archive_tasks.discard)
+        self._pending_archive_tasks.add(task)  # ty:ignore[unresolved-attribute]
+        task.add_done_callback(self._pending_archive_tasks.discard)  # ty:ignore[unresolved-attribute]
 
     async def _realtime_artifact_scan(
         self,
@@ -562,9 +562,9 @@ class BackgroundTasksMixin:
         project_path: Path | None,
     ) -> None:
         """Extract artifacts from in-memory conversation history. Never raises."""
-        assert self._artifact_scanner is not None
+        assert self._artifact_scanner is not None  # ty:ignore[unresolved-attribute]
         try:
-            new_count, updated_count = await self._artifact_scanner.scan_from_history(
+            new_count, updated_count = await self._artifact_scanner.scan_from_history(  # ty:ignore[unresolved-attribute]
                 session_id, conversation_history, project_path
             )
             if new_count > 0 or updated_count > 0:
@@ -574,20 +574,20 @@ class BackgroundTasksMixin:
 
     def _fire_text_artifact_scan(self, session: ActiveSession, texts: list[str]) -> None:
         """Schedule a fire-and-forget background task to scan text strings for artifacts."""
-        if self._artifact_scanner is None or not self._settings or not self._settings.ARTIFACT_AUTO_SCAN:
+        if self._artifact_scanner is None or not self._settings or not self._settings.ARTIFACT_AUTO_SCAN:  # ty:ignore[unresolved-attribute]
             return
         project_path = Path(session.main_project_path) if session.main_project_path else None
         task = asyncio.create_task(self._text_artifact_scan(session.id, texts, project_path))
-        self._pending_archive_tasks.add(task)
-        task.add_done_callback(self._pending_archive_tasks.discard)
+        self._pending_archive_tasks.add(task)  # ty:ignore[unresolved-attribute]
+        task.add_done_callback(self._pending_archive_tasks.discard)  # ty:ignore[unresolved-attribute]
 
     async def _text_artifact_scan(
         self, session_id: str, texts: list[str], project_path: Path | None
     ) -> None:
         """Extract artifacts from raw text strings. Never raises."""
-        assert self._artifact_scanner is not None
+        assert self._artifact_scanner is not None  # ty:ignore[unresolved-attribute]
         try:
-            new_count, updated_count = await self._artifact_scanner.scan_texts(
+            new_count, updated_count = await self._artifact_scanner.scan_texts(  # ty:ignore[unresolved-attribute]
                 session_id, texts, project_path
             )
             if new_count > 0 or updated_count > 0:
@@ -620,7 +620,7 @@ class BackgroundTasksMixin:
 
     def _enrich_artifact_dict(self, artifact_data: dict[str, Any]) -> dict[str, Any]:
         """Add ``project_name`` to an artifact dict based on its file path."""
-        projects_dirs = self._settings.projects_dirs if self._settings else []
+        projects_dirs = self._settings.projects_dirs if self._settings else []  # ty:ignore[unresolved-attribute]
         artifact_data["project_name"] = self._resolve_artifact_project(
             artifact_data.get("file_path", ""), projects_dirs
         )
@@ -628,16 +628,16 @@ class BackgroundTasksMixin:
 
     async def _broadcast_artifact_list(self) -> None:
         """Fetch all artifacts for this backend and broadcast to connected clients."""
-        if self._db_session_factory is None or self._settings is None:
+        if self._db_session_factory is None or self._settings is None:  # ty:ignore[unresolved-attribute]
             return
-        async with self._db_session_factory() as db:
+        async with self._db_session_factory() as db:  # ty:ignore[unresolved-attribute]
             stmt = (
                 select(ArtifactModel)
-                .where(ArtifactModel.backend_id == self._settings.RCFLOW_BACKEND_ID)
+                .where(ArtifactModel.backend_id == self._settings.RCFLOW_BACKEND_ID)  # ty:ignore[unresolved-attribute]
                 .order_by(ArtifactModel.discovered_at.desc())
             )
             result = await db.execute(stmt)
-            projects_dirs = self._settings.projects_dirs
+            projects_dirs = self._settings.projects_dirs  # ty:ignore[unresolved-attribute]
             artifacts = [
                 {
                     "artifact_id": str(a.id),
@@ -653,4 +653,4 @@ class BackgroundTasksMixin:
                 }
                 for a in result.scalars()
             ]
-        self._session_manager.broadcast_artifact_list(artifacts)
+        self._session_manager.broadcast_artifact_list(artifacts)  # ty:ignore[unresolved-attribute]

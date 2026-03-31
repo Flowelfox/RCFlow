@@ -62,19 +62,19 @@ class ClaudeCodeAgentMixin:
         # injecting the global ANTHROPIC_API_KEY so the settings.json env
         # section takes precedence.
         tool_provider = ""
-        if self._tool_settings:
-            tool_provider = self._tool_settings.get_settings("claude_code").get("provider", "")
+        if self._tool_settings:  # ty:ignore[unresolved-attribute]
+            tool_provider = self._tool_settings.get_settings("claude_code").get("provider", "")  # ty:ignore[unresolved-attribute]
 
         if tool_provider == "anthropic_login":
             # Anthropic Login uses OAuth tokens from .credentials.json —
             # ensure no ANTHROPIC_API_KEY leaks from the server process env,
             # which would override OAuth and cause "Invalid API key" errors.
             extra_env["ANTHROPIC_API_KEY"] = ""
-        elif not tool_provider and self._settings and self._settings.ANTHROPIC_API_KEY:
-            extra_env["ANTHROPIC_API_KEY"] = self._settings.ANTHROPIC_API_KEY
+        elif not tool_provider and self._settings and self._settings.ANTHROPIC_API_KEY:  # ty:ignore[unresolved-attribute]
+            extra_env["ANTHROPIC_API_KEY"] = self._settings.ANTHROPIC_API_KEY  # ty:ignore[unresolved-attribute]
 
-        if self._tool_settings:
-            config_dir = self._tool_settings.get_config_dir("claude_code")
+        if self._tool_settings:  # ty:ignore[unresolved-attribute]
+            config_dir = self._tool_settings.get_config_dir("claude_code")  # ty:ignore[unresolved-attribute]
             config_dir.mkdir(parents=True, exist_ok=True)
             extra_env["CLAUDE_CONFIG_DIR"] = str(config_dir)
 
@@ -105,7 +105,7 @@ class ClaudeCodeAgentMixin:
             working_dir = selected_wt
         elif session.main_project_path:
             working_dir = session.main_project_path
-        working_path = self._resolve_working_directory(working_dir)
+        working_path = self._resolve_working_directory(working_dir)  # ty:ignore[unresolved-attribute]
         try:
             is_dir = working_path.is_dir()
         except OSError as e:
@@ -134,7 +134,7 @@ class ClaudeCodeAgentMixin:
         # Replace the working_directory in tool_input with the resolved absolute path
         tool_call.tool_input["working_directory"] = str(working_path)
 
-        executor = self._get_executor(tool_def.executor, tool_def)
+        executor = self._get_executor(tool_def.executor, tool_def)  # ty:ignore[unresolved-attribute]
         assert isinstance(executor, ClaudeCodeExecutor)
 
         session.claude_code_executor = executor
@@ -143,7 +143,7 @@ class ClaudeCodeAgentMixin:
 
         # Enable interactive permissions if configured
         effective_config = {**tool_def.executor_config.get("claude_code", {})}
-        for k, v in self._get_managed_config_overrides("claude_code").items():
+        for k, v in self._get_managed_config_overrides("claude_code").items():  # ty:ignore[unresolved-attribute]
             if v not in (None, ""):
                 effective_config[k] = v
         if effective_config.get("default_permission_mode") == "interactive":
@@ -415,7 +415,7 @@ class ClaudeCodeAgentMixin:
                                 scan_texts.append(v)
                 # Fire artifact scan for this assistant message
                 if scan_texts:
-                    self._fire_text_artifact_scan(session, scan_texts)
+                    self._fire_text_artifact_scan(session, scan_texts)  # ty:ignore[unresolved-attribute]
 
             elif event_type == "tool_result":
                 raw_content = event.get("content", "")
@@ -441,7 +441,7 @@ class ClaudeCodeAgentMixin:
                         },
                     )
                     # Fire artifact scan for this tool result
-                    self._fire_text_artifact_scan(session, [content])
+                    self._fire_text_artifact_scan(session, [content])  # ty:ignore[unresolved-attribute]
 
                 # Clear current_tool after the result
                 session.subprocess_current_tool = None
@@ -496,11 +496,11 @@ class ClaudeCodeAgentMixin:
                             "claude_code_interrupted": False,
                         },
                     )
-                    self._fire_summary_task(session, summary_text)  # No SESSION_END_ASK
-                    self._fire_task_update_task(session, summary_text)
+                    self._fire_summary_task(session, summary_text)  # ty:ignore[unresolved-attribute]  # No SESSION_END_ASK
+                    self._fire_task_update_task(session, summary_text)  # ty:ignore[unresolved-attribute]
                 elif result_text:
-                    self._fire_summary_task(session, result_text, push_session_end_ask=True)
-                    self._fire_task_update_task(session, result_text)
+                    self._fire_summary_task(session, result_text, push_session_end_ask=True)  # ty:ignore[unresolved-attribute]
+                    self._fire_task_update_task(session, result_text)  # ty:ignore[unresolved-attribute]
                 else:
                     # Result event with no text and no subtype — still notify the user
                     session.buffer.push_text(
@@ -631,7 +631,7 @@ class ClaudeCodeAgentMixin:
             },
         )
         session.complete()
-        self._fire_archive_task(session.id)
+        self._fire_archive_task(session.id)  # ty:ignore[unresolved-attribute]
 
     async def _forward_to_claude_code(self, session: ActiveSession, text: str) -> None:
         """Forward a follow-up message to the active Claude Code subprocess.
@@ -653,7 +653,7 @@ class ClaudeCodeAgentMixin:
         if session.subprocess_started_at is None:
             session.subprocess_started_at = datetime.now(UTC)
             session.subprocess_type = "claude_code"
-            cc_def_for_name = self._tool_registry.get("claude_code")
+            cc_def_for_name = self._tool_registry.get("claude_code")  # ty:ignore[unresolved-attribute]
             session.subprocess_display_name = (
                 cc_def_for_name.display_name if cc_def_for_name and cc_def_for_name.display_name else "Claude Code"
             )
@@ -672,7 +672,7 @@ class ClaudeCodeAgentMixin:
         )
 
         # Open a new agent group for this follow-up turn
-        cc_def = self._tool_registry.get("claude_code")
+        cc_def = self._tool_registry.get("claude_code")  # ty:ignore[unresolved-attribute]
         session.buffer.push_text(
             MessageType.AGENT_GROUP_START,
             {

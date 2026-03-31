@@ -687,6 +687,7 @@ class PromptRouter(
 
             # Run the agentic loop
             try:
+                assert self._llm is not None, "LLM client not initialized"
                 async for event in self._llm.run_agentic_loop(
                     messages=session.conversation_history,
                     execute_tool_fn=execute_tool,
