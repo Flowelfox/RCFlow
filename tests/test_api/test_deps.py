@@ -176,7 +176,7 @@ class TestHandleWsFirstMessageAuth:
 
     async def test_timeout_closes_socket(self) -> None:
         ws = _mock_async_websocket()
-        ws.receive_text.side_effect = asyncio.TimeoutError()
+        ws.receive_text.side_effect = TimeoutError()
         with patch("src.api.deps.get_settings", return_value=_mock_settings()):
             result = await handle_ws_first_message_auth(ws)
         assert result is False
