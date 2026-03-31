@@ -16,12 +16,14 @@ Covers:
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+if TYPE_CHECKING:
+    from fastapi import FastAPI
 
 API_KEY = "test-api-key"
 _VALID_UUID = "00000000-0000-0000-0000-000000000001"
@@ -85,14 +87,16 @@ class TestUpdateArtifactSettings:
         assert resp.status_code == 200
 
     def test_update_auto_scan_returns_settings(self, client: TestClient) -> None:
-        with patch("src.api.routes.artifacts.update_settings_file") as mock_update:
-            with patch("src.api.routes.artifacts.Settings") as mock_settings_cls:
-                mock_settings_cls.return_value = client.app.state.settings
-                resp = client.patch(
-                    "/api/artifacts/settings",
-                    json={"auto_scan": False},
-                    headers=_auth(),
-                )
+        with (
+            patch("src.api.routes.artifacts.update_settings_file") as mock_update,
+            patch("src.api.routes.artifacts.Settings") as mock_settings_cls,
+        ):
+            mock_settings_cls.return_value = client.app.state.settings
+            resp = client.patch(
+                "/api/artifacts/settings",
+                json={"auto_scan": False},
+                headers=_auth(),
+            )
         assert resp.status_code == 200
         # update_settings_file should have been called with ARTIFACT_AUTO_SCAN
         mock_update.assert_called_once()
@@ -100,28 +104,32 @@ class TestUpdateArtifactSettings:
         assert "ARTIFACT_AUTO_SCAN" in call_args
 
     def test_update_max_file_size(self, client: TestClient) -> None:
-        with patch("src.api.routes.artifacts.update_settings_file") as mock_update:
-            with patch("src.api.routes.artifacts.Settings") as mock_settings_cls:
-                mock_settings_cls.return_value = client.app.state.settings
-                resp = client.patch(
-                    "/api/artifacts/settings",
-                    json={"max_file_size": 2048},
-                    headers=_auth(),
-                )
+        with (
+            patch("src.api.routes.artifacts.update_settings_file") as mock_update,
+            patch("src.api.routes.artifacts.Settings") as mock_settings_cls,
+        ):
+            mock_settings_cls.return_value = client.app.state.settings
+            resp = client.patch(
+                "/api/artifacts/settings",
+                json={"max_file_size": 2048},
+                headers=_auth(),
+            )
         assert resp.status_code == 200
         call_args = mock_update.call_args[0][0]
         assert "ARTIFACT_MAX_FILE_SIZE" in call_args
         assert call_args["ARTIFACT_MAX_FILE_SIZE"] == "2048"
 
     def test_update_include_pattern(self, client: TestClient) -> None:
-        with patch("src.api.routes.artifacts.update_settings_file") as mock_update:
-            with patch("src.api.routes.artifacts.Settings") as mock_settings_cls:
-                mock_settings_cls.return_value = client.app.state.settings
-                resp = client.patch(
-                    "/api/artifacts/settings",
-                    json={"include_pattern": "**/*.py"},
-                    headers=_auth(),
-                )
+        with (
+            patch("src.api.routes.artifacts.update_settings_file") as mock_update,
+            patch("src.api.routes.artifacts.Settings") as mock_settings_cls,
+        ):
+            mock_settings_cls.return_value = client.app.state.settings
+            resp = client.patch(
+                "/api/artifacts/settings",
+                json={"include_pattern": "**/*.py"},
+                headers=_auth(),
+            )
         assert resp.status_code == 200
         call_args = mock_update.call_args[0][0]
         assert call_args["ARTIFACT_INCLUDE_PATTERN"] == "**/*.py"

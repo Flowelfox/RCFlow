@@ -13,10 +13,11 @@ Covers:
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
 import pytest
-from fastapi import FastAPI
+from fastapi import HTTPException as FastHTTPException
 from fastapi.testclient import TestClient
 from wtpython import (
     GitOperationError,
@@ -27,6 +28,11 @@ from wtpython import (
     WorktreeExists,
     WorktreeNotFound,
 )
+
+from src.api.routes.worktrees import _map_exception
+
+if TYPE_CHECKING:
+    from fastapi import FastAPI
 
 API_KEY = "test-api-key"
 
@@ -98,8 +104,6 @@ class TestListWorktrees:
             pass  # We test this via the real _manager raising HTTPException
 
         # Patch _manager to raise HTTPException(400) directly
-        from fastapi import HTTPException as FastHTTPException
-
         with patch(
             "src.api.routes.worktrees._manager",
             side_effect=FastHTTPException(status_code=400, detail="Not a git repository"),
@@ -169,8 +173,6 @@ class TestCreateWorktree:
         assert resp.status_code == 422
 
     def test_not_git_repo_returns_400(self, client: TestClient) -> None:
-        from fastapi import HTTPException as FastHTTPException
-
         with patch(
             "src.api.routes.worktrees._manager",
             side_effect=FastHTTPException(status_code=400, detail="Not a git repository"),
@@ -321,8 +323,6 @@ class TestRemoveWorktree:
 
 class TestMapException:
     def _map(self, exc: Exception) -> int:
-        from src.api.routes.worktrees import _map_exception
-
         return _map_exception(exc).status_code
 
     def test_worktree_not_found_is_404(self) -> None:

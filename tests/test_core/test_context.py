@@ -16,13 +16,13 @@ Covers:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
-
-import pytest
 
 from src.core.context import ContextMixin, _format_file_size
 
+if TYPE_CHECKING:
+    from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # Minimal concrete host
@@ -344,7 +344,7 @@ class TestParseDirectToolPrompt:
         host = _ContextHost(tool_registry=_registry_with(tool))
         result = host._parse_direct_tool_prompt("#run_shell echo hello")
         assert isinstance(result, tuple)
-        tool_def, tool_input, _ = result
+        _tool_def, tool_input, _ = result
         assert "command" in tool_input
         assert tool_input["command"] == "echo hello"
 

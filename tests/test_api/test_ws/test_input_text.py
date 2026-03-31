@@ -20,8 +20,6 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from src.core.session import SessionType
-
 API_KEY = "test-api-key"
 
 # ---------------------------------------------------------------------------
@@ -166,10 +164,12 @@ class TestEndSession:
         assert data["code"] == "MISSING_SESSION_ID"
 
     def test_success_returns_ack(self, client: TestClient) -> None:
-        with patch.object(client.app.state.prompt_router, "end_session", new=AsyncMock()):
-            with client.websocket_connect(_ws_url()) as ws:
-                ws.send_json({"type": "end_session", "session_id": "test-session-id"})
-                data = ws.receive_json()
+        with (
+            patch.object(client.app.state.prompt_router, "end_session", new=AsyncMock()),
+            client.websocket_connect(_ws_url()) as ws,
+        ):
+            ws.send_json({"type": "end_session", "session_id": "test-session-id"})
+            data = ws.receive_json()
 
         assert data["type"] == "ack"
         assert data["session_id"] == "test-session-id"
@@ -179,10 +179,9 @@ class TestEndSession:
             client.app.state.prompt_router,
             "end_session",
             new=AsyncMock(side_effect=ValueError("Session not found")),
-        ):
-            with client.websocket_connect(_ws_url()) as ws:
-                ws.send_json({"type": "end_session", "session_id": "bad-id"})
-                data = ws.receive_json()
+        ), client.websocket_connect(_ws_url()) as ws:
+            ws.send_json({"type": "end_session", "session_id": "bad-id"})
+            data = ws.receive_json()
 
         assert data["type"] == "error"
         assert data["code"] == "END_SESSION_ERROR"
@@ -203,10 +202,12 @@ class TestPauseSession:
         assert data["code"] == "MISSING_SESSION_ID"
 
     def test_success_returns_ack(self, client: TestClient) -> None:
-        with patch.object(client.app.state.prompt_router, "pause_session", new=AsyncMock()):
-            with client.websocket_connect(_ws_url()) as ws:
-                ws.send_json({"type": "pause_session", "session_id": "test-id"})
-                data = ws.receive_json()
+        with (
+            patch.object(client.app.state.prompt_router, "pause_session", new=AsyncMock()),
+            client.websocket_connect(_ws_url()) as ws,
+        ):
+            ws.send_json({"type": "pause_session", "session_id": "test-id"})
+            data = ws.receive_json()
 
         assert data["type"] == "ack"
         assert data["session_id"] == "test-id"
@@ -216,10 +217,9 @@ class TestPauseSession:
             client.app.state.prompt_router,
             "pause_session",
             new=AsyncMock(side_effect=RuntimeError("Cannot pause")),
-        ):
-            with client.websocket_connect(_ws_url()) as ws:
-                ws.send_json({"type": "pause_session", "session_id": "bad-id"})
-                data = ws.receive_json()
+        ), client.websocket_connect(_ws_url()) as ws:
+            ws.send_json({"type": "pause_session", "session_id": "bad-id"})
+            data = ws.receive_json()
 
         assert data["type"] == "error"
         assert data["code"] == "PAUSE_SESSION_ERROR"
@@ -240,10 +240,12 @@ class TestResumeSession:
         assert data["code"] == "MISSING_SESSION_ID"
 
     def test_success_returns_ack(self, client: TestClient) -> None:
-        with patch.object(client.app.state.prompt_router, "resume_session", new=AsyncMock()):
-            with client.websocket_connect(_ws_url()) as ws:
-                ws.send_json({"type": "resume_session", "session_id": "test-id"})
-                data = ws.receive_json()
+        with (
+            patch.object(client.app.state.prompt_router, "resume_session", new=AsyncMock()),
+            client.websocket_connect(_ws_url()) as ws,
+        ):
+            ws.send_json({"type": "resume_session", "session_id": "test-id"})
+            data = ws.receive_json()
 
         assert data["type"] == "ack"
         assert data["session_id"] == "test-id"
@@ -253,10 +255,9 @@ class TestResumeSession:
             client.app.state.prompt_router,
             "resume_session",
             new=AsyncMock(side_effect=ValueError("Session not paused")),
-        ):
-            with client.websocket_connect(_ws_url()) as ws:
-                ws.send_json({"type": "resume_session", "session_id": "bad-id"})
-                data = ws.receive_json()
+        ), client.websocket_connect(_ws_url()) as ws:
+            ws.send_json({"type": "resume_session", "session_id": "bad-id"})
+            data = ws.receive_json()
 
         assert data["type"] == "error"
         assert data["code"] == "RESUME_SESSION_ERROR"
@@ -285,10 +286,9 @@ class TestRestoreSession:
             client.app.state.prompt_router,
             "restore_session",
             new=AsyncMock(return_value=mock_session),
-        ):
-            with client.websocket_connect(_ws_url()) as ws:
-                ws.send_json({"type": "restore_session", "session_id": "test-id"})
-                data = ws.receive_json()
+        ), client.websocket_connect(_ws_url()) as ws:
+            ws.send_json({"type": "restore_session", "session_id": "test-id"})
+            data = ws.receive_json()
 
         assert data["type"] == "ack"
         assert data["session_id"] == "test-id"
@@ -300,10 +300,9 @@ class TestRestoreSession:
             client.app.state.prompt_router,
             "restore_session",
             new=AsyncMock(side_effect=ValueError("Session not found")),
-        ):
-            with client.websocket_connect(_ws_url()) as ws:
-                ws.send_json({"type": "restore_session", "session_id": "bad-id"})
-                data = ws.receive_json()
+        ), client.websocket_connect(_ws_url()) as ws:
+            ws.send_json({"type": "restore_session", "session_id": "bad-id"})
+            data = ws.receive_json()
 
         assert data["type"] == "error"
         assert data["code"] == "RESTORE_SESSION_ERROR"
@@ -324,10 +323,12 @@ class TestDismissSessionEndAsk:
         assert data["code"] == "MISSING_SESSION_ID"
 
     def test_success_returns_ack(self, client: TestClient) -> None:
-        with patch.object(client.app.state.prompt_router, "dismiss_session_end_ask", return_value=None):
-            with client.websocket_connect(_ws_url()) as ws:
-                ws.send_json({"type": "dismiss_session_end_ask", "session_id": "test-id"})
-                data = ws.receive_json()
+        with (
+            patch.object(client.app.state.prompt_router, "dismiss_session_end_ask", return_value=None),
+            client.websocket_connect(_ws_url()) as ws,
+        ):
+            ws.send_json({"type": "dismiss_session_end_ask", "session_id": "test-id"})
+            data = ws.receive_json()
 
         assert data["type"] == "ack"
         assert data["session_id"] == "test-id"
@@ -337,10 +338,9 @@ class TestDismissSessionEndAsk:
             client.app.state.prompt_router,
             "dismiss_session_end_ask",
             side_effect=ValueError("Session not found"),
-        ):
-            with client.websocket_connect(_ws_url()) as ws:
-                ws.send_json({"type": "dismiss_session_end_ask", "session_id": "bad-id"})
-                data = ws.receive_json()
+        ), client.websocket_connect(_ws_url()) as ws:
+            ws.send_json({"type": "dismiss_session_end_ask", "session_id": "bad-id"})
+            data = ws.receive_json()
 
         assert data["type"] == "error"
         assert data["code"] == "DISMISS_SESSION_END_ASK_ERROR"
@@ -369,16 +369,18 @@ class TestPermissionResponse:
         assert data["code"] == "MISSING_REQUEST_ID"
 
     def test_success_returns_ack(self, client: TestClient) -> None:
-        with patch.object(client.app.state.prompt_router, "resolve_permission", return_value=None):
-            with client.websocket_connect(_ws_url()) as ws:
-                ws.send_json({
-                    "type": "permission_response",
-                    "session_id": "sess-1",
-                    "request_id": "req-1",
-                    "decision": "allow",
-                    "scope": "once",
-                })
-                data = ws.receive_json()
+        with (
+            patch.object(client.app.state.prompt_router, "resolve_permission", return_value=None),
+            client.websocket_connect(_ws_url()) as ws,
+        ):
+            ws.send_json({
+                "type": "permission_response",
+                "session_id": "sess-1",
+                "request_id": "req-1",
+                "decision": "allow",
+                "scope": "once",
+            })
+            data = ws.receive_json()
 
         assert data["type"] == "ack"
         assert data["session_id"] == "sess-1"
@@ -394,10 +396,10 @@ class TestPromptDispatch:
         with (
             patch.object(client.app.state.prompt_router, "ensure_session", return_value="new-session-id"),
             patch.object(client.app.state.prompt_router, "handle_prompt", new=AsyncMock()),
+            client.websocket_connect(_ws_url()) as ws,
         ):
-            with client.websocket_connect(_ws_url()) as ws:
-                ws.send_json({"type": "prompt", "text": "list my files"})
-                data = ws.receive_json()
+            ws.send_json({"type": "prompt", "text": "list my files"})
+            data = ws.receive_json()
 
         assert data["type"] == "ack"
         assert data["session_id"] == "new-session-id"
@@ -406,10 +408,10 @@ class TestPromptDispatch:
         with (
             patch.object(client.app.state.prompt_router, "ensure_session", return_value="existing-id"),
             patch.object(client.app.state.prompt_router, "handle_prompt", new=AsyncMock()),
+            client.websocket_connect(_ws_url()) as ws,
         ):
-            with client.websocket_connect(_ws_url()) as ws:
-                ws.send_json({"type": "prompt", "text": "continue", "session_id": "existing-id"})
-                data = ws.receive_json()
+            ws.send_json({"type": "prompt", "text": "continue", "session_id": "existing-id"})
+            data = ws.receive_json()
 
         assert data["type"] == "ack"
         assert data["session_id"] == "existing-id"
@@ -419,10 +421,10 @@ class TestPromptDispatch:
         with (
             patch.object(client.app.state.prompt_router, "ensure_session", mock_ensure),
             patch.object(client.app.state.prompt_router, "handle_prompt", new=AsyncMock()),
+            client.websocket_connect(_ws_url()) as ws,
         ):
-            with client.websocket_connect(_ws_url()) as ws:
-                ws.send_json({"type": "prompt", "text": "hello", "session_id": "existing-id"})
-                ws.receive_json()
+            ws.send_json({"type": "prompt", "text": "hello", "session_id": "existing-id"})
+            ws.receive_json()
 
         mock_ensure.assert_called_once_with("existing-id")
 
@@ -431,9 +433,9 @@ class TestPromptDispatch:
         with (
             patch.object(client.app.state.prompt_router, "ensure_session", mock_ensure),
             patch.object(client.app.state.prompt_router, "handle_prompt", new=AsyncMock()),
+            client.websocket_connect(_ws_url()) as ws,
         ):
-            with client.websocket_connect(_ws_url()) as ws:
-                ws.send_json({"type": "prompt", "text": "hello"})
-                ws.receive_json()
+            ws.send_json({"type": "prompt", "text": "hello"})
+            ws.receive_json()
 
         mock_ensure.assert_called_once_with(None)

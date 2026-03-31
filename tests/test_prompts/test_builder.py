@@ -37,7 +37,7 @@ class TestPromptBuilder:
 
     def test_missing_template_file(self, tmp_path: Path) -> None:
         missing = tmp_path / "nonexistent.j2"
-        with pytest.raises(FileNotFoundError, match="nonexistent.j2"):
+        with pytest.raises(FileNotFoundError, match=r"nonexistent.j2"):
             PromptBuilder(template=missing)
 
     def test_real_template_renders(self) -> None:

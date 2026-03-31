@@ -15,11 +15,15 @@ And the deprecated legacy aliases:
 from __future__ import annotations
 
 import json
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from fastapi import FastAPI
 
 API_KEY = "test-api-key"
 
@@ -56,7 +60,9 @@ def _make_plugins_dir(tmp_path: Path) -> Path:
 # ---------------------------------------------------------------------------
 
 class TestListToolPlugins:
-    def test_returns_200_for_claude_code(self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_returns_200_for_claude_code(
+        self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         pd = _make_plugins_dir(tmp_path)
         monkeypatch.setattr("src.api.routes.rcflow_plugins.get_tool_plugins_dir", lambda _: pd)
         resp = client.get("/api/tools/claude_code/plugins", headers=_auth())
@@ -98,7 +104,9 @@ class TestListToolPlugins:
         plugins = resp.json()["plugins"]
         assert any(p["name"] == "my-tool" for p in plugins)
 
-    def test_plugin_has_enabled_field(self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_plugin_has_enabled_field(
+        self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         pd = _make_plugins_dir(tmp_path)
         _make_plugin(pd, "some-plugin", {"cmd": 'description: "X"'})
         monkeypatch.setattr("src.api.routes.rcflow_plugins.get_tool_plugins_dir", lambda _: pd)
@@ -107,7 +115,9 @@ class TestListToolPlugins:
         assert "enabled" in plugin
         assert plugin["enabled"] is True  # enabled by default
 
-    def test_disabled_plugin_shows_enabled_false(self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_disabled_plugin_shows_enabled_false(
+        self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         pd = _make_plugins_dir(tmp_path)
         _make_plugin(pd, "disabled-one", {"cmd": 'description: "X"'})
         # Write the plugins_state.json marking this plugin as disabled
@@ -119,7 +129,9 @@ class TestListToolPlugins:
         plugin = next(p for p in resp.json()["plugins"] if p["name"] == "disabled-one")
         assert plugin["enabled"] is False
 
-    def test_plugin_has_commands_list(self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_plugin_has_commands_list(
+        self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         pd = _make_plugins_dir(tmp_path)
         _make_plugin(pd, "multi", {"alpha": 'description: "A"', "beta": 'description: "B"'})
         monkeypatch.setattr("src.api.routes.rcflow_plugins.get_tool_plugins_dir", lambda _: pd)
@@ -127,7 +139,9 @@ class TestListToolPlugins:
         plugin = next(p for p in resp.json()["plugins"] if p["name"] == "multi")
         assert set(plugin["commands"]) == {"alpha", "beta"}
 
-    def test_hidden_commands_excluded(self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_hidden_commands_excluded(
+        self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         pd = _make_plugins_dir(tmp_path)
         _make_plugin(pd, "my-tool", {
             "visible": 'description: "OK"',
@@ -139,7 +153,9 @@ class TestListToolPlugins:
         assert "visible" in plugin["commands"]
         assert "hidden" not in plugin["commands"]
 
-    def test_description_from_plugin_json(self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_description_from_plugin_json(
+        self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         pd = _make_plugins_dir(tmp_path)
         plugin_dir = pd / "with-desc"
         plugin_dir.mkdir()
@@ -159,7 +175,9 @@ class TestListToolPlugins:
 # ---------------------------------------------------------------------------
 
 class TestInstallToolPlugin:
-    def test_install_from_local_path_201(self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_install_from_local_path_201(
+        self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         pd = _make_plugins_dir(tmp_path)
         source_dir = tmp_path / "source-plugin"
         (source_dir / "commands").mkdir(parents=True)
@@ -175,7 +193,9 @@ class TestInstallToolPlugin:
         assert plugin["name"] == "my-local"
         assert "run" in plugin["commands"]
 
-    def test_install_creates_directory(self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_install_creates_directory(
+        self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         pd = _make_plugins_dir(tmp_path)
         source_dir = tmp_path / "src-plugin"
         source_dir.mkdir()
@@ -188,7 +208,9 @@ class TestInstallToolPlugin:
         assert resp.status_code == 201
         assert (pd / "new-plugin").is_dir()
 
-    def test_install_duplicate_returns_409(self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_install_duplicate_returns_409(
+        self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         pd = _make_plugins_dir(tmp_path)
         _make_plugin(pd, "existing", {"cmd": 'description: "X"'})
         source_dir = tmp_path / "another-source"
@@ -201,7 +223,9 @@ class TestInstallToolPlugin:
         )
         assert resp.status_code == 409
 
-    def test_install_empty_source_returns_422(self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_install_empty_source_returns_422(
+        self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         pd = _make_plugins_dir(tmp_path)
         monkeypatch.setattr("src.api.routes.rcflow_plugins.get_tool_plugins_dir", lambda _: pd)
         resp = client.post("/api/tools/claude_code/plugins", json={"source": ""}, headers=_auth())
@@ -211,7 +235,9 @@ class TestInstallToolPlugin:
         resp = client.post("/api/tools/claude_code/plugins", json={"source": "x"})
         assert resp.status_code in (401, 403, 422)
 
-    def test_install_name_derived_from_source(self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_install_name_derived_from_source(
+        self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         pd = _make_plugins_dir(tmp_path)
         source_dir = tmp_path / "cool-tool"
         source_dir.mkdir()
@@ -240,7 +266,9 @@ class TestInstallToolPlugin:
         )
         assert resp.status_code == 404
 
-    def test_installed_plugin_has_enabled_true(self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_installed_plugin_has_enabled_true(
+        self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         pd = _make_plugins_dir(tmp_path)
         source_dir = tmp_path / "fresh-plugin"
         source_dir.mkdir()
@@ -259,7 +287,9 @@ class TestInstallToolPlugin:
 # ---------------------------------------------------------------------------
 
 class TestUninstallToolPlugin:
-    def test_uninstall_200(self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_uninstall_200(
+        self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         pd = _make_plugins_dir(tmp_path)
         _make_plugin(pd, "bye-plugin", {"cmd": 'description: "X"'})
         monkeypatch.setattr("src.api.routes.rcflow_plugins.get_tool_plugins_dir", lambda _: pd)
@@ -268,7 +298,9 @@ class TestUninstallToolPlugin:
         assert resp.json()["name"] == "bye-plugin"
         assert not (pd / "bye-plugin").exists()
 
-    def test_uninstall_missing_returns_404(self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_uninstall_missing_returns_404(
+        self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         pd = _make_plugins_dir(tmp_path)
         monkeypatch.setattr("src.api.routes.rcflow_plugins.get_tool_plugins_dir", lambda _: pd)
         resp = client.delete("/api/tools/claude_code/plugins/no-such-plugin", headers=_auth())
@@ -282,7 +314,9 @@ class TestUninstallToolPlugin:
         resp = client.delete("/api/tools/codex/plugins/any-name", headers=_auth())
         assert resp.status_code == 422
 
-    def test_uninstall_removes_from_disabled_state(self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_uninstall_removes_from_disabled_state(
+        self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         pd = _make_plugins_dir(tmp_path)
         _make_plugin(pd, "was-disabled", {"cmd": 'description: "X"'})
         # Pre-mark as disabled
@@ -301,7 +335,9 @@ class TestUninstallToolPlugin:
 # ---------------------------------------------------------------------------
 
 class TestSetToolPluginEnabled:
-    def test_disable_plugin_returns_enabled_false(self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_disable_plugin_returns_enabled_false(
+        self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         pd = _make_plugins_dir(tmp_path)
         _make_plugin(pd, "toggle-me", {"cmd": 'description: "X"'})
         monkeypatch.setattr("src.api.routes.rcflow_plugins.get_tool_plugins_dir", lambda _: pd)
@@ -313,7 +349,9 @@ class TestSetToolPluginEnabled:
         assert resp.status_code == 200
         assert resp.json()["plugin"]["enabled"] is False
 
-    def test_enable_plugin_returns_enabled_true(self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_enable_plugin_returns_enabled_true(
+        self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         pd = _make_plugins_dir(tmp_path)
         _make_plugin(pd, "toggle-me", {"cmd": 'description: "X"'})
         (pd / "plugins_state.json").write_text(
@@ -328,7 +366,9 @@ class TestSetToolPluginEnabled:
         assert resp.status_code == 200
         assert resp.json()["plugin"]["enabled"] is True
 
-    def test_disable_persisted_to_state_file(self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_disable_persisted_to_state_file(
+        self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         pd = _make_plugins_dir(tmp_path)
         _make_plugin(pd, "persist-test", {"cmd": 'description: "X"'})
         monkeypatch.setattr("src.api.routes.rcflow_plugins.get_tool_plugins_dir", lambda _: pd)
@@ -340,7 +380,9 @@ class TestSetToolPluginEnabled:
         state = json.loads((pd / "plugins_state.json").read_text())
         assert "persist-test" in state["disabled"]
 
-    def test_enable_removes_from_state_file(self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_enable_removes_from_state_file(
+        self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         pd = _make_plugins_dir(tmp_path)
         _make_plugin(pd, "re-enable", {"cmd": 'description: "X"'})
         (pd / "plugins_state.json").write_text(
@@ -355,7 +397,9 @@ class TestSetToolPluginEnabled:
         state = json.loads((pd / "plugins_state.json").read_text())
         assert "re-enable" not in state.get("disabled", [])
 
-    def test_missing_plugin_returns_404(self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_missing_plugin_returns_404(
+        self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         pd = _make_plugins_dir(tmp_path)
         monkeypatch.setattr("src.api.routes.rcflow_plugins.get_tool_plugins_dir", lambda _: pd)
         resp = client.patch(
@@ -389,7 +433,9 @@ class TestDeprecatedLegacyEndpoints:
         resp = client.get("/api/rcflow-plugins", headers=_auth())
         assert resp.status_code == 200
 
-    def test_list_has_deprecation_header(self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_list_has_deprecation_header(
+        self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         pd = _make_plugins_dir(tmp_path)
         monkeypatch.setattr("src.api.routes.rcflow_plugins.get_managed_cc_plugins_dir", lambda: pd)
         resp = client.get("/api/rcflow-plugins", headers=_auth())
@@ -402,7 +448,9 @@ class TestDeprecatedLegacyEndpoints:
         resp = client.get("/api/rcflow-plugins", headers=_auth())
         assert any(p["name"] == "my-tool" for p in resp.json()["plugins"])
 
-    def test_install_returns_201(self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_install_returns_201(
+        self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         pd = _make_plugins_dir(tmp_path)
         source_dir = tmp_path / "src-p"
         source_dir.mkdir()
@@ -415,7 +463,9 @@ class TestDeprecatedLegacyEndpoints:
         assert resp.status_code == 201
         assert resp.json()["plugin"]["name"] == "via-legacy"
 
-    def test_install_has_deprecation_header(self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_install_has_deprecation_header(
+        self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         pd = _make_plugins_dir(tmp_path)
         source_dir = tmp_path / "src-p2"
         source_dir.mkdir()
@@ -435,7 +485,9 @@ class TestDeprecatedLegacyEndpoints:
         resp = client.delete("/api/rcflow-plugins/to-remove", headers=_auth())
         assert resp.status_code == 200
 
-    def test_delete_has_deprecation_header(self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_delete_has_deprecation_header(
+        self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         pd = _make_plugins_dir(tmp_path)
         _make_plugin(pd, "del-dep", {"cmd": 'description: "X"'})
         monkeypatch.setattr("src.api.routes.rcflow_plugins.get_managed_cc_plugins_dir", lambda: pd)

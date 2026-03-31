@@ -7,8 +7,7 @@ from pathlib import Path
 import pytest
 
 from src.config import Settings
-from src.services.artifact_scanner import ArtifactScanner, _FILE_PATH_RE
-
+from src.services.artifact_scanner import _FILE_PATH_RE, ArtifactScanner
 
 # ---------------------------------------------------------------------------
 # Fixtures

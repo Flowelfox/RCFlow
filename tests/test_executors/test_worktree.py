@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from wtpython import (
@@ -19,7 +19,6 @@ from wtpython import (
 
 from src.executors.worktree import WorktreeExecutor
 from src.tools.loader import ToolDefinition
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -188,16 +187,26 @@ async def test_unexpected_exception_returns_error(executor: WorktreeExecutor, wo
 async def test_execute_streaming_success(executor: WorktreeExecutor, worktree_tool: ToolDefinition) -> None:
     output_json = json.dumps({"worktrees": []})
     with patch("src.executors.worktree.asyncio.to_thread", new=AsyncMock(return_value=output_json)):
-        chunks = [c async for c in executor.execute_streaming(worktree_tool, {"action": "list", "repo_path": "/tmp/repo"})]
+        chunks = [
+            c async for c in executor.execute_streaming(
+                worktree_tool, {"action": "list", "repo_path": "/tmp/repo"}
+            )
+        ]
     assert len(chunks) == 1
     assert chunks[0].content == output_json
     assert chunks[0].stream == "stdout"
 
 
 @pytest.mark.asyncio
-async def test_execute_streaming_error_uses_error_field(executor: WorktreeExecutor, worktree_tool: ToolDefinition) -> None:
+async def test_execute_streaming_error_uses_error_field(
+    executor: WorktreeExecutor, worktree_tool: ToolDefinition
+) -> None:
     with patch("src.executors.worktree.asyncio.to_thread", side_effect=WorktreeNotFound("wt")):
-        chunks = [c async for c in executor.execute_streaming(worktree_tool, {"action": "list", "repo_path": "/tmp/repo"})]
+        chunks = [
+            c async for c in executor.execute_streaming(
+                worktree_tool, {"action": "list", "repo_path": "/tmp/repo"}
+            )
+        ]
     assert len(chunks) == 1
     assert "not found" in chunks[0].content.lower()
 

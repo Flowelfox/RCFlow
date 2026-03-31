@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
+if TYPE_CHECKING:
+    from pathlib import Path
 
-def _make_gui(tmp_path: Path) -> "RCFlowGUI":  # type: ignore[name-defined]
+
+def _make_gui(tmp_path: Path) -> RCFlowGUI:  # type: ignore[name-defined]  # noqa: F821
     """Construct an RCFlowGUI with all tkinter/pystray/subprocess pieces mocked out."""
     # Patch tkinter so no real window is created
     tk_mock = MagicMock()
@@ -23,7 +26,7 @@ def _make_gui(tmp_path: Path) -> "RCFlowGUI":  # type: ignore[name-defined]
     tk_mock.StringVar.side_effect = _Var
     tk_mock.BooleanVar.side_effect = _Var
 
-    import sys
+    import sys  # noqa: PLC0415
     with (
         patch.dict(sys.modules, {
             "tkinter": tk_mock,
@@ -37,7 +40,7 @@ def _make_gui(tmp_path: Path) -> "RCFlowGUI":  # type: ignore[name-defined]
         patch("src.gui.RCFlowGUI._start_server"),
         patch("src.gui.RCFlowGUI._set_window_icon"),
     ):
-        from src.gui import RCFlowGUI
+        from src.gui import RCFlowGUI  # noqa: PLC0415
 
         gui = RCFlowGUI.__new__(RCFlowGUI)
         # Manually initialise only the attributes touched by _start_server
@@ -69,8 +72,9 @@ def test_start_server_persists_host_and_port(tmp_path: Path) -> None:
 
     # Ensure _load_settings_into_env re-runs against our tmp dir
     with patch("src.paths.get_install_dir", return_value=tmp_path):
-        from src import config as cfg_mod
-        import importlib
+        import importlib  # noqa: PLC0415
+
+        from src import config as cfg_mod  # noqa: PLC0415
         importlib.reload(cfg_mod)
 
     gui = _make_gui(tmp_path)
@@ -95,7 +99,7 @@ def test_start_server_persists_host_and_port(tmp_path: Path) -> None:
         # Import after patching install dir so _get_settings_path resolves correctly
         with patch("src.config._get_settings_path", return_value=settings_path):
             # Temporarily restore the real _start_server (it was stubbed during __new__)
-            import src.gui as gui_mod
+            import src.gui as gui_mod  # noqa: PLC0415
             gui._start_server = gui_mod.RCFlowGUI._start_server.__get__(gui)
             gui._start_server()
 
@@ -126,7 +130,7 @@ def test_start_server_persists_default_host_and_port(tmp_path: Path) -> None:
         mock_popen.return_value.pid = 1234
         mock_popen.return_value.poll.return_value = None
 
-        import src.gui as gui_mod
+        import src.gui as gui_mod  # noqa: PLC0415
         gui._start_server = gui_mod.RCFlowGUI._start_server.__get__(gui)
         gui._start_server()
 

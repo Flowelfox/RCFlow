@@ -3,12 +3,13 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
-from unittest.mock import AsyncMock, patch
+from typing import TYPE_CHECKING, Any
 
 import pytest
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
+
+if TYPE_CHECKING:
+    from fastapi import FastAPI
 
 import src.api.routes.slash_commands as _sc_module
 
@@ -83,7 +84,10 @@ class TestSlashCommandsEndpoint:
         assert "doctor" in cc_builtin_names
 
     def test_sources_are_valid(self, client: TestClient) -> None:
-        valid_sources = {"rcflow", "claude_code_builtin", "claude_code_user", "claude_code_project", "claude_code_plugin", "rcflow_plugin"}
+        valid_sources = {
+            "rcflow", "claude_code_builtin", "claude_code_user",
+            "claude_code_project", "claude_code_plugin", "rcflow_plugin",
+        }
         resp = client.get("/api/slash-commands", headers=_auth())
         for cmd in resp.json()["commands"]:
             assert cmd["source"] in valid_sources
@@ -220,7 +224,7 @@ class TestCCBuiltinDescriptionsFromClaude:
         )
 
         async def fake_fetch(binary: str) -> list[dict[str, str]]:
-            import json
+            import json  # noqa: PLC0415
             data = json.loads(live_json)
             return [
                 {"name": k, "description": v, "source": "claude_code_builtin"}
@@ -235,7 +239,11 @@ class TestCCBuiltinDescriptionsFromClaude:
 
         resp = client.get("/api/slash-commands", headers=_auth())
         assert resp.status_code == 200
-        builtins = {c["name"]: c["description"] for c in resp.json()["commands"] if c["source"] == "claude_code_builtin"}
+        builtins = {
+            c["name"]: c["description"]
+            for c in resp.json()["commands"]
+            if c["source"] == "claude_code_builtin"
+        }
         assert builtins["compact"] == "Live compact"
         assert builtins["btw"] == "Live btw"
 
@@ -260,7 +268,11 @@ class TestCCBuiltinDescriptionsFromClaude:
         resp = client.get("/api/slash-commands", headers=_auth())
         assert resp.status_code == 200
         assert not fetch_called, "_fetch_from_claude should not be called when disk cache is valid"
-        builtins = {c["name"]: c["description"] for c in resp.json()["commands"] if c["source"] == "claude_code_builtin"}
+        builtins = {
+            c["name"]: c["description"]
+            for c in resp.json()["commands"]
+            if c["source"] == "claude_code_builtin"
+        }
         assert builtins.get("compact") == "Cached compact"
 
     def test_fallback_when_fetch_returns_empty(
@@ -575,12 +587,11 @@ class TestRCFlowManagedPlugins:
         self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Commands from a disabled RCFlow-managed plugin are not returned."""
-        import json as _json
         plugins_dir = tmp_path / "plugins"
         self._make_rcflow_plugin(plugins_dir, "disabled-plugin", {"secret-cmd": 'description: "Should not appear"'})
         # Write plugins_state.json marking this plugin as disabled
         (plugins_dir / "plugins_state.json").write_text(
-            _json.dumps({"disabled": ["disabled-plugin"]}), encoding="utf-8"
+            json.dumps({"disabled": ["disabled-plugin"]}), encoding="utf-8"
         )
         monkeypatch.setattr("src.api.routes.slash_commands.get_managed_cc_plugins_dir", lambda: plugins_dir)
 
@@ -593,12 +604,11 @@ class TestRCFlowManagedPlugins:
         self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Commands from an enabled plugin are returned even when a state file exists."""
-        import json as _json
         plugins_dir = tmp_path / "plugins"
         self._make_rcflow_plugin(plugins_dir, "enabled-plugin", {"good-cmd": 'description: "Should appear"'})
         self._make_rcflow_plugin(plugins_dir, "off-plugin", {"bad-cmd": 'description: "Should NOT appear"'})
         (plugins_dir / "plugins_state.json").write_text(
-            _json.dumps({"disabled": ["off-plugin"]}), encoding="utf-8"
+            json.dumps({"disabled": ["off-plugin"]}), encoding="utf-8"
         )
         monkeypatch.setattr("src.api.routes.slash_commands.get_managed_cc_plugins_dir", lambda: plugins_dir)
 
