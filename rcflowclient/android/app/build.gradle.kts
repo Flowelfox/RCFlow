@@ -1,3 +1,6 @@
+import java.util.Properties
+import java.io.FileInputStream
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
@@ -8,9 +11,9 @@ plugins {
 // Load release signing configuration from key.properties if it exists.
 // See: https://flutter.dev/to/reference-keystore
 val keyPropertiesFile = rootProject.file("key.properties")
-val keyProperties = java.util.Properties()
+val keyProperties = Properties()
 if (keyPropertiesFile.exists()) {
-    keyProperties.load(java.io.FileInputStream(keyPropertiesFile))
+    keyProperties.load(FileInputStream(keyPropertiesFile))
 }
 
 android {
@@ -23,8 +26,8 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_17.toString()
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
     }
 
     defaultConfig {
@@ -38,10 +41,10 @@ android {
     signingConfigs {
         if (keyPropertiesFile.exists()) {
             create("release") {
-                keyAlias = keyProperties["keyAlias"] as String
-                keyPassword = keyProperties["keyPassword"] as String
-                storeFile = file(keyProperties["storeFile"] as String)
-                storePassword = keyProperties["storePassword"] as String
+                keyAlias = keyProperties.getProperty("keyAlias")
+                keyPassword = keyProperties.getProperty("keyPassword")
+                storeFile = file(keyProperties.getProperty("storeFile"))
+                storePassword = keyProperties.getProperty("storePassword")
             }
         }
     }
