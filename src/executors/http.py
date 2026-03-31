@@ -80,11 +80,9 @@ async def _validate_url_no_ssrf(url: str) -> None:
         raise ValueError(f"DNS resolution failed for {hostname!r}: {exc}") from exc
 
     for info in infos:
-        ip = info[4][0]
+        ip: str = str(info[4][0])
         if _is_blocked_ip(ip):
-            raise ValueError(
-                f"HTTP tool request blocked: {hostname!r} resolves to private/reserved address {ip!r}"
-            )
+            raise ValueError(f"HTTP tool request blocked: {hostname!r} resolves to private/reserved address {ip!r}")
 
 
 def _substitute_env_vars(text: str) -> str:

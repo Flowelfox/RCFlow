@@ -23,6 +23,15 @@ import time
 import tkinter as tk
 from pathlib import Path
 from tkinter import scrolledtext, ttk
+from typing import Protocol
+
+
+class _TrayIconProtocol(Protocol):
+    """Structural type for pystray.Icon (optional dependency)."""
+
+    def update_menu(self) -> None: ...
+    def stop(self) -> None: ...
+
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +55,7 @@ class RCFlowGUI:
         self._quitting = False
 
         # Tray icon (optional — may not have pystray)
-        self._tray_icon: object | None = None
+        self._tray_icon: _TrayIconProtocol | None = None
 
         self._root = tk.Tk()
         self._root.title("RCFlow Worker")
@@ -104,7 +113,10 @@ class RCFlowGUI:
 
         self._wss_var = tk.BooleanVar(value=True)
         self._wss_check = ttk.Checkbutton(
-            settings_frame, text="WSS Enabled", variable=self._wss_var, command=self._on_wss_toggle,
+            settings_frame,
+            text="WSS Enabled",
+            variable=self._wss_var,
+            command=self._on_wss_toggle,
         )
         self._wss_check.grid(row=0, column=4, sticky=tk.W, padx=(16, 0))
 
@@ -545,7 +557,7 @@ class RCFlowGUI:
     def _update_tray_status(self) -> None:
         if self._tray_icon is not None:
             with contextlib.suppress(Exception):
-                self._tray_icon.update_menu()  # type: ignore[attr-defined]
+                self._tray_icon.update_menu()
 
     def _on_tray_open(self, icon: object = None, item: object = None) -> None:
         """Restore the GUI window from the tray."""
@@ -568,7 +580,7 @@ class RCFlowGUI:
 
         if self._tray_icon is not None:
             with contextlib.suppress(Exception):
-                self._tray_icon.stop()  # type: ignore[attr-defined]
+                self._tray_icon.stop()
 
         # Destroy the tkinter window from the main thread
         self._root.after(0, self._root.destroy)
