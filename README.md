@@ -167,6 +167,14 @@ Prompt Router → LLM (Anthropic/Bedrock) → Tool Executor → Session Manager
 
 **Request lifecycle:** Client sends text/audio → STT transcribes audio → Prompt Router creates/resumes a session → LLM generates tool calls → Executors run tools → Output streams back via WebSocket → Session archived to database on completion.
 
+## Testing
+
+Backend tests run via [pytest](https://docs.pytest.org/) with coverage provided by `pytest-cov`. The CI pipeline runs `pytest --cov` on every push and pull request, reporting line-level coverage to the job log. Run tests locally with:
+
+```bash
+uv run pytest tests/ -v --cov --cov-report=term-missing
+```
+
 ## License
 
 Not yet specified.

@@ -61,6 +61,15 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 pythonpath = ["."]
 
+[tool.coverage.run]
+source = ["src"]
+omit = ["src/__main__.py"]
+
+[tool.coverage.report]
+show_missing = true
+skip_empty = true
+fail_under = 0
+
 [tool.ruff]
 target-version = "py312"
 line-length = 120
