@@ -366,15 +366,7 @@ class OpenCodeAgentMixin:
         session.opencode_executor = None
         session._opencode_stream_task = None
 
-        session.subprocess_started_at = None
-        session.subprocess_current_tool = None
-        session.subprocess_type = None
-        session.subprocess_display_name = None
-        session.subprocess_working_directory = None
-        session.buffer.push_ephemeral(
-            MessageType.SUBPROCESS_STATUS,
-            {"session_id": session.id, "subprocess_type": None},
-        )
+        session.clear_subprocess_tracking()
 
         if session.status == SessionStatus.PAUSED:
             session.complete()
