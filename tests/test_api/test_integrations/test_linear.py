@@ -13,21 +13,24 @@ New in this revision:
 
 from __future__ import annotations
 
-import json
 import uuid
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from src.config import Settings
-from src.core.session import SessionManager
 from src.models.db import LinearIssue as LinearIssueModel
 from src.models.db import Task as TaskModel
+from src.services.linear_service import LinearServiceError
+
+if TYPE_CHECKING:
+    from fastapi import FastAPI
+
+    from src.core.session import SessionManager
 
 API_KEY = "test-api-key"
 BACKEND_ID = "test-backend-id"
@@ -197,8 +200,6 @@ class TestTestLinearConnection:
     def test_invalid_key_returns_502(
         self, client: TestClient, linear_app: FastAPI
     ) -> None:
-        from src.services.linear_service import LinearServiceError
-
         mock_svc = AsyncMock()
         mock_svc.fetch_teams = AsyncMock(
             side_effect=LinearServiceError("Linear API key is invalid or expired", status_code=401)
@@ -272,8 +273,6 @@ class TestListLinearTeams:
     def test_linear_api_error_returns_502(
         self, client: TestClient, linear_app: FastAPI
     ) -> None:
-        from src.services.linear_service import LinearServiceError
-
         mock_svc = AsyncMock()
         mock_svc.fetch_teams = AsyncMock(side_effect=LinearServiceError("rate limited"))
         mock_svc.aclose = AsyncMock()
@@ -490,7 +489,7 @@ class TestSyncLinearIssues:
     def test_sync_upserts_issues_and_returns_count(
         self, client: TestClient, linear_app: FastAPI
     ) -> None:
-        issue = _make_issue_row()
+        _issue = _make_issue_row()
         mock_db = AsyncMock()
         # First execute: check existing (None → insert), then scalars for list
         mock_db.execute = AsyncMock(return_value=_scalar_result(None))
@@ -517,7 +516,7 @@ class TestSyncLinearIssues:
         self, client: TestClient, linear_app: FastAPI, session_manager: SessionManager
     ) -> None:
         linear_app.state.session_manager = session_manager
-        issue = _make_issue_row()
+        _issue = _make_issue_row()
         mock_db = AsyncMock()
         mock_db.execute = AsyncMock(return_value=_scalar_result(None))
         mock_db.add = MagicMock()
@@ -584,8 +583,6 @@ class TestSyncLinearIssues:
     def test_linear_api_error_returns_502(
         self, client: TestClient, linear_app: FastAPI
     ) -> None:
-        from src.services.linear_service import LinearServiceError
-
         mock_svc = AsyncMock()
         mock_svc.fetch_issues = AsyncMock(side_effect=LinearServiceError("API down"))
         mock_svc.aclose = AsyncMock()
@@ -717,8 +714,6 @@ class TestCreateLinearIssue:
     def test_linear_api_error_returns_502(
         self, client: TestClient, linear_app: FastAPI
     ) -> None:
-        from src.services.linear_service import LinearServiceError
-
         mock_svc = AsyncMock()
         mock_svc.create_issue = AsyncMock(side_effect=LinearServiceError("creation failed"))
         mock_svc.aclose = AsyncMock()
@@ -802,7 +797,7 @@ class TestUpdateLinearIssue:
     def test_linear_api_error_returns_502(
         self, client: TestClient, linear_app: FastAPI
     ) -> None:
-        from src.services.linear_service import LinearServiceError
+        from src.services.linear_service import LinearServiceError  # noqa: PLC0415
 
         issue = _make_issue_row()
         mock_db = AsyncMock()

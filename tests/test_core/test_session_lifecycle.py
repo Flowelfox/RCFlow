@@ -15,11 +15,12 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from src.core.buffer import MessageType
+from src.core.permissions import PermissionManager
 from src.core.prompt_router import PromptRouter
 from src.core.session import ActiveSession, SessionManager, SessionStatus, SessionType
 from src.tools.registry import ToolRegistry
@@ -169,7 +170,6 @@ class TestPauseSession:
         assert len(paused_msgs) == 1
 
     async def test_cancels_pending_permissions_on_pause(self, session_manager: SessionManager) -> None:
-        from src.core.permissions import PermissionManager
         router = _make_router(session_manager)
         session = session_manager.create_session(SessionType.CONVERSATIONAL)
         session.set_active()
@@ -284,8 +284,6 @@ class TestResumeSession:
         This is the end-to-end regression test for the bug where resumed messages
         were routed to the RCFlow LLM instead of the Claude Code subprocess.
         """
-        from unittest.mock import patch
-
         router = _make_router(session_manager)
         session = session_manager.create_session(SessionType.LONG_RUNNING)
         session.set_active()
@@ -302,10 +300,12 @@ class TestResumeSession:
         assert session.claude_code_executor is not None
 
         # Now send a message — it must be forwarded to Claude Code, not the LLM.
-        with patch.object(router, "_forward_to_claude_code", new_callable=AsyncMock) as mock_fwd:
+        with (
+            patch.object(router, "_forward_to_claude_code", new_callable=AsyncMock) as mock_fwd,
             # _ensure_session_row_in_db is a background DB helper; stub it out.
-            with patch.object(router, "_ensure_session_row_in_db", new_callable=AsyncMock):
-                await router.handle_prompt("continue the task", session.id)
+            patch.object(router, "_ensure_session_row_in_db", new_callable=AsyncMock),
+        ):
+            await router.handle_prompt("continue the task", session.id)
 
         mock_fwd.assert_awaited_once()
         called_session, called_text = mock_fwd.call_args.args
@@ -565,7 +565,6 @@ class TestAgentType:
 
     def test_broadcast_includes_agent_type(self, session_manager: SessionManager) -> None:
         """broadcast_session_update should include agent_type in the update dict."""
-        updates: list[dict] = []
         queue = session_manager.subscribe_updates("test-sub")
 
         session = session_manager.create_session(SessionType.CONVERSATIONAL)

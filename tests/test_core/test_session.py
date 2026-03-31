@@ -9,7 +9,9 @@ from sqlalchemy.pool import StaticPool
 
 from src.core.buffer import MessageType
 from src.core.session import ActiveSession, SessionManager, SessionStatus, SessionType
-from src.models.db import Base, Session as SessionModel, SessionMessage as SessionMessageModel
+from src.models.db import Base
+from src.models.db import Session as SessionModel
+from src.models.db import SessionMessage as SessionMessageModel
 
 
 def _make_session_row(
@@ -636,7 +638,6 @@ class TestSelectedWorktree:
     def test_selected_worktree_broadcast(self):
         manager = SessionManager("test-backend")
         session = manager.create_session(SessionType.ONE_SHOT)
-        received: list[dict] = []
         q = manager.subscribe_updates("test-sub")
 
         session.metadata["selected_worktree_path"] = "/projects/myrepo/.worktrees/feature-abc"

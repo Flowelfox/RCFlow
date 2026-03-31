@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from src.core.buffer import MessageType
+from src.core.llm import ToolCallRequest
 from src.core.permissions import PermissionManager
 from src.core.prompt_router import PromptRouter
 from src.core.session import SessionManager, SessionStatus, SessionType
@@ -775,8 +776,6 @@ def test_build_active_worktree_context_merge_direction_disambiguation(
 
 def test_update_worktree_meta_new_auto_selects_path(session_manager: SessionManager) -> None:
     """After action=new, selected_worktree_path is auto-set from the result JSON."""
-    from src.core.llm import ToolCallRequest
-
     router = _make_router(session_manager)
     session = session_manager.create_session(SessionType.ONE_SHOT)
 
@@ -808,8 +807,6 @@ def test_update_worktree_meta_new_auto_selects_path(session_manager: SessionMana
 
 def test_update_worktree_meta_new_handles_missing_path(session_manager: SessionManager) -> None:
     """Gracefully handles malformed result JSON without raising."""
-    from src.core.llm import ToolCallRequest
-
     router = _make_router(session_manager)
     session = session_manager.create_session(SessionType.ONE_SHOT)
 
@@ -826,8 +823,6 @@ def test_update_worktree_meta_new_handles_missing_path(session_manager: SessionM
 
 def test_update_worktree_meta_merge_clears_selected_path(session_manager: SessionManager) -> None:
     """action=merge clears a previously selected worktree path."""
-    from src.core.llm import ToolCallRequest
-
     router = _make_router(session_manager)
     session = session_manager.create_session(SessionType.ONE_SHOT)
     session.metadata["selected_worktree_path"] = "/repos/myproject/.worktrees/old"
@@ -845,8 +840,6 @@ def test_update_worktree_meta_merge_clears_selected_path(session_manager: Sessio
 
 def test_update_worktree_meta_rm_clears_selected_path(session_manager: SessionManager) -> None:
     """action=rm clears a previously selected worktree path."""
-    from src.core.llm import ToolCallRequest
-
     router = _make_router(session_manager)
     session = session_manager.create_session(SessionType.ONE_SHOT)
     session.metadata["selected_worktree_path"] = "/repos/myproject/.worktrees/old"
@@ -1067,7 +1060,7 @@ async def test_relay_enter_plan_mode_blocks_and_resumes_on_approve(
     )
 
     # Session should still be active (not ended by denial)
-    assert session.status != SessionStatus.COMPLETED or True  # relay ended normally
+    assert True  # relay ended normally
 
     # PLAN_MODE_ASK should be in the buffer, marked accepted
     plan_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.PLAN_MODE_ASK]

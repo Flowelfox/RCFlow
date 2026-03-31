@@ -3,17 +3,20 @@
 from __future__ import annotations
 
 import base64
+from datetime import UTC, datetime, timedelta
 from io import BytesIO
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
 
 import pytest
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
+
+if TYPE_CHECKING:
+    from fastapi import FastAPI
 
 from src.core.attachment_store import AttachmentStore, ResolvedAttachment
 from src.core.prompt_router import PromptRouter
-from src.core.session import SessionManager, SessionType
+from src.core.session import SessionManager
 
 API_KEY = "test-api-key"
 
@@ -235,8 +238,6 @@ class TestAttachmentStore:
             store.store("f.bin", "application/octet-stream", b"toolong")
 
     def test_evict_expired(self) -> None:
-        from datetime import UTC, datetime, timedelta
-
         store = AttachmentStore(ttl_seconds=60)
         att = store.store("old.txt", "text/plain", b"data")
         # Manually expire it

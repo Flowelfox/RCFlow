@@ -23,7 +23,6 @@ from src.core.permissions import (
     get_scope_options,
 )
 
-
 # ---------------------------------------------------------------------------
 # classify_risk
 # ---------------------------------------------------------------------------
@@ -340,8 +339,9 @@ class TestPermissionManagerWaitForResponse:
             await asyncio.sleep(0)
             pm.resolve_request(p.request_id, PermissionDecision.ALLOW, PermissionScope.ONCE)
 
-        asyncio.create_task(_resolve_later())
+        task = asyncio.create_task(_resolve_later())
         result = await pm.wait_for_response(p.request_id)
+        await task
         assert result.decision == PermissionDecision.ALLOW
 
     async def test_times_out_and_auto_denies(self) -> None:

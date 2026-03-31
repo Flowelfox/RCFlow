@@ -2,20 +2,21 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from src.api.routes.telemetry import router as telemetry_router
-from src.config import Settings
 from src.db.engine import get_db_session
 from src.services.telemetry_service import TelemetryService
-
 
 # ---------------------------------------------------------------------------
 # Helpers
