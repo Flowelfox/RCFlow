@@ -100,85 +100,105 @@ async def test_cancel_already_cancelled_session(session_manager: SessionManager)
         await router.cancel_session(session.id)
 
 
-# --- Summarization tests ---
+# --- Summary generation tests ---
 
 
 @pytest.mark.asyncio
-async def test_summarize_and_push(session_manager: SessionManager) -> None:
-    """_summarize_and_push should call llm.summarize and push a SUMMARY message."""
+async def test_fire_summary_task_pushes_session_end_ask(session_manager: SessionManager) -> None:
+    """_fire_summary_task with push_session_end_ask=True should push SESSION_END_ASK after summarizing."""
     router = _make_router(session_manager)
     router._llm.summarize = AsyncMock(return_value="Short summary.")
 
     session = session_manager.create_session(SessionType.LONG_RUNNING)
     session.set_active()
 
-    await router._summarize_and_push(session, "Long result text from Claude Code.")
-
-    router._llm.summarize.assert_awaited_once_with("Long result text from Claude Code.")
-
-    summary_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.SUMMARY]
-    assert len(summary_msgs) == 1
-    assert summary_msgs[0].data["content"] == "Short summary."
-    assert summary_msgs[0].data["session_id"] == session.id
-
-
-@pytest.mark.asyncio
-async def test_summarize_and_push_with_session_end_ask(session_manager: SessionManager) -> None:
-    """_summarize_and_push with push_session_end_ask=True should push SESSION_END_ASK after summary."""
-    router = _make_router(session_manager)
-    router._llm.summarize = AsyncMock(return_value="Short summary.")
-
-    session = session_manager.create_session(SessionType.LONG_RUNNING)
-    session.set_active()
-
-    await router._summarize_and_push(session, "Result text.", push_session_end_ask=True)
-
-    summary_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.SUMMARY]
-    assert len(summary_msgs) == 1
+    router._fire_summary_task(session, "Result text.", push_session_end_ask=True)
+    await asyncio.gather(*router._pending_summary_tasks)
 
     end_ask_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.SESSION_END_ASK]
     assert len(end_ask_msgs) == 1
     assert end_ask_msgs[0].data["session_id"] == session.id
 
-    # SESSION_END_ASK must come after SUMMARY
-    summary_seq = summary_msgs[0].sequence
-    end_ask_seq = end_ask_msgs[0].sequence
-    assert end_ask_seq > summary_seq
+
+@pytest.mark.asyncio
+async def test_fire_summary_task_no_push_without_flag(session_manager: SessionManager) -> None:
+    """_fire_summary_task without push_session_end_ask should not push SESSION_END_ASK."""
+    router = _make_router(session_manager)
+    router._llm.summarize = AsyncMock(return_value="Short summary.")
+
+    session = session_manager.create_session(SessionType.LONG_RUNNING)
+    session.set_active()
+
+    router._fire_summary_task(session, "Result text.")
+    await asyncio.gather(*router._pending_summary_tasks)
+
+    end_ask_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.SESSION_END_ASK]
+    assert len(end_ask_msgs) == 0
+
+
+@pytest.mark.asyncio
+async def test_fire_summary_task_no_llm_still_pushes_session_end_ask(session_manager: SessionManager) -> None:
+    """When _llm is None, SESSION_END_ASK is pushed synchronously without summarizing."""
+    router = _make_router(session_manager)
+    router._llm = None
+
+    session = session_manager.create_session(SessionType.LONG_RUNNING)
+    session.set_active()
+
+    router._fire_summary_task(session, "Result text.", push_session_end_ask=True)
+
+    end_ask_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.SESSION_END_ASK]
+    assert len(end_ask_msgs) == 1
+    assert end_ask_msgs[0].data["session_id"] == session.id
+
+
+@pytest.mark.asyncio
+async def test_summarize_and_push_pushes_summary_message(session_manager: SessionManager) -> None:
+    """_summarize_and_push should push a SUMMARY message with content from the LLM."""
+    router = _make_router(session_manager)
+    router._llm.summarize = AsyncMock(return_value="One sentence summary.")
+
+    session = session_manager.create_session(SessionType.LONG_RUNNING)
+    session.set_active()
+
+    await router._summarize_and_push(session, "Long result text.")
+
+    summary_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.SUMMARY]
+    assert len(summary_msgs) == 1
+    assert summary_msgs[0].data["content"] == "One sentence summary."
+    assert summary_msgs[0].data["session_id"] == session.id
 
 
 @pytest.mark.asyncio
 async def test_summarize_and_push_failure_does_not_raise(session_manager: SessionManager) -> None:
-    """_summarize_and_push should swallow exceptions without breaking the session."""
+    """A LLM exception in _summarize_and_push must not propagate — session stays alive."""
     router = _make_router(session_manager)
     router._llm.summarize = AsyncMock(side_effect=RuntimeError("LLM unavailable"))
 
     session = session_manager.create_session(SessionType.LONG_RUNNING)
     session.set_active()
 
-    # Should not raise
-    await router._summarize_and_push(session, "Some text")
+    # Must not raise
+    await router._summarize_and_push(session, "Some text.")
 
-    # No SUMMARY message should have been pushed
     summary_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.SUMMARY]
     assert len(summary_msgs) == 0
 
 
 @pytest.mark.asyncio
 async def test_summarize_failure_still_pushes_session_end_ask(session_manager: SessionManager) -> None:
-    """SESSION_END_ASK should still be pushed even when summary generation fails."""
+    """Even when summarization fails, SESSION_END_ASK must still be delivered."""
     router = _make_router(session_manager)
     router._llm.summarize = AsyncMock(side_effect=RuntimeError("LLM unavailable"))
 
     session = session_manager.create_session(SessionType.LONG_RUNNING)
     session.set_active()
 
-    await router._summarize_and_push(session, "Some text", push_session_end_ask=True)
-
-    summary_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.SUMMARY]
-    assert len(summary_msgs) == 0
+    await router._summarize_and_push(session, "Some text.", push_session_end_ask=True)
 
     end_ask_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.SESSION_END_ASK]
     assert len(end_ask_msgs) == 1
+    assert end_ask_msgs[0].data["session_id"] == session.id
 
 
 # --- Title generation tests ---
@@ -243,10 +263,10 @@ async def _async_stream_chunks(chunks: list[ExecutionChunk]):
 
 
 @pytest.mark.asyncio
-async def test_relay_claude_code_stream_fires_summary_on_result(session_manager: SessionManager) -> None:
-    """_relay_claude_code_stream should fire a summary task and push SESSION_END_ASK when a result event arrives."""
+async def test_relay_claude_code_stream_pushes_session_end_ask_on_result(session_manager: SessionManager) -> None:
+    """_relay_claude_code_stream should push SESSION_END_ASK when a result event arrives."""
     router = _make_router(session_manager)
-    router._llm.summarize = AsyncMock(return_value="Summarized result.")
+    router._llm.summarize = AsyncMock(return_value="Short summary.")
 
     session = session_manager.create_session(SessionType.LONG_RUNNING)
     session.set_active()
@@ -255,15 +275,7 @@ async def test_relay_claude_code_stream_fires_summary_on_result(session_manager:
     stream = _async_stream_chunks([ExecutionChunk(content=result_event, stream="stdout")])
 
     await router._relay_claude_code_stream(session, stream)
-
-    # Let the background summary task complete
-    if router._pending_summary_tasks:
-        await asyncio.gather(*router._pending_summary_tasks)
-
-    # Verify SUMMARY was pushed
-    summary_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.SUMMARY]
-    assert len(summary_msgs) == 1
-    assert summary_msgs[0].data["content"] == "Summarized result."
+    await asyncio.gather(*router._pending_summary_tasks)
 
     # Verify SESSION_END_ASK was pushed
     end_ask_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.SESSION_END_ASK]
@@ -275,7 +287,7 @@ async def test_relay_claude_code_stream_fires_summary_on_result(session_manager:
 async def test_relay_claude_code_stream_empty_result_still_pushes_end_ask(session_manager: SessionManager) -> None:
     """Even with empty result text, SESSION_END_ASK should fire so the user isn't left in limbo."""
     router = _make_router(session_manager)
-    router._llm.summarize = AsyncMock(return_value="Should not be called.")
+    router._llm.summarize = AsyncMock(return_value="Short summary.")
 
     session = session_manager.create_session(SessionType.LONG_RUNNING)
     session.set_active()
@@ -284,12 +296,9 @@ async def test_relay_claude_code_stream_empty_result_still_pushes_end_ask(sessio
     stream = _async_stream_chunks([ExecutionChunk(content=result_event, stream="stdout")])
 
     await router._relay_claude_code_stream(session, stream)
+    await asyncio.gather(*router._pending_summary_tasks)
 
-    # No summary since result text is empty and no subtype
-    router._llm.summarize.assert_not_awaited()
-    summary_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.SUMMARY]
-    assert len(summary_msgs) == 0
-    # But SESSION_END_ASK should still be pushed
+    # SESSION_END_ASK should still be pushed
     end_ask_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.SESSION_END_ASK]
     assert len(end_ask_msgs) == 1
 
@@ -298,7 +307,6 @@ async def test_relay_claude_code_stream_empty_result_still_pushes_end_ask(sessio
 async def test_relay_claude_code_stream_max_turns_subtype(session_manager: SessionManager) -> None:
     """When result has subtype=max_turns, the session is paused with reason='max_turns' (no SESSION_END_ASK)."""
     router = _make_router(session_manager)
-    router._llm.summarize = AsyncMock(return_value="Hit max turns limit.")
 
     session = session_manager.create_session(SessionType.LONG_RUNNING)
     session.set_active()
@@ -307,15 +315,6 @@ async def test_relay_claude_code_stream_max_turns_subtype(session_manager: Sessi
     stream = _async_stream_chunks([ExecutionChunk(content=result_event, stream="stdout")])
 
     await router._relay_claude_code_stream(session, stream)
-
-    # Let the background summary task complete
-    if router._pending_summary_tasks:
-        await asyncio.gather(*router._pending_summary_tasks)
-
-    # Summary should fire with fallback text since result was empty
-    router._llm.summarize.assert_awaited_once()
-    summary_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.SUMMARY]
-    assert len(summary_msgs) == 1
 
     # SESSION_END_ASK must NOT be pushed — the session is paused instead
     end_ask_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.SESSION_END_ASK]
@@ -1030,7 +1029,7 @@ async def test_relay_enter_plan_mode_blocks_and_resumes_on_approve(
 ) -> None:
     """EnterPlanMode in the stream blocks until the user approves, then continues."""
     router = _make_router(session_manager)
-    router._llm.summarize = AsyncMock(return_value="Done.")
+
 
     session = session_manager.create_session(SessionType.LONG_RUNNING)
     session.set_active()
@@ -1126,7 +1125,7 @@ async def test_relay_exit_plan_mode_blocks_until_approval(
 ) -> None:
     """ExitPlanMode relay blocks the stream until the user provides a response."""
     router = _make_router(session_manager)
-    router._llm.summarize = AsyncMock(return_value="Done.")
+
 
     session = session_manager.create_session(SessionType.LONG_RUNNING)
     session.set_active()
@@ -1186,7 +1185,7 @@ async def test_relay_exit_plan_mode_approve_sends_to_stdin(
 ) -> None:
     """Approving the plan review sends the approval text to Claude Code stdin."""
     router = _make_router(session_manager)
-    router._llm.summarize = AsyncMock(return_value="Done.")
+
 
     session = session_manager.create_session(SessionType.LONG_RUNNING)
     session.set_active()
@@ -1231,7 +1230,7 @@ async def test_relay_exit_plan_mode_reject_sends_feedback_to_stdin(
 ) -> None:
     """Rejecting the plan review sends feedback text to Claude Code stdin for revision."""
     router = _make_router(session_manager)
-    router._llm.summarize = AsyncMock(return_value="Done.")
+
 
     session = session_manager.create_session(SessionType.LONG_RUNNING)
     session.set_active()

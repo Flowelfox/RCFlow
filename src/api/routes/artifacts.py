@@ -65,6 +65,22 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Artifacts"])
 
+_MAX_GLOB_LEN = 200
+_BLOCKED_GLOB_PARTS = frozenset({"..", "~"})
+
+
+def _validate_glob_pattern(pattern: str, field: str) -> None:
+    """Raise HTTPException if *pattern* contains path-traversal components."""
+    if len(pattern) > _MAX_GLOB_LEN:
+        raise HTTPException(status_code=422, detail=f"{field}: pattern too long (max {_MAX_GLOB_LEN} chars)")
+    # Reject absolute paths
+    if pattern.startswith("/") or (len(pattern) >= 2 and pattern[1] == ":"):
+        raise HTTPException(status_code=422, detail=f"{field}: absolute paths are not allowed")
+    # Reject traversal sequences and home-dir expansion
+    parts = pattern.replace("\\", "/").split("/")
+    if any(p in _BLOCKED_GLOB_PARTS for p in parts):
+        raise HTTPException(status_code=422, detail=f"{field}: path traversal sequences are not allowed")
+
 
 def _artifact_to_dict(artifact: ArtifactModel) -> dict[str, Any]:
     """Serialize an Artifact ORM instance to a JSON-friendly dict."""
@@ -119,6 +135,11 @@ async def update_artifact_settings(
     request: Request,
 ) -> dict[str, Any]:
     """Update artifact extraction settings."""
+    if body.include_pattern is not None:
+        _validate_glob_pattern(body.include_pattern, "include_pattern")
+    if body.exclude_pattern is not None:
+        _validate_glob_pattern(body.exclude_pattern, "exclude_pattern")
+
     updates: dict[str, str] = {}
 
     if body.include_pattern is not None:
@@ -134,7 +155,7 @@ async def update_artifact_settings(
         update_settings_file(updates)
 
         # Recreate artifact scanner with new settings
-        settings = Settings()  # type: ignore[call-arg]
+        settings = Settings()
         from src.services.artifact_scanner import ArtifactScanner  # noqa: PLC0415
 
         request.app.state.artifact_scanner = ArtifactScanner(

@@ -775,8 +775,8 @@ class SessionManager:
 
         reloaded = 0
         for row in stale_rows:
+            session_id = str(row.id)
             try:
-                session_id = str(row.id)
                 if session_id in self._sessions:
                     logger.warning("Skipping stale session %s — already in memory", session_id)
                     continue
@@ -831,7 +831,15 @@ class SessionManager:
                     .all()
                 )
                 for msg_row in msg_rows:
-                    msg_type = MessageType(msg_row.message_type)
+                    try:
+                        msg_type = MessageType(msg_row.message_type)
+                    except ValueError:
+                        logger.warning(
+                            "Skipping unknown message type %r in session %s",
+                            msg_row.message_type,
+                            session_id,
+                        )
+                        continue
                     data = dict(msg_row.metadata_) if msg_row.metadata_ else {}
                     if "content" not in data and msg_row.content:
                         data["content"] = msg_row.content
@@ -856,7 +864,7 @@ class SessionManager:
 
                 reloaded += 1
             except Exception:
-                logger.exception("Failed to reload stale session %s on startup", row.id)
+                logger.exception("Failed to reload stale session %s on startup", session_id)
                 try:
                     await db.rollback()
                 except Exception:

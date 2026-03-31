@@ -43,9 +43,6 @@ async def server_info(request: Request) -> dict[str, Any]:
 
     return {
         "os": platform.system(),
-        "os_version": platform.version(),
-        "architecture": platform.machine(),
-        "hostname": platform.node(),
         "backend_id": settings.RCFLOW_BACKEND_ID,
         "active_sessions": len(session_manager.list_active_sessions()),
         # Text files are always accepted, so the attachment button is always
@@ -116,6 +113,11 @@ class UpdateConfigRequest(BaseModel):
     updates: dict[str, Any]
 
 
+_API_KEY_PREFIXES: dict[str, str] = {
+    "ANTHROPIC_API_KEY": "sk-ant-",
+}
+
+
 @router.patch(
     "/config",
     summary="Update server configuration",
@@ -136,6 +138,15 @@ async def update_config(body: UpdateConfigRequest, request: Request) -> dict[str
             detail=f"Unknown or non-configurable keys: {', '.join(sorted(invalid_keys))}",
         )
 
+    for key, expected_prefix in _API_KEY_PREFIXES.items():
+        if key in body.updates:
+            value = body.updates[key]
+            if value and not str(value).startswith(expected_prefix):
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"{key} does not match the expected format",
+                )
+
     env_updates: dict[str, str] = {}
     for key, value in body.updates.items():
         if isinstance(value, list):
@@ -147,7 +158,7 @@ async def update_config(body: UpdateConfigRequest, request: Request) -> dict[str
 
     update_settings_file(env_updates)
 
-    new_settings = Settings()  # type: ignore[call-arg]
+    new_settings = Settings()
     request.app.state.settings = new_settings
 
     _reload_components(request, new_settings)

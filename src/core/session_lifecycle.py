@@ -51,9 +51,9 @@ class SessionLifecycleMixin:
         all_pending: set[asyncio.Task[None]] = set()
         for task_set in (
             self._pending_log_tasks,  # ty:ignore[unresolved-attribute]
-            self._pending_summary_tasks,  # ty:ignore[unresolved-attribute]
             self._pending_title_tasks,  # ty:ignore[unresolved-attribute]
             self._pending_archive_tasks,  # ty:ignore[unresolved-attribute]
+            self._pending_summary_tasks,  # ty:ignore[unresolved-attribute]
             self._pending_task_creation_tasks,  # ty:ignore[unresolved-attribute]
             self._pending_task_update_tasks,  # ty:ignore[unresolved-attribute]
         ):

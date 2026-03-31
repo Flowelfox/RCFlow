@@ -535,8 +535,10 @@ class ToolManager:
             asset_name = f"codex-{target}.exe"
             download_url = f"{CODEX_RELEASE_BASE}/{tag}/{asset_name}"
             async with httpx.AsyncClient(follow_redirects=True) as client:
+                checksums = await _fetch_codex_checksums(client, tag)
                 resp = await client.get(download_url, timeout=_DOWNLOAD_TIMEOUT)
                 resp.raise_for_status()
+                _verify_codex_asset_checksum(resp.content, asset_name, checksums)
                 tmp_path = install_dir / f".codex-{version}.tmp"
                 try:
                     tmp_path.write_bytes(resp.content)
@@ -548,8 +550,10 @@ class ToolManager:
             download_url = f"{CODEX_RELEASE_BASE}/{tag}/{asset_name}"
 
             async with httpx.AsyncClient(follow_redirects=True) as client:
+                checksums = await _fetch_codex_checksums(client, tag)
                 resp = await client.get(download_url, timeout=_DOWNLOAD_TIMEOUT)
                 resp.raise_for_status()
+                _verify_codex_asset_checksum(resp.content, asset_name, checksums)
 
                 with tempfile.TemporaryDirectory(dir=str(install_dir)) as tmp_dir:
                     tar_path = Path(tmp_dir) / asset_name
@@ -822,30 +826,34 @@ class ToolManager:
 
             yield {"step": "downloading", "progress": 0.0, "message": "Starting download..."}
 
-            async with (
-                httpx.AsyncClient(follow_redirects=True) as client,
-                client.stream("GET", download_url, timeout=_DOWNLOAD_TIMEOUT) as stream,
-            ):
-                total = int(stream.headers.get("content-length", 0))
+            async with httpx.AsyncClient(follow_redirects=True) as client:
+                checksums = await _fetch_codex_checksums(client, tag)
+                total = 0
                 received = 0
                 chunks: list[bytes] = []
-                async for chunk in stream.aiter_bytes(65536):
-                    chunks.append(chunk)
-                    received += len(chunk)
-                    if total > 0:
-                        pct = received / total
-                        mb_recv = received / 1_048_576
-                        mb_total = total / 1_048_576
-                        yield {
-                            "step": "downloading",
-                            "progress": round(pct, 3),
-                            "message": f"Downloading... {mb_recv:.1f} / {mb_total:.1f} MB",
-                        }
+                async with client.stream("GET", download_url, timeout=_DOWNLOAD_TIMEOUT) as stream:
+                    total = int(stream.headers.get("content-length", 0))
+                    async for chunk in stream.aiter_bytes(65536):
+                        chunks.append(chunk)
+                        received += len(chunk)
+                        if total > 0:
+                            pct = received / total
+                            mb_recv = received / 1_048_576
+                            mb_total = total / 1_048_576
+                            yield {
+                                "step": "downloading",
+                                "progress": round(pct, 3),
+                                "message": f"Downloading... {mb_recv:.1f} / {mb_total:.1f} MB",
+                            }
+
+            content = b"".join(chunks)
+            yield {"step": "verifying", "message": "Verifying checksum..."}
+            _verify_codex_asset_checksum(content, asset_name, checksums)
 
             yield {"step": "installing", "message": "Installing..."}
             tmp_path = install_dir / f".codex-{version}.tmp"
             try:
-                tmp_path.write_bytes(b"".join(chunks))
+                tmp_path.write_bytes(content)
                 tmp_path.rename(binary_path)
             finally:
                 tmp_path.unlink(missing_ok=True)
@@ -855,31 +863,35 @@ class ToolManager:
 
             yield {"step": "downloading", "progress": 0.0, "message": "Starting download..."}
 
-            async with (
-                httpx.AsyncClient(follow_redirects=True) as client,
-                client.stream("GET", download_url, timeout=_DOWNLOAD_TIMEOUT) as stream,
-            ):
-                total = int(stream.headers.get("content-length", 0))
+            async with httpx.AsyncClient(follow_redirects=True) as client:
+                checksums = await _fetch_codex_checksums(client, tag)
+                total = 0
                 received = 0
                 chunks: list[bytes] = []
-                async for chunk in stream.aiter_bytes(65536):
-                    chunks.append(chunk)
-                    received += len(chunk)
-                    if total > 0:
-                        pct = received / total
-                        mb_recv = received / 1_048_576
-                        mb_total = total / 1_048_576
-                        yield {
-                            "step": "downloading",
-                            "progress": round(pct, 3),
-                            "message": f"Downloading... {mb_recv:.1f} / {mb_total:.1f} MB",
-                        }
+                async with client.stream("GET", download_url, timeout=_DOWNLOAD_TIMEOUT) as stream:
+                    total = int(stream.headers.get("content-length", 0))
+                    async for chunk in stream.aiter_bytes(65536):
+                        chunks.append(chunk)
+                        received += len(chunk)
+                        if total > 0:
+                            pct = received / total
+                            mb_recv = received / 1_048_576
+                            mb_total = total / 1_048_576
+                            yield {
+                                "step": "downloading",
+                                "progress": round(pct, 3),
+                                "message": f"Downloading... {mb_recv:.1f} / {mb_total:.1f} MB",
+                            }
+
+            content = b"".join(chunks)
+            yield {"step": "verifying", "message": "Verifying checksum..."}
+            _verify_codex_asset_checksum(content, asset_name, checksums)
 
             yield {"step": "installing", "message": "Installing..."}
 
             with tempfile.TemporaryDirectory(dir=str(install_dir)) as tmp_dir:
                 tar_path = Path(tmp_dir) / asset_name
-                tar_path.write_bytes(b"".join(chunks))
+                tar_path.write_bytes(content)
 
                 with tarfile.open(tar_path, "r:gz") as tf:
                     members = tf.getnames()
@@ -1306,6 +1318,61 @@ def _find_opencode_binary(extract_dir: Path, members: list[str]) -> Path | None:
         if p.name == target_name and "desktop" not in member.lower() and "electron" not in member.lower():
             return p
     return None
+
+
+async def _fetch_codex_checksums(client: httpx.AsyncClient, tag: str) -> dict[str, str]:
+    """Download and parse ``checksums.txt`` for a Codex GitHub release.
+
+    Returns ``{filename: sha256_hex}``.  If the file is absent (older release)
+    logs a warning and returns an empty dict so the install can still proceed.
+    """
+    url = f"{CODEX_RELEASE_BASE}/{tag}/checksums.txt"
+    try:
+        resp = await client.get(url, timeout=_CHECK_TIMEOUT)
+        resp.raise_for_status()
+        return _parse_codex_checksums(resp.text)
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 404:
+            logger.warning(
+                "Codex checksums.txt not found for tag %s — skipping integrity check", tag
+            )
+            return {}
+        raise
+
+
+def _parse_codex_checksums(text: str) -> dict[str, str]:
+    """Parse a checksums.txt file into ``{filename: sha256_hex}``."""
+    result: dict[str, str] = {}
+    for line in text.splitlines():
+        parts = line.strip().split()
+        if len(parts) >= 2:
+            sha256_hex, filename = parts[0], parts[-1].lstrip("*")
+            result[filename] = sha256_hex
+    return result
+
+
+def _verify_codex_asset_checksum(content: bytes, asset_name: str, checksums: dict[str, str]) -> None:
+    """Verify *content* matches the SHA-256 in *checksums* for *asset_name*.
+
+    Raises ValueError on a mismatch.  If the asset is not listed in *checksums*
+    (e.g. the release predates the checksums file) a warning is logged and the
+    function returns without error — callers should treat an empty *checksums*
+    dict as a signal that verification was skipped.
+    """
+    if not checksums:
+        return
+    expected = checksums.get(asset_name)
+    if expected is None:
+        logger.warning(
+            "No checksum entry for %r in checksums.txt — skipping verification", asset_name
+        )
+        return
+    actual = hashlib.sha256(content).hexdigest()
+    if actual != expected:
+        raise ValueError(
+            f"Codex checksum mismatch for {asset_name!r}: expected {expected!r}, got {actual!r}"
+        )
+    logger.debug("Codex asset checksum verified: %s", asset_name)
 
 
 def _find_codex_binary(extract_dir: Path, members: list[str]) -> Path | None:

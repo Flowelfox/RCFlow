@@ -49,9 +49,6 @@ class _StubPaneHost implements PaneHost {
   }) {}
 
   @override
-  void muteSessionSound(String sessionId) {}
-
-  @override
   void markSubscribed(String sessionId, {required String workerId}) {}
 
   @override

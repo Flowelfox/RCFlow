@@ -169,7 +169,7 @@ class RCFlowGUI:
         try:
             from src.config import Settings  # noqa: PLC0415
 
-            settings = Settings()  # type: ignore[call-arg]
+            settings = Settings()
             self._ip_var.set(settings.RCFLOW_HOST)
             self._port_var.set(str(settings.RCFLOW_PORT))
             self._wss_var.set(settings.WSS_ENABLED)
@@ -187,7 +187,7 @@ class RCFlowGUI:
         try:
             from src.config import Settings  # noqa: PLC0415
 
-            api_key = Settings().RCFLOW_API_KEY  # type: ignore[call-arg]
+            api_key = Settings().RCFLOW_API_KEY
             if not api_key:
                 self._set_status("No API token configured", error=True)
                 return
@@ -420,7 +420,7 @@ class RCFlowGUI:
             try:
                 from src.config import Settings  # noqa: PLC0415
 
-                api_key = Settings().RCFLOW_API_KEY  # type: ignore[call-arg]
+                api_key = Settings().RCFLOW_API_KEY
                 req = urllib.request.Request(
                     f"{base}/api/info",
                     headers={"X-API-Key": api_key},
@@ -545,7 +545,7 @@ class RCFlowGUI:
     def _update_tray_status(self) -> None:
         if self._tray_icon is not None:
             with contextlib.suppress(Exception):
-                self._tray_icon.update_menu()  # type: ignore[attr-defined]  # ty:ignore[unresolved-attribute]
+                self._tray_icon.update_menu()  # type: ignore[attr-defined]
 
     def _on_tray_open(self, icon: object = None, item: object = None) -> None:
         """Restore the GUI window from the tray."""
@@ -568,7 +568,7 @@ class RCFlowGUI:
 
         if self._tray_icon is not None:
             with contextlib.suppress(Exception):
-                self._tray_icon.stop()  # type: ignore[attr-defined]  # ty:ignore[unresolved-attribute]
+                self._tray_icon.stop()  # type: ignore[attr-defined]
 
         # Destroy the tkinter window from the main thread
         self._root.after(0, self._root.destroy)

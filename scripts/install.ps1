@@ -266,10 +266,28 @@ if (-not (Test-Path $jsonFile)) {
 
     Set-Content -Path $jsonFile -Value $jsonContent -Encoding UTF8
 
+    # Write the API key to a restricted file instead of printing it to the
+    # console (which may be captured in transcripts or CI logs).
+    $keyFile = Join-Path $InstallDir "initial-key.txt"
+    Set-Content -Path $keyFile -Value $ApiKey -Encoding UTF8
+    # Restrict read access to Administrators and SYSTEM only
+    $acl = Get-Acl $keyFile
+    $acl.SetAccessRuleProtection($true, $false)
+    $adminRule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+        "Administrators", "FullControl", "Allow"
+    )
+    $systemRule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+        "SYSTEM", "FullControl", "Allow"
+    )
+    $acl.AddAccessRule($adminRule)
+    $acl.AddAccessRule($systemRule)
+    Set-Acl -Path $keyFile -AclObject $acl
+
     Write-Ok "Configuration created with generated API key"
     Write-Host ""
-    Write-Host "  API Key: $ApiKey" -ForegroundColor Yellow
-    Write-Host "  Save this key - you'll need it to connect clients." -ForegroundColor Yellow
+    Write-Host "  API key saved to: $keyFile" -ForegroundColor Yellow
+    Write-Host "  Read with (Admin PowerShell): Get-Content '$keyFile'" -ForegroundColor Yellow
+    Write-Host "  Delete after copying: Remove-Item '$keyFile'" -ForegroundColor Yellow
     Write-Host "  Config file: $jsonFile" -ForegroundColor Yellow
     Write-Host ""
 }

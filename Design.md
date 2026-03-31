@@ -22,8 +22,7 @@ RCFlow is a background server running on Linux or Windows that provides a WebSoc
 | OS                   | Linux, Windows                |
 | Client Platforms     | Android, Windows (desktop)    |
 | Android Keep-Alive   | flutter_foreground_task       |
-| Notification Sounds  | audioplayers (local WAV files) |
-| File Picker          | file_picker (Windows custom sounds) |
+| File Picker          | file_picker (file attachments) |
 | Bundling             | PyInstaller (self-contained distributable) |
 | Windows GUI          | tkinter (server control window)            |
 | Windows Tray         | pystray + Pillow (system tray icon)        |
@@ -114,8 +113,7 @@ The Flutter client (`rcflowclient/`) runs on Android and Windows desktop from a 
 - **Foreground service** (`flutter_foreground_task`): Android/iOS only. On desktop, `ForegroundServiceHelper.init()`, `.start()`, and `.stop()` are no-ops guarded by `Platform.isAndroid || Platform.isIOS`.
 - **Keyboard input**: On desktop, Enter sends a message and Shift+Enter inserts a newline. On mobile, `TextInputAction.send` + `onSubmitted` is used (standard mobile keyboard behavior).
 - **Responsive layout**: At `>700px` width, a persistent 280px session sidebar appears on the left. At narrower widths (mobile), sessions are shown via a modal bottom sheet.
-- **Settings**: Multi-section settings menu (`lib/ui/widgets/settings_menu.dart`). On desktop, shown as a two-column dialog (160px sidebar nav + content) via the sidebar's bottom "Settings" button. On mobile, shown as a `DraggableScrollableSheet` bottom sheet with all sections in a scrollable list. Sections: Workers (summary of connected/total count, "Manage Workers" button to open Workers screen), Appearance (theme mode, font size, compact mode), Notifications (sound toggle, sound selection, vibrate — vibrate hidden on desktop), About (version info). Settings persisted via `SharedPreferences` through `SettingsService`.
-- **Notification sounds** (`lib/services/notification_sound_service.dart`): Two independent sound toggles: (1) "Sound when done" (`soundOnCompleteEnabled`, default `true`) — plays when work finishes and the session is waiting for user input (`summary`, `session_end_ask`, `plan_mode_ask`, `plan_review_ask`); (2) "Sound on message" (`soundEnabled`, default `false`) — plays on general message events including errors. Five built-in WAV sounds in `assets/sounds/` (gentle_chime, soft_ping, subtle_pop, bell, digital_tone). On Windows, users can also select a custom `.wav` file (validated to be < 10 seconds) via `file_picker`. Sound selection UI appears in the Notifications settings section when either sound toggle is enabled. Additional settings: `notificationSound` (sound ID string, default `gentle_chime`), `customSoundPath` (file path for custom sound on Windows). Audio playback via `audioplayers` package.
+- **Settings**: Multi-section settings menu (`lib/ui/widgets/settings_menu.dart`). On desktop, shown as a two-column dialog (160px sidebar nav + content) via the sidebar's bottom "Settings" button. On mobile, shown as a `DraggableScrollableSheet` bottom sheet with all sections in a scrollable list. Sections: Workers (summary of connected/total count, "Manage Workers" button to open Workers screen), Appearance (theme mode, font size, compact mode), Notifications (toast notification toggles), About (version info). Settings persisted via `SharedPreferences` through `SettingsService`.
 
 ### Split View (Desktop)
 
@@ -641,16 +639,6 @@ Token usage fields are included in every `session_update` broadcast:
 
 **Project name error field** (`project_name_error`): transient string field set when the backend cannot resolve or access the project folder sent via the WS prompt `project_name` field. Cleared on the next successful resolution. The client renders the project chip in error state (red, with tooltip) when this field is non-null. The field is NOT persisted to the database.
 
-### Output Audio Protocol
-
-Server sends binary Opus/OGG frames. Each frame is prefixed with a small binary header:
-
-```
-[session_id: 16 bytes UUID][sequence: 4 bytes uint32][opus frame data]
-```
-
-This allows the client to demultiplex audio from multiple sessions if subscribed to more than one.
-
 ### Session Subscription
 
 Clients control which sessions they receive output for by sending subscribe/unsubscribe messages on the output connections:
@@ -1001,7 +989,7 @@ The tool JSON definition specifies which type a tool uses (see Tool Definitions 
 
 ### Storage
 
-- **Active sessions**: Held in memory with full output buffer (text + audio references).
+- **Active sessions**: Held in memory with full output buffer.
 - **Paused sessions**: Remain in memory like active sessions. Any running Claude Code or Codex subprocess is killed on pause. Not reaped by inactivity timer. Archived only after being resumed and reaching a terminal state.
 - **Completed sessions**: Automatically archived to the database when a session reaches a terminal state (completed, failed, or cancelled). The prompt router fires a background task after each `session.complete()`, `session.fail()`, or `session.cancel()` call. Stores: session ID, timestamps, all prompts, all LLM responses, tool calls, tool outputs, metadata, `conversation_history` (the raw LLM message list for restoration), and token usage totals (`input_tokens`, `output_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens`, `tool_input_tokens`, `tool_output_tokens`, `tool_cost_usd`).
 - **Restored sessions**: Archived sessions can be restored back to active state via `POST /api/sessions/{id}/restore` or the `restore_session` WebSocket message. The session's conversation history, buffer messages, and metadata are loaded from the DB. For Claude Code sessions, the CC `session_id`, `working_directory`, tool name, and parameters are stored in `metadata_` during archiving and used to reconstruct the executor on restore. The first message sent to a restored CC session triggers a `restart_with_prompt` using the stored `--session-id`, allowing Claude Code to resume its internal conversation context.
@@ -1631,7 +1619,7 @@ Despite using a PTY, the I/O *protocol* remains `stream-json` (`--output-format 
 
 **Disabling PTY mode:** Set `"use_pty": false` in `executor_config.claude_code` to fall back to the original pipe-based I/O (required on Windows, optional on Unix).
 
-**Result summarization:** When Claude Code emits a `result` event (turn complete), the prompt router fires a background task that sends the result text to a fast model (configured via `SUMMARY_MODEL`) to produce a 2-3 sentence summary. The summary is pushed to the session buffer as a `summary` message type, arriving after the `text_chunk(finished=true)` for the result, and displayed in the client UI as a summary bubble. Summary failures are logged but never break the session. A `session_end_ask` message is also pushed immediately after the result to ask the user whether they want to end the session or continue chatting.
+**Result completion:** When Claude Code emits a `result` event (turn complete), a `session_end_ask` message is pushed to ask the user whether they want to end the session or continue chatting.
 
 **Environment:** The `CLAUDECODE` and `CLAUDE_AVAILABLE_MODELS` environment variables are removed from the subprocess environment to allow nesting.
 
@@ -1943,14 +1931,6 @@ Both SQLite and PostgreSQL are supported. The ORM uses `sa.JSON` columns (maps t
 
 ```sql
 -- Logical schema (PostgreSQL syntax for illustration; SQLAlchemy ORM handles dialect differences)
--- API keys for WebSocket authentication
-CREATE TABLE api_keys (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    key_hash VARCHAR(128) NOT NULL UNIQUE,
-    name VARCHAR(255),
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    revoked_at TIMESTAMPTZ
-);
 
 -- Archived sessions
 CREATE TABLE sessions (
@@ -2156,7 +2136,7 @@ All configuration is via environment variables, loaded from a `settings.json` fi
 
 | Variable                | Required | Default         | Description                          |
 |-------------------------|----------|-----------------|--------------------------------------|
-| `RCFLOW_HOST`           | no       | `0.0.0.0`       | Server bind address                  |
+| `RCFLOW_HOST`           | no       | `127.0.0.1`     | Server bind address                  |
 | `RCFLOW_PORT`           | no       | `53890` (Linux) / `53891` (Windows) | Server port                          |
 | `RCFLOW_API_KEY`        | yes      |                 | API key for WebSocket auth           |
 | `RCFLOW_BACKEND_ID`     | no       | auto-generated  | Unique backend instance ID (UUID). Auto-generated and persisted to `settings.json` on first run. Used to isolate sessions per backend when multiple backends share one database. |
@@ -2174,7 +2154,6 @@ All configuration is via environment variables, loaded from a `settings.json` fi
 | `PROJECTS_DIR`          | no       | `~/Projects`    | Comma-separated list of project directories (used in system prompt, path resolution, and `/api/projects` endpoint) |
 | `TOOLS_DIR`             | no       | `./tools`       | Path to tool definitions directory   |
 | `CODEX_API_KEY`         | no       |                 | OpenAI API key for Codex CLI         |
-| `SUMMARY_MODEL`         | no       | _(main model)_  | Model for session summaries. When blank, falls back to the main model. |
 | `TITLE_MODEL`           | no       | _(main model)_  | Model for session title generation. When blank, falls back to the main model. |
 | `TASK_MODEL`            | no       | _(main model)_  | Model for task extraction and status evaluation. When blank, falls back to the main model. |
 | `GLOBAL_PROMPT`         | no       |                 | Custom instructions appended to the system prompt for every session |
@@ -2808,5 +2787,3 @@ just bundle-windows-backend --sign          # Windows setup.exe + Authenticode
 - **Python callable tools**: Another executor type for direct Python function invocation
 - **Hot-reload tools**: Watch the `tools/` directory for changes without restart
 - **Multi-user support**: JWT-based auth with user accounts and per-user sessions
-- **Voice input on output channels**: Bidirectional audio for full voice conversation
-- **Audio format negotiation**: Let client specify preferred audio codec on connect

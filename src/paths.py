@@ -20,7 +20,7 @@ def get_bundle_dir() -> Path:
     When running from source, this is the project root (parent of ``src/``).
     """
     if is_frozen():
-        return Path(sys._MEIPASS)  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
+        return Path(sys._MEIPASS)  # type: ignore[attr-defined]
     return Path(__file__).resolve().parent.parent
 
 
@@ -73,7 +73,7 @@ def get_templates_dir() -> Path:
     When running from source, they're at ``src/prompts/templates``.
     """
     if is_frozen():
-        return Path(sys._MEIPASS) / "templates"  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
+        return Path(sys._MEIPASS) / "templates"  # type: ignore[attr-defined]
     return Path(__file__).resolve().parent / "prompts" / "templates"
 
 

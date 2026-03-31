@@ -138,9 +138,9 @@ async def trigger_single_tool_update(request: Request, tool_name: str) -> Stream
             tool = await tool_manager.detect_tool(tool_name)
             tool_manager._tools[tool_name] = tool
             yield json_mod.dumps({"step": "complete", "tool": _tool_dict(tool)}) + "\n"
-        except Exception as e:
+        except Exception:
             logger.exception("Update failed for '%s'", tool_name)
-            yield json_mod.dumps({"step": "error", "message": str(e)}) + "\n"
+            yield json_mod.dumps({"step": "error", "message": "Update failed — see server logs"}) + "\n"
 
     return StreamingResponse(_stream(), media_type="application/x-ndjson")
 
@@ -168,9 +168,9 @@ async def install_managed_tool(request: Request, tool_name: str) -> StreamingRes
             tool = await tool_manager.detect_tool(tool_name)
             tool_manager._tools[tool_name] = tool
             yield json_mod.dumps({"step": "complete", "tool": _tool_dict(tool)}) + "\n"
-        except Exception as e:
+        except Exception:
             logger.exception("Install failed for '%s'", tool_name)
-            yield json_mod.dumps({"step": "error", "message": str(e)}) + "\n"
+            yield json_mod.dumps({"step": "error", "message": "Install failed — see server logs"}) + "\n"
 
     return StreamingResponse(_stream(), media_type="application/x-ndjson")
 

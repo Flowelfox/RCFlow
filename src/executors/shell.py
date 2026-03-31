@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import shlex
 import sys
 from collections.abc import AsyncGenerator, AsyncIterator
 from pathlib import PurePath
@@ -12,6 +13,44 @@ logger = logging.getLogger(__name__)
 
 _IS_WINDOWS = sys.platform == "win32"
 _POWERSHELL_NAMES = {"powershell.exe", "powershell", "pwsh.exe", "pwsh"}
+
+
+def _quote_params_for_shell(
+    parameters: dict[str, Any],
+    template: str,
+    *,
+    is_powershell: bool,
+) -> dict[str, Any]:
+    """Return a copy of *parameters* with string values shell-escaped.
+
+    Numeric and boolean values are passed through unchanged — they cannot
+    contain shell metacharacters.  All other values are converted to str and
+    then quoted so that LLM-supplied content cannot inject shell commands via
+    the command_template substitution (F1: command injection mitigation).
+
+    Parameters whose placeholder IS the entire template (e.g.
+    ``command_template = "{command}"``) are not quoted: they represent the
+    full shell command and must retain shell operators and spaces.  All other
+    string parameters are quoted to prevent injection.
+    """
+    # Params that constitute the entire template value pass through unquoted
+    # because they ARE the shell command, not an argument embedded in one.
+    raw_params: frozenset[str] = frozenset(
+        k for k in parameters if template.strip() == f"{{{k}}}"
+    )
+
+    quoted: dict[str, Any] = {}
+    for k, v in parameters.items():
+        if k in raw_params or isinstance(v, (int, float, bool)):
+            quoted[k] = v
+        else:
+            s = str(v)
+            if is_powershell:
+                # PowerShell: wrap in double-quotes and escape internal double-quotes.
+                quoted[k] = '"' + s.replace('"', '""') + '"'
+            else:
+                quoted[k] = shlex.quote(s)
+    return quoted
 
 
 class ShellExecutor(BaseExecutor):
@@ -69,7 +108,9 @@ class ShellExecutor(BaseExecutor):
         parameters: dict[str, Any],
     ) -> ExecutionResult:
         config = tool.get_shell_config()
-        command = config.command_template.format(**parameters)
+        is_ps = self._is_powershell(config.shell)
+        quoted = _quote_params_for_shell(parameters, config.command_template, is_powershell=is_ps)
+        command = config.command_template.format(**quoted)
         timeout = parameters.get("timeout", 30)
         working_dir = parameters.get("working_directory", ".")
 
@@ -119,7 +160,9 @@ class ShellExecutor(BaseExecutor):
         parameters: dict[str, Any],
     ) -> AsyncGenerator[ExecutionChunk, None]:
         config = tool.get_shell_config()
-        command = config.command_template.format(**parameters)
+        is_ps = self._is_powershell(config.shell)
+        quoted = _quote_params_for_shell(parameters, config.command_template, is_powershell=is_ps)
+        command = config.command_template.format(**quoted)
         working_dir = parameters.get("working_directory", ".")
 
         process = await self._create_process(

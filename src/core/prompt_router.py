@@ -95,9 +95,9 @@ class PromptRouter(
         self._artifact_scanner = artifact_scanner
         self._telemetry = telemetry_service
         self._pending_log_tasks: set[asyncio.Task[None]] = set()
-        self._pending_summary_tasks: set[asyncio.Task[None]] = set()
         self._pending_title_tasks: set[asyncio.Task[None]] = set()
         self._pending_archive_tasks: set[asyncio.Task[None]] = set()
+        self._pending_summary_tasks: set[asyncio.Task[None]] = set()
         self._pending_task_creation_tasks: set[asyncio.Task[None]] = set()
         self._pending_task_update_tasks: set[asyncio.Task[None]] = set()
 

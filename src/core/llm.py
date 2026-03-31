@@ -18,6 +18,10 @@ logger = logging.getLogger(__name__)
 
 _OPENAI_REASONING_PREFIXES = ("o1", "o3", "o4")
 
+# Maximum number of LLM ↔ tool-execution round-trips per prompt (F5).
+# Prevents runaway agentic loops that could exhaust memory or API budget.
+_MAX_AGENTIC_TURNS = 50
+
 
 
 @dataclass
@@ -103,7 +107,6 @@ class LLMClient:
             msg = f"Unknown LLM provider: {self._provider!r}. Must be 'anthropic', 'bedrock', or 'openai'."
             raise ValueError(msg)
 
-        self._summary_model = settings.SUMMARY_MODEL or self._model
         self._title_model = settings.TITLE_MODEL or self._model
         self._task_model = settings.TASK_MODEL or self._model
         self._settings = settings
@@ -461,7 +464,7 @@ class LLMClient:
                 appended to ``messages`` (preserving conversation history) but
                 the loop exits without calling the LLM again.
         """
-        while True:
+        for _turn_number in range(_MAX_AGENTIC_TURNS):
             turn = ConversationTurn()
 
             async for event in self.stream_turn(messages, system):
@@ -504,6 +507,16 @@ class LLMClient:
             # Check if caller wants to stop the loop (e.g. after starting claude_code)
             if should_stop_after_tools is not None and should_stop_after_tools():
                 break
+        else:
+            # Reached the turn limit without a natural stop — surface this clearly.
+            logger.warning(
+                "Agentic loop reached the maximum turn limit (%d). "
+                "Stopping to prevent runaway execution and API cost overrun.",
+                _MAX_AGENTIC_TURNS,
+            )
+            yield TextChunk(
+                content=f"\n\n[Stopped: reached the maximum of {_MAX_AGENTIC_TURNS} agentic turns.]"
+            )
 
     # ------------------------------------------------------------------
     # Utility methods (title generation, summarization)
@@ -512,7 +525,7 @@ class LLMClient:
     async def _anthropic_create(self, system: str, content: str, max_tokens: int, *, model: str | None = None) -> str:
         """Make a non-streaming Anthropic/Bedrock call and return the text."""
         assert self._anthropic_client is not None
-        use_model = model or self._summary_model
+        use_model = model or self._model
         response = await self._anthropic_client.messages.create(
             model=use_model,
             max_tokens=max_tokens,
@@ -526,7 +539,7 @@ class LLMClient:
     async def _openai_create(self, system: str, content: str, max_tokens: int, *, model: str | None = None) -> str:
         """Make a non-streaming OpenAI call and return the text."""
         assert self._openai_client is not None
-        use_model = model or self._summary_model
+        use_model = model or self._model
         response = await self._openai_client.chat.completions.create(
             model=use_model,
             max_completion_tokens=max_tokens,
@@ -559,15 +572,14 @@ class LLMClient:
         return title
 
     async def summarize(self, text: str) -> str:
-        """Generate a short TTS-friendly summary of the given text using a fast model."""
+        """Generate a concise 2-3 sentence summary of the given text."""
         system = (
-            "You are a concise summarizer. Produce a 2-3 sentence summary of the following text. "
-            "The summary will be read aloud via text-to-speech, so keep it natural, conversational, "
-            "and free of markdown, code blocks, or special formatting."
+            "You are a concise summarizer. Produce a single sentence summary of the following text. "
+            "Be direct and informative. No markdown."
         )
         if self._provider == "openai":
-            return await self._openai_create(system, text, max_tokens=256)
-        return await self._anthropic_create(system, text, max_tokens=256)
+            return await self._openai_create(system, text, max_tokens=80)
+        return await self._anthropic_create(system, text, max_tokens=80)
 
     @staticmethod
     def _parse_llm_json(raw: str, fallback: dict) -> dict:

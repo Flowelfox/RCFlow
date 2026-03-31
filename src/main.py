@@ -35,6 +35,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     logger.info("Starting RCFlow server")
 
+    # WSS cert validation (F26)
+    if settings.WSS_ENABLED and (not settings.SSL_CERTFILE or not settings.SSL_KEYFILE):
+        raise RuntimeError(
+            "WSS_ENABLED=true but SSL_CERTFILE and/or SSL_KEYFILE are not configured. "
+            "Set both paths or disable WSS by setting WSS_ENABLED=false."
+        )
+
     # Database
     init_engine(settings)
     try:
