@@ -64,6 +64,7 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
   late bool _useSSL;
   late bool _allowSelfSigned;
   late bool _autoConnect;
+  String? _defaultAgent;
 
   // Validation
   bool _submitted = false;
@@ -88,6 +89,7 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
     _useSSL = widget.existing?.useSSL ?? false;
     _allowSelfSigned = widget.existing?.allowSelfSigned ?? true;
     _autoConnect = widget.existing?.autoConnect ?? true;
+    _defaultAgent = widget.existing?.defaultAgent;
 
     widget.worker?.addListener(_onWorkerChanged);
   }
@@ -142,6 +144,7 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
       allowSelfSigned: _allowSelfSigned,
       autoConnect: _autoConnect,
       sortOrder: widget.existing?.sortOrder ?? widget.sortOrder,
+      defaultAgent: _defaultAgent,
     );
     Navigator.of(context).pop(config);
   }
@@ -522,6 +525,30 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
             activeTrackColor: context.appColors.accent,
             contentPadding: EdgeInsets.zero,
             onChanged: (v) => setState(() => _autoConnect = v),
+          ),
+          SizedBox(height: 16),
+          _buildLabel('Default coding agent'),
+          SizedBox(height: 6),
+          DropdownButtonFormField<String?>(
+            value: _defaultAgent,
+            dropdownColor: context.appColors.bgElevated,
+            style: TextStyle(color: context.appColors.textPrimary, fontSize: 14),
+            decoration: InputDecoration(
+              prefixIcon: Icon(Icons.smart_toy_outlined,
+                  color: context.appColors.textMuted, size: 20),
+              fillColor: context.appColors.bgElevated,
+              border: OutlineInputBorder(
+                borderSide: BorderSide.none,
+                borderRadius: BorderRadius.circular(14),
+              ),
+            ),
+            items: const [
+              DropdownMenuItem(value: null, child: Text('None (let LLM decide)')),
+              DropdownMenuItem(value: 'claude_code', child: Text('Claude Code')),
+              DropdownMenuItem(value: 'codex', child: Text('Codex')),
+              DropdownMenuItem(value: 'opencode', child: Text('OpenCode')),
+            ],
+            onChanged: (v) => setState(() => _defaultAgent = v),
           ),
         ],
       ),

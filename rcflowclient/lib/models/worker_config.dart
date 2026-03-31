@@ -1,5 +1,15 @@
 import 'dart:math';
 
+const _kValidAgents = {'codex', 'opencode', 'claude_code'};
+
+/// Maps internal agent names to their mention-form (PascalCase) equivalents,
+/// matching the `mention_name` the backend derives from `display_name`.
+const kAgentMentionNames = <String, String>{
+  'codex': 'Codex',
+  'opencode': 'OpenCode',
+  'claude_code': 'ClaudeCode',
+};
+
 class WorkerConfig {
   final String id;
   String name;
@@ -10,6 +20,9 @@ class WorkerConfig {
   bool allowSelfSigned;
   bool autoConnect;
   int sortOrder;
+  /// Default coding agent for new sessions on this worker.
+  /// One of ``'codex'``, ``'opencode'``, ``'claude_code'``, or null (no default).
+  String? defaultAgent;
 
   WorkerConfig({
     required this.id,
@@ -21,6 +34,7 @@ class WorkerConfig {
     this.allowSelfSigned = true,
     this.autoConnect = true,
     this.sortOrder = 0,
+    this.defaultAgent,
   });
 
   /// Combined host:port string for use in URLs.
@@ -44,6 +58,8 @@ class WorkerConfig {
       port = 53890;
     }
 
+    final rawAgent = json['default_agent'] as String?;
+
     return WorkerConfig(
       id: json['id'] as String,
       name: json['name'] as String,
@@ -54,6 +70,7 @@ class WorkerConfig {
       allowSelfSigned: json['allow_self_signed'] as bool? ?? true,
       autoConnect: json['auto_connect'] as bool? ?? true,
       sortOrder: json['sort_order'] as int? ?? 0,
+      defaultAgent: (rawAgent != null && _kValidAgents.contains(rawAgent)) ? rawAgent : null,
     );
   }
 
@@ -67,6 +84,7 @@ class WorkerConfig {
         'allow_self_signed': allowSelfSigned,
         'auto_connect': autoConnect,
         'sort_order': sortOrder,
+        if (defaultAgent != null) 'default_agent': defaultAgent,
       };
 
   WorkerConfig copyWith({
@@ -79,6 +97,7 @@ class WorkerConfig {
     bool? allowSelfSigned,
     bool? autoConnect,
     int? sortOrder,
+    Object? defaultAgent = _sentinel,
   }) {
     return WorkerConfig(
       id: id ?? this.id,
@@ -90,6 +109,7 @@ class WorkerConfig {
       allowSelfSigned: allowSelfSigned ?? this.allowSelfSigned,
       autoConnect: autoConnect ?? this.autoConnect,
       sortOrder: sortOrder ?? this.sortOrder,
+      defaultAgent: defaultAgent == _sentinel ? this.defaultAgent : defaultAgent as String?,
     );
   }
 
@@ -105,3 +125,5 @@ class WorkerConfig {
         '${hex.substring(20, 32)}';
   }
 }
+
+const _sentinel = Object();

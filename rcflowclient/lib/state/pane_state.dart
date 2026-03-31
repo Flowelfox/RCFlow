@@ -70,6 +70,10 @@ abstract class PaneHost {
   /// Whether the worker for [workerId] (or the default worker) supports
   /// image attachments (JPEG, PNG, GIF, WEBP).
   bool workerSupportsImageAttachments(String? workerId);
+
+  /// Returns the default agent tool name configured for [workerId], or null if
+  /// no default is set or the worker is not found.
+  String? defaultAgentForWorker(String? workerId);
 }
 
 class PaneState extends ChangeNotifier {
@@ -568,6 +572,11 @@ class PaneState extends ChangeNotifier {
     _pendingLocalUserMessages = 0;
     _pendingInputText = null;
     _selectedToolMention = null;
+    // Apply the worker's default agent as the pre-selected tool for new chats.
+    final defaultAgent = _host.defaultAgentForWorker(_workerId ?? _host.defaultWorkerId);
+    if (defaultAgent != null) {
+      _selectedToolMention = defaultAgent;
+    }
     _pendingWorktreePath = null;
     _messages.clear();
     _todos = [];
