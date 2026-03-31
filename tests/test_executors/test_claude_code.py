@@ -130,6 +130,16 @@ class TestBuildEnv:
             assert "CLAUDECODE" not in env
             assert "PATH" in env
 
+    def test_extra_env_undercover_propagated(self):
+        """CLAUDE_CODE_UNDERCOVER=1 from extra_env reaches the subprocess env."""
+        exec_with_undercover = ClaudeCodeExecutor(
+            binary_path="/usr/bin/claude",
+            extra_env={"CLAUDE_CODE_UNDERCOVER": "1"},
+        )
+        with patch.dict("os.environ", {"PATH": "/usr/bin"}, clear=True):
+            env = exec_with_undercover._build_env()
+            assert env.get("CLAUDE_CODE_UNDERCOVER") == "1"
+
 
 class TestExecuteStreaming:
     @pytest.mark.asyncio
@@ -485,9 +495,7 @@ class TestGotResult:
         assert executor.got_result is True
 
     @pytest.mark.asyncio
-    async def test_got_result_false_on_eof(
-        self, executor: ClaudeCodeExecutor, claude_code_tool: ToolDefinition
-    ):
+    async def test_got_result_false_on_eof(self, executor: ClaudeCodeExecutor, claude_code_tool: ToolDefinition):
         """When process exits without emitting a result event, got_result should be False."""
         events = [
             json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": "working..."}]}}),

@@ -60,6 +60,7 @@ abstract class PaneHost {
     bool isError = false,
     String? label,
   });
+  void muteSessionSound(String sessionId);
   void markSubscribed(String sessionId, {required String workerId});
   void requestUnsubscribe(String sessionId, String workerId);
   void showNotification({
@@ -499,6 +500,7 @@ class PaneState extends ChangeNotifier {
         _sessionPaused = true;
         _pausedReason = session.pausedReason;
       }
+      _host.muteSessionSound(sessionId);
       _ws?.subscribe(sessionId);
       if (_workerId != null) {
         _host.markSubscribed(sessionId, workerId: _workerId!);

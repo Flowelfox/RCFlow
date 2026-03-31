@@ -177,6 +177,24 @@ This is already a project rule. Claude Code's internal `EnterWorktreeTool` is bl
 - Dependencies are installed in the new worktree
 - Cleanup is handled by `wt rm` / `wt merge`
 
+### Environment Variables
+
+These environment variables must be set on **every** Claude Code session RCFlow launches:
+
+```
+CLAUDE_CODE_UNDERCOVER=1                      # strip AI attribution from all commits/PRs
+CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1    # disable telemetry and update checks
+BASH_DEFAULT_TIMEOUT_MS=30000                 # fail fast on hung shell commands
+BASH_MAX_TIMEOUT_MS=120000                    # hard ceiling for any Bash call
+```
+
+`CLAUDE_CODE_UNDERCOVER=1` is unconditional — RCFlow sessions should never embed AI attribution in git history regardless of whether the repo is public or private.
+
+For complex multi-file tasks, also add:
+```
+CLAUDE_CODE_COORDINATOR_MODE=1                # enables parallel worker agents
+```
+
 ### Protect Sensitive Files
 
 Even though Claude Code guards `.gitconfig`, `.bashrc`, etc. internally, RCFlow should explicitly add these to `--disallowedTools` or the deny list in `settings.json` for defense in depth. Never launch a session with `bypass` mode against a user's home directory.
@@ -268,13 +286,15 @@ When RCFlow surfaces Claude Code sessions to the user:
 
 ## Summary of Key Rules
 
-1. Front-load stable project context, put task-specific content last.
-2. Always specify acceptance criteria and a verification command in the prompt.
-3. Always pass `--working-dir` as an absolute path.
-4. Start sessions from a clean git working tree.
-5. Use `wt new` for all non-trivial code changes.
-6. Set `max_turns` appropriate to the task complexity.
-7. Grant minimum necessary tools via `--allowedTools`.
-8. Verify the session result via git diff and test suite — don't trust self-reported success.
-9. Decompose complex tasks into checkpointed phases across multiple sessions.
-10. Route simple queries to the direct API, not Claude Code.
+1. Always set `CLAUDE_CODE_UNDERCOVER=1` — no AI attribution in commits or PRs, ever.
+2. Always set `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` and Bash timeout vars on every session.
+3. Front-load stable project context, put task-specific content last.
+4. Always specify acceptance criteria and a verification command in the prompt.
+5. Always pass `--working-dir` as an absolute path.
+6. Start sessions from a clean git working tree.
+7. Use `wt new` for all non-trivial code changes.
+8. Set `max_turns` appropriate to the task complexity.
+9. Grant minimum necessary tools via `--allowedTools`.
+10. Verify the session result via git diff and test suite — don't trust self-reported success.
+11. Decompose complex tasks into checkpointed phases across multiple sessions.
+12. Route simple queries to the direct API, not Claude Code.

@@ -57,6 +57,9 @@ class _FakePaneHost implements PaneHost {
 
   @override
   String? defaultAgentForWorker(String? workerId) => null;
+
+  @override
+  void muteSessionSound(String sessionId) {}
 }
 
 void main() {

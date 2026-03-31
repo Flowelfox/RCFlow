@@ -14,6 +14,7 @@ import '../models/app_notification.dart';
 import '../services/foreground_service.dart';
 import '../services/hotkey_service.dart';
 import '../services/notification_service.dart';
+import '../services/notification_sound_service.dart';
 import '../services/settings_service.dart';
 import '../services/websocket_service.dart';
 import '../services/worker_connection.dart';
@@ -23,6 +24,7 @@ import 'pane_state.dart';
 
 class AppState extends ChangeNotifier implements PaneHost {
   final SettingsService _settings;
+  late final NotificationSoundService _soundService;
   late final NotificationService _notificationService;
   late final HotkeyService _hotkeyService;
 
@@ -86,6 +88,9 @@ class AppState extends ChangeNotifier implements PaneHost {
   bool get anyWorkerHasLinear => _workers.values.any((w) => w.hasLinear);
 
   WorkerConnection? getWorker(String workerId) => _workers[workerId];
+
+  // Sessions with temporarily muted sound (during history replay after switch)
+  final Set<String> _soundMutedSessions = {};
 
   // Merged session list (all workers)
   @override
@@ -787,6 +792,7 @@ class AppState extends ChangeNotifier implements PaneHost {
   }
 
   SettingsService get settings => _settings;
+  NotificationSoundService get soundService => _soundService;
   NotificationService get notificationService => _notificationService;
   HotkeyService get hotkeyService => _hotkeyService;
 
@@ -804,6 +810,7 @@ class AppState extends ChangeNotifier implements PaneHost {
     : _settings = settings,
       _splitRoot = const PaneLeaf('pane_0'),
       _activePaneId = 'pane_0' {
+    _soundService = NotificationSoundService(settings: _settings);
     _notificationService = NotificationService();
     _hotkeyService = HotkeyService(settings: _settings);
     _panes['pane_0'] = PaneState(paneId: 'pane_0', host: this)
@@ -1175,6 +1182,14 @@ class AppState extends ChangeNotifier implements PaneHost {
     } catch (_) {
       return null;
     }
+  }
+
+  @override
+  void muteSessionSound(String sessionId) {
+    _soundMutedSessions.add(sessionId);
+    Future.delayed(const Duration(seconds: 3), () {
+      _soundMutedSessions.remove(sessionId);
+    });
   }
 
   @override
@@ -1691,8 +1706,24 @@ class AppState extends ChangeNotifier implements PaneHost {
 
   // --- Output channel message handling ---
 
+  static const _completionSoundTypes = {
+    'summary',
+    'session_end_ask',
+    'plan_mode_ask',
+    'plan_review_ask',
+  };
+
+  static const _messageSoundTypes = {
+    'summary',
+    'session_end_ask',
+    'error',
+    'plan_mode_ask',
+    'plan_review_ask',
+  };
+
   // Message types that indicate a session is waiting for user input
   static const _awaitingInputTypes = {
+    'summary',
     'session_end_ask',
     'plan_mode_ask',
     'plan_review_ask',
@@ -1749,6 +1780,17 @@ class AppState extends ChangeNotifier implements PaneHost {
     }
 
     final sessionId = msg['session_id'] as String?;
+    final muted = sessionId != null && _soundMutedSessions.contains(sessionId);
+    if (!muted) {
+      final playForComplete =
+          _settings.soundOnCompleteEnabled &&
+          _completionSoundTypes.contains(type);
+      final playForMessage =
+          _settings.soundEnabled && _messageSoundTypes.contains(type);
+      if (playForComplete || playForMessage) {
+        _soundService.playNotificationSound();
+      }
+    }
 
     // Toast notifications for background sessions
     if (sessionId != null) {
@@ -2050,6 +2092,7 @@ class AppState extends ChangeNotifier implements PaneHost {
       pane.dispose();
     }
     _panes.clear();
+    _soundService.dispose();
     _notificationService.dispose();
     inputFocusRequest.dispose();
     ForegroundServiceHelper.stop();

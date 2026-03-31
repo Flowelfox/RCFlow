@@ -11,6 +11,7 @@ Used as a mixin class — ``PromptRouter`` inherits from
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -86,6 +87,9 @@ class ClaudeCodeAgentMixin:
             if (venv_bin / "wt").exists():
                 current_path = os.environ.get("PATH", "")
                 extra_env["PATH"] = f"{venv_bin}:{current_path}"
+
+        # Signal to Claude Code that it is running under RCFlow orchestration.
+        extra_env["CLAUDE_CODE_UNDERCOVER"] = "1"
 
         return extra_env
 
@@ -564,37 +568,46 @@ class ClaudeCodeAgentMixin:
                 await session.claude_code_executor.stop_process()
             session.claude_code_executor = None
             session._claude_code_stream_task = None
-            logger.info(
-                "Session %s paused after stream (reason=%s)", session.id, session.paused_reason
-            )
+            logger.info("Session %s paused after stream (reason=%s)", session.id, session.paused_reason)
             return
 
         # Detect unexpected exit (no result event received)
         if not executor.got_result:
             exit_code = executor.exit_code
-            logger.warning(
-                "Claude Code exited without result event (session=%s, exit_code=%s)",
-                session.id,
-                exit_code,
-            )
             session.set_activity(ActivityState.IDLE)
             session.clear_subprocess_tracking()
             session.buffer.push_text(
                 MessageType.AGENT_GROUP_END,
                 {"session_id": session.id},
             )
-            session.buffer.push_text(
-                MessageType.ERROR,
-                {
-                    "session_id": session.id,
-                    "content": (
-                        f"Claude Code process exited unexpectedly (exit code: {exit_code}). "
-                        "This may be caused by a timeout, out-of-memory condition, or internal error. "
-                        "You can send another message to restart it."
-                    ),
-                    "code": "CLAUDE_CODE_UNEXPECTED_EXIT",
-                },
-            )
+            if exit_code == 0:
+                # Clean exit with no result event — treat as normal completion.
+                logger.info(
+                    "Claude Code exited cleanly without result event (session=%s)",
+                    session.id,
+                )
+                session.buffer.push_text(
+                    MessageType.SESSION_END_ASK,
+                    {"session_id": session.id},
+                )
+            else:
+                logger.warning(
+                    "Claude Code exited without result event (session=%s, exit_code=%s)",
+                    session.id,
+                    exit_code,
+                )
+                session.buffer.push_text(
+                    MessageType.ERROR,
+                    {
+                        "session_id": session.id,
+                        "content": (
+                            f"Claude Code process exited unexpectedly (exit code: {exit_code}). "
+                            "This may be caused by a timeout, out-of-memory condition, or internal error. "
+                            "You can send another message to restart it."
+                        ),
+                        "code": "CLAUDE_CODE_UNEXPECTED_EXIT",
+                    },
+                )
             await executor.stop_process()
             return
 
@@ -695,6 +708,12 @@ class ClaudeCodeAgentMixin:
                 )
                 return
 
+            # Ensure any previous stream task is stopped before starting a new one
+            if session._claude_code_stream_task is not None and not session._claude_code_stream_task.done():
+                session._claude_code_stream_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await session._claude_code_stream_task
+
             # Read response events in background
             session._claude_code_stream_task = asyncio.create_task(self._read_claude_code_followup(session, executor))
         else:
@@ -740,37 +759,45 @@ class ClaudeCodeAgentMixin:
                 await session.claude_code_executor.stop_process()
             session.claude_code_executor = None
             session._claude_code_stream_task = None
-            logger.info(
-                "Session %s paused after restart stream (reason=%s)", session.id, session.paused_reason
-            )
+            logger.info("Session %s paused after restart stream (reason=%s)", session.id, session.paused_reason)
             return
 
         # Detect unexpected exit (no result event received)
         if not executor.got_result:
             exit_code = executor.exit_code
-            logger.warning(
-                "Claude Code (restart) exited without result event (session=%s, exit_code=%s)",
-                session.id,
-                exit_code,
-            )
             session.set_activity(ActivityState.IDLE)
             session.clear_subprocess_tracking()
             session.buffer.push_text(
                 MessageType.AGENT_GROUP_END,
                 {"session_id": session.id},
             )
-            session.buffer.push_text(
-                MessageType.ERROR,
-                {
-                    "session_id": session.id,
-                    "content": (
-                        f"Claude Code process exited unexpectedly (exit code: {exit_code}). "
-                        "This may be caused by a timeout, out-of-memory condition, or internal error. "
-                        "You can send another message to restart it."
-                    ),
-                    "code": "CLAUDE_CODE_UNEXPECTED_EXIT",
-                },
-            )
+            if exit_code == 0:
+                logger.info(
+                    "Claude Code (restart) exited cleanly without result event (session=%s)",
+                    session.id,
+                )
+                session.buffer.push_text(
+                    MessageType.SESSION_END_ASK,
+                    {"session_id": session.id},
+                )
+            else:
+                logger.warning(
+                    "Claude Code (restart) exited without result event (session=%s, exit_code=%s)",
+                    session.id,
+                    exit_code,
+                )
+                session.buffer.push_text(
+                    MessageType.ERROR,
+                    {
+                        "session_id": session.id,
+                        "content": (
+                            f"Claude Code process exited unexpectedly (exit code: {exit_code}). "
+                            "This may be caused by a timeout, out-of-memory condition, or internal error. "
+                            "You can send another message to restart it."
+                        ),
+                        "code": "CLAUDE_CODE_UNEXPECTED_EXIT",
+                    },
+                )
             return
 
         session.buffer.push_text(
@@ -814,37 +841,45 @@ class ClaudeCodeAgentMixin:
                 await session.claude_code_executor.stop_process()
             session.claude_code_executor = None
             session._claude_code_stream_task = None
-            logger.info(
-                "Session %s paused after follow-up stream (reason=%s)", session.id, session.paused_reason
-            )
+            logger.info("Session %s paused after follow-up stream (reason=%s)", session.id, session.paused_reason)
             return
 
         # Detect unexpected exit (no result event received)
         if not executor.got_result:
             exit_code = executor.exit_code
-            logger.warning(
-                "Claude Code (follow-up) exited without result event (session=%s, exit_code=%s)",
-                session.id,
-                exit_code,
-            )
             session.set_activity(ActivityState.IDLE)
             session.clear_subprocess_tracking()
             session.buffer.push_text(
                 MessageType.AGENT_GROUP_END,
                 {"session_id": session.id},
             )
-            session.buffer.push_text(
-                MessageType.ERROR,
-                {
-                    "session_id": session.id,
-                    "content": (
-                        f"Claude Code process exited unexpectedly (exit code: {exit_code}). "
-                        "This may be caused by a timeout, out-of-memory condition, or internal error. "
-                        "You can send another message to restart it."
-                    ),
-                    "code": "CLAUDE_CODE_UNEXPECTED_EXIT",
-                },
-            )
+            if exit_code == 0:
+                logger.info(
+                    "Claude Code (follow-up) exited cleanly without result event (session=%s)",
+                    session.id,
+                )
+                session.buffer.push_text(
+                    MessageType.SESSION_END_ASK,
+                    {"session_id": session.id},
+                )
+            else:
+                logger.warning(
+                    "Claude Code (follow-up) exited without result event (session=%s, exit_code=%s)",
+                    session.id,
+                    exit_code,
+                )
+                session.buffer.push_text(
+                    MessageType.ERROR,
+                    {
+                        "session_id": session.id,
+                        "content": (
+                            f"Claude Code process exited unexpectedly (exit code: {exit_code}). "
+                            "This may be caused by a timeout, out-of-memory condition, or internal error. "
+                            "You can send another message to restart it."
+                        ),
+                        "code": "CLAUDE_CODE_UNEXPECTED_EXIT",
+                    },
+                )
             return
 
         session.buffer.push_text(
