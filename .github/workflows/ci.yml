@@ -1,0 +1,95 @@
+# =============================================================================
+# Continuous Integration
+#
+# Runs on every push (all branches) and on pull requests targeting main.
+# Validates both the Python backend and the Flutter client.
+# No API keys or external services are required — tests use SQLite in-memory
+# and mock any LLM/HTTP calls.
+# =============================================================================
+
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Backend — lint · type-check · test
+  # ---------------------------------------------------------------------------
+  backend:
+    name: Backend (lint / typecheck / test)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # uv manages the virtual-env and Python installation.
+      # enable-cache stores the uv download cache between runs.
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      # Install the Python version pinned in .python-version (3.12).
+      - name: Set up Python 3.12
+        run: uv python install 3.12
+
+      # Install production dependencies + the optional "dev" extras
+      # (ruff, pytest, pytest-cov, httpx).  The [dependency-groups].dev
+      # group (pytest >= 9) is included automatically by uv sync.
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      # ── Code quality ────────────────────────────────────────────────────
+
+      - name: Lint (ruff)
+        run: uv run ruff check src/ tests/
+
+      # ty is Astral's type-checker.  It is NOT in the project's deps
+      # (it lives in the pre-commit hook), so we run it via uvx which
+      # installs it in an isolated, ephemeral environment.
+      - name: Type check (ty)
+        run: uvx ty check src/
+
+      # ── Tests ───────────────────────────────────────────────────────────
+
+      # RCFLOW_API_KEY is auto-generated at server startup; not needed here.
+      - name: Run tests
+        run: uv run pytest tests/ -v --tb=short
+
+  # ---------------------------------------------------------------------------
+  # Flutter client — analyze · test
+  # ---------------------------------------------------------------------------
+  flutter:
+    name: Flutter client (analyze / test)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Set up the stable Flutter channel.  The pub-cache directory is
+      # cached between runs to speed up subsequent pub-get invocations.
+      - name: Set up Flutter (stable)
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install Flutter packages
+        working-directory: rcflowclient
+        run: flutter pub get
+
+      # Runs the Dart analyzer plus flutter_lints rules.
+      # --fatal-warnings promotes warnings to errors to keep the build clean.
+      - name: Analyze
+        working-directory: rcflowclient
+        run: flutter analyze --fatal-warnings
+
+      # Unit + widget tests — no device or emulator required.
+      - name: Test
+        working-directory: rcflowclient
+        run: flutter test --reporter=expanded
