@@ -56,6 +56,10 @@ class SettingsService {
   static const _artifactsExpandedWorkersKey = 'rcflow_artifacts_expanded_workers';
   static const _artifactsExpandedProjectsKey = 'rcflow_artifacts_expanded_projects';
 
+  // Setup / onboarding keys
+  static const _setupCompleteKey = 'rcflow_setup_complete';
+  static const _onboardingCompleteKey = 'rcflow_onboarding_complete';
+
   static const _defaultHost = '192.168.1.100:8765';
 
   late final SharedPreferences _prefs;
@@ -63,6 +67,16 @@ class SettingsService {
   Future<void> init() async {
     _prefs = await SharedPreferences.getInstance();
   }
+
+  // --- Setup / onboarding ---
+
+  bool get setupComplete => _prefs.getBool(_setupCompleteKey) ?? false;
+  set setupComplete(bool value) => _prefs.setBool(_setupCompleteKey, value);
+
+  bool get onboardingComplete =>
+      _prefs.getBool(_onboardingCompleteKey) ?? false;
+  set onboardingComplete(bool value) =>
+      _prefs.setBool(_onboardingCompleteKey, value);
 
   // --- Legacy single-server keys (for migration) ---
 

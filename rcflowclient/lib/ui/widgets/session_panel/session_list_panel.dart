@@ -7,6 +7,7 @@ import '../../../services/notification_service.dart';
 import '../../../state/app_state.dart';
 import '../../../theme.dart';
 import '../../dialogs/worker_edit_dialog.dart';
+import '../../onboarding_keys.dart' as onboarding;
 import '../notification_toast.dart';
 import '../settings_menu.dart';
 import 'artifact_list_panel.dart';
@@ -86,6 +87,7 @@ class _SessionListPanelState extends State<SessionListPanel>
             children: [
               Expanded(
                 child: TabBar(
+                  key: onboarding.sidebarTabBarKey,
                   controller: _tabController,
                   labelColor: context.appColors.textPrimary,
                   unselectedLabelColor: context.appColors.textMuted,
@@ -148,6 +150,7 @@ class _SessionListPanelState extends State<SessionListPanel>
                   padding: const EdgeInsets.symmetric(
                       horizontal: 12, vertical: 8),
                   child: InkWell(
+                    key: onboarding.settingsButtonKey,
                     borderRadius: BorderRadius.circular(10),
                     onTap: () => showSettingsMenu(context),
                     child: Padding(

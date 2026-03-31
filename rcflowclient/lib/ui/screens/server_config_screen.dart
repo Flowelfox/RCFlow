@@ -69,6 +69,9 @@ class ServerConfigContent extends StatefulWidget {
   /// When true, hides internal save buttons (used when embedded in a dialog
   /// that provides its own save action).
   final bool embedded;
+  /// When set, renders only options in this config group (e.g. 'LLM')
+  /// without the sidebar navigation.
+  final String? sectionFilter;
 
   const ServerConfigContent({
     super.key,
@@ -76,6 +79,7 @@ class ServerConfigContent extends StatefulWidget {
     required this.workerName,
     this.scrollController,
     this.embedded = false,
+    this.sectionFilter,
   });
 
   @override
@@ -777,6 +781,15 @@ class ServerConfigContentState extends State<ServerConfigContent> {
             ),
           ],
         ),
+      );
+    }
+
+    // Filtered mode — render only the specified section without sidebar.
+    if (widget.sectionFilter != null) {
+      return SingleChildScrollView(
+        controller: widget.scrollController,
+        padding: const EdgeInsets.all(16),
+        child: _buildSectionContent(widget.sectionFilter!),
       );
     }
 

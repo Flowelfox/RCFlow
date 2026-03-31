@@ -6,6 +6,7 @@ import '../../models/todo_item.dart';
 import '../../state/app_state.dart';
 import '../../state/pane_state.dart';
 import '../../theme.dart';
+import '../onboarding_keys.dart' as onboarding;
 import 'input_area.dart';
 import 'output_display.dart';
 import 'pane_header.dart';
@@ -191,7 +192,7 @@ class _SessionPaneState extends State<SessionPane> {
                                 Expanded(
                                   child: _OutputWithRightPanels(pane: widget.pane),
                                 ),
-                                const InputArea(),
+                                InputArea(key: onboarding.inputAreaKey),
                               ],
                             ),
                 ),
@@ -256,7 +257,8 @@ class _OutputWithRightPanelsState extends State<_OutputWithRightPanels> {
                 color: _dragging
                     ? context.appColors.accent.withAlpha(80)
                     : Colors.transparent,
-                child: Center(
+                child: Align(
+                  alignment: Alignment.centerRight,
                   child: Container(
                     width: 1,
                     height: double.infinity,
@@ -302,6 +304,7 @@ class _RightBookmarks extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Column(
+      key: onboarding.rightBookmarksKey,
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
         _BookmarkTab(
