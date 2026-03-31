@@ -64,6 +64,9 @@ class _StubPaneHost implements PaneHost {
 
   @override
   bool workerSupportsImageAttachments(String? workerId) => false;
+
+  @override
+  String? defaultAgentForWorker(String? workerId) => null;
 }
 
 // ---------------------------------------------------------------------------
@@ -596,4 +599,27 @@ void main() {
       expect(pane.currentSelectedWorktreePath, isNull);
     });
   });
+
+  group('PaneState.startNewChat — default agent', () {
+    test('pre-selects default agent when worker has one configured', () {
+      final host = _StubPaneHostWithDefaultAgent([]);
+      final pane = PaneState(paneId: 'pane1', host: host);
+      pane.startNewChat();
+      expect(pane.selectedToolMention, 'ClaudeCode');
+    });
+
+    test('leaves selectedToolMention null when no default agent', () {
+      final host = _StubPaneHost([]);
+      final pane = PaneState(paneId: 'pane1', host: host);
+      pane.startNewChat();
+      expect(pane.selectedToolMention, isNull);
+    });
+  });
+}
+
+class _StubPaneHostWithDefaultAgent extends _StubPaneHost {
+  _StubPaneHostWithDefaultAgent(super.sessions);
+
+  @override
+  String? defaultAgentForWorker(String? workerId) => 'ClaudeCode';
 }

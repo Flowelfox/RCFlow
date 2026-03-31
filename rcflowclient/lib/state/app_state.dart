@@ -1143,6 +1143,18 @@ class AppState extends ChangeNotifier implements PaneHost {
   }
 
   @override
+  String? defaultAgentForWorker(String? workerId) {
+    if (workerId == null) return null;
+    try {
+      final agent = _workerConfigs.firstWhere((c) => c.id == workerId).defaultAgent;
+      if (agent == null) return null;
+      return kAgentMentionNames[agent] ?? agent;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
   void muteSessionSound(String sessionId) {
     _soundMutedSessions.add(sessionId);
     Future.delayed(const Duration(seconds: 3), () {
