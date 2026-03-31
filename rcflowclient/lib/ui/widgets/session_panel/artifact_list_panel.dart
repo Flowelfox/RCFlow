@@ -30,8 +30,7 @@ class _ArtifactListPanelState extends State<ArtifactListPanel> {
   @override
   void initState() {
     super.initState();
-    final settings =
-        Provider.of<AppState>(context, listen: false).settings;
+    final settings = Provider.of<AppState>(context, listen: false).settings;
     _searchQuery = settings.artifactsFilterSearch;
     _searchController.text = _searchQuery;
     _groupByProject = settings.artifactsGroupByProject;
@@ -53,14 +52,12 @@ class _ArtifactListPanelState extends State<ArtifactListPanel> {
   }
 
   void _saveFilters() {
-    final settings =
-        Provider.of<AppState>(context, listen: false).settings;
+    final settings = Provider.of<AppState>(context, listen: false).settings;
     settings.artifactsFilterSearch = _searchQuery;
   }
 
   void _saveExpandedState() {
-    final settings =
-        Provider.of<AppState>(context, listen: false).settings;
+    final settings = Provider.of<AppState>(context, listen: false).settings;
     settings.artifactsExpandedWorkers = _expandedWorkers.toList();
     settings.artifactsExpandedProjects = _expandedProjects.toList();
   }
@@ -78,7 +75,8 @@ class _ArtifactListPanelState extends State<ArtifactListPanel> {
   /// Build a grouped structure: workerId -> projectName -> artifacts.
   /// The key for "Other" (no project) is null.
   Map<String, Map<String?, List<ArtifactInfo>>> _groupArtifacts(
-      List<ArtifactInfo> artifacts) {
+    List<ArtifactInfo> artifacts,
+  ) {
     final grouped = <String, Map<String?, List<ArtifactInfo>>>{};
     for (final a in artifacts) {
       grouped
@@ -100,19 +98,29 @@ class _ArtifactListPanelState extends State<ArtifactListPanel> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.article_outlined,
-                    color: context.appColors.textMuted, size: 40),
+                Icon(
+                  Icons.article_outlined,
+                  color: context.appColors.textMuted,
+                  size: 40,
+                ),
                 const SizedBox(height: 12),
-                Text('No artifacts yet',
-                    style: TextStyle(
-                        color: context.appColors.textSecondary,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600)),
+                Text(
+                  'No artifacts yet',
+                  style: TextStyle(
+                    color: context.appColors.textSecondary,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
                 const SizedBox(height: 4),
-                Text('Artifacts are extracted from\nsession messages',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                        color: context.appColors.textMuted, fontSize: 13)),
+                Text(
+                  'Artifacts are extracted from\nsession messages',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: context.appColors.textMuted,
+                    fontSize: 13,
+                  ),
+                ),
               ],
             ),
           );
@@ -145,7 +153,12 @@ class _ArtifactListPanelState extends State<ArtifactListPanel> {
               child: filtered.isEmpty && _searchQuery.isNotEmpty
                   ? _buildNoResults(context)
                   : _buildGroupedList(
-                      context, state, grouped, workerConfigs, hasMultipleWorkers),
+                      context,
+                      state,
+                      grouped,
+                      workerConfigs,
+                      hasMultipleWorkers,
+                    ),
             ),
           ],
         );
@@ -172,31 +185,37 @@ class _ArtifactListPanelState extends State<ArtifactListPanel> {
       workerOrder[workerConfigs[i].id] = i;
     }
     final sortedWorkerIds = grouped.keys.toList()
-      ..sort((a, b) => (workerOrder[a] ?? 999).compareTo(workerOrder[b] ?? 999));
+      ..sort(
+        (a, b) => (workerOrder[a] ?? 999).compareTo(workerOrder[b] ?? 999),
+      );
 
     for (final workerId in sortedWorkerIds) {
       final projectMap = grouped[workerId]!;
       final workerName = _findWorkerName(workerConfigs, workerId);
-      final workerArtifactCount =
-          projectMap.values.fold<int>(0, (sum, list) => sum + list.length);
+      final workerArtifactCount = projectMap.values.fold<int>(
+        0,
+        (sum, list) => sum + list.length,
+      );
       final workerExpanded = _expandedWorkers.contains(workerId);
 
       if (hasMultipleWorkers) {
-        children.add(_WorkerHeader(
-          workerName: workerName,
-          artifactCount: workerArtifactCount,
-          expanded: workerExpanded,
-          onToggle: () {
-            setState(() {
-              if (workerExpanded) {
-                _expandedWorkers.remove(workerId);
-              } else {
-                _expandedWorkers.add(workerId);
-              }
-            });
-            _saveExpandedState();
-          },
-        ));
+        children.add(
+          _WorkerHeader(
+            workerName: workerName,
+            artifactCount: workerArtifactCount,
+            expanded: workerExpanded,
+            onToggle: () {
+              setState(() {
+                if (workerExpanded) {
+                  _expandedWorkers.remove(workerId);
+                } else {
+                  _expandedWorkers.add(workerId);
+                }
+              });
+              _saveExpandedState();
+            },
+          ),
+        );
       }
 
       if (!hasMultipleWorkers || workerExpanded) {
@@ -215,49 +234,55 @@ class _ArtifactListPanelState extends State<ArtifactListPanel> {
             final pKey = _projectKey(workerId, projectName);
             final projectExpanded = _expandedProjects.contains(pKey);
 
-            children.add(_ProjectHeader(
-              projectName: projectName,
-              artifactCount: projectArtifacts.length,
-              expanded: projectExpanded,
-              indented: hasMultipleWorkers,
-              onToggle: () {
-                setState(() {
-                  if (projectExpanded) {
-                    _expandedProjects.remove(pKey);
-                  } else {
-                    _expandedProjects.add(pKey);
-                  }
-                });
-                _saveExpandedState();
-              },
-            ));
+            children.add(
+              _ProjectHeader(
+                projectName: projectName,
+                artifactCount: projectArtifacts.length,
+                expanded: projectExpanded,
+                indented: hasMultipleWorkers,
+                onToggle: () {
+                  setState(() {
+                    if (projectExpanded) {
+                      _expandedProjects.remove(pKey);
+                    } else {
+                      _expandedProjects.add(pKey);
+                    }
+                  });
+                  _saveExpandedState();
+                },
+              ),
+            );
 
             if (projectExpanded) {
               for (final artifact in projectArtifacts) {
-                children.add(_ArtifactTile(
-                  artifact: artifact,
-                  state: state,
-                  onArtifactSelected: widget.onArtifactSelected,
-                  indented: hasMultipleWorkers,
-                ));
+                children.add(
+                  _ArtifactTile(
+                    artifact: artifact,
+                    state: state,
+                    onArtifactSelected: widget.onArtifactSelected,
+                    indented: hasMultipleWorkers,
+                  ),
+                );
               }
             }
           }
         } else {
           // Flat mode: all artifacts under this worker shown without project headers
-          final allArtifacts = projectNames
-              .expand((p) => projectMap[p]!)
-              .toList()
-            ..sort((a, b) =>
-                (b.discoveredAt ?? DateTime(2000))
-                    .compareTo(a.discoveredAt ?? DateTime(2000)));
+          final allArtifacts =
+              projectNames.expand((p) => projectMap[p]!).toList()..sort(
+                (a, b) => (b.discoveredAt ?? DateTime(2000)).compareTo(
+                  a.discoveredAt ?? DateTime(2000),
+                ),
+              );
           for (final artifact in allArtifacts) {
-            children.add(_ArtifactTile(
-              artifact: artifact,
-              state: state,
-              onArtifactSelected: widget.onArtifactSelected,
-              indented: hasMultipleWorkers,
-            ));
+            children.add(
+              _ArtifactTile(
+                artifact: artifact,
+                state: state,
+                onArtifactSelected: widget.onArtifactSelected,
+                indented: hasMultipleWorkers,
+              ),
+            );
           }
         }
       }
@@ -302,11 +327,16 @@ class _ArtifactListPanelState extends State<ArtifactListPanel> {
                   ),
                   prefixIcon: Padding(
                     padding: const EdgeInsets.only(left: 8, right: 4),
-                    child: Icon(Icons.search_rounded,
-                        color: context.appColors.textMuted, size: 16),
+                    child: Icon(
+                      Icons.search_rounded,
+                      color: context.appColors.textMuted,
+                      size: 16,
+                    ),
                   ),
-                  prefixIconConstraints:
-                      const BoxConstraints(maxWidth: 28, maxHeight: 30),
+                  prefixIconConstraints: const BoxConstraints(
+                    maxWidth: 28,
+                    maxHeight: 30,
+                  ),
                   suffixIcon: _searchQuery.isNotEmpty
                       ? GestureDetector(
                           onTap: () {
@@ -316,17 +346,24 @@ class _ArtifactListPanelState extends State<ArtifactListPanel> {
                           },
                           child: Padding(
                             padding: const EdgeInsets.only(right: 6),
-                            child: Icon(Icons.close_rounded,
-                                color: context.appColors.textMuted, size: 14),
+                            child: Icon(
+                              Icons.close_rounded,
+                              color: context.appColors.textMuted,
+                              size: 14,
+                            ),
                           ),
                         )
                       : null,
-                  suffixIconConstraints:
-                      const BoxConstraints(maxWidth: 24, maxHeight: 30),
+                  suffixIconConstraints: const BoxConstraints(
+                    maxWidth: 24,
+                    maxHeight: 30,
+                  ),
                   filled: true,
                   fillColor: context.appColors.bgElevated,
-                  contentPadding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 0,
+                  ),
                   border: OutlineInputBorder(
                     borderSide: BorderSide.none,
                     borderRadius: BorderRadius.circular(8),
@@ -336,8 +373,10 @@ class _ArtifactListPanelState extends State<ArtifactListPanel> {
                     borderRadius: BorderRadius.circular(8),
                   ),
                   focusedBorder: OutlineInputBorder(
-                    borderSide:
-                        BorderSide(color: context.appColors.accent, width: 1),
+                    borderSide: BorderSide(
+                      color: context.appColors.accent,
+                      width: 1,
+                    ),
                     borderRadius: BorderRadius.circular(8),
                   ),
                 ),
@@ -361,9 +400,10 @@ class _ArtifactListPanelState extends State<ArtifactListPanel> {
                     : 'Group by project',
                 onPressed: () {
                   setState(() => _groupByProject = !_groupByProject);
-                  Provider.of<AppState>(context, listen: false)
-                      .settings
-                      .artifactsGroupByProject = _groupByProject;
+                  Provider.of<AppState>(
+                    context,
+                    listen: false,
+                  ).settings.artifactsGroupByProject = _groupByProject;
                 },
               ),
             ),
@@ -378,12 +418,19 @@ class _ArtifactListPanelState extends State<ArtifactListPanel> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.search_off_rounded,
-              color: context.appColors.textMuted, size: 32),
+          Icon(
+            Icons.search_off_rounded,
+            color: context.appColors.textMuted,
+            size: 32,
+          ),
           const SizedBox(height: 8),
-          Text('No matching artifacts',
-              style: TextStyle(
-                  color: context.appColors.textSecondary, fontSize: 13)),
+          Text(
+            'No matching artifacts',
+            style: TextStyle(
+              color: context.appColors.textSecondary,
+              fontSize: 13,
+            ),
+          ),
           const SizedBox(height: 4),
           GestureDetector(
             onTap: () {
@@ -391,15 +438,15 @@ class _ArtifactListPanelState extends State<ArtifactListPanel> {
               setState(() => _searchQuery = '');
               _saveFilters();
             },
-            child: Text('Clear search',
-                style: TextStyle(
-                    color: context.appColors.accent, fontSize: 12)),
+            child: Text(
+              'Clear search',
+              style: TextStyle(color: context.appColors.accent, fontSize: 12),
+            ),
           ),
         ],
       ),
     );
   }
-
 }
 
 /// Collapsible header for a worker group.
@@ -545,7 +592,8 @@ class _ArtifactTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final isViewed = _isArtifactViewed();
     final isActive = _isArtifactActive();
-    final icon = _extIcons[artifact.fileExtension.toLowerCase()] ??
+    final icon =
+        _extIcons[artifact.fileExtension.toLowerCase()] ??
         Icons.insert_drive_file_outlined;
 
     return Container(
@@ -553,18 +601,20 @@ class _ArtifactTile extends StatelessWidget {
         color: isActive
             ? context.appColors.accent.withAlpha(25)
             : isViewed
-                ? context.appColors.accent.withAlpha(12)
-                : null,
+            ? context.appColors.accent.withAlpha(12)
+            : null,
         border: isActive
             ? Border(
-                left:
-                    BorderSide(color: context.appColors.accent, width: 3))
+                left: BorderSide(color: context.appColors.accent, width: 3),
+              )
             : isViewed
-                ? Border(
-                    left: BorderSide(
-                        color: context.appColors.accent.withAlpha(80),
-                        width: 2))
-                : null,
+            ? Border(
+                left: BorderSide(
+                  color: context.appColors.accent.withAlpha(80),
+                  width: 2,
+                ),
+              )
+            : null,
       ),
       child: ListTile(
         leading: Container(
@@ -590,15 +640,11 @@ class _ArtifactTile extends StatelessWidget {
         ),
         subtitle: Text(
           _subtitle(),
-          style:
-              TextStyle(color: context.appColors.textMuted, fontSize: 10),
+          style: TextStyle(color: context.appColors.textMuted, fontSize: 10),
         ),
         trailing: Text(
           artifact.displaySize,
-          style: TextStyle(
-            color: context.appColors.textMuted,
-            fontSize: 10,
-          ),
+          style: TextStyle(color: context.appColors.textMuted, fontSize: 10),
         ),
         dense: true,
         visualDensity: const VisualDensity(vertical: -4),

@@ -52,7 +52,8 @@ class TaskTile extends StatelessWidget {
     final isViewed = _isTaskViewed();
     final isActivePane = _isTaskActive();
     final statusIcon = _statusIcons[task.status] ?? Icons.help_outline;
-    final statusColor = _statusColors[task.status] ?? context.appColors.textMuted;
+    final statusColor =
+        _statusColors[task.status] ?? context.appColors.textMuted;
     final sessionCount = task.sessions.length;
     final issueCount = state.linearIssuesForTask(task.taskId).length;
 
@@ -65,20 +66,22 @@ class TaskTile extends StatelessWidget {
           color: isSelected
               ? context.appColors.accent.withAlpha(20)
               : isActivePane
-                  ? context.appColors.accent.withAlpha(25)
-                  : isViewed
-                      ? context.appColors.accent.withAlpha(12)
-                      : null,
+              ? context.appColors.accent.withAlpha(25)
+              : isViewed
+              ? context.appColors.accent.withAlpha(12)
+              : null,
           border: isActivePane
               ? Border(
-                  left: BorderSide(
-                      color: context.appColors.accent, width: 3))
+                  left: BorderSide(color: context.appColors.accent, width: 3),
+                )
               : isViewed
-                  ? Border(
-                      left: BorderSide(
-                          color: context.appColors.accent.withAlpha(80),
-                          width: 2))
-                  : null,
+              ? Border(
+                  left: BorderSide(
+                    color: context.appColors.accent.withAlpha(80),
+                    width: 2,
+                  ),
+                )
+              : null,
         ),
         child: ListTile(
           leading: isSelected
@@ -89,8 +92,11 @@ class TaskTile extends StatelessWidget {
                     color: context.appColors.accent.withAlpha(40),
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: Icon(Icons.check_box_rounded,
-                      color: context.appColors.accent, size: 16),
+                  child: Icon(
+                    Icons.check_box_rounded,
+                    color: context.appColors.accent,
+                    size: 16,
+                  ),
                 )
               : Container(
                   width: 30,
@@ -115,8 +121,7 @@ class TaskTile extends StatelessWidget {
           ),
           subtitle: Text(
             _subtitle(),
-            style: TextStyle(
-                color: context.appColors.textMuted, fontSize: 10),
+            style: TextStyle(color: context.appColors.textMuted, fontSize: 10),
           ),
           trailing: (sessionCount > 0 || issueCount > 0)
               ? Row(
@@ -124,10 +129,13 @@ class TaskTile extends StatelessWidget {
                   children: [
                     if (issueCount > 0)
                       Tooltip(
-                        message: '$issueCount linked issue${issueCount == 1 ? '' : 's'}',
+                        message:
+                            '$issueCount linked issue${issueCount == 1 ? '' : 's'}',
                         child: Container(
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 5, vertical: 2),
+                            horizontal: 5,
+                            vertical: 2,
+                          ),
                           margin: const EdgeInsets.only(right: 4),
                           decoration: BoxDecoration(
                             color: const Color(0xFF8B5CF6).withAlpha(30),
@@ -136,9 +144,11 @@ class TaskTile extends StatelessWidget {
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Icon(Icons.link_rounded,
-                                  size: 9,
-                                  color: const Color(0xFF8B5CF6)),
+                              Icon(
+                                Icons.link_rounded,
+                                size: 9,
+                                color: const Color(0xFF8B5CF6),
+                              ),
                               const SizedBox(width: 2),
                               Text(
                                 '$issueCount',
@@ -155,7 +165,9 @@ class TaskTile extends StatelessWidget {
                     if (sessionCount > 0)
                       Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 6, vertical: 2),
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
                         decoration: BoxDecoration(
                           color: context.appColors.accent.withAlpha(30),
                           borderRadius: BorderRadius.circular(8),
@@ -175,10 +187,12 @@ class TaskTile extends StatelessWidget {
           dense: true,
           visualDensity: const VisualDensity(vertical: -4),
           contentPadding: const EdgeInsets.only(left: 16, right: 8),
-          onTap: onTapOverride ?? () {
-            state.openTaskInPane(task.taskId);
-            onTaskSelected?.call();
-          },
+          onTap:
+              onTapOverride ??
+              () {
+                state.openTaskInPane(task.taskId);
+                onTaskSelected?.call();
+              },
         ),
       ),
     );
@@ -196,8 +210,7 @@ class TaskTile extends StatelessWidget {
           decoration: BoxDecoration(
             color: context.appColors.bgElevated,
             borderRadius: BorderRadius.circular(16),
-            border:
-                Border.all(color: context.appColors.accent.withAlpha(120)),
+            border: Border.all(color: context.appColors.accent.withAlpha(120)),
             boxShadow: [
               BoxShadow(
                 color: Colors.black.withAlpha(100),
@@ -248,7 +261,8 @@ class TaskTile extends StatelessWidget {
 
   String _subtitle() {
     final local = task.updatedAt.toLocal();
-    final time = '${monthAbbr(local.month)} ${local.day}, '
+    final time =
+        '${monthAbbr(local.month)} ${local.day}, '
         '${local.hour.toString().padLeft(2, '0')}:'
         '${local.minute.toString().padLeft(2, '0')}';
     final src = task.source == 'ai' ? 'AI' : 'User';
@@ -256,8 +270,7 @@ class TaskTile extends StatelessWidget {
   }
 
   void _showContextMenu(BuildContext context, Offset position) {
-    final overlay =
-        Overlay.of(context).context.findRenderObject() as RenderBox;
+    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
     showMenu<String>(
       context: context,
       position: RelativeRect.fromRect(
@@ -271,11 +284,16 @@ class TaskTile extends StatelessWidget {
           value: 'start_session',
           child: Row(
             children: [
-              Icon(Icons.play_arrow_rounded,
-                  color: context.appColors.textSecondary, size: 18),
+              Icon(
+                Icons.play_arrow_rounded,
+                color: context.appColors.textSecondary,
+                size: 18,
+              ),
               const SizedBox(width: 8),
-              Text('Start Session',
-                  style: TextStyle(color: context.appColors.textPrimary)),
+              Text(
+                'Start Session',
+                style: TextStyle(color: context.appColors.textPrimary),
+              ),
             ],
           ),
         ),
@@ -285,11 +303,16 @@ class TaskTile extends StatelessWidget {
             value: 'done',
             child: Row(
               children: [
-                Icon(Icons.check_circle_outline,
-                    color: const Color(0xFF10B981), size: 18),
+                Icon(
+                  Icons.check_circle_outline,
+                  color: const Color(0xFF10B981),
+                  size: 18,
+                ),
                 const SizedBox(width: 8),
-                Text('Mark done',
-                    style: TextStyle(color: context.appColors.textPrimary)),
+                Text(
+                  'Mark done',
+                  style: TextStyle(color: context.appColors.textPrimary),
+                ),
               ],
             ),
           ),
@@ -298,11 +321,16 @@ class TaskTile extends StatelessWidget {
             value: 'reopen',
             child: Row(
               children: [
-                Icon(Icons.replay_outlined,
-                    color: context.appColors.textSecondary, size: 18),
+                Icon(
+                  Icons.replay_outlined,
+                  color: context.appColors.textSecondary,
+                  size: 18,
+                ),
                 const SizedBox(width: 8),
-                Text('Reopen',
-                    style: TextStyle(color: context.appColors.textPrimary)),
+                Text(
+                  'Reopen',
+                  style: TextStyle(color: context.appColors.textPrimary),
+                ),
               ],
             ),
           ),
@@ -310,11 +338,16 @@ class TaskTile extends StatelessWidget {
           value: 'delete',
           child: Row(
             children: [
-              Icon(Icons.delete_outline,
-                  color: context.appColors.errorText, size: 18),
+              Icon(
+                Icons.delete_outline,
+                color: context.appColors.errorText,
+                size: 18,
+              ),
               const SizedBox(width: 8),
-              Text('Delete',
-                  style: TextStyle(color: context.appColors.errorText)),
+              Text(
+                'Delete',
+                style: TextStyle(color: context.appColors.errorText),
+              ),
             ],
           ),
         ),
@@ -359,19 +392,24 @@ class TaskTile extends StatelessWidget {
       builder: (ctx) => AlertDialog(
         backgroundColor: context.appColors.bgSurface,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        title: Text('Delete Task',
-            style: TextStyle(
-                color: context.appColors.textPrimary, fontSize: 16)),
+        title: Text(
+          'Delete Task',
+          style: TextStyle(color: context.appColors.textPrimary, fontSize: 16),
+        ),
         content: Text(
           'Delete "${task.title}"? This cannot be undone.',
           style: TextStyle(
-              color: context.appColors.textSecondary, fontSize: 14),
+            color: context.appColors.textSecondary,
+            fontSize: 14,
+          ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
-            child: Text('Cancel',
-                style: TextStyle(color: context.appColors.textSecondary)),
+            child: Text(
+              'Cancel',
+              style: TextStyle(color: context.appColors.textSecondary),
+            ),
           ),
           FilledButton(
             style: FilledButton.styleFrom(

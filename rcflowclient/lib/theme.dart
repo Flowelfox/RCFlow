@@ -5,68 +5,70 @@ import 'package:flutter/material.dart';
 // ============================================================================
 
 // Core palette — refined dark with depth
-const kBgBase = Color(0xFF0D1117);       // GitHub-dark base
-const kBgSurface = Color(0xFF161B22);    // Cards, input bar
-const kBgElevated = Color(0xFF1C2128);   // Elevated surfaces
-const kBgOverlay = Color(0xFF252B33);    // Hover, active states
+const kBgBase = Color(0xFF0D1117); // GitHub-dark base
+const kBgSurface = Color(0xFF161B22); // Cards, input bar
+const kBgElevated = Color(0xFF1C2128); // Elevated surfaces
+const kBgOverlay = Color(0xFF252B33); // Hover, active states
 
 // Accent
-const kAccent = Color(0xFF6366F1);       // Indigo-500 — primary action
-const kAccentLight = Color(0xFF818CF8);  // Indigo-400 — highlights
-const kAccentDim = Color(0xFF312E81);    // Indigo-900 — subtle backgrounds
+const kAccent = Color(0xFF6366F1); // Indigo-500 — primary action
+const kAccentLight = Color(0xFF818CF8); // Indigo-400 — highlights
+const kAccentDim = Color(0xFF312E81); // Indigo-900 — subtle backgrounds
 
 // Semantic
-const kUserBubble = Color(0xFF1E3A5F);   // User message background
-const kUserText = Color(0xFF60A5FA);     // Blue-400
-const kAssistantText = Color(0xFFE5E7EB);// Gray-200
-const kToolAccent = Color(0xFFFBBF24);   // Amber-400 — tool tags
-const kToolBg = Color(0xFF1A1D23);       // Tool block background
-const kToolOutputText = Color(0xFF9CA3AF);// Gray-400
-const kErrorBg = Color(0xFF3B1219);      // Error background
-const kErrorText = Color(0xFFF87171);    // Red-400
-const kSuccessBg = Color(0xFF132A1B);    // Success tint
-const kSuccessText = Color(0xFF4ADE80);  // Green-400
-const kSummaryBg = Color(0xFF1A1730);   // Subtle indigo tint
+const kUserBubble = Color(0xFF1E3A5F); // User message background
+const kUserText = Color(0xFF60A5FA); // Blue-400
+const kAssistantText = Color(0xFFE5E7EB); // Gray-200
+const kToolAccent = Color(0xFFFBBF24); // Amber-400 — tool tags
+const kToolBg = Color(0xFF1A1D23); // Tool block background
+const kToolOutputText = Color(0xFF9CA3AF); // Gray-400
+const kErrorBg = Color(0xFF3B1219); // Error background
+const kErrorText = Color(0xFFF87171); // Red-400
+const kSuccessBg = Color(0xFF132A1B); // Success tint
+const kSuccessText = Color(0xFF4ADE80); // Green-400
+const kSummaryBg = Color(0xFF1A1730); // Subtle indigo tint
 const kSummaryText = Color(0xFFA5B4FC); // Indigo-300
-const kSystemText = Color(0xFF6B7280);   // Gray-500
-const kDivider = Color(0xFF21262D);      // Subtle divider
-const kTextPrimary = Color(0xFFE5E7EB);  // Gray-200
-const kTextSecondary = Color(0xFF9CA3AF);// Gray-400
-const kTextMuted = Color(0xFF6B7280);    // Gray-500
+const kSystemText = Color(0xFF6B7280); // Gray-500
+const kDivider = Color(0xFF21262D); // Subtle divider
+const kTextPrimary = Color(0xFFE5E7EB); // Gray-200
+const kTextSecondary = Color(0xFF9CA3AF); // Gray-400
+const kTextMuted = Color(0xFF6B7280); // Gray-500
 
 // ============================================================================
 // LIGHT THEME COLORS
 // ============================================================================
 
 // Core palette — clean light with good contrast
-const kLightBgBase = Color(0xFFFAFAFA);       // Light gray base
-const kLightBgSurface = Color(0xFFFFFFFF);    // White cards, input bar
-const kLightBgElevated = Color(0xFFF5F5F5);   // Elevated surfaces
-const kLightBgOverlay = Color(0xFFE5E5E5);    // Hover, active states
+const kLightBgBase = Color(0xFFFAFAFA); // Light gray base
+const kLightBgSurface = Color(0xFFFFFFFF); // White cards, input bar
+const kLightBgElevated = Color(0xFFF5F5F5); // Elevated surfaces
+const kLightBgOverlay = Color(0xFFE5E5E5); // Hover, active states
 
 // Accent (same as dark for consistency)
-const kLightAccent = Color(0xFF6366F1);       // Indigo-500 — primary action
-const kLightAccentLight = Color(0xFF818CF8);  // Indigo-400 — highlights
-const kLightAccentDim = Color(0xFFE0E7FF);    // Indigo-100 — subtle backgrounds
+const kLightAccent = Color(0xFF6366F1); // Indigo-500 — primary action
+const kLightAccentLight = Color(0xFF818CF8); // Indigo-400 — highlights
+const kLightAccentDim = Color(0xFFE0E7FF); // Indigo-100 — subtle backgrounds
 
 // Semantic
-const kLightUserBubble = Color(0xFFDDEAFE);   // Light blue user message background
-const kLightUserText = Color(0xFF2563EB);     // Blue-600
-const kLightAssistantText = Color(0xFF1F2937);// Gray-800
-const kLightToolAccent = Color(0xFFF59E0B);   // Amber-500 — tool tags
-const kLightToolBg = Color(0xFFF9FAFB);       // Tool block background
-const kLightToolOutputText = Color(0xFF6B7280);// Gray-500
-const kLightErrorBg = Color(0xFFFEE2E2);      // Error background
-const kLightErrorText = Color(0xFFDC2626);    // Red-600
-const kLightSuccessBg = Color(0xFFDCFCE7);    // Success tint
-const kLightSuccessText = Color(0xFF16A34A);  // Green-600
-const kLightSummaryBg = Color(0xFFEEF2FF);   // Subtle indigo tint
+const kLightUserBubble = Color(
+  0xFFDDEAFE,
+); // Light blue user message background
+const kLightUserText = Color(0xFF2563EB); // Blue-600
+const kLightAssistantText = Color(0xFF1F2937); // Gray-800
+const kLightToolAccent = Color(0xFFF59E0B); // Amber-500 — tool tags
+const kLightToolBg = Color(0xFFF9FAFB); // Tool block background
+const kLightToolOutputText = Color(0xFF6B7280); // Gray-500
+const kLightErrorBg = Color(0xFFFEE2E2); // Error background
+const kLightErrorText = Color(0xFFDC2626); // Red-600
+const kLightSuccessBg = Color(0xFFDCFCE7); // Success tint
+const kLightSuccessText = Color(0xFF16A34A); // Green-600
+const kLightSummaryBg = Color(0xFFEEF2FF); // Subtle indigo tint
 const kLightSummaryText = Color(0xFF6366F1); // Indigo-500
-const kLightSystemText = Color(0xFF9CA3AF);   // Gray-400
-const kLightDivider = Color(0xFFE5E7EB);      // Subtle divider
-const kLightTextPrimary = Color(0xFF1F2937);  // Gray-800
-const kLightTextSecondary = Color(0xFF6B7280);// Gray-500
-const kLightTextMuted = Color(0xFF9CA3AF);    // Gray-400
+const kLightSystemText = Color(0xFF9CA3AF); // Gray-400
+const kLightDivider = Color(0xFFE5E7EB); // Subtle divider
+const kLightTextPrimary = Color(0xFF1F2937); // Gray-800
+const kLightTextSecondary = Color(0xFF6B7280); // Gray-500
+const kLightTextMuted = Color(0xFF9CA3AF); // Gray-400
 
 // ============================================================================
 // THEME EXTENSIONS

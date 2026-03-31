@@ -50,13 +50,12 @@ class TerminalSessionInfo {
     required this.title,
     required int maxLines,
     this.paneId,
-  })  : createdAt = DateTime.now(),
-        terminal = Terminal(maxLines: maxLines),
-        controller = TerminalController();
+  }) : createdAt = DateTime.now(),
+       terminal = Terminal(maxLines: maxLines),
+       controller = TerminalController();
 
-  String get shortId => terminalId.length >= 8
-      ? '${terminalId.substring(0, 8)}...'
-      : terminalId;
+  String get shortId =>
+      terminalId.length >= 8 ? '${terminalId.substring(0, 8)}...' : terminalId;
 }
 
 /// Legacy alias kept for backward compatibility with AppState._terminalPanes.
@@ -203,9 +202,7 @@ class _TerminalPaneState extends State<TerminalPane> {
         '${exitCode != null ? ' (exit code $exitCode)' : ''}]\x1b[0m\r\n',
       );
     } else if (type == 'error') {
-      _terminal.write(
-        '\r\n\x1b[31m[Error: ${msg['message']}]\x1b[0m\r\n',
-      );
+      _terminal.write('\r\n\x1b[31m[Error: ${msg['message']}]\x1b[0m\r\n');
     }
   }
 
@@ -264,7 +261,8 @@ class _TerminalPaneState extends State<TerminalPane> {
       _ => TerminalCursorType.block,
     };
 
-    final isDesktop = defaultTargetPlatform == TargetPlatform.linux ||
+    final isDesktop =
+        defaultTargetPlatform == TargetPlatform.linux ||
         defaultTargetPlatform == TargetPlatform.macOS ||
         defaultTargetPlatform == TargetPlatform.windows;
 
@@ -290,8 +288,7 @@ class _TerminalPaneState extends State<TerminalPane> {
   }
 
   void _showContextMenu(BuildContext context, Offset position) {
-    final overlay =
-        Overlay.of(context).context.findRenderObject() as RenderBox;
+    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
     showMenu<String>(
       context: context,
       position: RelativeRect.fromRect(
@@ -305,11 +302,16 @@ class _TerminalPaneState extends State<TerminalPane> {
           value: 'copy',
           child: Row(
             children: [
-              Icon(Icons.copy_rounded,
-                  color: context.appColors.textSecondary, size: 18),
+              Icon(
+                Icons.copy_rounded,
+                color: context.appColors.textSecondary,
+                size: 18,
+              ),
               const SizedBox(width: 8),
-              Text('Copy',
-                  style: TextStyle(color: context.appColors.textPrimary)),
+              Text(
+                'Copy',
+                style: TextStyle(color: context.appColors.textPrimary),
+              ),
             ],
           ),
         ),
@@ -317,11 +319,16 @@ class _TerminalPaneState extends State<TerminalPane> {
           value: 'paste',
           child: Row(
             children: [
-              Icon(Icons.paste_rounded,
-                  color: context.appColors.textSecondary, size: 18),
+              Icon(
+                Icons.paste_rounded,
+                color: context.appColors.textSecondary,
+                size: 18,
+              ),
               const SizedBox(width: 8),
-              Text('Paste',
-                  style: TextStyle(color: context.appColors.textPrimary)),
+              Text(
+                'Paste',
+                style: TextStyle(color: context.appColors.textPrimary),
+              ),
             ],
           ),
         ),

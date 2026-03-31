@@ -16,14 +16,14 @@ class TodoItem {
   }
 
   static TodoStatus _parseStatus(String s) => switch (s) {
-        'in_progress' => TodoStatus.inProgress,
-        'completed' => TodoStatus.completed,
-        _ => TodoStatus.pending,
-      };
+    'in_progress' => TodoStatus.inProgress,
+    'completed' => TodoStatus.completed,
+    _ => TodoStatus.pending,
+  };
 
   /// Display text: use activeForm for in-progress items, content otherwise.
   String get displayText =>
       status == TodoStatus.inProgress && activeForm != null
-          ? activeForm!
-          : content;
+      ? activeForm!
+      : content;
 }

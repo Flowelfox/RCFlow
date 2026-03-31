@@ -36,7 +36,13 @@ class _SessionListPanelState extends State<SessionListPanel>
   String _workerSearchQuery = '';
   final Set<String> _activeStatusFilters = {};
 
-  static const _statusOrder = ['active', 'paused', 'completed', 'failed', 'cancelled'];
+  static const _statusOrder = [
+    'active',
+    'paused',
+    'completed',
+    'failed',
+    'cancelled',
+  ];
   static const _statusLabels = {
     'active': 'Active',
     'paused': 'Paused',
@@ -56,8 +62,7 @@ class _SessionListPanelState extends State<SessionListPanel>
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
-    final settings =
-        Provider.of<AppState>(context, listen: false).settings;
+    final settings = Provider.of<AppState>(context, listen: false).settings;
     _workerSearchQuery = settings.workersFilterSearch;
     _workerSearchController.text = _workerSearchQuery;
     _activeStatusFilters.addAll(settings.workersFilterStatus);
@@ -148,24 +153,34 @@ class _SessionListPanelState extends State<SessionListPanel>
                 // Bottom bar: Settings
                 Padding(
                   padding: const EdgeInsets.symmetric(
-                      horizontal: 12, vertical: 8),
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
                   child: InkWell(
                     key: onboarding.settingsButtonKey,
                     borderRadius: BorderRadius.circular(10),
                     onTap: () => showSettingsMenu(context),
                     child: Padding(
                       padding: EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 10),
+                        horizontal: 8,
+                        vertical: 10,
+                      ),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(Icons.settings_outlined,
-                              color: context.appColors.textMuted, size: 20),
+                          Icon(
+                            Icons.settings_outlined,
+                            color: context.appColors.textMuted,
+                            size: 20,
+                          ),
                           SizedBox(width: 10),
-                          Text('Settings',
-                              style: TextStyle(
-                                  color: context.appColors.textSecondary,
-                                  fontSize: 14)),
+                          Text(
+                            'Settings',
+                            style: TextStyle(
+                              color: context.appColors.textSecondary,
+                              fontSize: 14,
+                            ),
+                          ),
                         ],
                       ),
                     ),
@@ -179,15 +194,13 @@ class _SessionListPanelState extends State<SessionListPanel>
   }
 
   void _saveFilters() {
-    final settings =
-        Provider.of<AppState>(context, listen: false).settings;
+    final settings = Provider.of<AppState>(context, listen: false).settings;
     settings.workersFilterSearch = _workerSearchQuery;
     settings.workersFilterStatus = _activeStatusFilters.toList();
   }
 
   void _saveExpanded() {
-    final settings =
-        Provider.of<AppState>(context, listen: false).settings;
+    final settings = Provider.of<AppState>(context, listen: false).settings;
     settings.workersExpanded = _expandedWorkers.toList();
   }
 
@@ -223,8 +236,13 @@ class _SessionListPanelState extends State<SessionListPanel>
 
         if (configs.isEmpty) {
           return Center(
-            child: Text('No workers configured',
-                style: TextStyle(color: context.appColors.textMuted, fontSize: 14)),
+            child: Text(
+              'No workers configured',
+              style: TextStyle(
+                color: context.appColors.textMuted,
+                fontSize: 14,
+              ),
+            ),
           );
         }
 
@@ -237,8 +255,12 @@ class _SessionListPanelState extends State<SessionListPanel>
         for (final entry in grouped.entries) {
           var sessions = entry.value;
           if (_activeStatusFilters.isNotEmpty) {
-            sessions = sessions.where((s) =>
-                _activeStatusFilters.contains(_normalizeStatus(s.status))).toList();
+            sessions = sessions
+                .where(
+                  (s) =>
+                      _activeStatusFilters.contains(_normalizeStatus(s.status)),
+                )
+                .toList();
           }
           filteredGrouped[entry.key] = sessions;
         }
@@ -254,9 +276,11 @@ class _SessionListPanelState extends State<SessionListPanel>
             return true;
           }
           // Match on any session title
-          if (sessions.any((s) =>
-              (s.title?.toLowerCase().contains(query) ?? false) ||
-              s.shortId.toLowerCase().contains(query))) {
+          if (sessions.any(
+            (s) =>
+                (s.title?.toLowerCase().contains(query) ?? false) ||
+                s.shortId.toLowerCase().contains(query),
+          )) {
             return true;
           }
           // Match on OS
@@ -278,64 +302,85 @@ class _SessionListPanelState extends State<SessionListPanel>
                     height: 30,
                     child: Row(
                       children: [
-                        Expanded(child: TextField(
-                      controller: _workerSearchController,
-                      onChanged: (v) {
-                        setState(() => _workerSearchQuery = v);
-                        _saveFilters();
-                      },
-                      style: TextStyle(
-                        color: context.appColors.textPrimary,
-                        fontSize: 12,
-                      ),
-                      decoration: InputDecoration(
-                        hintText: 'Search workers & sessions...',
-                        hintStyle: TextStyle(
-                          color: context.appColors.textMuted,
-                          fontSize: 12,
-                        ),
-                        prefixIcon: Padding(
-                          padding: const EdgeInsets.only(left: 8, right: 4),
-                          child: Icon(Icons.search_rounded,
-                              color: context.appColors.textMuted, size: 16),
-                        ),
-                        prefixIconConstraints:
-                            const BoxConstraints(maxWidth: 28, maxHeight: 30),
-                        suffixIcon: _workerSearchQuery.isNotEmpty
-                            ? GestureDetector(
-                                onTap: () {
-                                  _workerSearchController.clear();
-                                  setState(() => _workerSearchQuery = '');
-                                  _saveFilters();
-                                },
-                                child: Padding(
-                                  padding: const EdgeInsets.only(right: 6),
-                                  child: Icon(Icons.close_rounded,
-                                      color: context.appColors.textMuted, size: 14),
+                        Expanded(
+                          child: TextField(
+                            controller: _workerSearchController,
+                            onChanged: (v) {
+                              setState(() => _workerSearchQuery = v);
+                              _saveFilters();
+                            },
+                            style: TextStyle(
+                              color: context.appColors.textPrimary,
+                              fontSize: 12,
+                            ),
+                            decoration: InputDecoration(
+                              hintText: 'Search workers & sessions...',
+                              hintStyle: TextStyle(
+                                color: context.appColors.textMuted,
+                                fontSize: 12,
+                              ),
+                              prefixIcon: Padding(
+                                padding: const EdgeInsets.only(
+                                  left: 8,
+                                  right: 4,
                                 ),
-                              )
-                            : null,
-                        suffixIconConstraints:
-                            const BoxConstraints(maxWidth: 24, maxHeight: 30),
-                        filled: true,
-                        fillColor: context.appColors.bgElevated,
-                        contentPadding:
-                            const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
-                        border: OutlineInputBorder(
-                          borderSide: BorderSide.none,
-                          borderRadius: BorderRadius.circular(8),
+                                child: Icon(
+                                  Icons.search_rounded,
+                                  color: context.appColors.textMuted,
+                                  size: 16,
+                                ),
+                              ),
+                              prefixIconConstraints: const BoxConstraints(
+                                maxWidth: 28,
+                                maxHeight: 30,
+                              ),
+                              suffixIcon: _workerSearchQuery.isNotEmpty
+                                  ? GestureDetector(
+                                      onTap: () {
+                                        _workerSearchController.clear();
+                                        setState(() => _workerSearchQuery = '');
+                                        _saveFilters();
+                                      },
+                                      child: Padding(
+                                        padding: const EdgeInsets.only(
+                                          right: 6,
+                                        ),
+                                        child: Icon(
+                                          Icons.close_rounded,
+                                          color: context.appColors.textMuted,
+                                          size: 14,
+                                        ),
+                                      ),
+                                    )
+                                  : null,
+                              suffixIconConstraints: const BoxConstraints(
+                                maxWidth: 24,
+                                maxHeight: 30,
+                              ),
+                              filled: true,
+                              fillColor: context.appColors.bgElevated,
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 0,
+                              ),
+                              border: OutlineInputBorder(
+                                borderSide: BorderSide.none,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderSide: BorderSide.none,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderSide: BorderSide(
+                                  color: context.appColors.accent,
+                                  width: 1,
+                                ),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                            ),
+                          ),
                         ),
-                        enabledBorder: OutlineInputBorder(
-                          borderSide: BorderSide.none,
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderSide:
-                              BorderSide(color: context.appColors.accent, width: 1),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                      ),
-                    )),
                         const SizedBox(width: 6),
                         SizedBox(
                           width: 30,
@@ -353,10 +398,14 @@ class _SessionListPanelState extends State<SessionListPanel>
                                 ? 'Grouping by project (tap to disable)'
                                 : 'Group by project',
                             onPressed: () {
-                              setState(() => _groupByProject = !_groupByProject);
-                              Provider.of<AppState>(context, listen: false)
-                                  .settings
-                                  .workersGroupByProject = _groupByProject;
+                              setState(
+                                () => _groupByProject = !_groupByProject,
+                              );
+                              Provider.of<AppState>(
+                                    context,
+                                    listen: false,
+                                  ).settings.workersGroupByProject =
+                                  _groupByProject;
                             },
                           ),
                         ),
@@ -366,8 +415,11 @@ class _SessionListPanelState extends State<SessionListPanel>
                           height: 30,
                           child: IconButton(
                             padding: EdgeInsets.zero,
-                            icon: Icon(Icons.add_rounded,
-                                color: context.appColors.textSecondary, size: 18),
+                            icon: Icon(
+                              Icons.add_rounded,
+                              color: context.appColors.textSecondary,
+                              size: 18,
+                            ),
                             tooltip: 'Add worker',
                             onPressed: () async {
                               final state = context.read<AppState>();
@@ -399,11 +451,14 @@ class _SessionListPanelState extends State<SessionListPanel>
                                   child: _SessionStatusFilterChip(
                                     label: _statusLabels[status]!,
                                     color: _statusColors[status]!,
-                                    selected:
-                                        _activeStatusFilters.contains(status),
+                                    selected: _activeStatusFilters.contains(
+                                      status,
+                                    ),
                                     onTap: () {
                                       setState(() {
-                                        if (_activeStatusFilters.contains(status)) {
+                                        if (_activeStatusFilters.contains(
+                                          status,
+                                        )) {
                                           _activeStatusFilters.remove(status);
                                         } else {
                                           _activeStatusFilters.add(status);
@@ -421,8 +476,11 @@ class _SessionListPanelState extends State<SessionListPanel>
                             onTap: _clearFilters,
                             child: Padding(
                               padding: const EdgeInsets.only(left: 4),
-                              child: Icon(Icons.filter_alt_off_rounded,
-                                  color: context.appColors.textMuted, size: 16),
+                              child: Icon(
+                                Icons.filter_alt_off_rounded,
+                                color: context.appColors.textMuted,
+                                size: 16,
+                              ),
                             ),
                           ),
                       ],
@@ -437,20 +495,29 @@ class _SessionListPanelState extends State<SessionListPanel>
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(Icons.search_off_rounded,
-                              color: context.appColors.textMuted, size: 32),
+                          Icon(
+                            Icons.search_off_rounded,
+                            color: context.appColors.textMuted,
+                            size: 32,
+                          ),
                           const SizedBox(height: 8),
-                          Text('No matching results',
-                              style: TextStyle(
-                                  color: context.appColors.textSecondary,
-                                  fontSize: 13)),
+                          Text(
+                            'No matching results',
+                            style: TextStyle(
+                              color: context.appColors.textSecondary,
+                              fontSize: 13,
+                            ),
+                          ),
                           const SizedBox(height: 4),
                           GestureDetector(
                             onTap: _clearFilters,
-                            child: Text('Clear filters',
-                                style: TextStyle(
-                                    color: context.appColors.accent,
-                                    fontSize: 12)),
+                            child: Text(
+                              'Clear filters',
+                              style: TextStyle(
+                                color: context.appColors.accent,
+                                fontSize: 12,
+                              ),
+                            ),
                           ),
                         ],
                       ),

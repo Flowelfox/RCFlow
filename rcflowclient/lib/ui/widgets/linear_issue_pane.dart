@@ -46,15 +46,13 @@ class LinearIssuePane extends StatelessWidget {
   Widget _emptyState(BuildContext context, AppState appState) {
     return Column(
       children: [
-        _LinearIssuePaneHeader(
-          paneId: paneId,
-          issue: null,
-          appState: appState,
-        ),
+        _LinearIssuePaneHeader(paneId: paneId, issue: null, appState: appState),
         Expanded(
           child: Center(
-            child: Text('Issue not found',
-                style: TextStyle(color: context.appColors.textMuted)),
+            child: Text(
+              'Issue not found',
+              style: TextStyle(color: context.appColors.textMuted),
+            ),
           ),
         ),
       ],
@@ -87,8 +85,7 @@ class _LinearIssuePaneHeader extends StatelessWidget {
         color: isActive
             ? context.appColors.accent.withAlpha(20)
             : context.appColors.bgSurface,
-        border: Border(
-            bottom: BorderSide(color: context.appColors.divider)),
+        border: Border(bottom: BorderSide(color: context.appColors.divider)),
       ),
       padding: const EdgeInsets.symmetric(horizontal: 8),
       child: Row(
@@ -99,8 +96,11 @@ class _LinearIssuePaneHeader extends StatelessWidget {
               height: 26,
               child: IconButton(
                 padding: EdgeInsets.zero,
-                icon: Icon(Icons.arrow_back_rounded,
-                    color: context.appColors.textMuted, size: 14),
+                icon: Icon(
+                  Icons.arrow_back_rounded,
+                  color: context.appColors.textMuted,
+                  size: 14,
+                ),
                 tooltip: 'Back',
                 onPressed: () => appState.goBack(paneId),
               ),
@@ -119,13 +119,14 @@ class _LinearIssuePaneHeader extends StatelessWidget {
           const SizedBox(width: 6),
           if (issue != null) ...[
             Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
               decoration: BoxDecoration(
                 color: context.appColors.bgElevated,
                 borderRadius: BorderRadius.circular(4),
                 border: Border.all(
-                    color: context.appColors.divider, width: 0.5),
+                  color: context.appColors.divider,
+                  width: 0.5,
+                ),
               ),
               child: Text(
                 issue!.identifier,
@@ -157,8 +158,11 @@ class _LinearIssuePaneHeader extends StatelessWidget {
               height: 26,
               child: IconButton(
                 padding: EdgeInsets.zero,
-                icon: Icon(Icons.close_rounded,
-                    color: context.appColors.textMuted, size: 14),
+                icon: Icon(
+                  Icons.close_rounded,
+                  color: context.appColors.textMuted,
+                  size: 14,
+                ),
                 tooltip: 'Close',
                 onPressed: () => appState.closePane(paneId),
               ),
@@ -177,10 +181,7 @@ class _LinearIssueContent extends StatefulWidget {
   final LinearIssueInfo issue;
   final AppState appState;
 
-  const _LinearIssueContent({
-    required this.issue,
-    required this.appState,
-  });
+  const _LinearIssueContent({required this.issue, required this.appState});
 
   @override
   State<_LinearIssueContent> createState() => _LinearIssueContentState();
@@ -257,7 +258,9 @@ class _LinearIssueContentState extends State<_LinearIssueContent> {
                   width: 8,
                   height: 8,
                   decoration: BoxDecoration(
-                      color: stateColor, shape: BoxShape.circle),
+                    color: stateColor,
+                    shape: BoxShape.circle,
+                  ),
                 ),
                 label: issue.stateName,
                 color: stateColor,
@@ -265,16 +268,22 @@ class _LinearIssueContentState extends State<_LinearIssueContent> {
               ),
               if (issue.assigneeName != null)
                 _MetadataChip(
-                  icon: Icon(Icons.person_outline,
-                      color: context.appColors.textMuted, size: 14),
+                  icon: Icon(
+                    Icons.person_outline,
+                    color: context.appColors.textMuted,
+                    size: 14,
+                  ),
                   label: issue.assigneeName!,
                   color: context.appColors.textMuted,
                   context: context,
                 ),
               if (issue.teamName != null)
                 _MetadataChip(
-                  icon: Icon(Icons.group_outlined,
-                      color: context.appColors.textMuted, size: 14),
+                  icon: Icon(
+                    Icons.group_outlined,
+                    color: context.appColors.textMuted,
+                    size: 14,
+                  ),
                   label: issue.teamName!,
                   color: context.appColors.textMuted,
                   context: context,
@@ -288,22 +297,29 @@ class _LinearIssueContentState extends State<_LinearIssueContent> {
               spacing: 6,
               runSpacing: 6,
               children: issue.labels
-                  .map((label) => Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 3),
-                        decoration: BoxDecoration(
-                          color: context.appColors.bgElevated,
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(
-                              color: context.appColors.divider, width: 0.5),
+                  .map(
+                    (label) => Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 3,
+                      ),
+                      decoration: BoxDecoration(
+                        color: context.appColors.bgElevated,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: context.appColors.divider,
+                          width: 0.5,
                         ),
-                        child: Text(
-                          label,
-                          style: TextStyle(
-                              color: context.appColors.textSecondary,
-                              fontSize: 11),
+                      ),
+                      child: Text(
+                        label,
+                        style: TextStyle(
+                          color: context.appColors.textSecondary,
+                          fontSize: 11,
                         ),
-                      ))
+                      ),
+                    ),
+                  )
                   .toList(),
             ),
           ],
@@ -314,18 +330,22 @@ class _LinearIssueContentState extends State<_LinearIssueContent> {
 
           // Description
           if (issue.description != null && issue.description!.isNotEmpty) ...[
-            Text('Description',
-                style: TextStyle(
-                    color: context.appColors.textSecondary,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600)),
+            Text(
+              'Description',
+              style: TextStyle(
+                color: context.appColors.textSecondary,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
             const SizedBox(height: 8),
             SelectableText(
               issue.description!,
               style: TextStyle(
-                  color: context.appColors.textPrimary,
-                  fontSize: 13,
-                  height: 1.5),
+                color: context.appColors.textPrimary,
+                fontSize: 13,
+                height: 1.5,
+              ),
             ),
             const SizedBox(height: 20),
             const Divider(height: 1),
@@ -334,13 +354,22 @@ class _LinearIssueContentState extends State<_LinearIssueContent> {
 
           // Timestamps
           _TimestampRow(
-              label: 'Created', time: issue.createdAt, context: context),
+            label: 'Created',
+            time: issue.createdAt,
+            context: context,
+          ),
           const SizedBox(height: 4),
           _TimestampRow(
-              label: 'Updated', time: issue.updatedAt, context: context),
+            label: 'Updated',
+            time: issue.updatedAt,
+            context: context,
+          ),
           const SizedBox(height: 4),
           _TimestampRow(
-              label: 'Synced', time: issue.syncedAt, context: context),
+            label: 'Synced',
+            time: issue.syncedAt,
+            context: context,
+          ),
 
           const SizedBox(height: 24),
 
@@ -349,25 +378,35 @@ class _LinearIssueContentState extends State<_LinearIssueContent> {
             children: [
               OutlinedButton.icon(
                 onPressed: () => _copyUrl(context),
-                icon: Icon(Icons.copy_outlined,
-                    size: 16, color: context.appColors.textSecondary),
-                label: Text('Copy URL',
-                    style: TextStyle(
-                        color: context.appColors.textSecondary,
-                        fontSize: 13)),
+                icon: Icon(
+                  Icons.copy_outlined,
+                  size: 16,
+                  color: context.appColors.textSecondary,
+                ),
+                label: Text(
+                  'Copy URL',
+                  style: TextStyle(
+                    color: context.appColors.textSecondary,
+                    fontSize: 13,
+                  ),
+                ),
                 style: OutlinedButton.styleFrom(
                   side: BorderSide(color: context.appColors.divider),
                   shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8)),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
                   padding: const EdgeInsets.symmetric(
-                      horizontal: 12, vertical: 8),
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
                 ),
               ),
               const SizedBox(width: 8),
               if (issue.taskId == null)
                 OutlinedButton.icon(
-                  onPressed:
-                      _creatingTask ? null : () => _createTaskFromIssue(context),
+                  onPressed: _creatingTask
+                      ? null
+                      : () => _createTaskFromIssue(context),
                   icon: _creatingTask
                       ? SizedBox(
                           width: 14,
@@ -377,20 +416,29 @@ class _LinearIssueContentState extends State<_LinearIssueContent> {
                             color: context.appColors.accent,
                           ),
                         )
-                      : Icon(Icons.add_task,
-                          size: 16, color: context.appColors.accent),
+                      : Icon(
+                          Icons.add_task,
+                          size: 16,
+                          color: context.appColors.accent,
+                        ),
                   label: Text(
                     _creatingTask ? 'Creating…' : 'Create Task',
                     style: TextStyle(
-                        color: context.appColors.accent, fontSize: 13),
+                      color: context.appColors.accent,
+                      fontSize: 13,
+                    ),
                   ),
                   style: OutlinedButton.styleFrom(
                     side: BorderSide(
-                        color: context.appColors.accent.withAlpha(120)),
+                      color: context.appColors.accent.withAlpha(120),
+                    ),
                     shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8)),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 8),
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
                   ),
                 )
               else
@@ -398,18 +446,27 @@ class _LinearIssueContentState extends State<_LinearIssueContent> {
                   message: 'Unlink from task',
                   child: OutlinedButton.icon(
                     onPressed: () => _unlinkTask(context),
-                    icon: Icon(Icons.link_off,
-                        size: 16, color: context.appColors.textMuted),
-                    label: Text('Unlink Task',
-                        style: TextStyle(
-                            color: context.appColors.textMuted,
-                            fontSize: 13)),
+                    icon: Icon(
+                      Icons.link_off,
+                      size: 16,
+                      color: context.appColors.textMuted,
+                    ),
+                    label: Text(
+                      'Unlink Task',
+                      style: TextStyle(
+                        color: context.appColors.textMuted,
+                        fontSize: 13,
+                      ),
+                    ),
                     style: OutlinedButton.styleFrom(
                       side: BorderSide(color: context.appColors.divider),
                       shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8)),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 8),
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
                     ),
                   ),
                 ),
@@ -424,7 +481,9 @@ class _LinearIssueContentState extends State<_LinearIssueContent> {
     Clipboard.setData(ClipboardData(text: issue.url));
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-          content: Text('URL copied'), duration: Duration(seconds: 2)),
+        content: Text('URL copied'),
+        duration: Duration(seconds: 2),
+      ),
     );
   }
 
@@ -433,7 +492,9 @@ class _LinearIssueContentState extends State<_LinearIssueContent> {
     if (worker == null || !worker.isConnected) {
       if (context.mounted) {
         appState.addSystemMessage(
-            'No connected worker to create task on.', isError: true);
+          'No connected worker to create task on.',
+          isError: true,
+        );
       }
       return;
     }
@@ -446,7 +507,9 @@ class _LinearIssueContentState extends State<_LinearIssueContent> {
     } catch (e) {
       if (context.mounted) {
         appState.addSystemMessage(
-            'Failed to create task from issue: $e', isError: true);
+          'Failed to create task from issue: $e',
+          isError: true,
+        );
       }
     } finally {
       if (mounted) setState(() => _creatingTask = false);
@@ -497,9 +560,14 @@ class _MetadataChip extends StatelessWidget {
         children: [
           icon,
           const SizedBox(width: 5),
-          Text(label,
-              style: TextStyle(
-                  color: color, fontSize: 12, fontWeight: FontWeight.w500)),
+          Text(
+            label,
+            style: TextStyle(
+              color: color,
+              fontSize: 12,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
         ],
       ),
     );
@@ -529,14 +597,15 @@ class _TimestampRow extends StatelessWidget {
           width: 60,
           child: Text(
             label,
-            style: TextStyle(
-                color: context.appColors.textMuted, fontSize: 11),
+            style: TextStyle(color: context.appColors.textMuted, fontSize: 11),
           ),
         ),
         Text(
           formatted,
           style: TextStyle(
-              color: context.appColors.textSecondary, fontSize: 11),
+            color: context.appColors.textSecondary,
+            fontSize: 11,
+          ),
         ),
       ],
     );

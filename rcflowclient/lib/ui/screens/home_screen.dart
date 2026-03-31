@@ -86,8 +86,10 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
         builder: (context, constraints) {
           final isWide = constraints.maxWidth > 700;
           final totalWidth = constraints.maxWidth;
-          final sidebarWidth = (_sidebarFraction * totalWidth)
-              .clamp(_minPixels, totalWidth * _maxFraction);
+          final sidebarWidth = (_sidebarFraction * totalWidth).clamp(
+            _minPixels,
+            totalWidth * _maxFraction,
+          );
 
           if (isWide) {
             return Scaffold(
@@ -110,8 +112,9 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
                                 onDrag: (dx) {
                                   setState(() {
                                     final newWidth = (sidebarWidth + dx).clamp(
-                                        _minPixels,
-                                        totalWidth * _maxFraction);
+                                      _minPixels,
+                                      totalWidth * _maxFraction,
+                                    );
                                     _sidebarFraction = newWidth / totalWidth;
                                   });
                                 },
@@ -167,10 +170,7 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
     );
 
     if (Platform.isMacOS) {
-      return PlatformMenuBar(
-        menus: _buildMacOSMenus(context),
-        child: desktop,
-      );
+      return PlatformMenuBar(menus: _buildMacOSMenus(context), child: desktop);
     }
     return desktop;
   }
@@ -188,15 +188,18 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
           PlatformMenuItemGroup(
             members: [
               const PlatformProvidedMenuItem(
-                  type: PlatformProvidedMenuItemType.about),
+                type: PlatformProvidedMenuItemType.about,
+              ),
             ],
           ),
           PlatformMenuItemGroup(
             members: [
               PlatformMenuItem(
                 label: 'Settings…',
-                shortcut: const SingleActivator(LogicalKeyboardKey.comma,
-                    meta: true),
+                shortcut: const SingleActivator(
+                  LogicalKeyboardKey.comma,
+                  meta: true,
+                ),
                 onSelected: () => showSettingsMenu(context),
               ),
             ],
@@ -204,25 +207,31 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
           PlatformMenuItemGroup(
             members: [
               const PlatformProvidedMenuItem(
-                  type: PlatformProvidedMenuItemType.servicesSubmenu),
+                type: PlatformProvidedMenuItemType.servicesSubmenu,
+              ),
             ],
           ),
           PlatformMenuItemGroup(
             members: [
               const PlatformProvidedMenuItem(
-                  type: PlatformProvidedMenuItemType.hide),
+                type: PlatformProvidedMenuItemType.hide,
+              ),
               const PlatformProvidedMenuItem(
-                  type: PlatformProvidedMenuItemType.hideOtherApplications),
+                type: PlatformProvidedMenuItemType.hideOtherApplications,
+              ),
               const PlatformProvidedMenuItem(
-                  type: PlatformProvidedMenuItemType.showAllApplications),
+                type: PlatformProvidedMenuItemType.showAllApplications,
+              ),
             ],
           ),
           if (PlatformProvidedMenuItem.hasMenu(
-              PlatformProvidedMenuItemType.quit))
+            PlatformProvidedMenuItemType.quit,
+          ))
             PlatformMenuItemGroup(
               members: [
                 const PlatformProvidedMenuItem(
-                    type: PlatformProvidedMenuItemType.quit),
+                  type: PlatformProvidedMenuItemType.quit,
+                ),
               ],
             ),
         ],
@@ -235,8 +244,10 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
             members: [
               PlatformMenuItem(
                 label: 'New Session',
-                shortcut: const SingleActivator(LogicalKeyboardKey.keyN,
-                    meta: true),
+                shortcut: const SingleActivator(
+                  LogicalKeyboardKey.keyN,
+                  meta: true,
+                ),
                 onSelected: () =>
                     _newSessionFromMenu(context, context.read<AppState>()),
               ),
@@ -246,25 +257,34 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
             members: [
               PlatformMenuItem(
                 label: 'Split Right',
-                shortcut: const SingleActivator(LogicalKeyboardKey.backslash,
-                    meta: true),
+                shortcut: const SingleActivator(
+                  LogicalKeyboardKey.backslash,
+                  meta: true,
+                ),
                 onSelected: () {
                   final appState = context.read<AppState>();
                   if (!appState.hasNoPanes) {
                     appState.splitPane(
-                        appState.activePaneId, SplitAxis.horizontal);
+                      appState.activePaneId,
+                      SplitAxis.horizontal,
+                    );
                   }
                 },
               ),
               PlatformMenuItem(
                 label: 'Split Down',
-                shortcut: const SingleActivator(LogicalKeyboardKey.backslash,
-                    meta: true, shift: true),
+                shortcut: const SingleActivator(
+                  LogicalKeyboardKey.backslash,
+                  meta: true,
+                  shift: true,
+                ),
                 onSelected: () {
                   final appState = context.read<AppState>();
                   if (!appState.hasNoPanes) {
                     appState.splitPane(
-                        appState.activePaneId, SplitAxis.vertical);
+                      appState.activePaneId,
+                      SplitAxis.vertical,
+                    );
                   }
                 },
               ),
@@ -274,8 +294,10 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
             members: [
               PlatformMenuItem(
                 label: 'Close Pane',
-                shortcut: const SingleActivator(LogicalKeyboardKey.keyW,
-                    meta: true),
+                shortcut: const SingleActivator(
+                  LogicalKeyboardKey.keyW,
+                  meta: true,
+                ),
                 onSelected: () {
                   final appState = context.read<AppState>();
                   if (!appState.hasNoPanes) {
@@ -285,8 +307,11 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
               ),
               PlatformMenuItem(
                 label: 'Reopen Closed Pane',
-                shortcut: const SingleActivator(LogicalKeyboardKey.keyT,
-                    meta: true, shift: true),
+                shortcut: const SingleActivator(
+                  LogicalKeyboardKey.keyT,
+                  meta: true,
+                  shift: true,
+                ),
                 onSelected: () =>
                     context.read<AppState>().reopenLastClosedPane(),
               ),
@@ -296,8 +321,10 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
             members: [
               PlatformMenuItem(
                 label: 'Refresh Sessions',
-                shortcut: const SingleActivator(LogicalKeyboardKey.keyR,
-                    meta: true),
+                shortcut: const SingleActivator(
+                  LogicalKeyboardKey.keyR,
+                  meta: true,
+                ),
                 onSelected: () => context.read<AppState>().refreshSessions(),
               ),
             ],
@@ -312,18 +339,22 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
             members: [
               PlatformMenuItem(
                 label: 'Toggle Sidebar',
-                shortcut: const SingleActivator(LogicalKeyboardKey.keyB,
-                    meta: true),
+                shortcut: const SingleActivator(
+                  LogicalKeyboardKey.keyB,
+                  meta: true,
+                ),
                 onSelected: () => context.read<AppState>().toggleSidebar(),
               ),
             ],
           ),
           if (PlatformProvidedMenuItem.hasMenu(
-              PlatformProvidedMenuItemType.toggleFullScreen))
+            PlatformProvidedMenuItemType.toggleFullScreen,
+          ))
             PlatformMenuItemGroup(
               members: [
                 const PlatformProvidedMenuItem(
-                    type: PlatformProvidedMenuItemType.toggleFullScreen),
+                  type: PlatformProvidedMenuItemType.toggleFullScreen,
+                ),
               ],
             ),
         ],
@@ -335,15 +366,18 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
           PlatformMenuItemGroup(
             members: [
               const PlatformProvidedMenuItem(
-                  type: PlatformProvidedMenuItemType.minimizeWindow),
+                type: PlatformProvidedMenuItemType.minimizeWindow,
+              ),
               const PlatformProvidedMenuItem(
-                  type: PlatformProvidedMenuItemType.zoomWindow),
+                type: PlatformProvidedMenuItemType.zoomWindow,
+              ),
             ],
           ),
           PlatformMenuItemGroup(
             members: [
               const PlatformProvidedMenuItem(
-                  type: PlatformProvidedMenuItemType.arrangeWindowsInFront),
+                type: PlatformProvidedMenuItemType.arrangeWindowsInFront,
+              ),
             ],
           ),
         ],
@@ -380,8 +414,10 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
       builder: (context, constraints) {
         final isWide = constraints.maxWidth > 700;
         final totalWidth = constraints.maxWidth;
-        final sidebarWidth = (_sidebarFraction * totalWidth)
-            .clamp(_minPixels, totalWidth * _maxFraction);
+        final sidebarWidth = (_sidebarFraction * totalWidth).clamp(
+          _minPixels,
+          totalWidth * _maxFraction,
+        );
 
         return Scaffold(
           appBar: ConnectionBar(
@@ -399,8 +435,10 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
                     _SidebarDivider(
                       onDrag: (dx) {
                         setState(() {
-                          final newWidth = (sidebarWidth + dx)
-                              .clamp(_minPixels, totalWidth * _maxFraction);
+                          final newWidth = (sidebarWidth + dx).clamp(
+                            _minPixels,
+                            totalWidth * _maxFraction,
+                          );
                           _sidebarFraction = newWidth / totalWidth;
                         });
                       },
@@ -469,10 +507,7 @@ class _WelcomePane extends StatelessWidget {
           const SizedBox(height: 8),
           Text(
             'Start a new chat or select a session from the sidebar',
-            style: TextStyle(
-              color: context.appColors.textMuted,
-              fontSize: 14,
-            ),
+            style: TextStyle(color: context.appColors.textMuted, fontSize: 14),
           ),
           const SizedBox(height: 24),
           FilledButton.icon(

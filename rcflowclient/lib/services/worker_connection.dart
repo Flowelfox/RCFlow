@@ -9,7 +9,12 @@ import 'settings_service.dart';
 import 'terminal_service.dart';
 import 'websocket_service.dart';
 
-enum WorkerConnectionStatus { disconnected, connecting, connected, reconnecting }
+enum WorkerConnectionStatus {
+  disconnected,
+  connecting,
+  connected,
+  reconnecting,
+}
 
 class WorkerConnection extends ChangeNotifier {
   WorkerConfig config;
@@ -64,6 +69,7 @@ class WorkerConnection extends ChangeNotifier {
   void Function(Map<String, dynamic> msg, String workerId)? onInputMessage;
   void Function(Map<String, dynamic> msg, String workerId)? onOutputMessage;
   VoidCallback? onSessionsChanged;
+
   /// Fires when a session's mainProjectPath transitions from null to a real path,
   /// or changes to a different path. Used to sync the project chip in PaneState.
   void Function(String sessionId, String projectPath)? onProjectPathAttached;
@@ -122,9 +128,12 @@ class WorkerConnection extends ChangeNotifier {
       _inputSub = ws.inputMessages.listen(_handleInputMessage);
       _outputSub = ws.outputMessages.listen(_handleOutputMessage);
 
-      await ws.connect(config.hostWithPort, config.apiKey,
-          secure: config.useSSL,
-          allowSelfSigned: config.allowSelfSigned);
+      await ws.connect(
+        config.hostWithPort,
+        config.apiKey,
+        secure: config.useSSL,
+        allowSelfSigned: config.allowSelfSigned,
+      );
 
       _status = WorkerConnectionStatus.connected;
       notifyListeners();
@@ -219,7 +228,9 @@ class WorkerConnection extends ChangeNotifier {
     }
 
     // task_list / task_update / task_deleted: forward to AppState with worker info
-    if (type == 'task_list' || type == 'task_update' || type == 'task_deleted') {
+    if (type == 'task_list' ||
+        type == 'task_update' ||
+        type == 'task_deleted') {
       onOutputMessage?.call(msg, config.id);
       return;
     }
@@ -272,8 +283,8 @@ class WorkerConnection extends ChangeNotifier {
     final outputTokens = (msg['output_tokens'] as num?)?.toInt();
     final cacheCreationInputTokens =
         (msg['cache_creation_input_tokens'] as num?)?.toInt();
-    final cacheReadInputTokens =
-        (msg['cache_read_input_tokens'] as num?)?.toInt();
+    final cacheReadInputTokens = (msg['cache_read_input_tokens'] as num?)
+        ?.toInt();
     final toolInputTokens = (msg['tool_input_tokens'] as num?)?.toInt();
     final toolOutputTokens = (msg['tool_output_tokens'] as num?)?.toInt();
     final toolCostUsd = (msg['tool_cost_usd'] as num?)?.toDouble();
@@ -281,14 +292,15 @@ class WorkerConnection extends ChangeNotifier {
     // Parse worktree context
     final wtJson = msg['worktree'] as Map<String, dynamic>?;
     final worktreeProvided = msg.containsKey('worktree');
-    final worktreeInfo =
-        wtJson != null ? WorktreeInfo.fromJson(wtJson) : null;
+    final worktreeInfo = wtJson != null ? WorktreeInfo.fromJson(wtJson) : null;
 
     // Parse project and worktree selection (always present in server broadcasts,
     // but use containsKey sentinels so a missing field never clears existing data).
     final mainProjectPathProvided = msg.containsKey('main_project_path');
     final newMainProjectPath = msg['main_project_path'] as String?;
-    final selectedWorktreePathProvided = msg.containsKey('selected_worktree_path');
+    final selectedWorktreePathProvided = msg.containsKey(
+      'selected_worktree_path',
+    );
     final newSelectedWorktreePath = msg['selected_worktree_path'] as String?;
 
     // Project name error — non-null when backend rejected the last project_name.
@@ -377,7 +389,9 @@ class WorkerConnection extends ChangeNotifier {
   void _cacheSessions() {
     try {
       _settings.setCachedSessions(
-          config.id, jsonEncode(sessions.map((s) => s.toJson()).toList()));
+        config.id,
+        jsonEncode(sessions.map((s) => s.toJson()).toList()),
+      );
     } catch (_) {}
   }
 
@@ -387,20 +401,27 @@ class WorkerConnection extends ChangeNotifier {
     try {
       final list = jsonDecode(raw) as List<dynamic>;
       sessions = list
-          .map((s) => SessionInfo.fromJson(s as Map<String, dynamic>,
-              workerId: config.id))
+          .map(
+            (s) => SessionInfo.fromJson(
+              s as Map<String, dynamic>,
+              workerId: config.id,
+            ),
+          )
           .toList();
     } catch (_) {}
   }
 
   void _fetchServerInfo() {
-    ws.fetchServerInfo().then((info) {
-      serverOs = info['os'] as String?;
-      supportsAttachments = (info['supports_attachments'] as bool?) ?? true;
-      final caps = info['attachment_capabilities'] as Map<String, dynamic>?;
-      supportsImageAttachments = (caps?['images'] as bool?) ?? true;
-      notifyListeners();
-    }).catchError((_) {});
+    ws
+        .fetchServerInfo()
+        .then((info) {
+          serverOs = info['os'] as String?;
+          supportsAttachments = (info['supports_attachments'] as bool?) ?? true;
+          final caps = info['attachment_capabilities'] as Map<String, dynamic>?;
+          supportsImageAttachments = (caps?['images'] as bool?) ?? true;
+          notifyListeners();
+        })
+        .catchError((_) {});
   }
 
   /// Fetch time-series telemetry buckets from the backend.
@@ -429,20 +450,27 @@ class WorkerConnection extends ChangeNotifier {
   }
 
   void _fetchTokenLimits() {
-    ws.fetchConfig().then((configOptions) {
-      for (final opt in configOptions) {
-        final key = opt['key'] as String?;
-        final value = opt['value'];
-        if (key == 'SESSION_INPUT_TOKEN_LIMIT') {
-          inputTokenLimit = (value is num) ? value.toInt() : int.tryParse('$value') ?? 0;
-        } else if (key == 'SESSION_OUTPUT_TOKEN_LIMIT') {
-          outputTokenLimit = (value is num) ? value.toInt() : int.tryParse('$value') ?? 0;
-        } else if (key == 'LINEAR_API_KEY') {
-          hasLinear = value is String && value.isNotEmpty;
-        }
-      }
-      notifyListeners();
-    }).catchError((_) {});
+    ws
+        .fetchConfig()
+        .then((configOptions) {
+          for (final opt in configOptions) {
+            final key = opt['key'] as String?;
+            final value = opt['value'];
+            if (key == 'SESSION_INPUT_TOKEN_LIMIT') {
+              inputTokenLimit = (value is num)
+                  ? value.toInt()
+                  : int.tryParse('$value') ?? 0;
+            } else if (key == 'SESSION_OUTPUT_TOKEN_LIMIT') {
+              outputTokenLimit = (value is num)
+                  ? value.toInt()
+                  : int.tryParse('$value') ?? 0;
+            } else if (key == 'LINEAR_API_KEY') {
+              hasLinear = value is String && value.isNotEmpty;
+            }
+          }
+          notifyListeners();
+        })
+        .catchError((_) {});
   }
 
   // --- Reconnection ---
@@ -484,9 +512,12 @@ class WorkerConnection extends ChangeNotifier {
         _inputSub = ws.inputMessages.listen(_handleInputMessage);
         _outputSub = ws.outputMessages.listen(_handleOutputMessage);
 
-        await ws.connect(config.hostWithPort, config.apiKey,
+        await ws.connect(
+          config.hostWithPort,
+          config.apiKey,
           secure: config.useSSL,
-          allowSelfSigned: config.allowSelfSigned);
+          allowSelfSigned: config.allowSelfSigned,
+        );
         _status = WorkerConnectionStatus.connected;
         _retryCount = 0;
         notifyListeners();

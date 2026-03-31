@@ -80,8 +80,7 @@ class ToolBlock extends StatelessWidget {
                   : null,
               child: Container(
                 color: Colors.transparent,
-                padding:
-                    EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                padding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 child: Row(
                   children: [
                     if (hasExpandableContent) ...[
@@ -97,13 +96,13 @@ class ToolBlock extends StatelessWidget {
                     Icon(
                       finished
                           ? (isError
-                              ? Icons.error_outline_rounded
-                              : Icons.check_circle_outline_rounded)
+                                ? Icons.error_outline_rounded
+                                : Icons.check_circle_outline_rounded)
                           : Icons.sync_rounded,
                       color: finished
                           ? (isError
-                              ? context.appColors.errorText
-                              : context.appColors.successText)
+                                ? context.appColors.errorText
+                                : context.appColors.successText)
                           : context.appColors.toolAccent,
                       size: 14,
                     ),

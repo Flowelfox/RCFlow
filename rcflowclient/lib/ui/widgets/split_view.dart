@@ -38,8 +38,9 @@ class _SplitBranchView extends StatelessWidget {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final totalSize =
-            isHorizontal ? constraints.maxWidth : constraints.maxHeight;
+        final totalSize = isHorizontal
+            ? constraints.maxWidth
+            : constraints.maxHeight;
         // Account for divider width (6px)
         const dividerSize = 6.0;
         final available = totalSize - dividerSize;
@@ -55,10 +56,8 @@ class _SplitBranchView extends StatelessWidget {
           ResizableDivider(
             axis: branch.axis,
             totalSize: totalSize,
-            onDrag: (delta) => appState.updateSplitRatio(
-              branch,
-              branch.ratio + delta,
-            ),
+            onDrag: (delta) =>
+                appState.updateSplitRatio(branch, branch.ratio + delta),
           ),
           SizedBox(
             width: isHorizontal ? secondSize : null,

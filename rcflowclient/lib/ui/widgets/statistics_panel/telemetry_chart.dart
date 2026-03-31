@@ -136,10 +136,8 @@ class TelemetryChart extends StatelessWidget {
         gridData: FlGridData(
           show: true,
           drawVerticalLine: false,
-          getDrawingHorizontalLine: (v) => FlLine(
-            color: context.appColors.divider,
-            strokeWidth: 0.5,
-          ),
+          getDrawingHorizontalLine: (v) =>
+              FlLine(color: context.appColors.divider, strokeWidth: 0.5),
         ),
         borderData: FlBorderData(show: false),
         titlesData: FlTitlesData(
@@ -159,7 +157,9 @@ class TelemetryChart extends StatelessWidget {
                   return Text(
                     label,
                     style: TextStyle(
-                        color: context.appColors.textMuted, fontSize: 9),
+                      color: context.appColors.textMuted,
+                      fontSize: 9,
+                    ),
                   );
                 }
                 return const SizedBox.shrink();
@@ -179,7 +179,9 @@ class TelemetryChart extends StatelessWidget {
                     child: Text(
                       fmtBucket(series[idx].bucket),
                       style: TextStyle(
-                          color: context.appColors.textMuted, fontSize: 8),
+                        color: context.appColors.textMuted,
+                        fontSize: 8,
+                      ),
                     ),
                   );
                 }
@@ -214,9 +216,10 @@ class TelemetryChart extends StatelessWidget {
               return LineTooltipItem(
                 val,
                 TextStyle(
-                    color: context.appColors.textPrimary,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600),
+                  color: context.appColors.textPrimary,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                ),
               );
             }).toList(),
           ),

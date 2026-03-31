@@ -21,9 +21,18 @@ class NotificationToast extends StatelessWidget {
 
     final (Color accentColor, IconData icon) = switch (notification.level) {
       NotificationLevel.info => (colors.accent, Icons.info_outline_rounded),
-      NotificationLevel.warning => (colors.toolAccent, Icons.warning_amber_rounded),
-      NotificationLevel.error => (colors.errorText, Icons.error_outline_rounded),
-      NotificationLevel.success => (colors.successText, Icons.check_circle_outline_rounded),
+      NotificationLevel.warning => (
+        colors.toolAccent,
+        Icons.warning_amber_rounded,
+      ),
+      NotificationLevel.error => (
+        colors.errorText,
+        Icons.error_outline_rounded,
+      ),
+      NotificationLevel.success => (
+        colors.successText,
+        Icons.check_circle_outline_rounded,
+      ),
     };
 
     final bgColor = switch (notification.level) {
@@ -41,9 +50,7 @@ class NotificationToast extends StatelessWidget {
           decoration: BoxDecoration(
             color: bgColor,
             borderRadius: BorderRadius.circular(compact ? 8 : 10),
-            border: Border(
-              left: BorderSide(color: accentColor, width: 3),
-            ),
+            border: Border(left: BorderSide(color: accentColor, width: 3)),
             boxShadow: compact
                 ? null
                 : [
@@ -72,7 +79,11 @@ class NotificationToast extends StatelessWidget {
                 children: [
                   Padding(
                     padding: const EdgeInsets.only(top: 1),
-                    child: Icon(icon, color: accentColor, size: compact ? 14 : 18),
+                    child: Icon(
+                      icon,
+                      color: accentColor,
+                      size: compact ? 14 : 18,
+                    ),
                   ),
                   SizedBox(width: compact ? 6 : 10),
                   Expanded(

@@ -23,9 +23,9 @@ class PaneHeader extends StatelessWidget {
     String title;
     if (sessionId != null) {
       final session = appState.sessions.cast().firstWhere(
-            (s) => s?.sessionId == sessionId,
-            orElse: () => null,
-          );
+        (s) => s?.sessionId == sessionId,
+        orElse: () => null,
+      );
       title = session?.title ?? _shortId(sessionId);
     } else if (pane.readyForNewChat) {
       title = 'New Chat';
@@ -36,7 +36,9 @@ class PaneHeader extends StatelessWidget {
     return Container(
       height: 32,
       decoration: BoxDecoration(
-        color: isActive ? context.appColors.accent.withAlpha(20) : context.appColors.bgSurface,
+        color: isActive
+            ? context.appColors.accent.withAlpha(20)
+            : context.appColors.bgSurface,
         border: Border(bottom: BorderSide(color: context.appColors.divider)),
       ),
       padding: EdgeInsets.symmetric(horizontal: 8),
@@ -49,7 +51,10 @@ class PaneHeader extends StatelessWidget {
               child: IconButton(
                 padding: EdgeInsets.zero,
                 iconSize: 14,
-                icon: Icon(Icons.arrow_back_rounded, color: context.appColors.textMuted),
+                icon: Icon(
+                  Icons.arrow_back_rounded,
+                  color: context.appColors.textMuted,
+                ),
                 tooltip: 'Back',
                 onPressed: () => appState.goBack(pane.paneId),
               ),
@@ -68,7 +73,9 @@ class PaneHeader extends StatelessWidget {
             child: Text(
               title,
               style: TextStyle(
-                color: isActive ? context.appColors.textPrimary : context.appColors.textSecondary,
+                color: isActive
+                    ? context.appColors.textPrimary
+                    : context.appColors.textSecondary,
                 fontSize: 12,
                 fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
               ),
@@ -98,7 +105,10 @@ class PaneHeader extends StatelessWidget {
             child: IconButton(
               padding: EdgeInsets.zero,
               iconSize: 14,
-              icon: Icon(Icons.close_rounded, color: context.appColors.textMuted),
+              icon: Icon(
+                Icons.close_rounded,
+                color: context.appColors.textMuted,
+              ),
               tooltip: 'Close pane',
               onPressed: () => appState.closePane(pane.paneId),
             ),
@@ -113,8 +123,9 @@ class PaneHeader extends StatelessWidget {
 
   Widget _buildTodoBadge(BuildContext context, PaneState pane) {
     final todos = pane.todos;
-    final completed =
-        todos.where((t) => t.status == TodoStatus.completed).length;
+    final completed = todos
+        .where((t) => t.status == TodoStatus.completed)
+        .length;
     final total = todos.length;
 
     return Padding(
@@ -149,11 +160,15 @@ class PaneHeader extends StatelessWidget {
     );
   }
 
-  Widget _buildTokenBadge(BuildContext context, AppState appState, String sessionId) {
+  Widget _buildTokenBadge(
+    BuildContext context,
+    AppState appState,
+    String sessionId,
+  ) {
     final session = appState.sessions.cast<SessionInfo?>().firstWhere(
-          (s) => s?.sessionId == sessionId,
-          orElse: () => null,
-        );
+      (s) => s?.sessionId == sessionId,
+      orElse: () => null,
+    );
     if (session == null) return const SizedBox.shrink();
 
     final totalIn = session.totalInputTokens;
@@ -180,9 +195,14 @@ class PaneHeader extends StatelessWidget {
       'Input: ${_formatTokensLong(totalIn)}${inLimit > 0 ? ' / ${_formatTokensLong(inLimit)}' : ''}',
       'Output: ${_formatTokensLong(totalOut)}${outLimit > 0 ? ' / ${_formatTokensLong(outLimit)}' : ''}',
     ];
-    if (session.cacheReadInputTokens > 0 || session.cacheCreationInputTokens > 0) {
-      tooltipLines.add('Cache read: ${_formatTokensLong(session.cacheReadInputTokens)}');
-      tooltipLines.add('Cache write: ${_formatTokensLong(session.cacheCreationInputTokens)}');
+    if (session.cacheReadInputTokens > 0 ||
+        session.cacheCreationInputTokens > 0) {
+      tooltipLines.add(
+        'Cache read: ${_formatTokensLong(session.cacheReadInputTokens)}',
+      );
+      tooltipLines.add(
+        'Cache write: ${_formatTokensLong(session.cacheCreationInputTokens)}',
+      );
     }
 
     return Tooltip(
@@ -215,7 +235,12 @@ class PaneHeader extends StatelessWidget {
     );
   }
 
-  static double _maxUsageRatio(int totalIn, int inLimit, int totalOut, int outLimit) {
+  static double _maxUsageRatio(
+    int totalIn,
+    int inLimit,
+    int totalOut,
+    int outLimit,
+  ) {
     double ratio = 0;
     if (inLimit > 0) ratio = totalIn / inLimit;
     if (outLimit > 0) {
@@ -247,14 +272,9 @@ class PaneHeader extends StatelessWidget {
     return tokens.toString();
   }
 
-  void _showSplitMenu(
-    BuildContext context,
-    PaneState pane,
-    AppState appState,
-  ) {
+  void _showSplitMenu(BuildContext context, PaneState pane, AppState appState) {
     final button = context.findRenderObject() as RenderBox;
-    final overlay =
-        Overlay.of(context).context.findRenderObject() as RenderBox;
+    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
     final position = RelativeRect.fromRect(
       Rect.fromPoints(
         button.localToGlobal(Offset(0, button.size.height), ancestor: overlay),
@@ -276,11 +296,18 @@ class PaneHeader extends StatelessWidget {
           value: SplitAxis.horizontal,
           child: Row(
             children: [
-              Icon(Icons.view_column_outlined, color: context.appColors.textSecondary, size: 18),
+              Icon(
+                Icons.view_column_outlined,
+                color: context.appColors.textSecondary,
+                size: 18,
+              ),
               SizedBox(width: 10),
               Text(
                 'Split Right',
-                style: TextStyle(color: context.appColors.textPrimary, fontSize: 14),
+                style: TextStyle(
+                  color: context.appColors.textPrimary,
+                  fontSize: 14,
+                ),
               ),
             ],
           ),
@@ -289,11 +316,18 @@ class PaneHeader extends StatelessWidget {
           value: SplitAxis.vertical,
           child: Row(
             children: [
-              Icon(Icons.view_agenda_outlined, color: context.appColors.textSecondary, size: 18),
+              Icon(
+                Icons.view_agenda_outlined,
+                color: context.appColors.textSecondary,
+                size: 18,
+              ),
               SizedBox(width: 10),
               Text(
                 'Split Down',
-                style: TextStyle(color: context.appColors.textPrimary, fontSize: 14),
+                style: TextStyle(
+                  color: context.appColors.textPrimary,
+                  fontSize: 14,
+                ),
               ),
             ],
           ),

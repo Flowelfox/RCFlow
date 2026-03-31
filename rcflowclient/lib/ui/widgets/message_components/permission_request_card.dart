@@ -68,7 +68,9 @@ class _PermissionRequestCardState extends State<PermissionRequestCard> {
         decoration: BoxDecoration(
           color: _riskBgColor(context, riskLevel).withAlpha(60),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: _riskBorderColor(context, riskLevel).withAlpha(80)),
+          border: Border.all(
+            color: _riskBorderColor(context, riskLevel).withAlpha(80),
+          ),
         ),
         child: widget.message.accepted == null
             ? _buildPending(context, metadata, riskLevel)
@@ -86,7 +88,7 @@ class _PermissionRequestCardState extends State<PermissionRequestCard> {
     final description = metadata['description'] as String? ?? '';
     final scopeOptions =
         (metadata['scope_options'] as List<dynamic>?)?.cast<String>() ??
-            ['once', 'tool_session', 'all_session'];
+        ['once', 'tool_session', 'all_session'];
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -94,8 +96,11 @@ class _PermissionRequestCardState extends State<PermissionRequestCard> {
         // Header
         Row(
           children: [
-            Icon(Icons.shield_outlined,
-                color: _riskIconColor(context, riskLevel), size: 18),
+            Icon(
+              Icons.shield_outlined,
+              color: _riskIconColor(context, riskLevel),
+              size: 18,
+            ),
             const SizedBox(width: 8),
             Expanded(
               child: Text(
@@ -151,7 +156,10 @@ class _PermissionRequestCardState extends State<PermissionRequestCard> {
               SizedBox(height: 6),
               Text(
                 'Tool: $toolName',
-                style: TextStyle(color: context.appColors.textSecondary, fontSize: 11),
+                style: TextStyle(
+                  color: context.appColors.textSecondary,
+                  fontSize: 11,
+                ),
               ),
             ],
           ),
@@ -161,21 +169,34 @@ class _PermissionRequestCardState extends State<PermissionRequestCard> {
         // Scope selector
         Row(
           children: [
-            Text('Scope: ',
-                style: TextStyle(color: context.appColors.textSecondary, fontSize: 12)),
+            Text(
+              'Scope: ',
+              style: TextStyle(
+                color: context.appColors.textSecondary,
+                fontSize: 12,
+              ),
+            ),
             SizedBox(width: 4),
             Expanded(
               child: DropdownButton<String>(
                 value: _selectedScope,
                 isExpanded: true,
                 dropdownColor: context.appColors.bgElevated,
-                style: TextStyle(color: context.appColors.textPrimary, fontSize: 12),
-                underline: Container(height: 1, color: context.appColors.divider),
+                style: TextStyle(
+                  color: context.appColors.textPrimary,
+                  fontSize: 12,
+                ),
+                underline: Container(
+                  height: 1,
+                  color: context.appColors.divider,
+                ),
                 items: scopeOptions
-                    .map((s) => DropdownMenuItem(
-                          value: s,
-                          child: Text(_scopeLabel(s)),
-                        ))
+                    .map(
+                      (s) => DropdownMenuItem(
+                        value: s,
+                        child: Text(_scopeLabel(s)),
+                      ),
+                    )
                     .toList(),
                 onChanged: (v) {
                   if (v != null) setState(() => _selectedScope = v);
@@ -200,9 +221,10 @@ class _PermissionRequestCardState extends State<PermissionRequestCard> {
                   ),
                   padding: const EdgeInsets.symmetric(vertical: 12),
                 ),
-                child: const Text('Deny',
-                    style:
-                        TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                child: const Text(
+                  'Deny',
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                ),
               ),
             ),
             SizedBox(width: 10),
@@ -216,9 +238,10 @@ class _PermissionRequestCardState extends State<PermissionRequestCard> {
                   ),
                   padding: const EdgeInsets.symmetric(vertical: 12),
                 ),
-                child: const Text('Allow',
-                    style:
-                        TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                child: const Text(
+                  'Allow',
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                ),
               ),
             ),
           ],
@@ -242,7 +265,9 @@ class _PermissionRequestCardState extends State<PermissionRequestCard> {
       children: [
         Icon(
           allowed ? Icons.check_circle_outline : Icons.block_rounded,
-          color: allowed ? context.appColors.successText : context.appColors.errorText,
+          color: allowed
+              ? context.appColors.successText
+              : context.appColors.errorText,
           size: 18,
         ),
         SizedBox(width: 8),
@@ -250,7 +275,9 @@ class _PermissionRequestCardState extends State<PermissionRequestCard> {
           child: Text(
             '${allowed ? "Allowed" : "Denied"}: $description',
             style: TextStyle(
-              color: allowed ? context.appColors.textPrimary : context.appColors.textSecondary,
+              color: allowed
+                  ? context.appColors.textPrimary
+                  : context.appColors.textSecondary,
               fontSize: 13,
             ),
             maxLines: 2,
@@ -274,11 +301,11 @@ class _PermissionRequestCardState extends State<PermissionRequestCard> {
     });
 
     context.read<PaneState>().sendPermissionResponse(
-          sessionId: sessionId,
-          requestId: requestId,
-          decision: allow ? 'allow' : 'deny',
-          scope: _selectedScope,
-        );
+      sessionId: sessionId,
+      requestId: requestId,
+      decision: allow ? 'allow' : 'deny',
+      scope: _selectedScope,
+    );
   }
 
   static String _scopeLabel(String scope) {

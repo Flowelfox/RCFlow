@@ -56,7 +56,9 @@ class _ResizableDividerState extends State<ResizableDivider> {
               duration: const Duration(milliseconds: 150),
               width: isHorizontal ? (highlighted ? 3 : 1) : double.infinity,
               height: isHorizontal ? double.infinity : (highlighted ? 3 : 1),
-              color: highlighted ? context.appColors.accent.withAlpha(180) : context.appColors.divider,
+              color: highlighted
+                  ? context.appColors.accent.withAlpha(180)
+                  : context.appColors.divider,
             ),
           ),
         ),

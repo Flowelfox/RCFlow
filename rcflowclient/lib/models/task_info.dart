@@ -51,7 +51,8 @@ class TaskInfo {
     this.sessions = const [],
   });
 
-  factory TaskInfo.fromJson(Map<String, dynamic> json, {
+  factory TaskInfo.fromJson(
+    Map<String, dynamic> json, {
     String workerId = '',
     String workerName = '',
   }) {
@@ -64,8 +65,12 @@ class TaskInfo {
       source: json['source'] as String? ?? 'user',
       workerId: workerId,
       workerName: workerName,
-      createdAt: DateTime.tryParse(json['created_at'] as String? ?? '') ?? DateTime.now(),
-      updatedAt: DateTime.tryParse(json['updated_at'] as String? ?? '') ?? DateTime.now(),
+      createdAt:
+          DateTime.tryParse(json['created_at'] as String? ?? '') ??
+          DateTime.now(),
+      updatedAt:
+          DateTime.tryParse(json['updated_at'] as String? ?? '') ??
+          DateTime.now(),
       sessions: sessionsRaw
           .map((s) => TaskSessionRef.fromJson(s as Map<String, dynamic>))
           .toList(),

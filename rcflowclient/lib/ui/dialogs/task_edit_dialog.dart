@@ -237,15 +237,15 @@ class _TaskEditDialogState extends State<_TaskEditDialog> {
     );
   }
 
-  Widget _buildLabel(BuildContext context, String text,
-      {bool required = false}) {
+  Widget _buildLabel(
+    BuildContext context,
+    String text, {
+    bool required = false,
+  }) {
     return RichText(
       text: TextSpan(
         text: text,
-        style: TextStyle(
-          color: context.appColors.textSecondary,
-          fontSize: 13,
-        ),
+        style: TextStyle(color: context.appColors.textSecondary, fontSize: 13),
         children: [
           if (required)
             TextSpan(

@@ -24,7 +24,9 @@ class SubprocessInfo {
       displayName: json['display_name'] as String? ?? 'Subprocess',
       workingDirectory: json['working_directory'] as String? ?? '',
       currentTool: json['current_tool'] as String?,
-      startedAt: DateTime.tryParse(json['started_at'] as String? ?? '') ?? DateTime.now(),
+      startedAt:
+          DateTime.tryParse(json['started_at'] as String? ?? '') ??
+          DateTime.now(),
     );
   }
 

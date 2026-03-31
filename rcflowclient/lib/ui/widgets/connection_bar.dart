@@ -31,8 +31,7 @@ class ConnectionBar extends StatelessWidget implements PreferredSizeWidget {
   Widget build(BuildContext context) {
     final connected = context.select<AppState, bool>((s) => s.connected);
     final connecting = context.select<AppState, bool>((s) => s.connecting);
-    final allConnected =
-        context.select<AppState, bool>((s) => s.allConnected);
+    final allConnected = context.select<AppState, bool>((s) => s.allConnected);
 
     // Green: all connected, Amber: partial, Red: none
     final Color dotColor;
@@ -50,9 +49,9 @@ class ConnectionBar extends StatelessWidget implements PreferredSizeWidget {
       titleSpacing: 16,
       title: GestureDetector(
         onTap: () {
-              final appState = context.read<AppState>();
-              if (!appState.hasNoPanes) appState.activePane.goHome();
-            },
+          final appState = context.read<AppState>();
+          if (!appState.hasNoPanes) appState.activePane.goHome();
+        },
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -88,7 +87,9 @@ class ConnectionBar extends StatelessWidget implements PreferredSizeWidget {
               style: TextStyle(
                 fontSize: 20,
                 fontWeight: FontWeight.w700,
-                color: connecting ? context.appColors.textSecondary : context.appColors.textPrimary,
+                color: connecting
+                    ? context.appColors.textSecondary
+                    : context.appColors.textPrimary,
               ),
             ),
           ],
@@ -97,11 +98,15 @@ class ConnectionBar extends StatelessWidget implements PreferredSizeWidget {
       actions: [
         if (connected && _isDesktop)
           PopupMenuButton<SplitAxis>(
-            icon: Icon(Icons.view_column_outlined, color: context.appColors.textSecondary),
+            icon: Icon(
+              Icons.view_column_outlined,
+              color: context.appColors.textSecondary,
+            ),
             tooltip: 'Split pane',
             color: context.appColors.bgSurface,
             shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12)),
+              borderRadius: BorderRadius.circular(12),
+            ),
             onSelected: (axis) {
               final appState = context.read<AppState>();
               if (appState.hasNoPanes) {
@@ -115,11 +120,19 @@ class ConnectionBar extends StatelessWidget implements PreferredSizeWidget {
                 value: SplitAxis.horizontal,
                 child: Row(
                   children: [
-                    Icon(Icons.view_column_outlined,
-                        color: context.appColors.textSecondary, size: 18),
+                    Icon(
+                      Icons.view_column_outlined,
+                      color: context.appColors.textSecondary,
+                      size: 18,
+                    ),
                     SizedBox(width: 10),
-                    Text('Split Right',
-                        style: TextStyle(color: context.appColors.textPrimary, fontSize: 14)),
+                    Text(
+                      'Split Right',
+                      style: TextStyle(
+                        color: context.appColors.textPrimary,
+                        fontSize: 14,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -127,11 +140,19 @@ class ConnectionBar extends StatelessWidget implements PreferredSizeWidget {
                 value: SplitAxis.vertical,
                 child: Row(
                   children: [
-                    Icon(Icons.view_agenda_outlined,
-                        color: context.appColors.textSecondary, size: 18),
+                    Icon(
+                      Icons.view_agenda_outlined,
+                      color: context.appColors.textSecondary,
+                      size: 18,
+                    ),
                     SizedBox(width: 10),
-                    Text('Split Down',
-                        style: TextStyle(color: context.appColors.textPrimary, fontSize: 14)),
+                    Text(
+                      'Split Down',
+                      style: TextStyle(
+                        color: context.appColors.textPrimary,
+                        fontSize: 14,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -139,18 +160,27 @@ class ConnectionBar extends StatelessWidget implements PreferredSizeWidget {
           ),
         if (showSessionsButton)
           IconButton(
-            icon: Icon(Icons.history_rounded, color: context.appColors.textSecondary),
+            icon: Icon(
+              Icons.history_rounded,
+              color: context.appColors.textSecondary,
+            ),
             onPressed: onSessionsTap,
             tooltip: 'Sessions',
           ),
         IconButton(
-          icon: Icon(Icons.dns_outlined, color: context.appColors.textSecondary),
+          icon: Icon(
+            Icons.dns_outlined,
+            color: context.appColors.textSecondary,
+          ),
           onPressed: () => showWorkersScreen(context),
           tooltip: 'Workers',
         ),
         if (showSettingsButton)
           IconButton(
-            icon: Icon(Icons.settings_outlined, color: context.appColors.textSecondary),
+            icon: Icon(
+              Icons.settings_outlined,
+              color: context.appColors.textSecondary,
+            ),
             onPressed: () => showSettingsMenu(context),
             tooltip: 'Settings',
           ),

@@ -15,8 +15,11 @@ class WorkerSettingsPane extends StatefulWidget {
   final String paneId;
   final PaneState pane;
 
-  const WorkerSettingsPane(
-      {super.key, required this.paneId, required this.pane});
+  const WorkerSettingsPane({
+    super.key,
+    required this.paneId,
+    required this.pane,
+  });
 
   @override
   State<WorkerSettingsPane> createState() => _WorkerSettingsPaneState();
@@ -47,10 +50,7 @@ class _WorkerSettingsPaneState extends State<WorkerSettingsPane> {
             multiPane: multiPane,
           ),
           Expanded(
-            child: _PluginsSection(
-              paneId: widget.paneId,
-              toolName: toolName,
-            ),
+            child: _PluginsSection(paneId: widget.paneId, toolName: toolName),
           ),
         ],
       ),
@@ -97,10 +97,10 @@ class _WorkerSettingsPaneHeader extends StatelessWidget {
     final displayName = toolName == 'claude_code'
         ? 'Claude Code'
         : toolName == 'codex'
-            ? 'Codex'
-            : toolName == 'opencode'
-                ? 'OpenCode'
-                : toolName ?? 'Worker Settings';
+        ? 'Codex'
+        : toolName == 'opencode'
+        ? 'OpenCode'
+        : toolName ?? 'Worker Settings';
 
     return Container(
       height: 32,
@@ -108,8 +108,7 @@ class _WorkerSettingsPaneHeader extends StatelessWidget {
         color: isActive
             ? context.appColors.accent.withAlpha(20)
             : context.appColors.bgSurface,
-        border:
-            Border(bottom: BorderSide(color: context.appColors.divider)),
+        border: Border(bottom: BorderSide(color: context.appColors.divider)),
       ),
       padding: const EdgeInsets.symmetric(horizontal: 8),
       child: Row(
@@ -120,8 +119,11 @@ class _WorkerSettingsPaneHeader extends StatelessWidget {
               height: 26,
               child: IconButton(
                 padding: EdgeInsets.zero,
-                icon: Icon(Icons.arrow_back_rounded,
-                    color: context.appColors.textMuted, size: 14),
+                icon: Icon(
+                  Icons.arrow_back_rounded,
+                  color: context.appColors.textMuted,
+                  size: 14,
+                ),
                 tooltip: 'Back',
                 onPressed: () => appState.goBack(paneId),
               ),
@@ -136,8 +138,11 @@ class _WorkerSettingsPaneHeader extends StatelessWidget {
                 shape: BoxShape.circle,
               ),
             ),
-          Icon(Icons.extension_outlined,
-              color: context.appColors.textMuted, size: 14),
+          Icon(
+            Icons.extension_outlined,
+            color: context.appColors.textMuted,
+            size: 14,
+          ),
           const SizedBox(width: 6),
           Expanded(
             child: Text(
@@ -157,8 +162,11 @@ class _WorkerSettingsPaneHeader extends StatelessWidget {
               height: 26,
               child: IconButton(
                 padding: EdgeInsets.zero,
-                icon: Icon(Icons.vertical_split_outlined,
-                    color: context.appColors.textMuted, size: 14),
+                icon: Icon(
+                  Icons.vertical_split_outlined,
+                  color: context.appColors.textMuted,
+                  size: 14,
+                ),
                 tooltip: 'Split',
                 onPressed: () =>
                     appState.splitPane(paneId, SplitAxis.horizontal),
@@ -169,8 +177,11 @@ class _WorkerSettingsPaneHeader extends StatelessWidget {
               height: 26,
               child: IconButton(
                 padding: EdgeInsets.zero,
-                icon: Icon(Icons.close_rounded,
-                    color: context.appColors.textMuted, size: 14),
+                icon: Icon(
+                  Icons.close_rounded,
+                  color: context.appColors.textMuted,
+                  size: 14,
+                ),
                 tooltip: 'Close',
                 onPressed: () => appState.closePane(paneId),
               ),
@@ -181,8 +192,11 @@ class _WorkerSettingsPaneHeader extends StatelessWidget {
               height: 26,
               child: IconButton(
                 padding: EdgeInsets.zero,
-                icon: Icon(Icons.close_rounded,
-                    color: context.appColors.textMuted, size: 14),
+                icon: Icon(
+                  Icons.close_rounded,
+                  color: context.appColors.textMuted,
+                  size: 14,
+                ),
                 tooltip: 'Close settings',
                 onPressed: () => appState.closeWorkerSettingsView(paneId),
               ),
@@ -334,9 +348,13 @@ class _PluginsSectionState extends State<_PluginsSection> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(_error!,
-                style: TextStyle(
-                    color: context.appColors.errorText, fontSize: 13)),
+            Text(
+              _error!,
+              style: TextStyle(
+                color: context.appColors.errorText,
+                fontSize: 13,
+              ),
+            ),
             const SizedBox(height: 12),
             OutlinedButton(onPressed: _loadPlugins, child: const Text('Retry')),
           ],
@@ -348,15 +366,14 @@ class _PluginsSectionState extends State<_PluginsSection> {
       return Center(
         child: Text(
           'No plugins installed.',
-          style: TextStyle(
-              color: context.appColors.textMuted, fontSize: 13),
+          style: TextStyle(color: context.appColors.textMuted, fontSize: 13),
         ),
       );
     }
     return ListView.separated(
       padding: const EdgeInsets.symmetric(vertical: 8),
       itemCount: plugins.length,
-      separatorBuilder: (_, _i) =>
+      separatorBuilder: (_, _) =>
           Divider(height: 1, color: context.appColors.divider),
       itemBuilder: (context, index) {
         final plugin = plugins[index];
@@ -401,23 +418,27 @@ class _InstallBar extends StatelessWidget {
                 child: TextField(
                   controller: controller,
                   style: TextStyle(
-                      color: context.appColors.textPrimary, fontSize: 13),
+                    color: context.appColors.textPrimary,
+                    fontSize: 13,
+                  ),
                   decoration: InputDecoration(
                     hintText: 'Plugin path or URL…',
                     hintStyle: TextStyle(
-                        color: context.appColors.textMuted, fontSize: 13),
+                      color: context.appColors.textMuted,
+                      fontSize: 13,
+                    ),
                     isDense: true,
                     contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 10, vertical: 8),
+                      horizontal: 10,
+                      vertical: 8,
+                    ),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(6),
-                      borderSide:
-                          BorderSide(color: context.appColors.divider),
+                      borderSide: BorderSide(color: context.appColors.divider),
                     ),
                     enabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(6),
-                      borderSide:
-                          BorderSide(color: context.appColors.divider),
+                      borderSide: BorderSide(color: context.appColors.divider),
                     ),
                   ),
                   onSubmitted: (_) => onInstall(),
@@ -434,12 +455,15 @@ class _InstallBar extends StatelessWidget {
                       height: 34,
                       child: ElevatedButton.icon(
                         icon: const Icon(Icons.add, size: 14),
-                        label: const Text('Install',
-                            style: TextStyle(fontSize: 12)),
+                        label: const Text(
+                          'Install',
+                          style: TextStyle(fontSize: 12),
+                        ),
                         style: ElevatedButton.styleFrom(
                           padding: const EdgeInsets.symmetric(horizontal: 12),
                           shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(6)),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
                         ),
                         onPressed: onInstall,
                       ),
@@ -448,9 +472,13 @@ class _InstallBar extends StatelessWidget {
           ),
           if (error != null) ...[
             const SizedBox(height: 4),
-            Text(error!,
-                style: TextStyle(
-                    color: context.appColors.errorText, fontSize: 11)),
+            Text(
+              error!,
+              style: TextStyle(
+                color: context.appColors.errorText,
+                fontSize: 11,
+              ),
+            ),
           ],
         ],
       ),
@@ -476,7 +504,8 @@ class _PluginTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final name = plugin['name'] as String? ?? '';
-    final commands = (plugin['commands'] as List<dynamic>?)
+    final commands =
+        (plugin['commands'] as List<dynamic>?)
             ?.map((c) => c as Map<String, dynamic>)
             .toList() ??
         [];
@@ -493,8 +522,11 @@ class _PluginTile extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    Icon(Icons.extension,
-                        size: 14, color: context.appColors.accent),
+                    Icon(
+                      Icons.extension,
+                      size: 14,
+                      color: context.appColors.accent,
+                    ),
                     const SizedBox(width: 6),
                     Text(
                       name,
@@ -508,7 +540,9 @@ class _PluginTile extends StatelessWidget {
                       const SizedBox(width: 6),
                       Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 5, vertical: 1),
+                          horizontal: 5,
+                          vertical: 1,
+                        ),
                         decoration: BoxDecoration(
                           color: context.appColors.divider,
                           borderRadius: BorderRadius.circular(4),
@@ -516,8 +550,9 @@ class _PluginTile extends StatelessWidget {
                         child: Text(
                           'disabled',
                           style: TextStyle(
-                              color: context.appColors.textMuted,
-                              fontSize: 10),
+                            color: context.appColors.textMuted,
+                            fontSize: 10,
+                          ),
                         ),
                       ),
                     ],
@@ -532,7 +567,9 @@ class _PluginTile extends StatelessWidget {
                       final cmdName = cmd['name'] as String? ?? '';
                       return Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 5, vertical: 1),
+                          horizontal: 5,
+                          vertical: 1,
+                        ),
                         decoration: BoxDecoration(
                           color: context.appColors.accent.withAlpha(30),
                           borderRadius: BorderRadius.circular(4),
@@ -562,8 +599,11 @@ class _PluginTile extends StatelessWidget {
             height: 26,
             child: IconButton(
               padding: EdgeInsets.zero,
-              icon: Icon(Icons.delete_outline,
-                  color: context.appColors.textMuted, size: 14),
+              icon: Icon(
+                Icons.delete_outline,
+                color: context.appColors.textMuted,
+                size: 14,
+              ),
               tooltip: 'Uninstall',
               onPressed: () => _confirmUninstall(context),
             ),
@@ -578,17 +618,18 @@ class _PluginTile extends StatelessWidget {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: context.appColors.bgSurface,
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         title: const Text('Uninstall plugin'),
         content: Text('Remove "${plugin['name']}"? This cannot be undone.'),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel')),
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
           TextButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Uninstall')),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Uninstall'),
+          ),
         ],
       ),
     );

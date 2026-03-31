@@ -45,10 +45,7 @@ class ArtifactPane extends StatelessWidget {
             multiPane: multiPane,
           ),
           Expanded(
-            child: _ArtifactContent(
-              artifact: artifact,
-              appState: appState,
-            ),
+            child: _ArtifactContent(artifact: artifact, appState: appState),
           ),
         ],
       ),
@@ -67,8 +64,10 @@ class ArtifactPane extends StatelessWidget {
         ),
         Expanded(
           child: Center(
-            child: Text('Artifact not found',
-                style: TextStyle(color: context.appColors.textMuted)),
+            child: Text(
+              'Artifact not found',
+              style: TextStyle(color: context.appColors.textMuted),
+            ),
           ),
         ),
       ],
@@ -99,8 +98,7 @@ class _ArtifactPaneHeader extends StatelessWidget {
         color: isActive
             ? context.appColors.accent.withAlpha(20)
             : context.appColors.bgSurface,
-        border:
-            Border(bottom: BorderSide(color: context.appColors.divider)),
+        border: Border(bottom: BorderSide(color: context.appColors.divider)),
       ),
       padding: const EdgeInsets.symmetric(horizontal: 8),
       child: Row(
@@ -111,8 +109,11 @@ class _ArtifactPaneHeader extends StatelessWidget {
               height: 26,
               child: IconButton(
                 padding: EdgeInsets.zero,
-                icon: Icon(Icons.arrow_back_rounded,
-                    color: context.appColors.textMuted, size: 14),
+                icon: Icon(
+                  Icons.arrow_back_rounded,
+                  color: context.appColors.textMuted,
+                  size: 14,
+                ),
                 tooltip: 'Back',
                 onPressed: () => appState.goBack(paneId),
               ),
@@ -127,8 +128,11 @@ class _ArtifactPaneHeader extends StatelessWidget {
                 shape: BoxShape.circle,
               ),
             ),
-          Icon(Icons.article_outlined,
-              color: context.appColors.textMuted, size: 14),
+          Icon(
+            Icons.article_outlined,
+            color: context.appColors.textMuted,
+            size: 14,
+          ),
           const SizedBox(width: 6),
           Expanded(
             child: Text(
@@ -148,8 +152,11 @@ class _ArtifactPaneHeader extends StatelessWidget {
               height: 26,
               child: IconButton(
                 padding: EdgeInsets.zero,
-                icon: Icon(Icons.delete_outline,
-                    color: context.appColors.textMuted, size: 14),
+                icon: Icon(
+                  Icons.delete_outline,
+                  color: context.appColors.textMuted,
+                  size: 14,
+                ),
                 tooltip: 'Delete',
                 onPressed: () =>
                     _confirmDeleteArtifact(context, artifact!, appState),
@@ -161,8 +168,11 @@ class _ArtifactPaneHeader extends StatelessWidget {
               height: 26,
               child: IconButton(
                 padding: EdgeInsets.zero,
-                icon: Icon(Icons.vertical_split_outlined,
-                    color: context.appColors.textMuted, size: 14),
+                icon: Icon(
+                  Icons.vertical_split_outlined,
+                  color: context.appColors.textMuted,
+                  size: 14,
+                ),
                 tooltip: 'Split',
                 onPressed: () =>
                     appState.splitPane(paneId, SplitAxis.horizontal),
@@ -173,8 +183,11 @@ class _ArtifactPaneHeader extends StatelessWidget {
               height: 26,
               child: IconButton(
                 padding: EdgeInsets.zero,
-                icon: Icon(Icons.close_rounded,
-                    color: context.appColors.textMuted, size: 14),
+                icon: Icon(
+                  Icons.close_rounded,
+                  color: context.appColors.textMuted,
+                  size: 14,
+                ),
                 tooltip: 'Close',
                 onPressed: () => appState.closePane(paneId),
               ),
@@ -185,8 +198,11 @@ class _ArtifactPaneHeader extends StatelessWidget {
               height: 26,
               child: IconButton(
                 padding: EdgeInsets.zero,
-                icon: Icon(Icons.close_rounded,
-                    color: context.appColors.textMuted, size: 14),
+                icon: Icon(
+                  Icons.close_rounded,
+                  color: context.appColors.textMuted,
+                  size: 14,
+                ),
                 tooltip: 'Close artifact view',
                 onPressed: () => appState.closeArtifactView(paneId),
               ),
@@ -197,34 +213,40 @@ class _ArtifactPaneHeader extends StatelessWidget {
   }
 
   void _confirmDeleteArtifact(
-      BuildContext context, ArtifactInfo artifact, AppState appState) async {
+    BuildContext context,
+    ArtifactInfo artifact,
+    AppState appState,
+  ) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: context.appColors.bgSurface,
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        title: Text('Delete Artifact',
-            style: TextStyle(
-                color: context.appColors.textPrimary, fontSize: 16)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        title: Text(
+          'Delete Artifact',
+          style: TextStyle(color: context.appColors.textPrimary, fontSize: 16),
+        ),
         content: Text(
           'Remove "${artifact.fileName}" from tracking? The file itself will not be deleted.',
           style: TextStyle(
-              color: context.appColors.textSecondary, fontSize: 14),
+            color: context.appColors.textSecondary,
+            fontSize: 14,
+          ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
-            child: Text('Cancel',
-                style: TextStyle(color: context.appColors.textSecondary)),
+            child: Text(
+              'Cancel',
+              style: TextStyle(color: context.appColors.textSecondary),
+            ),
           ),
           FilledButton(
             style: FilledButton.styleFrom(
               backgroundColor: context.appColors.errorText,
             ),
             onPressed: () => Navigator.of(ctx).pop(true),
-            child:
-                const Text('Delete', style: TextStyle(color: Colors.white)),
+            child: const Text('Delete', style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
@@ -236,8 +258,10 @@ class _ArtifactPaneHeader extends StatelessWidget {
       await worker.ws.deleteArtifact(artifact.artifactId);
     } catch (e) {
       if (context.mounted) {
-        appState.addSystemMessage('Failed to delete artifact: $e',
-            isError: true);
+        appState.addSystemMessage(
+          'Failed to delete artifact: $e',
+          isError: true,
+        );
       }
     }
   }
@@ -248,10 +272,7 @@ class _ArtifactContent extends StatefulWidget {
   final ArtifactInfo artifact;
   final AppState appState;
 
-  const _ArtifactContent({
-    required this.artifact,
-    required this.appState,
-  });
+  const _ArtifactContent({required this.artifact, required this.appState});
 
   @override
   State<_ArtifactContent> createState() => _ArtifactContentState();
@@ -286,7 +307,8 @@ class _ArtifactContentState extends State<_ArtifactContent> {
       setState(() {
         _content = null;
         _loading = false;
-        _error = 'File too large (${widget.artifact.displaySize}). '
+        _error =
+            'File too large (${widget.artifact.displaySize}). '
             'Maximum supported size is 5 MB.';
       });
       return;
@@ -317,8 +339,9 @@ class _ArtifactContentState extends State<_ArtifactContent> {
     }
 
     try {
-      final content =
-          await worker.ws.getArtifactContent(widget.artifact.artifactId);
+      final content = await worker.ws.getArtifactContent(
+        widget.artifact.artifactId,
+      );
       if (mounted) {
         setState(() {
           _content = content;
@@ -351,9 +374,13 @@ class _ArtifactContentState extends State<_ArtifactContent> {
               ),
             ),
             const SizedBox(height: 12),
-            Text('Loading content...',
-                style: TextStyle(
-                    color: context.appColors.textMuted, fontSize: 13)),
+            Text(
+              'Loading content...',
+              style: TextStyle(
+                color: context.appColors.textMuted,
+                fontSize: 13,
+              ),
+            ),
           ],
         ),
       );
@@ -366,14 +393,19 @@ class _ArtifactContentState extends State<_ArtifactContent> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.warning_amber_rounded,
-                  color: context.appColors.textMuted, size: 40),
+              Icon(
+                Icons.warning_amber_rounded,
+                color: context.appColors.textMuted,
+                size: 40,
+              ),
               const SizedBox(height: 12),
               Text(
                 _error!,
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                    color: context.appColors.textSecondary, fontSize: 14),
+                  color: context.appColors.textSecondary,
+                  fontSize: 14,
+                ),
               ),
               const SizedBox(height: 16),
               OutlinedButton(
@@ -381,9 +413,10 @@ class _ArtifactContentState extends State<_ArtifactContent> {
                 style: OutlinedButton.styleFrom(
                   side: BorderSide(color: context.appColors.divider),
                 ),
-                child: Text('Retry',
-                    style:
-                        TextStyle(color: context.appColors.textSecondary)),
+                child: Text(
+                  'Retry',
+                  style: TextStyle(color: context.appColors.textSecondary),
+                ),
               ),
             ],
           ),
@@ -413,7 +446,9 @@ class _ArtifactContentState extends State<_ArtifactContent> {
               child: Text(
                 widget.artifact.filePath,
                 style: TextStyle(
-                    color: context.appColors.textMuted, fontSize: 11),
+                  color: context.appColors.textMuted,
+                  fontSize: 11,
+                ),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
@@ -428,37 +463,36 @@ class _ArtifactContentState extends State<_ArtifactContent> {
                       visualDensity: VisualDensity.compact,
                       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                       padding: WidgetStatePropertyAll(
-                          EdgeInsets.symmetric(horizontal: 8)),
+                        EdgeInsets.symmetric(horizontal: 8),
+                      ),
                       textStyle: WidgetStatePropertyAll(
-                          TextStyle(fontSize: 11)),
+                        TextStyle(fontSize: 11),
+                      ),
                       iconSize: WidgetStatePropertyAll(14),
-                      backgroundColor:
-                          WidgetStateProperty.resolveWith((states) {
+                      backgroundColor: WidgetStateProperty.resolveWith((
+                        states,
+                      ) {
                         if (states.contains(WidgetState.selected)) {
                           return context.appColors.accent.withAlpha(30);
                         }
                         return Colors.transparent;
                       }),
-                      foregroundColor:
-                          WidgetStateProperty.resolveWith((states) {
+                      foregroundColor: WidgetStateProperty.resolveWith((
+                        states,
+                      ) {
                         if (states.contains(WidgetState.selected)) {
                           return context.appColors.accent;
                         }
                         return context.appColors.textMuted;
                       }),
                       side: WidgetStatePropertyAll(
-                          BorderSide(color: context.appColors.divider)),
+                        BorderSide(color: context.appColors.divider),
+                      ),
                     ),
                     showSelectedIcon: false,
                     segments: const [
-                      ButtonSegment(
-                        value: true,
-                        label: Text('Rendered'),
-                      ),
-                      ButtonSegment(
-                        value: false,
-                        label: Text('Raw'),
-                      ),
+                      ButtonSegment(value: true, label: Text('Rendered')),
+                      ButtonSegment(value: false, label: Text('Raw')),
                     ],
                     selected: {_renderMarkdown},
                     onSelectionChanged: (v) =>
@@ -469,7 +503,9 @@ class _ArtifactContentState extends State<_ArtifactContent> {
             Text(
               widget.artifact.displaySize,
               style: TextStyle(
-                  color: context.appColors.textMuted, fontSize: 11),
+                color: context.appColors.textMuted,
+                fontSize: 11,
+              ),
             ),
           ],
         ),
@@ -507,41 +543,44 @@ class _ArtifactContentState extends State<_ArtifactContent> {
         codeblockPadding: const EdgeInsets.all(12),
         a: TextStyle(color: context.appColors.accentLight),
         listBullet: TextStyle(
-            color: context.appColors.textPrimary, fontSize: 14),
+          color: context.appColors.textPrimary,
+          fontSize: 14,
+        ),
         h1: TextStyle(
-            color: context.appColors.textPrimary,
-            fontSize: 24,
-            fontWeight: FontWeight.bold),
+          color: context.appColors.textPrimary,
+          fontSize: 24,
+          fontWeight: FontWeight.bold,
+        ),
         h2: TextStyle(
-            color: context.appColors.textPrimary,
-            fontSize: 20,
-            fontWeight: FontWeight.bold),
+          color: context.appColors.textPrimary,
+          fontSize: 20,
+          fontWeight: FontWeight.bold,
+        ),
         h3: TextStyle(
-            color: context.appColors.textPrimary,
-            fontSize: 17,
-            fontWeight: FontWeight.bold),
+          color: context.appColors.textPrimary,
+          fontSize: 17,
+          fontWeight: FontWeight.bold,
+        ),
         h4: TextStyle(
-            color: context.appColors.textPrimary,
-            fontSize: 15,
-            fontWeight: FontWeight.bold),
+          color: context.appColors.textPrimary,
+          fontSize: 15,
+          fontWeight: FontWeight.bold,
+        ),
         blockquoteDecoration: BoxDecoration(
           border: Border(
-              left: BorderSide(
-                  color: context.appColors.accentDim, width: 3)),
+            left: BorderSide(color: context.appColors.accentDim, width: 3),
+          ),
           color: context.appColors.bgElevated.withAlpha(80),
         ),
-        blockquotePadding:
-            const EdgeInsets.only(left: 12, top: 4, bottom: 4),
-        tableBorder:
-            TableBorder.all(color: context.appColors.divider),
+        blockquotePadding: const EdgeInsets.only(left: 12, top: 4, bottom: 4),
+        tableBorder: TableBorder.all(color: context.appColors.divider),
         tableHead: TextStyle(
-            color: context.appColors.textPrimary,
-            fontWeight: FontWeight.bold),
-        tableBody:
-            TextStyle(color: context.appColors.textPrimary),
+          color: context.appColors.textPrimary,
+          fontWeight: FontWeight.bold,
+        ),
+        tableBody: TextStyle(color: context.appColors.textPrimary),
         horizontalRuleDecoration: BoxDecoration(
-          border: Border(
-              top: BorderSide(color: context.appColors.divider)),
+          border: Border(top: BorderSide(color: context.appColors.divider)),
         ),
       ),
     );

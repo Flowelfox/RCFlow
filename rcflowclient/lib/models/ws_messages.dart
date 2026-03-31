@@ -13,6 +13,7 @@ enum DisplayMessageType {
   agentSessionStart,
   thinking,
   todoUpdate,
+
   /// Session was automatically paused because Claude Code reached its
   /// configured maximum number of turns (--max-turns limit).
   pausedMaxTurns,
@@ -75,6 +76,7 @@ class DisplayMessage {
   bool get isGroupRunning =>
       !finished ||
       (children?.any(
-              (c) => c.type == DisplayMessageType.toolBlock && !c.finished) ??
+            (c) => c.type == DisplayMessageType.toolBlock && !c.finished,
+          ) ??
           false);
 }

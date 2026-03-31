@@ -10,9 +10,7 @@ import '../widgets/custom_title_bar.dart';
 import 'server_config_screen.dart';
 
 void showWorkersScreen(BuildContext context) {
-  Navigator.of(context).push(
-    MaterialPageRoute(builder: (_) => _WorkersPage()),
-  );
+  Navigator.of(context).push(MaterialPageRoute(builder: (_) => _WorkersPage()));
 }
 
 // ---------------------------------------------------------------------------
@@ -32,12 +30,18 @@ class _WorkersPage extends StatelessWidget {
           AppBar(
             backgroundColor: context.appColors.bgBase,
             leading: IconButton(
-              icon: Icon(Icons.arrow_back, color: context.appColors.textPrimary),
+              icon: Icon(
+                Icons.arrow_back,
+                color: context.appColors.textPrimary,
+              ),
               onPressed: () => Navigator.of(context).pop(),
             ),
             title: Text(
               'Manage Workers',
-              style: TextStyle(color: context.appColors.textPrimary, fontSize: 18),
+              style: TextStyle(
+                color: context.appColors.textPrimary,
+                fontSize: 18,
+              ),
             ),
             actions: [
               Consumer<AppState>(
@@ -59,9 +63,12 @@ class _WorkersPage extends StatelessWidget {
                       backgroundColor: context.appColors.accent,
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 8),
+                        horizontal: 16,
+                        vertical: 8,
+                      ),
                       shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10)),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
                     ),
                   ),
                 ),
@@ -119,8 +126,7 @@ class _WorkersContentState extends State<_WorkersContent> {
   @override
   void initState() {
     super.initState();
-    final settings =
-        Provider.of<AppState>(context, listen: false).settings;
+    final settings = Provider.of<AppState>(context, listen: false).settings;
     _searchQuery = settings.workersFilterSearch;
     _searchController.text = _searchQuery;
     for (final name in settings.workersFilterStatus) {
@@ -136,11 +142,11 @@ class _WorkersContentState extends State<_WorkersContent> {
   }
 
   void _saveFilters() {
-    final settings =
-        Provider.of<AppState>(context, listen: false).settings;
+    final settings = Provider.of<AppState>(context, listen: false).settings;
     settings.workersFilterSearch = _searchQuery;
-    settings.workersFilterStatus =
-        _activeStatusFilters.map((s) => s.name).toList();
+    settings.workersFilterStatus = _activeStatusFilters
+        .map((s) => s.name)
+        .toList();
   }
 
   bool get _hasActiveFilters =>
@@ -159,9 +165,7 @@ class _WorkersContentState extends State<_WorkersContent> {
     List<WorkerConfig> configs,
     AppState state,
   ) {
-    var pairs = configs
-        .map((c) => (c, state.getWorker(c.id)))
-        .toList();
+    var pairs = configs.map((c) => (c, state.getWorker(c.id))).toList();
 
     if (_activeStatusFilters.isNotEmpty) {
       pairs = pairs.where((pair) {
@@ -205,17 +209,27 @@ class _WorkersContentState extends State<_WorkersContent> {
                 ),
                 child: Column(
                   children: [
-                    Icon(Icons.dns_outlined,
-                        color: context.appColors.textMuted, size: 40),
+                    Icon(
+                      Icons.dns_outlined,
+                      color: context.appColors.textMuted,
+                      size: 40,
+                    ),
                     SizedBox(height: 12),
-                    Text('No workers configured',
-                        style: TextStyle(
-                            color: context.appColors.textSecondary,
-                            fontSize: 14)),
+                    Text(
+                      'No workers configured',
+                      style: TextStyle(
+                        color: context.appColors.textSecondary,
+                        fontSize: 14,
+                      ),
+                    ),
                     SizedBox(height: 4),
-                    Text('Add a worker to connect to an RCFlow server',
-                        style: TextStyle(
-                            color: context.appColors.textMuted, fontSize: 12)),
+                    Text(
+                      'Add a worker to connect to an RCFlow server',
+                      style: TextStyle(
+                        color: context.appColors.textMuted,
+                        fontSize: 12,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -255,10 +269,10 @@ class _WorkersContentState extends State<_WorkersContent> {
                               _confirmRemove(context, state, config),
                           onSettings: worker?.isConnected == true
                               ? () => showServerConfigScreen(
-                                    context,
-                                    ws: worker!.ws,
-                                    workerName: config.name,
-                                  )
+                                  context,
+                                  ws: worker!.ws,
+                                  workerName: config.name,
+                                )
                               : null,
                           onToggleConnect: () {
                             if (worker?.isConnected == true) {
@@ -301,11 +315,16 @@ class _WorkersContentState extends State<_WorkersContent> {
               ),
               prefixIcon: Padding(
                 padding: const EdgeInsets.only(left: 12, right: 6),
-                child: Icon(Icons.search_rounded,
-                    color: context.appColors.textMuted, size: 18),
+                child: Icon(
+                  Icons.search_rounded,
+                  color: context.appColors.textMuted,
+                  size: 18,
+                ),
               ),
-              prefixIconConstraints:
-                  const BoxConstraints(maxWidth: 36, maxHeight: 36),
+              prefixIconConstraints: const BoxConstraints(
+                maxWidth: 36,
+                maxHeight: 36,
+              ),
               suffixIcon: _searchQuery.isNotEmpty
                   ? GestureDetector(
                       onTap: () {
@@ -315,17 +334,24 @@ class _WorkersContentState extends State<_WorkersContent> {
                       },
                       child: Padding(
                         padding: const EdgeInsets.only(right: 10),
-                        child: Icon(Icons.close_rounded,
-                            color: context.appColors.textMuted, size: 16),
+                        child: Icon(
+                          Icons.close_rounded,
+                          color: context.appColors.textMuted,
+                          size: 16,
+                        ),
                       ),
                     )
                   : null,
-              suffixIconConstraints:
-                  const BoxConstraints(maxWidth: 30, maxHeight: 36),
+              suffixIconConstraints: const BoxConstraints(
+                maxWidth: 30,
+                maxHeight: 36,
+              ),
               filled: true,
               fillColor: context.appColors.bgElevated,
-              contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 0,
+              ),
               border: OutlineInputBorder(
                 borderSide: BorderSide.none,
                 borderRadius: BorderRadius.circular(10),
@@ -335,8 +361,10 @@ class _WorkersContentState extends State<_WorkersContent> {
                 borderRadius: BorderRadius.circular(10),
               ),
               focusedBorder: OutlineInputBorder(
-                borderSide:
-                    BorderSide(color: context.appColors.accent, width: 1),
+                borderSide: BorderSide(
+                  color: context.appColors.accent,
+                  width: 1,
+                ),
                 borderRadius: BorderRadius.circular(10),
               ),
             ),
@@ -378,8 +406,11 @@ class _WorkersContentState extends State<_WorkersContent> {
                   onTap: _clearFilters,
                   child: Padding(
                     padding: const EdgeInsets.only(left: 6),
-                    child: Icon(Icons.filter_alt_off_rounded,
-                        color: context.appColors.textMuted, size: 18),
+                    child: Icon(
+                      Icons.filter_alt_off_rounded,
+                      color: context.appColors.textMuted,
+                      size: 18,
+                    ),
                   ),
                 ),
             ],
@@ -394,18 +425,26 @@ class _WorkersContentState extends State<_WorkersContent> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.search_off_rounded,
-              color: context.appColors.textMuted, size: 40),
+          Icon(
+            Icons.search_off_rounded,
+            color: context.appColors.textMuted,
+            size: 40,
+          ),
           const SizedBox(height: 12),
-          Text('No matching workers',
-              style: TextStyle(
-                  color: context.appColors.textSecondary, fontSize: 14)),
+          Text(
+            'No matching workers',
+            style: TextStyle(
+              color: context.appColors.textSecondary,
+              fontSize: 14,
+            ),
+          ),
           const SizedBox(height: 6),
           GestureDetector(
             onTap: _clearFilters,
-            child: Text('Clear filters',
-                style: TextStyle(
-                    color: context.appColors.accent, fontSize: 13)),
+            child: Text(
+              'Clear filters',
+              style: TextStyle(color: context.appColors.accent, fontSize: 13),
+            ),
           ),
         ],
       ),
@@ -413,32 +452,43 @@ class _WorkersContentState extends State<_WorkersContent> {
   }
 
   void _confirmRemove(
-      BuildContext context, AppState state, WorkerConfig config) {
+    BuildContext context,
+    AppState state,
+    WorkerConfig config,
+  ) {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: context.appColors.bgSurface,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text('Remove worker?',
-            style: TextStyle(color: context.appColors.textPrimary, fontSize: 18)),
+        title: Text(
+          'Remove worker?',
+          style: TextStyle(color: context.appColors.textPrimary, fontSize: 18),
+        ),
         content: Text(
           'This will disconnect and remove "${config.name}".',
-          style: TextStyle(color: context.appColors.textSecondary, fontSize: 14),
+          style: TextStyle(
+            color: context.appColors.textSecondary,
+            fontSize: 14,
+          ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
-            child:
-                Text('Cancel', style: TextStyle(color: context.appColors.textSecondary)),
+            child: Text(
+              'Cancel',
+              style: TextStyle(color: context.appColors.textSecondary),
+            ),
           ),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: context.appColors.errorText),
+            style: FilledButton.styleFrom(
+              backgroundColor: context.appColors.errorText,
+            ),
             onPressed: () {
               Navigator.of(ctx).pop();
               state.removeWorker(config.id);
             },
-            child: const Text('Remove',
-                style: TextStyle(color: Colors.white)),
+            child: const Text('Remove', style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
@@ -515,10 +565,22 @@ class _WorkerCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final status = worker?.status ?? WorkerConnectionStatus.disconnected;
     final (statusText, statusColor) = switch (status) {
-      WorkerConnectionStatus.connected => ('Connected', context.appColors.successText),
-      WorkerConnectionStatus.connecting => ('Connecting...', context.appColors.toolAccent),
-      WorkerConnectionStatus.reconnecting => ('Reconnecting...', context.appColors.toolAccent),
-      WorkerConnectionStatus.disconnected => ('Disconnected', context.appColors.textMuted),
+      WorkerConnectionStatus.connected => (
+        'Connected',
+        context.appColors.successText,
+      ),
+      WorkerConnectionStatus.connecting => (
+        'Connecting...',
+        context.appColors.toolAccent,
+      ),
+      WorkerConnectionStatus.reconnecting => (
+        'Reconnecting...',
+        context.appColors.toolAccent,
+      ),
+      WorkerConnectionStatus.disconnected => (
+        'Disconnected',
+        context.appColors.textMuted,
+      ),
     };
 
     return Container(
@@ -527,7 +589,10 @@ class _WorkerCard extends StatelessWidget {
         color: context.appColors.bgElevated,
         borderRadius: BorderRadius.circular(14),
         border: status == WorkerConnectionStatus.connected
-            ? Border.all(color: context.appColors.successText.withAlpha(60), width: 1)
+            ? Border.all(
+                color: context.appColors.successText.withAlpha(60),
+                width: 1,
+              )
             : null,
       ),
       child: Column(
@@ -572,14 +637,24 @@ class _WorkerCard extends StatelessWidget {
           if (worker?.serverOs != null)
             Padding(
               padding: EdgeInsets.only(top: 4),
-              child: Text('OS: ${worker!.serverOs}',
-                  style: TextStyle(color: context.appColors.textMuted, fontSize: 11)),
+              child: Text(
+                'OS: ${worker!.serverOs}',
+                style: TextStyle(
+                  color: context.appColors.textMuted,
+                  fontSize: 11,
+                ),
+              ),
             ),
           if (config.autoConnect)
             Padding(
               padding: EdgeInsets.only(top: 4),
-              child: Text('Auto-connect: ON',
-                  style: TextStyle(color: context.appColors.textMuted, fontSize: 11)),
+              child: Text(
+                'Auto-connect: ON',
+                style: TextStyle(
+                  color: context.appColors.textMuted,
+                  fontSize: 11,
+                ),
+              ),
             ),
           const SizedBox(height: 12),
           Wrap(
@@ -611,7 +686,8 @@ class _WorkerCard extends StatelessWidget {
                 icon: status == WorkerConnectionStatus.connected
                     ? Icons.link_off_rounded
                     : Icons.link_rounded,
-                onPressed: status == WorkerConnectionStatus.connecting ||
+                onPressed:
+                    status == WorkerConnectionStatus.connecting ||
                         status == WorkerConnectionStatus.reconnecting
                     ? null
                     : onToggleConnect,
@@ -645,7 +721,11 @@ class _SmallButton extends StatelessWidget {
     final c = color ?? context.appColors.textSecondary;
     return TextButton.icon(
       onPressed: onPressed,
-      icon: Icon(icon, size: 16, color: onPressed != null ? c : context.appColors.textMuted),
+      icon: Icon(
+        icon,
+        size: 16,
+        color: onPressed != null ? c : context.appColors.textMuted,
+      ),
       label: Text(
         label,
         style: TextStyle(

@@ -17,17 +17,16 @@ TaskInfo _task({
   required String id,
   String status = 'todo',
   String workerName = 'Alpha',
-}) =>
-    TaskInfo(
-      taskId: id,
-      title: 'Task $id',
-      status: status,
-      source: 'user',
-      workerId: 'w1',
-      workerName: workerName,
-      createdAt: _now,
-      updatedAt: _now,
-    );
+}) => TaskInfo(
+  taskId: id,
+  title: 'Task $id',
+  status: status,
+  source: 'user',
+  workerId: 'w1',
+  workerName: workerName,
+  createdAt: _now,
+  updatedAt: _now,
+);
 
 const _statusOrder = ['in_progress', 'todo', 'review', 'done'];
 
@@ -184,9 +183,7 @@ void main() {
     });
 
     test('collapsed status groups are ignored when grouping by worker', () {
-      final tasks = [
-        _task(id: 'a', status: 'done', workerName: 'Alpha'),
-      ];
+      final tasks = [_task(id: 'a', status: 'done', workerName: 'Alpha')];
       // Even though 'done' is in collapsedGroups, worker grouping ignores it.
       final result = computeFlatVisibleList(
         filteredTasks: tasks,
@@ -207,8 +204,7 @@ void main() {
     // These tests simulate the _handleTaskTap range logic by verifying that
     // given a flat list, the correct slice of IDs is produced.
 
-    List<String> rangeSelect(
-        List<TaskInfo> flatList, int anchor, int target) {
+    List<String> rangeSelect(List<TaskInfo> flatList, int anchor, int target) {
       final lo = anchor < target ? anchor : target;
       final hi = anchor < target ? target : anchor;
       return [

@@ -80,8 +80,9 @@ class _TaskCreateDialogState extends State<_TaskCreateDialog> {
     try {
       await worker.ws.createTask(
         title: _titleCtrl.text.trim(),
-        description:
-            _descCtrl.text.trim().isEmpty ? null : _descCtrl.text.trim(),
+        description: _descCtrl.text.trim().isEmpty
+            ? null
+            : _descCtrl.text.trim(),
         source: 'user',
       );
       if (mounted) Navigator.of(context).pop(true);
@@ -310,15 +311,15 @@ class _TaskCreateDialogState extends State<_TaskCreateDialog> {
     );
   }
 
-  Widget _buildLabel(BuildContext context, String text,
-      {bool required = false}) {
+  Widget _buildLabel(
+    BuildContext context,
+    String text, {
+    bool required = false,
+  }) {
     return RichText(
       text: TextSpan(
         text: text,
-        style: TextStyle(
-          color: context.appColors.textSecondary,
-          fontSize: 13,
-        ),
+        style: TextStyle(color: context.appColors.textSecondary, fontSize: 13),
         children: [
           if (required)
             TextSpan(

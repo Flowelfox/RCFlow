@@ -11,11 +11,9 @@ class AgentSessionStartBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final displayName =
-        message.displayName ?? message.toolName ?? 'Agent';
+    final displayName = message.displayName ?? message.toolName ?? 'Agent';
     final prompt = message.content;
-    final workingDir =
-        message.toolInput?['working_directory'] as String?;
+    final workingDir = message.toolInput?['working_directory'] as String?;
     final expanded = message.expanded;
     final shouldTruncate = prompt.length > 200;
     final displayPrompt = (!expanded && shouldTruncate)
@@ -29,8 +27,7 @@ class AgentSessionStartBubble extends StatelessWidget {
           color: context.appColors.accent.withAlpha(20),
           borderRadius: BorderRadius.circular(10),
           border: Border(
-            left: BorderSide(
-                color: context.appColors.accent, width: 3),
+            left: BorderSide(color: context.appColors.accent, width: 3),
           ),
         ),
         padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
@@ -39,8 +36,11 @@ class AgentSessionStartBubble extends StatelessWidget {
           children: [
             Row(
               children: [
-                Icon(Icons.rocket_launch_rounded,
-                    color: context.appColors.accentLight, size: 16),
+                Icon(
+                  Icons.rocket_launch_rounded,
+                  color: context.appColors.accentLight,
+                  size: 16,
+                ),
                 const SizedBox(width: 8),
                 Text(
                   '$displayName started',
@@ -90,9 +90,11 @@ class AgentSessionStartBubble extends StatelessWidget {
               const SizedBox(height: 6),
               Row(
                 children: [
-                  Icon(Icons.folder_outlined,
-                      color: context.appColors.textSecondary,
-                      size: 12),
+                  Icon(
+                    Icons.folder_outlined,
+                    color: context.appColors.textSecondary,
+                    size: 12,
+                  ),
                   const SizedBox(width: 4),
                   Flexible(
                     child: Text(

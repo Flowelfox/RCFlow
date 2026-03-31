@@ -114,7 +114,8 @@ class TurnSummary {
       ttftMs: (json['ttft_ms'] as num?)?.toInt(),
       inputTokens: (json['input_tokens'] as num?)?.toInt() ?? 0,
       outputTokens: (json['output_tokens'] as num?)?.toInt() ?? 0,
-      cacheCreationTokens: (json['cache_creation_tokens'] as num?)?.toInt() ?? 0,
+      cacheCreationTokens:
+          (json['cache_creation_tokens'] as num?)?.toInt() ?? 0,
       cacheReadTokens: (json['cache_read_tokens'] as num?)?.toInt() ?? 0,
       toolCalls: (json['tool_calls'] as num?)?.toInt() ?? 0,
       model: json['model'] as String?,

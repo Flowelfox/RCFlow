@@ -27,7 +27,8 @@ class ArtifactInfo {
     this.projectName,
   });
 
-  factory ArtifactInfo.fromJson(Map<String, dynamic> json, {
+  factory ArtifactInfo.fromJson(
+    Map<String, dynamic> json, {
     String workerId = '',
     String workerName = '',
   }) {
@@ -94,19 +95,60 @@ class ArtifactInfo {
     }
   }
 
-  bool get isMarkdown => fileExtension.toLowerCase() == '.md' ||
-                         fileExtension.toLowerCase() == '.markdown';
+  bool get isMarkdown =>
+      fileExtension.toLowerCase() == '.md' ||
+      fileExtension.toLowerCase() == '.markdown';
 
   bool get isTextFile {
     final ext = fileExtension.toLowerCase();
     return [
-      '.txt', '.log', '.json', '.yaml', '.yml', '.toml', '.xml',
-      '.py', '.js', '.ts', '.jsx', '.tsx', '.dart', '.java', '.cpp', '.c',
-      '.h', '.hpp', '.cs', '.go', '.rs', '.rb', '.php', '.swift', '.kt',
-      '.sh', '.bash', '.zsh', '.fish', '.ps1', '.bat', '.cmd',
-      '.html', '.css', '.scss', '.sass', '.less',
-      '.md', '.markdown', '.rst', '.tex',
-      '.ini', '.cfg', '.conf', '.env', '.gitignore', '.dockerignore',
+      '.txt',
+      '.log',
+      '.json',
+      '.yaml',
+      '.yml',
+      '.toml',
+      '.xml',
+      '.py',
+      '.js',
+      '.ts',
+      '.jsx',
+      '.tsx',
+      '.dart',
+      '.java',
+      '.cpp',
+      '.c',
+      '.h',
+      '.hpp',
+      '.cs',
+      '.go',
+      '.rs',
+      '.rb',
+      '.php',
+      '.swift',
+      '.kt',
+      '.sh',
+      '.bash',
+      '.zsh',
+      '.fish',
+      '.ps1',
+      '.bat',
+      '.cmd',
+      '.html',
+      '.css',
+      '.scss',
+      '.sass',
+      '.less',
+      '.md',
+      '.markdown',
+      '.rst',
+      '.tex',
+      '.ini',
+      '.cfg',
+      '.conf',
+      '.env',
+      '.gitignore',
+      '.dockerignore',
     ].contains(ext);
   }
 }

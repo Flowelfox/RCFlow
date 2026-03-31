@@ -72,9 +72,15 @@ class LinearIssueInfo {
       teamName: json['team_name'] as String?,
       url: json['url'] as String? ?? '',
       labels: labels,
-      createdAt: DateTime.tryParse(json['created_at'] as String? ?? '') ?? DateTime.now(),
-      updatedAt: DateTime.tryParse(json['updated_at'] as String? ?? '') ?? DateTime.now(),
-      syncedAt: DateTime.tryParse(json['synced_at'] as String? ?? '') ?? DateTime.now(),
+      createdAt:
+          DateTime.tryParse(json['created_at'] as String? ?? '') ??
+          DateTime.now(),
+      updatedAt:
+          DateTime.tryParse(json['updated_at'] as String? ?? '') ??
+          DateTime.now(),
+      syncedAt:
+          DateTime.tryParse(json['synced_at'] as String? ?? '') ??
+          DateTime.now(),
       taskId: json['task_id'] as String?,
       workerId: workerId,
       workerName: workerName,
@@ -120,7 +126,8 @@ class LinearIssueInfo {
   }
 
   /// Human-readable priority label.
-  String get priorityLabel => const {
+  String get priorityLabel =>
+      const {
         0: 'No priority',
         1: 'Urgent',
         2: 'High',
@@ -130,6 +137,5 @@ class LinearIssueInfo {
       'Unknown';
 
   /// Whether the issue is in a terminal state (completed or cancelled).
-  bool get isTerminal =>
-      stateType == 'completed' || stateType == 'cancelled';
+  bool get isTerminal => stateType == 'completed' || stateType == 'cancelled';
 }

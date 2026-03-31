@@ -15,12 +15,10 @@ class TerminalService {
   StreamSubscription<dynamic>? _channelSub;
 
   final _outputControllers = <String, StreamController<Uint8List>>{};
-  final _controlController =
-      StreamController<Map<String, dynamic>>.broadcast();
+  final _controlController = StreamController<Map<String, dynamic>>.broadcast();
 
   /// Stream of JSON control messages from server (created, closed, error).
-  Stream<Map<String, dynamic>> get controlMessages =>
-      _controlController.stream;
+  Stream<Map<String, dynamic>> get controlMessages => _controlController.stream;
 
   bool get isConnected => _channel != null;
 
@@ -146,8 +144,7 @@ class TerminalService {
 
   /// Convert 16 bytes to UUID string.
   static String _uuidFromBytes(Uint8List bytes) {
-    final hex =
-        bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+    final hex = bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
     return '${hex.substring(0, 8)}-${hex.substring(8, 12)}-'
         '${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20)}';
   }
