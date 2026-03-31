@@ -76,7 +76,7 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
@@ -151,7 +151,7 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # ── Android: set up Java 17 before Flutter ────────────────────────────
       # AGP 8+ requires JDK 17; the default JVM on ubuntu-latest may be older.
