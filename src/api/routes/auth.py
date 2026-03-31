@@ -5,7 +5,6 @@ import json as json_mod
 import logging
 import os
 import re as re_mod
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -16,6 +15,7 @@ from src.api.deps import verify_http_api_key
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
+    from pathlib import Path
 
     from src.services.tool_manager import ToolManager
     from src.services.tool_settings import ToolSettingsManager

@@ -25,11 +25,11 @@ class OpenCodeExecutor(BaseExecutor):
     ``step_start`` event (``sessionID`` field, camelCase).
 
     Actual JSONL event types emitted by opencode ≥ 1.3:
-    - ``step_start``   – start of a reasoning/tool step; carries ``sessionID``
-    - ``text``         – assistant text; content in ``part.text``
-    - ``tool_use``     – tool call + result; ``part.tool``, ``part.state``
-    - ``step_finish``  – end of step; ``part.reason`` is ``"stop"`` on final
-    - ``error``        – fatal error during the session
+    - ``step_start``   - start of a reasoning/tool step; carries ``sessionID``
+    - ``text``         - assistant text; content in ``part.text``
+    - ``tool_use``     - tool call + result; ``part.tool``, ``part.state``
+    - ``step_finish``  - end of step; ``part.reason`` is ``"stop"`` on final
+    - ``error``        - fatal error during the session
     """
 
     def __init__(

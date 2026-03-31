@@ -5,17 +5,16 @@ Revises: ea58dc65fd1f
 Create Date: 2026-03-08 02:30:00.000000
 
 """
-from typing import Sequence, Union
+from collections.abc import Sequence
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = 'a1b2c3d4e5f7'
-down_revision: Union[str, None] = 'ea58dc65fd1f'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = 'ea58dc65fd1f'
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
@@ -28,7 +27,12 @@ def upgrade() -> None:
         sa.Column('file_extension', sa.String(length=50), nullable=False),
         sa.Column('file_size', sa.Integer(), nullable=False),
         sa.Column('mime_type', sa.String(length=100), nullable=True),
-        sa.Column('discovered_at', sa.DateTime(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=False),
+        sa.Column(
+            'discovered_at',
+            sa.DateTime(timezone=True),
+            server_default=sa.text('CURRENT_TIMESTAMP'),
+            nullable=False,
+        ),
         sa.Column('modified_at', sa.DateTime(timezone=True), nullable=False),
         sa.Column('session_id', sa.Uuid(), nullable=True),
         sa.ForeignKeyConstraint(['session_id'], ['sessions.id'], ),

@@ -23,10 +23,6 @@ import time
 import tkinter as tk
 from pathlib import Path
 from tkinter import scrolledtext, ttk
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    pass
 
 logger = logging.getLogger(__name__)
 
@@ -341,10 +337,8 @@ class RCFlowGUI:
 
     def _log_append(self, text: str) -> None:
         """Append a local message to the log queue (not from subprocess)."""
-        try:
+        with contextlib.suppress(queue.Full):
             self._log_queue.put_nowait(text)
-        except queue.Full:
-            pass
 
     def _drain_log_queue(self) -> None:
         lines: list[str] = []
@@ -591,7 +585,7 @@ class RCFlowGUI:
 
     def run(self) -> None:
         """Start the GUI event loop."""
-        has_tray = self._setup_tray()
+        self._setup_tray()
 
         # Auto-start the server on launch
         self._start_server()
@@ -637,7 +631,7 @@ def _set_autostart(enabled: bool) -> None:
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _AUTOSTART_REG_KEY, 0, winreg.KEY_SET_VALUE) as key:
             if enabled:
-                exe = sys.executable if getattr(sys, "frozen", False) else sys.executable
+                exe = sys.executable
                 winreg.SetValueEx(key, _AUTOSTART_VALUE_NAME, 0, winreg.REG_SZ, f'"{exe}" gui')
             else:
                 with contextlib.suppress(FileNotFoundError):

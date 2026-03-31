@@ -405,7 +405,7 @@ class LinearService:
     async def aclose(self) -> None:
         await self._client.aclose()
 
-    async def __aenter__(self) -> "LinearService":
+    async def __aenter__(self) -> LinearService:
         return self
 
     async def __aexit__(self, *_: object) -> None:

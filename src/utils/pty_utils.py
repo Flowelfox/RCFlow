@@ -18,6 +18,8 @@ not exist) never trigger an ``ImportError``.  Import it only after checking
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import errno as _errno
 import logging
 import os
 import re
@@ -161,8 +163,6 @@ class PtyLineReader:
         try:
             data = os.read(self._fd, 65536)
         except OSError as exc:
-            import errno as _errno
-
             if exc.errno in (_errno.EAGAIN, _errno.EWOULDBLOCK, _errno.EIO):
                 # EIO typically means the slave side was closed (process exited)
                 self._set_closed()
@@ -187,10 +187,8 @@ class PtyLineReader:
 
     def _set_closed(self) -> None:
         self._closed = True
-        try:
+        with contextlib.suppress(Exception):
             self._loop.remove_reader(self._fd)
-        except Exception:
-            pass
         self._notify_waiters()
 
     def _set_exception(self, exc: BaseException) -> None:

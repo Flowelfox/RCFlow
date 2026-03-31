@@ -1,7 +1,21 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint, Uuid, func
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    Uuid,
+    func,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -163,7 +177,8 @@ class LinearIssue(Base):
     description: Mapped[str | None] = mapped_column(Text)
     priority: Mapped[int] = mapped_column(Integer, default=0, nullable=False)  # 0=none 1=urgent 2=high 3=medium 4=low
     state_name: Mapped[str] = mapped_column(String(100), nullable=False)
-    state_type: Mapped[str] = mapped_column(String(30), nullable=False)  # triage|backlog|unstarted|started|completed|cancelled
+    # triage|backlog|unstarted|started|completed|cancelled
+    state_type: Mapped[str] = mapped_column(String(30), nullable=False)
     assignee_id: Mapped[str | None] = mapped_column(String(255))
     assignee_name: Mapped[str | None] = mapped_column(String(255))
     team_id: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -241,7 +256,9 @@ class ToolCall(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     session_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("sessions.id", ondelete="CASCADE"), nullable=False)
-    turn_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, ForeignKey("session_turns.id", ondelete="SET NULL"), nullable=True)
+    turn_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("session_turns.id", ondelete="SET NULL"), nullable=True
+    )
     backend_id: Mapped[str] = mapped_column(String(36), nullable=False, default="")
     turn_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
     tool_call_index: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

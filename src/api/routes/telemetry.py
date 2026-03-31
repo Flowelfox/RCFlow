@@ -26,10 +26,10 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession  # noqa: TC002
 
 from src.db.engine import get_db_session
-from src.models.db import SessionTurn, ToolCall, TelemetryMinutely
+from src.models.db import SessionTurn, TelemetryMinutely, ToolCall
 
 router = APIRouter(prefix="/telemetry", tags=["Telemetry"])
 
@@ -72,7 +72,7 @@ def _p95_ms(values_ms: list[int]) -> float | None:
 )
 async def get_global_summary(
     request: Request,
-    db: AsyncSession = Depends(get_db_session),
+    db: AsyncSession = Depends(get_db_session),  # noqa: B008
 ) -> dict[str, Any]:
     """Return global telemetry summary for this backend."""
     backend_id = _backend_id(request)
@@ -150,7 +150,7 @@ async def get_global_summary(
 )
 async def get_worker_summary(
     request: Request,
-    db: AsyncSession = Depends(get_db_session),
+    db: AsyncSession = Depends(get_db_session),  # noqa: B008
 ) -> dict[str, Any]:
     """Return worker-level aggregated telemetry across all sessions."""
     backend_id = _backend_id(request)
@@ -253,7 +253,7 @@ async def get_worker_summary(
 async def get_session_summary(
     session_id: str,
     request: Request,
-    db: AsyncSession = Depends(get_db_session),
+    db: AsyncSession = Depends(get_db_session),  # noqa: B008
 ) -> dict[str, Any]:
     """Return telemetry summary for a single session."""
     backend_id = _backend_id(request)
@@ -351,11 +351,11 @@ async def get_session_summary(
 async def get_timeseries(
     request: Request,
     zoom: str = Query(..., description="Bucket granularity: 'minute', 'hour', or 'day'"),
-    start: datetime = Query(..., description="Start of window (ISO8601 UTC)"),
-    end: datetime = Query(..., description="End of window (ISO8601 UTC)"),
+    start: datetime = Query(..., description="Start of window (ISO8601 UTC)"),  # noqa: B008
+    end: datetime = Query(..., description="End of window (ISO8601 UTC)"),  # noqa: B008
     session_id: str | None = Query(None, description="Filter to a single session UUID"),
     metric: str | None = Query(None, description="Specific metric to return (all if omitted)"),
-    db: AsyncSession = Depends(get_db_session),
+    db: AsyncSession = Depends(get_db_session),  # noqa: B008
 ) -> dict[str, Any]:
     """Return bucketed time-series metrics for the requested window."""
     backend_id = _backend_id(request)

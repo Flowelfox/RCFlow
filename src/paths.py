@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import sys
 from pathlib import Path
@@ -100,10 +101,8 @@ def get_tool_plugins_dir(tool_name: str) -> Path:
     if tool_dir is None:
         raise ValueError(f"Unknown tool: {tool_name!r}. Must be one of: {sorted(_TOOL_DIR_MAP)}")
     candidate = get_managed_tools_dir() / tool_dir / "plugins"
-    try:
+    with contextlib.suppress(OSError):
         candidate.mkdir(parents=True, exist_ok=True)
-    except OSError:
-        pass
     return candidate
 
 
@@ -132,10 +131,8 @@ def get_managed_cc_plugins_dir() -> Path:
     it exists on every machine where RCFlow manages the Claude Code binary.
     """
     candidate = get_managed_tools_dir() / "claude-code" / "plugins"
-    try:
+    with contextlib.suppress(OSError):
         candidate.mkdir(parents=True, exist_ok=True)
-    except OSError:
-        pass
     return candidate
 
 

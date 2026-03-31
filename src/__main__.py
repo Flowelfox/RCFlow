@@ -73,11 +73,12 @@ def _ensure_self_signed_certs(certfile: Path, keyfile: Path) -> None:
     if certfile.exists() and keyfile.exists():
         return
 
-    from cryptography import x509
-    from cryptography.hazmat.primitives import hashes, serialization
-    from cryptography.hazmat.primitives.asymmetric import rsa
-    from cryptography.x509.oid import NameOID
-    import datetime
+    import datetime  # noqa: PLC0415
+
+    from cryptography import x509  # noqa: PLC0415
+    from cryptography.hazmat.primitives import hashes, serialization  # noqa: PLC0415
+    from cryptography.hazmat.primitives.asymmetric import rsa  # noqa: PLC0415
+    from cryptography.x509.oid import NameOID  # noqa: PLC0415
 
     print(f"Generating self-signed certificate: {certfile}")
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
@@ -92,8 +93,8 @@ def _ensure_self_signed_certs(certfile: Path, keyfile: Path) -> None:
         .issuer_name(issuer)
         .public_key(key.public_key())
         .serial_number(x509.random_serial_number())
-        .not_valid_before(datetime.datetime.now(datetime.timezone.utc))
-        .not_valid_after(datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=3650))
+        .not_valid_before(datetime.datetime.now(datetime.UTC))
+        .not_valid_after(datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=3650))
         .add_extension(
             x509.SubjectAlternativeName([
                 x509.DNSName("localhost"),
@@ -109,7 +110,11 @@ def _ensure_self_signed_certs(certfile: Path, keyfile: Path) -> None:
     keyfile.parent.mkdir(parents=True, exist_ok=True)
     certfile.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
     keyfile.write_bytes(
-        key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.TraditionalOpenSSL, serialization.NoEncryption())
+        key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.TraditionalOpenSSL,
+            serialization.NoEncryption(),
+        )
     )
     print("Self-signed certificate generated successfully.")
 
@@ -123,7 +128,7 @@ def _cmd_run(args: argparse.Namespace) -> None:
 
     ssl_kwargs: dict[str, str] = {}
     if settings.WSS_ENABLED:
-        from src.paths import get_install_dir
+        from src.paths import get_install_dir  # noqa: PLC0415
 
         certfile = Path(settings.SSL_CERTFILE) if settings.SSL_CERTFILE else get_install_dir() / "certs" / "cert.pem"
         keyfile = Path(settings.SSL_KEYFILE) if settings.SSL_KEYFILE else get_install_dir() / "certs" / "key.pem"

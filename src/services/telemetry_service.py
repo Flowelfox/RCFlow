@@ -8,7 +8,7 @@ Phases:
 
 import logging
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
@@ -16,7 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from src.models.db import Session as SessionModel
-from src.models.db import SessionTurn, ToolCall, TelemetryMinutely
+from src.models.db import SessionTurn, TelemetryMinutely, ToolCall
 
 if TYPE_CHECKING:
     from src.core.llm import TurnUsage

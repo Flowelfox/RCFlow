@@ -100,7 +100,7 @@ class BackgroundTasksMixin:
 
     # --- Session row pre-creation ---
 
-    async def _ensure_session_row_in_db(self, session: "ActiveSession") -> None:
+    async def _ensure_session_row_in_db(self, session: ActiveSession) -> None:
         """Create a stub sessions row in the DB if one does not already exist.
 
         Telemetry tables (session_turns, tool_calls) reference sessions.id via a
@@ -282,8 +282,8 @@ class BackgroundTasksMixin:
             attach_ids = llm_result.get("attach_task_ids") or []
 
             attached_task_ids: list[str] = []
-            from datetime import UTC
-            from datetime import datetime as dt
+            from datetime import UTC  # noqa: PLC0415
+            from datetime import datetime as dt  # noqa: PLC0415
 
             async with self._db_session_factory() as db:
                 # Ensure session row exists in DB (it may not be archived yet)
@@ -460,14 +460,14 @@ class BackgroundTasksMixin:
         task_ids: list[str],
     ) -> None:
         """Update tasks based on session results. Never raises."""
-        from sqlite3 import OperationalError as SQLiteOperationalError
+        from sqlite3 import OperationalError as SQLiteOperationalError  # noqa: PLC0415
 
         try:
             if self._db_session_factory is None:
                 return
 
-            from datetime import UTC
-            from datetime import datetime as dt
+            from datetime import UTC  # noqa: PLC0415
+            from datetime import datetime as dt  # noqa: PLC0415
 
             async with self._db_session_factory() as db:
                 for tid in task_ids:
@@ -493,7 +493,7 @@ class BackgroundTasksMixin:
                     changed = False
                     # Validate transition and enforce AI can't set done
                     if new_status != task.status and new_status != "done":
-                        from src.api.http import VALID_TASK_TRANSITIONS
+                        from src.api.http import VALID_TASK_TRANSITIONS  # noqa: PLC0415
 
                         allowed = VALID_TASK_TRANSITIONS.get(task.status, set())
                         if new_status in allowed:

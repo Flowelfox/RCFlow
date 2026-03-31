@@ -210,7 +210,7 @@ class ToolManager:
         Use ``install_tool()`` or ``install_tool_streaming()`` to install
         on-demand when the user requests it via the UI.
         """
-        _BINARY_NAMES = {"claude_code": "claude", "codex": "codex", "opencode": "opencode"}
+        binary_names = {"claude_code": "claude", "codex": "codex", "opencode": "opencode"}
         results: dict[str, ManagedTool] = {}
         for name in ("claude_code", "codex", "opencode"):
             try:
@@ -230,7 +230,7 @@ class ToolManager:
                 logger.exception("Failed to set up tool '%s'", name)
                 results[name] = ManagedTool(
                     name=name,
-                    binary_name=_BINARY_NAMES.get(name, name),
+                    binary_name=binary_names.get(name, name),
                     error=str(exc),
                 )
         self._tools = results
@@ -348,8 +348,8 @@ class ToolManager:
 
         Priority: RCFlow managed directory first, then PATH lookup.
         """
-        _BINARY_NAMES = {"claude_code": "claude", "codex": "codex", "opencode": "opencode"}
-        binary_name = _BINARY_NAMES.get(name, name)
+        binary_names = {"claude_code": "claude", "codex": "codex", "opencode": "opencode"}
+        binary_name = binary_names.get(name, name)
 
         # Probe both sources so the UI can offer a switch
         mp = self._managed_binary_path(name)

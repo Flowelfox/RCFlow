@@ -498,7 +498,7 @@ class ContextMixin:
 
         tool_def, tool_input, display_text = parsed
 
-        from src.core.llm import ToolCallRequest
+        from src.core.llm import ToolCallRequest  # noqa: PLC0415
 
         tool_call = ToolCallRequest(
             tool_use_id=str(uuid.uuid4()),
@@ -532,5 +532,9 @@ class ContextMixin:
             session.title = title
 
         # If non-agent tool completed, set IDLE
-        if session.claude_code_executor is None and session.codex_executor is None and session.opencode_executor is None:
+        if (
+            session.claude_code_executor is None
+            and session.codex_executor is None
+            and session.opencode_executor is None
+        ):
             session.set_activity(ActivityState.IDLE)

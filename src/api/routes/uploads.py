@@ -10,13 +10,15 @@ after 10 minutes.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile
 
 from src.api.deps import verify_http_api_key
-from src.core.attachment_store import AttachmentStore
-from src.core.llm import LLMClient
+
+if TYPE_CHECKING:
+    from src.core.attachment_store import AttachmentStore
+    from src.core.llm import LLMClient
 
 logger = logging.getLogger(__name__)
 
@@ -58,15 +60,18 @@ async def upload_attachment(
     # Validate MIME type against model capabilities before reading the body.
     mime_type_early = file.content_type or "application/octet-stream"
     llm_client: LLMClient | None = getattr(request.app.state, "llm_client", None)
-    if llm_client is not None and mime_type_early in _IMAGE_MIME_TYPES:
-        if not llm_client.attachment_capabilities["images"]:
-            raise HTTPException(
-                status_code=415,
-                detail=(
-                    "Image attachments are not supported by the current model. "
-                    "Only text and code files can be attached."
-                ),
-            )
+    if (
+        llm_client is not None
+        and mime_type_early in _IMAGE_MIME_TYPES
+        and not llm_client.attachment_capabilities["images"]
+    ):
+        raise HTTPException(
+            status_code=415,
+            detail=(
+                "Image attachments are not supported by the current model. "
+                "Only text and code files can be attached."
+            ),
+        )
 
     data = await file.read()
 

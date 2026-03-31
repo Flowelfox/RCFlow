@@ -4,13 +4,14 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+
 from src.api.http import router as http_router
 from src.api.integrations.linear import router as linear_router
-from src.core.attachment_store import AttachmentStore
 from src.api.ws.input_text import router as input_text_router
 from src.api.ws.output_text import router as output_text_router
 from src.api.ws.terminal import router as terminal_router
 from src.config import get_settings
+from src.core.attachment_store import AttachmentStore
 from src.core.llm import LLMClient
 from src.core.prompt_router import PromptRouter
 from src.core.session import SessionManager
@@ -140,10 +141,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     telemetry_task = asyncio.create_task(_run_telemetry_loop())
 
+    # Background task set — keeps strong references so tasks are not GC'd
+    _bg_tasks: set[asyncio.Task[None]] = set()
+
     # Linear startup sync (non-blocking background task)
     if settings.LINEAR_SYNC_ON_STARTUP and settings.LINEAR_API_KEY and settings.LINEAR_TEAM_ID:
-        from src.api.integrations.linear import _upsert_issues, _issue_to_dict  # noqa: PLC0415
-        from src.services.linear_service import LinearService as _LinearService, LinearServiceError as _LinearServiceError  # noqa: PLC0415
+        from src.api.integrations.linear import _issue_to_dict, _upsert_issues  # noqa: PLC0415
+        from src.services.linear_service import LinearService as _LinearService  # noqa: PLC0415
+        from src.services.linear_service import LinearServiceError as _LinearServiceError  # noqa: PLC0415
         async def _run_startup_sync() -> None:
             try:
                 async with _LinearService(settings.LINEAR_API_KEY) as svc:
@@ -157,7 +162,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
                 logger.warning("Linear startup sync failed: %s", exc)
             except Exception as exc:
                 logger.warning("Linear startup sync unexpected error: %s", exc)
-        asyncio.create_task(_run_startup_sync())
+        _t = asyncio.create_task(_run_startup_sync())
+        _bg_tasks.add(_t)
+        _t.add_done_callback(_bg_tasks.discard)
 
     yield
 
