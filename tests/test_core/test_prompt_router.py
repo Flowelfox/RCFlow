@@ -788,15 +788,17 @@ def test_update_worktree_meta_new_auto_selects_path(session_manager: SessionMana
             "base": "main",
         },
     )
-    result_json = json.dumps({
-        "created": {
-            "name": "new-thing",
-            "branch": "feature/new-thing",
-            "base": "main",
-            "path": "/repos/myproject/.worktrees/new-thing",
-            "created_at": "2026-03-18T10:00:00",
+    result_json = json.dumps(
+        {
+            "created": {
+                "name": "new-thing",
+                "branch": "feature/new-thing",
+                "base": "main",
+                "path": "/repos/myproject/.worktrees/new-thing",
+                "created_at": "2026-03-18T10:00:00",
+            }
         }
-    })
+    )
 
     router._update_session_worktree_meta(session, tool_call, result_json)
 
@@ -857,6 +859,7 @@ def test_update_worktree_meta_rm_clears_selected_path(session_manager: SessionMa
 # ---------------------------------------------------------------------------
 # Permission resolution — buffer persistence
 # ---------------------------------------------------------------------------
+
 
 def test_resolve_permission_sets_accepted_in_buffer(session_manager: SessionManager) -> None:
     """Resolving a permission request persists 'accepted' in the buffer message.
@@ -1030,21 +1033,24 @@ async def test_relay_enter_plan_mode_blocks_and_resumes_on_approve(
     """EnterPlanMode in the stream blocks until the user approves, then continues."""
     router = _make_router(session_manager)
 
-
     session = session_manager.create_session(SessionType.LONG_RUNNING)
     session.set_active()
 
-    enter_plan_event = json.dumps({
-        "type": "assistant",
-        "message": {
-            "content": [{"type": "tool_use", "name": "EnterPlanMode", "input": {}}],
-        },
-    })
+    enter_plan_event = json.dumps(
+        {
+            "type": "assistant",
+            "message": {
+                "content": [{"type": "tool_use", "name": "EnterPlanMode", "input": {}}],
+            },
+        }
+    )
     result_event = json.dumps({"type": "result", "result": "Plan complete."})
-    stream = _async_stream_chunks([
-        ExecutionChunk(content=enter_plan_event, stream="stdout"),
-        ExecutionChunk(content=result_event, stream="stdout"),
-    ])
+    stream = _async_stream_chunks(
+        [
+            ExecutionChunk(content=enter_plan_event, stream="stdout"),
+            ExecutionChunk(content=result_event, stream="stdout"),
+        ]
+    )
 
     # Run relay concurrently with an approval sent after a short delay
     async def _approve_after_yield() -> None:
@@ -1083,18 +1089,22 @@ async def test_relay_enter_plan_mode_denied_ends_session(
     mock_executor.stop_process = AsyncMock()
     session.claude_code_executor = mock_executor
 
-    enter_plan_event = json.dumps({
-        "type": "assistant",
-        "message": {
-            "content": [{"type": "tool_use", "name": "EnterPlanMode", "input": {}}],
-        },
-    })
+    enter_plan_event = json.dumps(
+        {
+            "type": "assistant",
+            "message": {
+                "content": [{"type": "tool_use", "name": "EnterPlanMode", "input": {}}],
+            },
+        }
+    )
     # The result event should NOT be reached after a denial
     result_event = json.dumps({"type": "result", "result": "Should not reach."})
-    stream = _async_stream_chunks([
-        ExecutionChunk(content=enter_plan_event, stream="stdout"),
-        ExecutionChunk(content=result_event, stream="stdout"),
-    ])
+    stream = _async_stream_chunks(
+        [
+            ExecutionChunk(content=enter_plan_event, stream="stdout"),
+            ExecutionChunk(content=result_event, stream="stdout"),
+        ]
+    )
 
     async def _deny_after_yield() -> None:
         await asyncio.sleep(0)
@@ -1126,7 +1136,6 @@ async def test_relay_exit_plan_mode_blocks_until_approval(
     """ExitPlanMode relay blocks the stream until the user provides a response."""
     router = _make_router(session_manager)
 
-
     session = session_manager.create_session(SessionType.LONG_RUNNING)
     session.set_active()
 
@@ -1136,21 +1145,27 @@ async def test_relay_exit_plan_mode_blocks_until_approval(
     mock_executor.send_input = AsyncMock()
     session.claude_code_executor = mock_executor
 
-    exit_plan_event = json.dumps({
-        "type": "assistant",
-        "message": {
-            "content": [{
-                "type": "tool_use",
-                "name": "ExitPlanMode",
-                "input": {"plan": "1. Do X\n2. Do Y"},
-            }],
-        },
-    })
+    exit_plan_event = json.dumps(
+        {
+            "type": "assistant",
+            "message": {
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "name": "ExitPlanMode",
+                        "input": {"plan": "1. Do X\n2. Do Y"},
+                    }
+                ],
+            },
+        }
+    )
     result_event = json.dumps({"type": "result", "result": "Plan ready."})
-    stream = _async_stream_chunks([
-        ExecutionChunk(content=exit_plan_event, stream="stdout"),
-        ExecutionChunk(content=result_event, stream="stdout"),
-    ])
+    stream = _async_stream_chunks(
+        [
+            ExecutionChunk(content=exit_plan_event, stream="stdout"),
+            ExecutionChunk(content=result_event, stream="stdout"),
+        ]
+    )
 
     relay_done = False
 
@@ -1170,9 +1185,7 @@ async def test_relay_exit_plan_mode_blocks_until_approval(
     await asyncio.gather(_track_relay(), _approve_after_yield())
 
     # PLAN_REVIEW_ASK should be in the buffer, marked accepted
-    plan_review_msgs = [
-        m for m in session.buffer.text_history if m.message_type == MessageType.PLAN_REVIEW_ASK
-    ]
+    plan_review_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.PLAN_REVIEW_ASK]
     assert len(plan_review_msgs) == 1
     assert plan_review_msgs[0].data["plan_input"] == {"plan": "1. Do X\n2. Do Y"}
     assert plan_review_msgs[0].data["session_id"] == session.id
@@ -1186,7 +1199,6 @@ async def test_relay_exit_plan_mode_approve_sends_to_stdin(
     """Approving the plan review sends the approval text to Claude Code stdin."""
     router = _make_router(session_manager)
 
-
     session = session_manager.create_session(SessionType.LONG_RUNNING)
     session.set_active()
 
@@ -1195,17 +1207,21 @@ async def test_relay_exit_plan_mode_approve_sends_to_stdin(
     mock_executor.send_input = AsyncMock()
     session.claude_code_executor = mock_executor
 
-    exit_plan_event = json.dumps({
-        "type": "assistant",
-        "message": {
-            "content": [{"type": "tool_use", "name": "ExitPlanMode", "input": {"plan": "Step 1"}}],
-        },
-    })
+    exit_plan_event = json.dumps(
+        {
+            "type": "assistant",
+            "message": {
+                "content": [{"type": "tool_use", "name": "ExitPlanMode", "input": {"plan": "Step 1"}}],
+            },
+        }
+    )
     result_event = json.dumps({"type": "result", "result": "Done."})
-    stream = _async_stream_chunks([
-        ExecutionChunk(content=exit_plan_event, stream="stdout"),
-        ExecutionChunk(content=result_event, stream="stdout"),
-    ])
+    stream = _async_stream_chunks(
+        [
+            ExecutionChunk(content=exit_plan_event, stream="stdout"),
+            ExecutionChunk(content=result_event, stream="stdout"),
+        ]
+    )
 
     approval_text = "Looks good, proceed with the plan."
 
@@ -1231,7 +1247,6 @@ async def test_relay_exit_plan_mode_reject_sends_feedback_to_stdin(
     """Rejecting the plan review sends feedback text to Claude Code stdin for revision."""
     router = _make_router(session_manager)
 
-
     session = session_manager.create_session(SessionType.LONG_RUNNING)
     session.set_active()
 
@@ -1240,17 +1255,21 @@ async def test_relay_exit_plan_mode_reject_sends_feedback_to_stdin(
     mock_executor.send_input = AsyncMock()
     session.claude_code_executor = mock_executor
 
-    exit_plan_event = json.dumps({
-        "type": "assistant",
-        "message": {
-            "content": [{"type": "tool_use", "name": "ExitPlanMode", "input": {"plan": "Step 1"}}],
-        },
-    })
+    exit_plan_event = json.dumps(
+        {
+            "type": "assistant",
+            "message": {
+                "content": [{"type": "tool_use", "name": "ExitPlanMode", "input": {"plan": "Step 1"}}],
+            },
+        }
+    )
     result_event = json.dumps({"type": "result", "result": "Done."})
-    stream = _async_stream_chunks([
-        ExecutionChunk(content=exit_plan_event, stream="stdout"),
-        ExecutionChunk(content=result_event, stream="stdout"),
-    ])
+    stream = _async_stream_chunks(
+        [
+            ExecutionChunk(content=exit_plan_event, stream="stdout"),
+            ExecutionChunk(content=result_event, stream="stdout"),
+        ]
+    )
 
     feedback = "Please also add error handling in step 1."
 
@@ -1548,3 +1567,13 @@ async def test_resume_session_reconstructs_opencode_executor(session_manager: Se
     assert result.status == SessionStatus.ACTIVE
     assert result.opencode_executor is not None
     assert result.opencode_executor.opencode_session_id == "oc-sess-abc"
+
+
+class TestBuildClaudeCodeExtraEnv:
+    """Tests for ClaudeCodeAgentMixin._build_claude_code_extra_env."""
+
+    def test_always_sets_undercover(self, session_manager: SessionManager):
+        """CLAUDE_CODE_UNDERCOVER=1 is always included in extra env."""
+        router = _make_router(session_manager)
+        env = router._build_claude_code_extra_env()
+        assert env.get("CLAUDE_CODE_UNDERCOVER") == "1"

@@ -69,6 +69,9 @@ class _StubPaneHost implements PaneHost {
 
   @override
   String? defaultAgentForWorker(String? workerId) => null;
+
+  @override
+  void muteSessionSound(String sessionId) {}
 }
 
 // ---------------------------------------------------------------------------

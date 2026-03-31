@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/worker_config.dart';
 
 class SettingsService {
+  // Legacy keys (kept for migration)
   static const _hostKey = 'rcflow_host';
   static const _apiKeyKey = 'rcflow_api_key';
   static const _useSSLKey = 'rcflow_use_ssl';
@@ -20,6 +21,12 @@ class SettingsService {
   static const _themeModeKey = 'rcflow_theme_mode';
   static const _fontSizeKey = 'rcflow_font_size';
   static const _compactModeKey = 'rcflow_compact_mode';
+  static const _soundEnabledKey = 'rcflow_sound_enabled';
+  static const _vibrateEnabledKey = 'rcflow_vibrate_enabled';
+  static const _soundOnCompleteEnabledKey = 'rcflow_sound_on_complete';
+  static const _notificationSoundKey = 'rcflow_notification_sound';
+  static const _customSoundPathKey = 'rcflow_custom_sound_path';
+
   static const _terminalScrollbackKey = 'rcflow_terminal_scrollback';
   static const _terminalColorSchemeKey = 'rcflow_terminal_color_scheme';
   static const _terminalCursorStyleKey = 'rcflow_terminal_cursor_style';
@@ -186,6 +193,26 @@ class SettingsService {
 
   bool get compactMode => _prefs.getBool(_compactModeKey) ?? false;
   set compactMode(bool value) => _prefs.setBool(_compactModeKey, value);
+
+  bool get soundEnabled => _prefs.getBool(_soundEnabledKey) ?? false;
+  set soundEnabled(bool value) => _prefs.setBool(_soundEnabledKey, value);
+
+  bool get soundOnCompleteEnabled =>
+      _prefs.getBool(_soundOnCompleteEnabledKey) ?? true;
+  set soundOnCompleteEnabled(bool value) =>
+      _prefs.setBool(_soundOnCompleteEnabledKey, value);
+
+  bool get vibrateEnabled => _prefs.getBool(_vibrateEnabledKey) ?? true;
+  set vibrateEnabled(bool value) => _prefs.setBool(_vibrateEnabledKey, value);
+
+  String get notificationSound =>
+      _prefs.getString(_notificationSoundKey) ?? 'gentle_chime';
+  set notificationSound(String value) =>
+      _prefs.setString(_notificationSoundKey, value);
+
+  String get customSoundPath => _prefs.getString(_customSoundPathKey) ?? '';
+  set customSoundPath(String value) =>
+      _prefs.setString(_customSoundPathKey, value);
 
   int get terminalScrollback => _prefs.getInt(_terminalScrollbackKey) ?? 1000;
   set terminalScrollback(int value) =>
