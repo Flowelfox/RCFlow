@@ -102,17 +102,39 @@ class _InputAreaState extends State<InputArea> {
   String? _worktreeCacheKey;
   List<Map<String, dynamic>>? _preSessionWorktrees;
   bool _loadingWorktrees = false;
+  // Set to true after a fetch failure so the build-time addPostFrameCallback
+  // does not retry on every rebuild.  Reset when the cache key changes (new
+  // project or worker) or when the user explicitly opens the dropdown.
+  bool _worktreeFetchFailed = false;
+
+  // Tracks the active pane so the worktree cache can be invalidated when the
+  // user switches to a different session pane (the widget may be reused).
+  String? _lastPaneId;
 
   /// Fetch the worktree list for [projectPath] using the given [workerId].
   /// Results are cached per [projectPath]; a concurrent or redundant call
-  /// while loading is silently ignored.
-  Future<void> _fetchWorktrees(String projectPath, String workerId) async {
+  /// while loading is silently ignored.  Pass [force] to bypass the cache
+  /// and always fetch fresh data (e.g. when the user opens the dropdown).
+  Future<void> _fetchWorktrees(
+    String projectPath,
+    String workerId, {
+    bool force = false,
+  }) async {
     final cacheKey = '$workerId:$projectPath';
-    if (_worktreeCacheKey == cacheKey && _preSessionWorktrees != null) return;
+    // When the cache key changes, reset the failed flag so a fresh attempt runs.
+    if (_worktreeCacheKey != cacheKey) {
+      _worktreeFetchFailed = false;
+    }
+    if (!force &&
+        _worktreeCacheKey == cacheKey &&
+        (_preSessionWorktrees != null || _worktreeFetchFailed)) {
+      return;
+    }
     if (_loadingWorktrees) return;
     if (!mounted) return;
     setState(() {
       _loadingWorktrees = true;
+      _worktreeFetchFailed = false;
       if (_worktreeCacheKey != cacheKey) {
         _preSessionWorktrees = null;
         _worktreeCacheKey = cacheKey;
@@ -128,7 +150,9 @@ class _InputAreaState extends State<InputArea> {
         });
       }
     } catch (_) {
-      // Silently ignore fetch errors; the chip will remain in a loading state
+      // Mark as failed so the build-time trigger stops retrying until the
+      // cache key changes (different project/worker) or a forced refresh.
+      if (mounted) setState(() => _worktreeFetchFailed = true);
     } finally {
       if (mounted) setState(() => _loadingWorktrees = false);
     }
@@ -1032,6 +1056,15 @@ class _InputAreaState extends State<InputArea> {
       });
     }
 
+    // Detect pane switches so we invalidate the worktree cache — the widget
+    // instance may be reused across different panes by Flutter.
+    final currentPaneId = context.select<PaneState, String>((s) => s.paneId);
+    if (_lastPaneId != null && _lastPaneId != currentPaneId) {
+      _preSessionWorktrees = null;
+      _worktreeCacheKey = null;
+    }
+    _lastPaneId = currentPaneId;
+
     final canSend = context.select<PaneState, bool>((s) => s.canSendMessage);
     final sessionEnded = context.select<PaneState, bool>((s) => s.sessionEnded);
     final sessionPaused = context.select<PaneState, bool>(
@@ -1222,6 +1255,7 @@ class _InputAreaState extends State<InputArea> {
                         onOpen: () => _fetchWorktrees(
                           selectedProjectPath,
                           paneWorkerId ?? state.defaultWorkerId ?? '',
+                          force: true,
                         ),
                         onSelect: (path) => context
                             .read<PaneState>()
@@ -1238,6 +1272,7 @@ class _InputAreaState extends State<InputArea> {
                         onOpen: () => _fetchWorktrees(
                           activeSessionProjectPath,
                           paneWorkerId ?? state.defaultWorkerId ?? '',
+                          force: true,
                         ),
                         onSelect: (path) =>
                             _setSessionWorktree(sessionId, path),
