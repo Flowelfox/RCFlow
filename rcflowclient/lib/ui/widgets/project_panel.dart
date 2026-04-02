@@ -106,7 +106,10 @@ class _ProjectPanelState extends State<ProjectPanel> {
     setState(() => _loadingWorktrees = true);
     try {
       final worker = appState.getWorker(workerId);
-      if (worker == null) return;
+      if (worker == null) {
+        if (mounted) setState(() => _loadingWorktrees = false);
+        return;
+      }
       await worker.ws.createWorktree(
         branch: params.branch,
         repoPath: projectPath,
@@ -160,7 +163,10 @@ class _ProjectPanelState extends State<ProjectPanel> {
     setState(() => _loadingWorktrees = true);
     try {
       final worker = appState.getWorker(workerId);
-      if (worker == null) return;
+      if (worker == null) {
+        if (mounted) setState(() => _loadingWorktrees = false);
+        return;
+      }
       await worker.ws.mergeWorktree(
         name: name,
         message: message,
@@ -188,7 +194,10 @@ class _ProjectPanelState extends State<ProjectPanel> {
     setState(() => _loadingWorktrees = true);
     try {
       final worker = appState.getWorker(workerId);
-      if (worker == null) return;
+      if (worker == null) {
+        if (mounted) setState(() => _loadingWorktrees = false);
+        return;
+      }
       await worker.ws.removeWorktree(name: name, repoPath: projectPath);
       await _refreshWorktrees(appState, workerId, projectPath);
     } catch (e) {

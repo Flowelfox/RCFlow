@@ -80,11 +80,24 @@ abstract class PaneHost {
   /// Returns the default agent tool name configured for [workerId], or null if
   /// no default is set or the worker is not found.
   String? defaultAgentForWorker(String? workerId);
+
+  /// Returns the last project name the user worked on for [workerId], or null.
+  String? getLastProjectForWorker(String workerId);
+
+  /// Returns the last agent mention name the user used for [workerId], or null.
+  String? getLastAgentForWorker(String workerId);
+
+  /// Validates that [projectName] exists on [workerId] and returns its full
+  /// absolute path, or null if the project cannot be found or the worker is
+  /// not connected.
+  Future<String?> resolveProjectOnWorker(String workerId, String projectName);
 }
 
 class PaneState extends ChangeNotifier {
   final String paneId;
   final PaneHost _host;
+
+  bool _disposed = false;
 
   // Worker this pane is currently targeting
   String? _workerId;
@@ -106,6 +119,12 @@ class PaneState extends ChangeNotifier {
   // Cleared when the backend accepts a project or when the user clears the chip.
   String? _projectNameError;
   String? get projectNameError => _projectNameError;
+
+  // True while _applyWorkerDefaults() is resolving the cached project for the
+  // newly selected worker.  Used by the UI to show a subtle loading state on
+  // the project chip instead of a blank gap.
+  bool _loadingWorkerDefaults = false;
+  bool get loadingWorkerDefaults => _loadingWorkerDefaults;
 
   // Tool selected via the #ToolName chip above the input field.
   // When set, the tool mention is prepended to the prompt text on send so
@@ -401,9 +420,60 @@ class PaneState extends ChangeNotifier {
     return _host.wsForWorker(wid);
   }
 
-  /// Set the target worker for new chats.
+  /// Loads the per-worker cached project and agent for [workerId] and applies
+  /// them as pre-session defaults.  Validates the cached project against the
+  /// worker's live project list so a project that no longer exists on that
+  /// worker is silently skipped rather than causing a backend error.
+  ///
+  /// Safe to call from async contexts — guards against disposal mid-flight.
+  Future<void> _applyWorkerDefaults(String workerId) async {
+    _loadingWorkerDefaults = true;
+    notifyListeners();
+    try {
+      // Agent: last-used overrides the configured static default.
+      final lastAgent = _host.getLastAgentForWorker(workerId);
+      final configAgent = _host.defaultAgentForWorker(workerId);
+      _selectedToolMention = lastAgent ?? configAgent;
+
+      // Project: validate existence on the worker before applying.
+      final lastProject = _host.getLastProjectForWorker(workerId);
+      if (lastProject != null) {
+        final resolvedPath = await _host.resolveProjectOnWorker(
+          workerId,
+          lastProject,
+        );
+        if (_disposed) return;
+        if (resolvedPath != null) {
+          _selectedProjectName = lastProject;
+          _selectedProjectPath = resolvedPath;
+        }
+        // If resolvedPath is null the project doesn't exist on this worker;
+        // leave _selectedProjectName null so no stale value is shown.
+      }
+    } finally {
+      if (!_disposed) {
+        _loadingWorkerDefaults = false;
+        notifyListeners();
+      }
+    }
+  }
+
+  /// Set the target worker for new chats.  Clears any project/tool state that
+  /// belongs to the previous worker and asynchronously loads defaults for the
+  /// new worker.
   void setTargetWorker(String? workerId) {
     _workerId = workerId;
+    _selectedProjectName = null;
+    _selectedProjectPath = null;
+    _projectNameError = null;
+    _selectedToolMention = null;
+    _pendingWorktreePath = null;
+    if (workerId != null) {
+      // Apply sync fallback immediately so the chip isn't blank during the
+      // async validation phase.
+      _selectedToolMention = _host.defaultAgentForWorker(workerId);
+      _applyWorkerDefaults(workerId);
+    }
     notifyListeners();
   }
 
@@ -578,14 +648,17 @@ class PaneState extends ChangeNotifier {
     _pendingLocalUserMessages = 0;
     _pendingInputText = null;
     _selectedToolMention = null;
-    // Apply the worker's default agent as the pre-selected tool for new chats.
-    final defaultAgent = _host.defaultAgentForWorker(
-      _workerId ?? _host.defaultWorkerId,
-    );
-    if (defaultAgent != null) {
-      _selectedToolMention = defaultAgent;
-    }
+    _selectedProjectName = null;
+    _selectedProjectPath = null;
+    _projectNameError = null;
     _pendingWorktreePath = null;
+    // Apply per-worker cached defaults (project + agent) for the new chat.
+    // The sync fallback ensures the tool chip isn't blank during async work.
+    final targetWorker = _workerId ?? _host.defaultWorkerId;
+    if (targetWorker != null) {
+      _selectedToolMention = _host.defaultAgentForWorker(targetWorker);
+      _applyWorkerDefaults(targetWorker);
+    }
     _messages.clear();
     _todos = [];
     _activeRightPanel = null;
@@ -1412,6 +1485,7 @@ class PaneState extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
     _streamingTimer?.cancel();
     super.dispose();
   }

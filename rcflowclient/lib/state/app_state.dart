@@ -1185,6 +1185,31 @@ class AppState extends ChangeNotifier implements PaneHost {
   }
 
   @override
+  String? getLastProjectForWorker(String workerId) =>
+      _settings.getLastProjectForWorker(workerId);
+
+  @override
+  String? getLastAgentForWorker(String workerId) =>
+      _settings.getLastAgentForWorker(workerId);
+
+  @override
+  Future<String?> resolveProjectOnWorker(
+    String workerId,
+    String projectName,
+  ) async {
+    try {
+      final ws = wsForWorker(workerId);
+      final projects = await ws.fetchProjects(query: projectName);
+      for (final p in projects) {
+        if (p['name'] == projectName) return p['path'];
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
   void muteSessionSound(String sessionId) {
     _soundMutedSessions.add(sessionId);
     Future.delayed(const Duration(seconds: 3), () {
@@ -1692,6 +1717,16 @@ class AppState extends ChangeNotifier implements PaneHost {
           worker.subscribe(sessionId);
         }
         _settings.setLastSessionId(workerId, sessionId);
+        // Persist per-worker last-used project and agent so new sessions on
+        // the same worker can restore these as defaults.
+        final projectName = pane.selectedProjectName;
+        if (projectName != null) {
+          _settings.setLastProjectForWorker(workerId, projectName);
+        }
+        final agentName = pane.selectedToolMention;
+        if (agentName != null) {
+          _settings.setLastAgentForWorker(workerId, agentName);
+        }
         _workers[workerId]?.refreshSessions();
         break;
       case 'error':

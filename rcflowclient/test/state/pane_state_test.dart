@@ -71,6 +71,18 @@ class _StubPaneHost implements PaneHost {
   String? defaultAgentForWorker(String? workerId) => null;
 
   @override
+  String? getLastProjectForWorker(String workerId) => null;
+
+  @override
+  String? getLastAgentForWorker(String workerId) => null;
+
+  @override
+  Future<String?> resolveProjectOnWorker(
+    String workerId,
+    String projectName,
+  ) async => null;
+
+  @override
   void muteSessionSound(String sessionId) {}
 }
 
