@@ -42,7 +42,7 @@ class _ContextHost(ContextMixin):
         self._settings = settings
         self._db_session_factory = db_session_factory
 
-    async def _execute_tool(self, session, tool_call):  # type: ignore[override]
+    async def _execute_tool(self, session, tool_call):
         """Stub — not exercised here."""
 
 

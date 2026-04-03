@@ -41,7 +41,7 @@ jobs:
   # BACKEND  ·  Linux · macOS · Windows
   # ===========================================================================
   backend:
-    name: Backend — ${{ matrix.platform }}
+    name: Backend — ${{ matrix.label }}
 
     strategy:
       fail-fast: false   # Let all platforms finish even if one fails
@@ -50,19 +50,30 @@ jobs:
           # ── Linux ──────────────────────────────────────────────────────────
           # Outputs: dist/rcflow-<ver>-linux-x64.tar.gz
           #          dist/rcflow_<ver>_amd64.deb
-          - platform: linux
+          - label: linux
+            platform: linux
             os: ubuntu-latest
             uv-extras: "--extra bundle"
             bundle-args: "--platform linux --installer"
 
-          # ── macOS (Apple Silicon) ───────────────────────────────────────────
+          # ── macOS (Apple Silicon / arm64) ───────────────────────────────────
           # Output: dist/rcflow-<ver>-macos-arm64.dmg  (.app bundle inside)
           # Note: produced unsigned — see file header for details.
-          # Use macos-13 instead of macos-latest for an x86_64 build.
           # --extra tray installs pystray + Pillow for the menu bar UI and DMG
           # background generation.
-          - platform: macos
+          - label: macos-arm64
+            platform: macos
             os: macos-latest
+            uv-extras: "--extra bundle --extra tray"
+            bundle-args: "--platform macos --installer"
+
+          # ── macOS (Intel / x64) ─────────────────────────────────────────────
+          # Output: dist/rcflow-<ver>-macos-x64.dmg  (.app bundle inside)
+          # macos-13 runs on Intel x86_64 hardware.
+          # Note: produced unsigned — see file header for details.
+          - label: macos-x64
+            platform: macos
+            os: macos-13
             uv-extras: "--extra bundle --extra tray"
             bundle-args: "--platform macos --installer"
 
@@ -70,7 +81,8 @@ jobs:
           # Outputs: dist/rcflow-<ver>-windows-x64.zip
           #          dist/rcflow-<ver>-x64-setup.exe
           # --extra tray installs pystray + pywinpty for the system-tray UI.
-          - platform: windows
+          - label: windows
+            platform: windows
             os: windows-latest
             uv-extras: "--extra bundle --extra tray"
             bundle-args: "--platform windows --installer"
@@ -109,7 +121,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: backend-${{ matrix.platform }}
+          name: backend-${{ matrix.label }}
           path: dist/
           if-no-files-found: error
 
@@ -117,7 +129,7 @@ jobs:
   # FLUTTER CLIENT  ·  Linux · macOS · Windows · Android
   # ===========================================================================
   flutter-client:
-    name: Flutter client — ${{ matrix.platform }}
+    name: Flutter client — ${{ matrix.label }}
 
     strategy:
       fail-fast: false
@@ -128,26 +140,37 @@ jobs:
           # GStreamer dev libs (for audioplayers_linux). These are NOT
           # pre-installed on ubuntu-latest and are added below.
           # Output: dist/rcflowclient-linux-x86_64.tar.gz
-          - platform: linux
+          - label: linux
+            platform: linux
             os: ubuntu-latest
 
-          # ── macOS desktop (Apple Silicon) ───────────────────────────────────
+          # ── macOS desktop (Apple Silicon / arm64) ───────────────────────────
           # Xcode command-line tools are pre-installed on macos-latest.
           # Output: dist/rcflowclient-macos-arm64.tar.gz (unsigned .app inside)
-          - platform: macos
+          - label: macos-arm64
+            platform: macos
             os: macos-latest
+
+          # ── macOS desktop (Intel / x64) ─────────────────────────────────────
+          # macos-13 runs on Intel x86_64 hardware.
+          # Output: dist/rcflowclient-macos-x86_64.tar.gz (unsigned .app inside)
+          - label: macos-x64
+            platform: macos
+            os: macos-13
 
           # ── Windows desktop ─────────────────────────────────────────────────
           # Visual Studio Build Tools are pre-installed on windows-latest.
           # Output: dist/rcflowclient-windows-x64.zip
-          - platform: windows
+          - label: windows
+            platform: windows
             os: windows-latest
 
           # ── Android ─────────────────────────────────────────────────────────
           # The Android SDK is pre-installed on ubuntu-latest at $ANDROID_SDK_ROOT.
           # Java 17 is required by the Android Gradle Plugin (AGP 8+).
           # Produces split APKs: arm64-v8a, armeabi-v7a, x86_64 (unsigned).
-          - platform: android
+          - label: android
+            platform: android
             os: ubuntu-latest
 
     runs-on: ${{ matrix.os }}
@@ -191,6 +214,20 @@ jobs:
         working-directory: rcflowclient
         run: yes | flutter doctor --android-licenses || true
 
+      # ── Windows client: Inno Setup must be on PATH ────────────────────────
+      - name: Add Inno Setup to PATH (Windows client)
+        if: matrix.platform == 'windows'
+        run: echo "C:\Program Files (x86)\Inno Setup 6" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        shell: pwsh
+
+      # ── Extract client version from pubspec.yaml ──────────────────────────
+      - name: Get client version
+        shell: bash
+        run: |
+          CLIENT_VERSION=$(grep '^version:' rcflowclient/pubspec.yaml \
+            | sed 's/version: //' | sed 's/+.*//')
+          echo "CLIENT_VERSION=$CLIENT_VERSION" >> "$GITHUB_ENV"
+
       # ── Platform build steps ──────────────────────────────────────────────
 
       - name: Build Linux desktop
@@ -218,41 +255,80 @@ jobs:
       # Mirror the layout produced by the justfile bundle-* recipes so local
       # and CI artifacts have identical names.
 
+      # Linux client: .deb package installed to /opt/rcflowclient with a
+      # /usr/bin/rcflowclient symlink.  Requires dpkg-deb (standard on Ubuntu).
       - name: Package Linux client
         if: matrix.platform == 'linux'
         run: |
+          CLIENT_VERSION="${{ env.CLIENT_VERSION }}"
+          PKG_NAME="rcflow-v${CLIENT_VERSION}-linux-client-amd64"
+          DEB_ROOT=$(mktemp -d)
+          install -Dm755 rcflowclient/build/linux/x64/release/bundle/rcflowclient \
+            "$DEB_ROOT/opt/rcflowclient/rcflowclient"
+          cp -r rcflowclient/build/linux/x64/release/bundle/data "$DEB_ROOT/opt/rcflowclient/"
+          cp -r rcflowclient/build/linux/x64/release/bundle/lib  "$DEB_ROOT/opt/rcflowclient/"
+          mkdir -p "$DEB_ROOT/usr/bin"
+          ln -s /opt/rcflowclient/rcflowclient "$DEB_ROOT/usr/bin/rcflowclient"
+          mkdir -p "$DEB_ROOT/DEBIAN"
+          printf 'Package: rcflow-client\nVersion: %s\nArchitecture: amd64\nMaintainer: RCFlow <rcflow@localhost>\nDescription: RCFlow Desktop Client\n Self-contained RCFlow Flutter desktop client.\nSection: net\nPriority: optional\n' \
+            "$CLIENT_VERSION" > "$DEB_ROOT/DEBIAN/control"
           mkdir -p dist
-          tar -czf dist/rcflowclient-linux-x86_64.tar.gz \
-            -C rcflowclient/build/linux/x64/release bundle
+          dpkg-deb --build --root-owner-group "$DEB_ROOT" "dist/${PKG_NAME}.deb"
+          rm -rf "$DEB_ROOT"
 
+      # macOS client: DMG containing the signed .app bundle with an
+      # /Applications symlink for drag-and-drop installation.
       - name: Package macOS client
         if: matrix.platform == 'macos'
         run: |
+          CLIENT_VERSION="${{ env.CLIENT_VERSION }}"
+          CLIENT_ARCH=$(uname -m | sed 's/x86_64/amd64/')
+          DMG_NAME="rcflow-v${CLIENT_VERSION}-macos-client-${CLIENT_ARCH}"
+          APP_PATH="rcflowclient/build/macos/Build/Products/Release/RCFlow.app"
+          STAGE=$(mktemp -d)
+          cp -R "$APP_PATH" "$STAGE/"
+          ln -s /Applications "$STAGE/Applications"
           mkdir -p dist
-          tar -czf dist/rcflowclient-macos-$(uname -m).tar.gz \
-            -C rcflowclient/build/macos/Build/Products/Release RCFlow.app
+          hdiutil create -srcfolder "$STAGE" -volname "RCFlow Client" \
+            -fs HFS+ -format UDZO -o "dist/${DMG_NAME}.dmg"
+          rm -rf "$STAGE"
 
+      # Windows client: Inno Setup installer (.exe) wrapping the Flutter build
+      # output directory (rcflowclient.exe + DLLs + data/).
       - name: Package Windows client
         if: matrix.platform == 'windows'
         shell: pwsh
         run: |
+          $appVersion = "${{ env.CLIENT_VERSION }}"
+          $bundleDir = Resolve-Path 'rcflowclient\build\windows\x64\runner\Release'
+          $outputFilename = "rcflow-v${appVersion}-windows-client-amd64"
           if (-not (Test-Path dist)) { New-Item -ItemType Directory -Path dist | Out-Null }
-          Compress-Archive -Force `
-            -Path 'rcflowclient\build\windows\x64\runner\Release\*' `
-            -DestinationPath 'dist\rcflowclient-windows-x64.zip'
+          iscc scripts\inno_setup_client.iss `
+            "/DBundleDir=$bundleDir" `
+            "/DAppVersion=$appVersion" `
+            "/DArch=amd64" `
+            "/DOutputDir=dist" `
+            "/DOutputFilename=$outputFilename"
 
-      # Android APKs already have ABI-specific filenames; just copy them.
+      # Android APKs: rename from Flutter's default ABI-suffixed names to the
+      # unified rcflow-v{ver}-android-client-{arch} convention.
       - name: Collect Android APKs
         if: matrix.platform == 'android'
         run: |
+          CLIENT_VERSION="${{ env.CLIENT_VERSION }}"
           mkdir -p dist
-          cp rcflowclient/build/app/outputs/flutter-apk/app-*-release.apk dist/
+          mv rcflowclient/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk \
+            "dist/rcflow-v${CLIENT_VERSION}-android-client-arm64.apk"
+          mv rcflowclient/build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk \
+            "dist/rcflow-v${CLIENT_VERSION}-android-client-armv7.apk"
+          mv rcflowclient/build/app/outputs/flutter-apk/app-x86_64-release.apk \
+            "dist/rcflow-v${CLIENT_VERSION}-android-client-x86_64.apk"
 
       # Upload all dist/ files for this platform as a named artifact.
       # The workflow run summary will show a separate download per platform.
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: client-${{ matrix.platform }}
+          name: client-${{ matrix.label }}
           path: dist/
           if-no-files-found: error

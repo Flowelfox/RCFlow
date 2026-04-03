@@ -23,6 +23,9 @@ class _ProjectPanelState extends State<ProjectPanel> {
   List<Map<String, dynamic>>? _worktrees;
   bool _loadingWorktrees = false;
   String? _worktreesError;
+  /// True when the server confirmed this project has no git repository.
+  /// Prevents auto-refresh retries — only reset when the project changes.
+  bool _noGitRepo = false;
 
   /// Cache key: reloads when the project path or workerId changes.
   String? _lastFetchedKey;
@@ -73,13 +76,22 @@ class _ProjectPanelState extends State<ProjectPanel> {
         setState(() {
           _worktrees = fetchedWorktrees;
           _loadingWorktrees = false;
+          _noGitRepo = false;
         });
       }
     } catch (e) {
+      final isNoGitRepo = e.toString().contains('Not a git repository');
+      if (isNoGitRepo) {
+        appState.setProjectDataCache(
+          '$workerId:$projectPath',
+          noGitRepo: true,
+        );
+      }
       if (mounted) {
         setState(() {
           _worktreesError = e.toString();
           _loadingWorktrees = false;
+          _noGitRepo = isNoGitRepo;
         });
       }
     }
@@ -134,6 +146,7 @@ class _ProjectPanelState extends State<ProjectPanel> {
     setState(() {
       _loadingWorktrees = true;
       _worktreesError = null;
+      _noGitRepo = false;
     });
     try {
       final worker = appState.getWorker(workerId);
@@ -273,11 +286,22 @@ class _ProjectPanelState extends State<ProjectPanel> {
     }
 
     // Auto-refresh when project path, worker, OR worktree operation changes.
+    // Skip entirely when the project is known to have no git repository.
     final worktreeLastAction = pane.currentWorktreeInfo?.lastAction;
     if (mainProjectPath != null) {
       final fetchKey = '$workerId:$mainProjectPath:${worktreeLastAction ?? ''}';
       final cacheKey = '$workerId:$mainProjectPath';
-      if (fetchKey != _lastFetchedKey && !_loadingWorktrees) {
+
+      // Restore noGitRepo flag from shared cache when the project changes.
+      if (_lastFetchedKey == null ||
+          !_lastFetchedKey!.startsWith(cacheKey)) {
+        final cached = appState.getProjectDataCache(cacheKey);
+        _noGitRepo = cached?.noGitRepo ?? false;
+      }
+
+      if (!_noGitRepo &&
+          fetchKey != _lastFetchedKey &&
+          !_loadingWorktrees) {
         _lastFetchedKey = fetchKey;
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (!mounted) return;

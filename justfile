@@ -79,65 +79,107 @@ bundle-macos-backend *FLAGS:
 bundle-macos-backend-install:
     uv run --extra bundle --extra tray python scripts/bundle.py --platform macos --install
 
-# Build Linux Flutter client distributable (must be on Linux)
-# Requires: cmake, ninja, clang, pkg-config, libgtk-3-dev
-# Install missing deps with: sudo apt-get install cmake ninja-build clang pkg-config libgtk-3-dev
+# Build Linux Flutter client .deb (must be on Linux)
+# Requires: cmake, ninja, clang, pkg-config, libgtk-3-dev, dpkg-deb
+# Install missing deps with: sudo apt-get install cmake ninja-build clang pkg-config libgtk-3-dev dpkg
 [unix]
 bundle-linux-client:
     #!/usr/bin/env bash
     set -euo pipefail
     missing=()
-    for cmd in cmake ninja clang pkg-config; do
+    for cmd in cmake ninja clang pkg-config dpkg-deb; do
         command -v "$cmd" &>/dev/null || missing+=("$cmd")
     done
     if (( ${#missing[@]} > 0 )); then
         printf '\nERROR: Missing Linux build dependencies: %s\n\n' "${missing[*]}"
         printf 'Install them on Debian/Ubuntu with:\n'
-        printf '  sudo apt-get install cmake ninja-build clang pkg-config libgtk-3-dev\n\n'
+        printf '  sudo apt-get install cmake ninja-build clang pkg-config libgtk-3-dev dpkg\n\n'
         exit 1
     fi
     (cd rcflowclient && flutter build linux --release)
     mkdir -p dist
-    tar -czf dist/rcflowclient-linux-$(uname -m).tar.gz -C rcflowclient/build/linux/x64/release bundle
+    CLIENT_VERSION=$(grep '^version:' rcflowclient/pubspec.yaml | sed 's/version: //' | sed 's/+.*//')
+    PKG_NAME="rcflow-v${CLIENT_VERSION}-linux-client-amd64"
+    DEB_ROOT=$(mktemp -d)
+    trap "rm -rf '$DEB_ROOT'" EXIT
+    install -Dm755 rcflowclient/build/linux/x64/release/bundle/rcflowclient \
+      "$DEB_ROOT/opt/rcflowclient/rcflowclient"
+    cp -r rcflowclient/build/linux/x64/release/bundle/data "$DEB_ROOT/opt/rcflowclient/"
+    cp -r rcflowclient/build/linux/x64/release/bundle/lib "$DEB_ROOT/opt/rcflowclient/"
+    mkdir -p "$DEB_ROOT/usr/bin"
+    ln -s /opt/rcflowclient/rcflowclient "$DEB_ROOT/usr/bin/rcflowclient"
+    mkdir -p "$DEB_ROOT/DEBIAN"
+    printf 'Package: rcflow-client\nVersion: %s\nArchitecture: amd64\nMaintainer: RCFlow <rcflow@localhost>\nDescription: RCFlow Desktop Client\n Self-contained RCFlow Flutter desktop client.\nSection: net\nPriority: optional\n' \
+      "$CLIENT_VERSION" > "$DEB_ROOT/DEBIAN/control"
+    dpkg-deb --build --root-owner-group "$DEB_ROOT" "dist/${PKG_NAME}.deb"
+    printf 'Built dist/%s.deb\n' "$PKG_NAME"
 
-# Build and install Linux Flutter client (must be on Linux)
+# Build and install Linux Flutter client .deb (must be on Linux)
 [unix]
 bundle-linux-client-install: bundle-linux-client
-    @echo "Installing Linux Flutter client..."
-    mkdir -p ~/.local/bin ~/.local/lib/rcflowclient
-    tar -xzf dist/rcflowclient-linux-$(uname -m).tar.gz -C ~/.local/lib/rcflowclient --strip-components=1
-    ln -sfn ~/.local/lib/rcflowclient/rcflowclient ~/.local/bin/rcflowclient
-    @echo "Installed to ~/.local/lib/rcflowclient"
+    #!/usr/bin/env bash
+    set -euo pipefail
+    CLIENT_VERSION=$(grep '^version:' rcflowclient/pubspec.yaml | sed 's/version: //' | sed 's/+.*//')
+    sudo dpkg -i "dist/rcflow-v${CLIENT_VERSION}-linux-client-amd64.deb"
+    echo "Installed rcflow-client to /opt/rcflowclient"
 
-# Build macOS Flutter client distributable (must be on macOS)
+# Build macOS Flutter client .dmg (must be on macOS)
 [macos]
 bundle-macos-client:
-    cd rcflowclient && flutter build macos --release
+    #!/usr/bin/env bash
+    set -euo pipefail
+    (cd rcflowclient && flutter build macos --release)
     mkdir -p dist
-    tar -czf dist/rcflowclient-macos-$(uname -m).tar.gz -C rcflowclient/build/macos/Build/Products/Release RCFlow.app
+    CLIENT_VERSION=$(grep '^version:' rcflowclient/pubspec.yaml | sed 's/version: //' | sed 's/+.*//')
+    CLIENT_ARCH=$(uname -m | sed 's/x86_64/amd64/')
+    DMG_NAME="rcflow-v${CLIENT_VERSION}-macos-client-${CLIENT_ARCH}"
+    APP_PATH="rcflowclient/build/macos/Build/Products/Release/RCFlow.app"
+    STAGE=$(mktemp -d)
+    cp -R "$APP_PATH" "$STAGE/"
+    ln -s /Applications "$STAGE/Applications"
+    hdiutil create -srcfolder "$STAGE" -volname "RCFlow Client" -fs HFS+ -format UDZO \
+      -o "dist/${DMG_NAME}.dmg"
+    rm -rf "$STAGE"
+    printf 'Built dist/%s.dmg\n' "$DMG_NAME"
 
 # Build and install macOS Flutter client (must be on macOS)
 [macos]
 bundle-macos-client-install: bundle-macos-client
-    @echo "Installing macOS Flutter client..."
+    #!/usr/bin/env bash
+    set -euo pipefail
+    CLIENT_VERSION=$(grep '^version:' rcflowclient/pubspec.yaml | sed 's/version: //' | sed 's/+.*//')
+    CLIENT_ARCH=$(uname -m | sed 's/x86_64/amd64/')
+    DMG="dist/rcflow-v${CLIENT_VERSION}-macos-client-${CLIENT_ARCH}.dmg"
+    MOUNT=$(hdiutil attach "$DMG" -nobrowse | awk '/\/Volumes\//{print $NF}')
     mkdir -p ~/Applications
-    tar -xzf dist/rcflowclient-macos-$(uname -m).tar.gz -C ~/Applications
-    @echo "Installed to ~/Applications/RCFlow.app"
+    cp -R "$MOUNT/RCFlow.app" ~/Applications/
+    hdiutil detach "$MOUNT" -quiet
+    echo "Installed to ~/Applications/RCFlow.app"
 
-# Build Windows Flutter client distributable (must be on Windows)
+# Build Windows Flutter client .exe installer (must be on Windows)
+# Requires Inno Setup 6 (iscc.exe on PATH or at default install location)
 [windows]
 bundle-windows-client:
     Set-Location rcflowclient; flutter build windows --release
+    $appVersion = (Get-Content rcflowclient/pubspec.yaml | Select-String '^version:').Line `
+      -replace 'version: ', '' -replace '\+.*', ''
+    $bundleDir = Resolve-Path 'rcflowclient\build\windows\x64\runner\Release'
+    $outputFilename = "rcflow-v${appVersion}-windows-client-amd64"
     if (-not (Test-Path dist)) { New-Item -ItemType Directory -Path dist | Out-Null }
-    Compress-Archive -Force -Path 'rcflowclient\build\windows\x64\runner\Release\*' -DestinationPath 'dist\rcflowclient-windows-x64.zip'
+    iscc scripts\inno_setup_client.iss `
+      "/DBundleDir=$bundleDir" `
+      "/DAppVersion=$appVersion" `
+      "/DArch=amd64" `
+      "/DOutputDir=dist" `
+      "/DOutputFilename=$outputFilename"
 
 # Build and install Windows Flutter client (must be on Windows)
 [windows]
 bundle-windows-client-install: bundle-windows-client
-    $dest = "$env:LOCALAPPDATA\RCFlowClient"
-    if (Test-Path $dest) { Remove-Item -Recurse -Force $dest }
-    Expand-Archive -Force -Path 'dist\rcflowclient-windows-x64.zip' -DestinationPath $dest
-    Write-Host "Installed to $dest"
+    $appVersion = (Get-Content rcflowclient/pubspec.yaml | Select-String '^version:').Line `
+      -replace 'version: ', '' -replace '\+.*', ''
+    $installer = "dist\rcflow-v${appVersion}-windows-client-amd64.exe"
+    Start-Process -FilePath $installer -Wait
 
 # Build Windows backend installer (setup.exe, must be on Windows)
 [windows]

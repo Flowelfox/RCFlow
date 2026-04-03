@@ -1,4 +1,5 @@
 """Tests for src/gui.py — focused on settings persistence behaviour."""
+
 from __future__ import annotations
 
 import json
@@ -13,12 +14,15 @@ def _make_gui(tmp_path: Path) -> RCFlowGUI:  # type: ignore[name-defined]  # noq
     """Construct an RCFlowGUI with all tkinter/pystray/subprocess pieces mocked out."""
     # Patch tkinter so no real window is created
     tk_mock = MagicMock()
+
     # StringVar / BooleanVar need to behave like value containers
     class _Var:
         def __init__(self, value=None):
             self._v = value
+
         def get(self):
             return self._v
+
         def set(self, v):
             self._v = v
 
@@ -27,12 +31,16 @@ def _make_gui(tmp_path: Path) -> RCFlowGUI:  # type: ignore[name-defined]  # noq
     tk_mock.BooleanVar.side_effect = _Var
 
     import sys  # noqa: PLC0415
+
     with (
-        patch.dict(sys.modules, {
-            "tkinter": tk_mock,
-            "tkinter.scrolledtext": MagicMock(),
-            "tkinter.ttk": MagicMock(),
-        }),
+        patch.dict(
+            sys.modules,
+            {
+                "tkinter": tk_mock,
+                "tkinter.scrolledtext": MagicMock(),
+                "tkinter.ttk": MagicMock(),
+            },
+        ),
         # Keep the real config module but redirect settings.json to tmp_path
         patch("src.paths.get_install_dir", return_value=tmp_path),
         # Prevent auto-start side effects
@@ -55,15 +63,21 @@ def _make_gui(tmp_path: Path) -> RCFlowGUI:  # type: ignore[name-defined]  # noq
 
         # Stub UI-mutating calls so they don't raise
         for attr in (
-            "_ip_entry", "_port_entry", "_wss_check", "_toggle_btn",
-            "_status_label", "_uptime_var", "_bound_addr_var",
-            "_sessions_var", "_backend_id_var",
+            "_ip_entry",
+            "_port_entry",
+            "_wss_check",
+            "_toggle_btn",
+            "_status_label",
+            "_uptime_var",
+            "_bound_addr_var",
+            "_sessions_var",
+            "_backend_id_var",
         ):
             setattr(gui, attr, MagicMock())
         gui._set_status = MagicMock()
         gui._log_append = MagicMock()
 
-    return gui  # type: ignore[return-value]
+    return gui
 
 
 def test_start_server_persists_host_and_port(tmp_path: Path) -> None:
@@ -75,6 +89,7 @@ def test_start_server_persists_host_and_port(tmp_path: Path) -> None:
         import importlib  # noqa: PLC0415
 
         from src import config as cfg_mod  # noqa: PLC0415
+
         importlib.reload(cfg_mod)
 
     gui = _make_gui(tmp_path)
@@ -100,17 +115,14 @@ def test_start_server_persists_host_and_port(tmp_path: Path) -> None:
         with patch("src.config._get_settings_path", return_value=settings_path):
             # Temporarily restore the real _start_server (it was stubbed during __new__)
             import src.gui as gui_mod  # noqa: PLC0415
+
             gui._start_server = gui_mod.RCFlowGUI._start_server.__get__(gui)
             gui._start_server()
 
     assert settings_path.exists(), "settings.json was not created"
     data = json.loads(settings_path.read_text())
-    assert data.get("RCFLOW_HOST") == "192.168.50.10", (
-        f"RCFLOW_HOST not persisted; got: {data.get('RCFLOW_HOST')!r}"
-    )
-    assert data.get("RCFLOW_PORT") == "54321", (
-        f"RCFLOW_PORT not persisted; got: {data.get('RCFLOW_PORT')!r}"
-    )
+    assert data.get("RCFLOW_HOST") == "192.168.50.10", f"RCFLOW_HOST not persisted; got: {data.get('RCFLOW_HOST')!r}"
+    assert data.get("RCFLOW_PORT") == "54321", f"RCFLOW_PORT not persisted; got: {data.get('RCFLOW_PORT')!r}"
 
 
 def test_start_server_persists_default_host_and_port(tmp_path: Path) -> None:
@@ -131,6 +143,7 @@ def test_start_server_persists_default_host_and_port(tmp_path: Path) -> None:
         mock_popen.return_value.poll.return_value = None
 
         import src.gui as gui_mod  # noqa: PLC0415
+
         gui._start_server = gui_mod.RCFlowGUI._start_server.__get__(gui)
         gui._start_server()
 

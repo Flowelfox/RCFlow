@@ -62,7 +62,7 @@ async def test_cancel_session_with_executor(session_manager: SessionManager) -> 
     # Mock a running background task
     task_future: asyncio.Future[None] = asyncio.get_event_loop().create_future()
     task = asyncio.ensure_future(task_future)
-    session._claude_code_stream_task = task
+    session._claude_code_stream_task = task  # type: ignore[assignment]
 
     result = await router.cancel_session(session.id)
 
@@ -107,7 +107,7 @@ async def test_cancel_already_cancelled_session(session_manager: SessionManager)
 async def test_fire_summary_task_pushes_session_end_ask(session_manager: SessionManager) -> None:
     """_fire_summary_task with push_session_end_ask=True should push SESSION_END_ASK after summarizing."""
     router = _make_router(session_manager)
-    router._llm.summarize = AsyncMock(return_value="Short summary.")
+    router._llm.summarize = AsyncMock(return_value="Short summary.")  # type: ignore[method-assign]
 
     session = session_manager.create_session(SessionType.LONG_RUNNING)
     session.set_active()
@@ -124,7 +124,7 @@ async def test_fire_summary_task_pushes_session_end_ask(session_manager: Session
 async def test_fire_summary_task_no_push_without_flag(session_manager: SessionManager) -> None:
     """_fire_summary_task without push_session_end_ask should not push SESSION_END_ASK."""
     router = _make_router(session_manager)
-    router._llm.summarize = AsyncMock(return_value="Short summary.")
+    router._llm.summarize = AsyncMock(return_value="Short summary.")  # type: ignore[method-assign]
 
     session = session_manager.create_session(SessionType.LONG_RUNNING)
     session.set_active()
@@ -156,7 +156,7 @@ async def test_fire_summary_task_no_llm_still_pushes_session_end_ask(session_man
 async def test_summarize_and_push_pushes_summary_message(session_manager: SessionManager) -> None:
     """_summarize_and_push should push a SUMMARY message with content from the LLM."""
     router = _make_router(session_manager)
-    router._llm.summarize = AsyncMock(return_value="One sentence summary.")
+    router._llm.summarize = AsyncMock(return_value="One sentence summary.")  # type: ignore[method-assign]
 
     session = session_manager.create_session(SessionType.LONG_RUNNING)
     session.set_active()
@@ -173,7 +173,7 @@ async def test_summarize_and_push_pushes_summary_message(session_manager: Sessio
 async def test_summarize_and_push_failure_does_not_raise(session_manager: SessionManager) -> None:
     """A LLM exception in _summarize_and_push must not propagate — session stays alive."""
     router = _make_router(session_manager)
-    router._llm.summarize = AsyncMock(side_effect=RuntimeError("LLM unavailable"))
+    router._llm.summarize = AsyncMock(side_effect=RuntimeError("LLM unavailable"))  # type: ignore[method-assign]
 
     session = session_manager.create_session(SessionType.LONG_RUNNING)
     session.set_active()
@@ -189,7 +189,7 @@ async def test_summarize_and_push_failure_does_not_raise(session_manager: Sessio
 async def test_summarize_failure_still_pushes_session_end_ask(session_manager: SessionManager) -> None:
     """Even when summarization fails, SESSION_END_ASK must still be delivered."""
     router = _make_router(session_manager)
-    router._llm.summarize = AsyncMock(side_effect=RuntimeError("LLM unavailable"))
+    router._llm.summarize = AsyncMock(side_effect=RuntimeError("LLM unavailable"))  # type: ignore[method-assign]
 
     session = session_manager.create_session(SessionType.LONG_RUNNING)
     session.set_active()
@@ -208,7 +208,7 @@ async def test_summarize_failure_still_pushes_session_end_ask(session_manager: S
 async def test_generate_and_set_title(session_manager: SessionManager) -> None:
     """_generate_and_set_title should call llm.generate_title and set session.title."""
     router = _make_router(session_manager)
-    router._llm.generate_title = AsyncMock(return_value="List project files")
+    router._llm.generate_title = AsyncMock(return_value="List project files")  # type: ignore[method-assign]
 
     session = session_manager.create_session(SessionType.CONVERSATIONAL)
     session.set_active()
@@ -216,7 +216,7 @@ async def test_generate_and_set_title(session_manager: SessionManager) -> None:
 
     await router._generate_and_set_title(session, "list files", "Here are the files...")
 
-    router._llm.generate_title.assert_awaited_once_with("list files", "Here are the files...")
+    router._llm.generate_title.assert_awaited_once_with("list files", "Here are the files...")  # type: ignore[attr-defined]
     assert session.title == "List project files"
 
 
@@ -224,7 +224,7 @@ async def test_generate_and_set_title(session_manager: SessionManager) -> None:
 async def test_generate_and_set_title_failure_does_not_raise(session_manager: SessionManager) -> None:
     """_generate_and_set_title should swallow exceptions without breaking the session."""
     router = _make_router(session_manager)
-    router._llm.generate_title = AsyncMock(side_effect=RuntimeError("LLM unavailable"))
+    router._llm.generate_title = AsyncMock(side_effect=RuntimeError("LLM unavailable"))  # type: ignore[method-assign]
 
     session = session_manager.create_session(SessionType.CONVERSATIONAL)
     session.set_active()
@@ -239,7 +239,7 @@ async def test_generate_and_set_title_failure_does_not_raise(session_manager: Se
 async def test_fire_title_task(session_manager: SessionManager) -> None:
     """_fire_title_task should schedule a background task that completes."""
     router = _make_router(session_manager)
-    router._llm.generate_title = AsyncMock(return_value="Setup dev environment")
+    router._llm.generate_title = AsyncMock(return_value="Setup dev environment")  # type: ignore[method-assign]
 
     session = session_manager.create_session(SessionType.CONVERSATIONAL)
     session.set_active()
@@ -266,7 +266,7 @@ async def _async_stream_chunks(chunks: list[ExecutionChunk]):
 async def test_relay_claude_code_stream_pushes_session_end_ask_on_result(session_manager: SessionManager) -> None:
     """_relay_claude_code_stream should push SESSION_END_ASK when a result event arrives."""
     router = _make_router(session_manager)
-    router._llm.summarize = AsyncMock(return_value="Short summary.")
+    router._llm.summarize = AsyncMock(return_value="Short summary.")  # type: ignore[method-assign]
 
     session = session_manager.create_session(SessionType.LONG_RUNNING)
     session.set_active()
@@ -287,7 +287,7 @@ async def test_relay_claude_code_stream_pushes_session_end_ask_on_result(session
 async def test_relay_claude_code_stream_empty_result_still_pushes_end_ask(session_manager: SessionManager) -> None:
     """Even with empty result text, SESSION_END_ASK should fire so the user isn't left in limbo."""
     router = _make_router(session_manager)
-    router._llm.summarize = AsyncMock(return_value="Short summary.")
+    router._llm.summarize = AsyncMock(return_value="Short summary.")  # type: ignore[method-assign]
 
     session = session_manager.create_session(SessionType.LONG_RUNNING)
     session.set_active()
@@ -373,7 +373,7 @@ async def test_interrupt_subprocess_with_claude_code_executor(session_manager: S
 
     task_future: asyncio.Future[None] = asyncio.get_event_loop().create_future()
     task = asyncio.ensure_future(task_future)
-    session._claude_code_stream_task = task
+    session._claude_code_stream_task = task  # type: ignore[assignment]
 
     result = await router.interrupt_subprocess(session.id)
 
@@ -463,7 +463,7 @@ async def test_pause_session_with_executor(session_manager: SessionManager) -> N
     # Mock a running background task
     task_future: asyncio.Future[None] = asyncio.get_event_loop().create_future()
     task = asyncio.ensure_future(task_future)
-    session._claude_code_stream_task = task
+    session._claude_code_stream_task = task  # type: ignore[assignment]
 
     result = await router.pause_session(session.id)
 
@@ -515,7 +515,7 @@ async def test_pause_and_resume_session_with_executor(session_manager: SessionMa
     # Mock a running background task
     task_future: asyncio.Future[None] = asyncio.get_event_loop().create_future()
     task = asyncio.ensure_future(task_future)
-    session._claude_code_stream_task = task
+    session._claude_code_stream_task = task  # type: ignore[assignment]
 
     await router.pause_session(session.id)
     assert session.status == SessionStatus.PAUSED
@@ -1079,7 +1079,7 @@ async def test_relay_enter_plan_mode_denied_ends_session(
 ) -> None:
     """Denying plan mode ends the session with PLAN_MODE_DENIED error."""
     router = _make_router(session_manager)
-    router._end_claude_code_session = AsyncMock()
+    router._end_claude_code_session = AsyncMock()  # type: ignore[method-assign]
 
     session = session_manager.create_session(SessionType.LONG_RUNNING)
     session.set_active()
@@ -1126,7 +1126,7 @@ async def test_relay_enter_plan_mode_denied_ends_session(
     assert any(m.data.get("code") == "PLAN_MODE_DENIED" for m in error_msgs)
 
     # _end_claude_code_session should have been called
-    router._end_claude_code_session.assert_awaited_once_with(session)
+    router._end_claude_code_session.assert_awaited_once_with(session)  # type: ignore[attr-defined]
 
 
 @pytest.mark.asyncio
@@ -1385,7 +1385,7 @@ async def test_pause_session_resolves_pending_plan_review_event(
 # ---------------------------------------------------------------------------
 
 
-async def _empty_agentic_loop(**kwargs):  # type: ignore[no-untyped-def]
+async def _empty_agentic_loop(**kwargs):
     """Async generator stub that immediately terminates the agentic loop."""
     return
     yield  # pragma: no cover — makes this an async generator
@@ -1477,7 +1477,7 @@ async def test_interrupt_subprocess_with_opencode_executor(session_manager: Sess
 
     task_future: asyncio.Future[None] = asyncio.get_event_loop().create_future()
     task = asyncio.ensure_future(task_future)
-    session._opencode_stream_task = task
+    session._opencode_stream_task = task  # type: ignore[assignment]
 
     result = await router.interrupt_subprocess(session.id)
 
@@ -1505,7 +1505,7 @@ async def test_cancel_session_with_opencode_executor(session_manager: SessionMan
 
     task_future: asyncio.Future[None] = asyncio.get_event_loop().create_future()
     task = asyncio.ensure_future(task_future)
-    session._opencode_stream_task = task
+    session._opencode_stream_task = task  # type: ignore[assignment]
 
     result = await router.cancel_session(session.id)
 
@@ -1531,7 +1531,7 @@ async def test_pause_session_with_opencode_executor(session_manager: SessionMana
 
     task_future: asyncio.Future[None] = asyncio.get_event_loop().create_future()
     task = asyncio.ensure_future(task_future)
-    session._opencode_stream_task = task
+    session._opencode_stream_task = task  # type: ignore[assignment]
 
     result = await router.pause_session(session.id)
 

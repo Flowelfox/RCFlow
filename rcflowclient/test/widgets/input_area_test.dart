@@ -219,4 +219,79 @@ void main() {
       expect(find.text('Codex'), findsOneWidget);
     });
   });
+
+  group('InputArea — worktree chip (no git repo)', () {
+    testWidgets('hides worktree chip when project is marked noGitRepo in cache',
+        (tester) async {
+      final (appState, paneState) = await _setupStates();
+
+      // Pre-mark this project as having no git repo in the shared cache.
+      appState.setProjectDataCache(
+        ':/tmp/no-git-project',
+        noGitRepo: true,
+      );
+
+      // Select the project so the chip would normally appear.
+      paneState.setSelectedProject('no-git-project', path: '/tmp/no-git-project');
+
+      await tester.pumpWidget(
+        _buildInputArea(appState: appState, paneState: paneState),
+      );
+      // Let post-frame callbacks fire (eager worktree fetch).
+      await tester.pump();
+      await tester.pump();
+
+      // The worktree chip should NOT appear — the project has no git repo.
+      expect(find.text('Worktree'), findsNothing);
+    });
+
+    testWidgets(
+        'worktree chip appears for a normal project (noGitRepo not set)',
+        (tester) async {
+      final (appState, paneState) = await _setupStates();
+
+      // Select a normal project (no noGitRepo flag).
+      paneState.setSelectedProject('my-project', path: '/tmp/my-project');
+
+      await tester.pumpWidget(
+        _buildInputArea(appState: appState, paneState: paneState),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      // The chip should appear — we don't block it for normal projects.
+      // The fetch will fail (no real server) but the chip is still shown.
+      expect(find.text('Worktree'), findsOneWidget);
+    });
+
+    testWidgets(
+        'worktree chip reappears when switching from noGitRepo to normal project',
+        (tester) async {
+      final (appState, paneState) = await _setupStates();
+
+      // Mark the first project as no git repo.
+      appState.setProjectDataCache(
+        ':/tmp/no-git-project',
+        noGitRepo: true,
+      );
+      paneState.setSelectedProject(
+        'no-git-project',
+        path: '/tmp/no-git-project',
+      );
+
+      await tester.pumpWidget(
+        _buildInputArea(appState: appState, paneState: paneState),
+      );
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('Worktree'), findsNothing);
+
+      // Switch to a normal project.
+      paneState.setSelectedProject('normal-project', path: '/tmp/normal-project');
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.text('Worktree'), findsOneWidget);
+    });
+  });
 }

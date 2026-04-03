@@ -303,7 +303,7 @@ class TestStreamTurnAnthropic:
             _Obj(type="content_block_delta", delta=_Obj(type="text_delta", text="world")),
         ]
         final_msg = _make_anthropic_final_message()
-        client._anthropic_client.messages.stream.return_value = _MockAnthropicStream(events, final_msg)
+        client._anthropic_client.messages.stream.return_value = _MockAnthropicStream(events, final_msg)  # type: ignore[attr-defined]
 
         collected = []
         async for event in client._stream_turn_anthropic([{"role": "user", "content": "hi"}]):
@@ -337,7 +337,7 @@ class TestStreamTurnAnthropic:
             _Obj(type="content_block_stop"),
         ]
         final_msg = _make_anthropic_final_message(stop_reason="tool_use")
-        client._anthropic_client.messages.stream.return_value = _MockAnthropicStream(events, final_msg)
+        client._anthropic_client.messages.stream.return_value = _MockAnthropicStream(events, final_msg)  # type: ignore[attr-defined]
 
         collected = []
         async for event in client._stream_turn_anthropic([{"role": "user", "content": "read it"}]):
@@ -353,7 +353,7 @@ class TestStreamTurnAnthropic:
         client = _make_llm_client("anthropic", "claude-sonnet-4-6")
         events = [_Obj(type="content_block_delta", delta=_Obj(type="text_delta", text="hi"))]
         final_msg = _make_anthropic_final_message(input_tokens=20, output_tokens=8)
-        client._anthropic_client.messages.stream.return_value = _MockAnthropicStream(events, final_msg)
+        client._anthropic_client.messages.stream.return_value = _MockAnthropicStream(events, final_msg)  # type: ignore[attr-defined]
 
         collected = []
         async for event in client._stream_turn_anthropic([]):
@@ -374,7 +374,7 @@ class TestStreamTurnAnthropic:
             _Obj(type="content_block_stop"),
         ]
         final_msg = _make_anthropic_final_message()
-        client._anthropic_client.messages.stream.return_value = _MockAnthropicStream(events, final_msg)
+        client._anthropic_client.messages.stream.return_value = _MockAnthropicStream(events, final_msg)  # type: ignore[attr-defined]
 
         collected = []
         async for event in client._stream_turn_anthropic([]):
@@ -446,7 +446,7 @@ class TestStreamTurnOpenAI:
             _make_openai_chunk(text="world", finish_reason="stop"),
             _make_openai_chunk(usage=usage_mock),
         ]
-        client._openai_client.chat.completions.create = AsyncMock(return_value=_MockOpenAIStream(chunks))
+        client._openai_client.chat.completions.create = AsyncMock(return_value=_MockOpenAIStream(chunks))  # type: ignore[method-assign]
 
         collected = []
         async for event in client._stream_turn_openai([{"role": "user", "content": "hi"}]):
@@ -487,7 +487,7 @@ class TestStreamTurnOpenAI:
             _make_openai_chunk(finish_reason="tool_calls"),
             _make_openai_chunk(usage=usage_mock),
         ]
-        client._openai_client.chat.completions.create = AsyncMock(return_value=_MockOpenAIStream(chunks))
+        client._openai_client.chat.completions.create = AsyncMock(return_value=_MockOpenAIStream(chunks))  # type: ignore[method-assign]
 
         collected = []
         async for event in client._stream_turn_openai([]):
@@ -511,7 +511,7 @@ class TestStreamTurnOpenAI:
             _make_openai_chunk(text="hi", finish_reason="stop"),
             _make_openai_chunk(usage=usage_mock),
         ]
-        client._openai_client.chat.completions.create = AsyncMock(return_value=_MockOpenAIStream(chunks))
+        client._openai_client.chat.completions.create = AsyncMock(return_value=_MockOpenAIStream(chunks))  # type: ignore[method-assign]
 
         collected = []
         async for event in client._stream_turn_openai([]):
@@ -537,7 +537,7 @@ class TestRunAgenticLoop:
             yield TextChunk(content="Done.")
             yield StreamDone(stop_reason="end_turn")
 
-        client.stream_turn = _fake_stream_turn
+        client.stream_turn = _fake_stream_turn  # type: ignore[method-assign]
         tool_fn = AsyncMock(return_value="tool result")
 
         collected = []
@@ -569,7 +569,7 @@ class TestRunAgenticLoop:
                 yield TextChunk(content="All done.")
                 yield StreamDone(stop_reason="end_turn")
 
-        client.stream_turn = _fake_stream_turn
+        client.stream_turn = _fake_stream_turn  # type: ignore[method-assign]
         tool_fn = AsyncMock(return_value="echo result")
 
         messages = [{"role": "user", "content": "echo hello"}]
@@ -596,7 +596,7 @@ class TestRunAgenticLoop:
             yield tc
             yield StreamDone(stop_reason="tool_use")
 
-        client.stream_turn = _fake_stream_turn
+        client.stream_turn = _fake_stream_turn  # type: ignore[method-assign]
         tool_fn = AsyncMock(return_value="result")
 
         messages = [{"role": "user", "content": "go"}]
@@ -616,7 +616,7 @@ class TestRunAgenticLoop:
             yield tc
             yield StreamDone(stop_reason="tool_use")
 
-        client.stream_turn = _fake_stream_turn
+        client.stream_turn = _fake_stream_turn  # type: ignore[method-assign]
         tool_fn = AsyncMock(side_effect=RuntimeError("tool exploded"))
 
         messages = [{"role": "user", "content": "do it"}]

@@ -65,6 +65,7 @@ def executor() -> WorktreeExecutor:
 async def test_missing_repo_path_returns_error(executor: WorktreeExecutor, worktree_tool: ToolDefinition) -> None:
     result = await executor.execute(worktree_tool, {"action": "list"})
     assert result.exit_code == 1
+    assert result.error is not None
     assert "repo_path" in result.error
 
 
@@ -72,6 +73,7 @@ async def test_missing_repo_path_returns_error(executor: WorktreeExecutor, workt
 async def test_invalid_action_returns_error(executor: WorktreeExecutor, worktree_tool: ToolDefinition) -> None:
     result = await executor.execute(worktree_tool, {"action": "invalid", "repo_path": "/tmp/repo"})
     assert result.exit_code == 1
+    assert result.error is not None
     assert "action" in result.error.lower()
 
 
@@ -79,6 +81,7 @@ async def test_invalid_action_returns_error(executor: WorktreeExecutor, worktree
 async def test_missing_action_returns_error(executor: WorktreeExecutor, worktree_tool: ToolDefinition) -> None:
     result = await executor.execute(worktree_tool, {"repo_path": "/tmp/repo"})
     assert result.exit_code == 1
+    assert result.error is not None
     assert "action" in result.error.lower()
 
 
@@ -159,6 +162,7 @@ async def test_known_exception_returns_error(
     with patch("src.executors.worktree.asyncio.to_thread", side_effect=exc_class("detail")):
         result = await executor.execute(worktree_tool, {"action": "list", "repo_path": "/tmp/repo"})
     assert result.exit_code == 1
+    assert result.error is not None
     assert expected_fragment.lower() in result.error.lower()
 
 
@@ -167,6 +171,7 @@ async def test_wt_exception_returns_error(executor: WorktreeExecutor, worktree_t
     with patch("src.executors.worktree.asyncio.to_thread", side_effect=WtException("generic wt error")):
         result = await executor.execute(worktree_tool, {"action": "list", "repo_path": "/tmp/repo"})
     assert result.exit_code == 1
+    assert result.error is not None
     assert "generic wt error" in result.error
 
 
@@ -175,6 +180,7 @@ async def test_unexpected_exception_returns_error(executor: WorktreeExecutor, wo
     with patch("src.executors.worktree.asyncio.to_thread", side_effect=RuntimeError("boom")):
         result = await executor.execute(worktree_tool, {"action": "list", "repo_path": "/tmp/repo"})
     assert result.exit_code == 1
+    assert result.error is not None
     assert "boom" in result.error
 
 
@@ -188,9 +194,7 @@ async def test_execute_streaming_success(executor: WorktreeExecutor, worktree_to
     output_json = json.dumps({"worktrees": []})
     with patch("src.executors.worktree.asyncio.to_thread", new=AsyncMock(return_value=output_json)):
         chunks = [
-            c async for c in executor.execute_streaming(
-                worktree_tool, {"action": "list", "repo_path": "/tmp/repo"}
-            )
+            c async for c in executor.execute_streaming(worktree_tool, {"action": "list", "repo_path": "/tmp/repo"})
         ]
     assert len(chunks) == 1
     assert chunks[0].content == output_json
@@ -203,9 +207,7 @@ async def test_execute_streaming_error_uses_error_field(
 ) -> None:
     with patch("src.executors.worktree.asyncio.to_thread", side_effect=WorktreeNotFound("wt")):
         chunks = [
-            c async for c in executor.execute_streaming(
-                worktree_tool, {"action": "list", "repo_path": "/tmp/repo"}
-            )
+            c async for c in executor.execute_streaming(worktree_tool, {"action": "list", "repo_path": "/tmp/repo"})
         ]
     assert len(chunks) == 1
     assert "not found" in chunks[0].content.lower()

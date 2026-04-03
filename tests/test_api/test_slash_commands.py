@@ -1,4 +1,5 @@
 """Tests for GET /api/slash-commands."""
+
 from __future__ import annotations
 
 import json
@@ -9,6 +10,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 if TYPE_CHECKING:
+    from collections.abc import Generator
+
     from fastapi import FastAPI
 
 import src.api.routes.slash_commands as _sc_module
@@ -17,7 +20,7 @@ API_KEY = "test-api-key"
 
 
 @pytest.fixture(autouse=True)
-def reset_cc_builtins_cache() -> None:
+def reset_cc_builtins_cache() -> Generator[None, None, None]:
     """Reset the in-process CC builtins cache between tests.
 
     Each test that exercises the slash-commands endpoint should start with a
@@ -85,8 +88,12 @@ class TestSlashCommandsEndpoint:
 
     def test_sources_are_valid(self, client: TestClient) -> None:
         valid_sources = {
-            "rcflow", "claude_code_builtin", "claude_code_user",
-            "claude_code_project", "claude_code_plugin", "rcflow_plugin",
+            "rcflow",
+            "claude_code_builtin",
+            "claude_code_user",
+            "claude_code_project",
+            "claude_code_plugin",
+            "rcflow_plugin",
         }
         resp = client.get("/api/slash-commands", headers=_auth())
         for cmd in resp.json()["commands"]:
@@ -178,15 +185,11 @@ class TestSlashCommandsUserLevelSkills:
         assert "real-skill" in user_names
         assert "real-skill.md:Zone" not in " ".join(user_names)
 
-    def test_multiple_user_skills(
-        self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_multiple_user_skills(self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         commands_dir = tmp_path / ".claude" / "commands"
         commands_dir.mkdir(parents=True)
         for name, desc in [("deploy", "Deploy to production"), ("lint", "Run linter"), ("test-all", "Run all tests")]:
-            (commands_dir / f"{name}.md").write_text(
-                f"---\ndescription: {desc}\n---\n", encoding="utf-8"
-            )
+            (commands_dir / f"{name}.md").write_text(f"---\ndescription: {desc}\n---\n", encoding="utf-8")
         monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
 
         resp = client.get("/api/slash-commands", headers=_auth())
@@ -199,9 +202,7 @@ class TestSlashCommandsUserLevelSkills:
 class TestCCBuiltinDescriptionsFromClaude:
     """Tests for the live-fetch path that sources descriptions from Claude."""
 
-    def test_fallback_used_when_binary_not_found(
-        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_fallback_used_when_binary_not_found(self, client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
         """When claude binary is not on PATH, hard-coded fallback is served."""
         monkeypatch.setattr("src.api.routes.slash_commands.shutil.which", lambda _: None)
 
@@ -225,11 +226,9 @@ class TestCCBuiltinDescriptionsFromClaude:
 
         async def fake_fetch(binary: str) -> list[dict[str, str]]:
             import json  # noqa: PLC0415
+
             data = json.loads(live_json)
-            return [
-                {"name": k, "description": v, "source": "claude_code_builtin"}
-                for k, v in data.items()
-            ]
+            return [{"name": k, "description": v, "source": "claude_code_builtin"} for k, v in data.items()]
 
         monkeypatch.setattr("src.api.routes.slash_commands.shutil.which", lambda _: "/usr/bin/claude")
         monkeypatch.setattr("src.api.routes.slash_commands._fetch_from_claude", fake_fetch)
@@ -240,21 +239,17 @@ class TestCCBuiltinDescriptionsFromClaude:
         resp = client.get("/api/slash-commands", headers=_auth())
         assert resp.status_code == 200
         builtins = {
-            c["name"]: c["description"]
-            for c in resp.json()["commands"]
-            if c["source"] == "claude_code_builtin"
+            c["name"]: c["description"] for c in resp.json()["commands"] if c["source"] == "claude_code_builtin"
         }
         assert builtins["compact"] == "Live compact"
         assert builtins["btw"] == "Live btw"
 
-    def test_disk_cache_used_without_subprocess_call(
-        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_disk_cache_used_without_subprocess_call(self, client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
         """When a valid disk cache exists, _fetch_from_claude is never called."""
         cached_commands = [
-            {"name": "help",    "description": "Cached help",    "source": "claude_code_builtin"},
+            {"name": "help", "description": "Cached help", "source": "claude_code_builtin"},
             {"name": "compact", "description": "Cached compact", "source": "claude_code_builtin"},
-            {"name": "btw",     "description": "Cached btw",     "source": "claude_code_builtin"},
+            {"name": "btw", "description": "Cached btw", "source": "claude_code_builtin"},
         ]
         fetch_called = []
 
@@ -269,16 +264,13 @@ class TestCCBuiltinDescriptionsFromClaude:
         assert resp.status_code == 200
         assert not fetch_called, "_fetch_from_claude should not be called when disk cache is valid"
         builtins = {
-            c["name"]: c["description"]
-            for c in resp.json()["commands"]
-            if c["source"] == "claude_code_builtin"
+            c["name"]: c["description"] for c in resp.json()["commands"] if c["source"] == "claude_code_builtin"
         }
         assert builtins.get("compact") == "Cached compact"
 
-    def test_fallback_when_fetch_returns_empty(
-        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_fallback_when_fetch_returns_empty(self, client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
         """If the subprocess returns no commands, hard-coded fallback is used."""
+
         async def empty_fetch(binary: str) -> list[dict[str, str]]:
             return []
 
@@ -295,9 +287,7 @@ class TestCCBuiltinDescriptionsFromClaude:
         assert "compact" in names
         assert "btw" in names
 
-    def test_in_process_cache_prevents_second_fetch(
-        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_in_process_cache_prevents_second_fetch(self, client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
         """After the first request the in-process cache is populated; no further
         subprocess calls are made on subsequent requests."""
         call_count = []
@@ -359,24 +349,21 @@ class TestPluginSkillCommands:
             encoding="utf-8",
         )
         settings: dict = {"enabledPlugins": enabled}
-        (dot_claude / "settings.json").write_text(
-            json.dumps(settings), encoding="utf-8"
-        )
+        (dot_claude / "settings.json").write_text(json.dumps(settings), encoding="utf-8")
 
     def test_plugin_commands_are_returned(
         self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Commands from an enabled plugin appear with source=claude_code_plugin."""
         plugin_key = "my-plugin@marketplace"
-        install_path, _ = self._make_plugin(
-            tmp_path, plugin_key, {"do-thing": 'description: "Do the thing"'}
-        )
+        install_path, _ = self._make_plugin(tmp_path, plugin_key, {"do-thing": 'description: "Do the thing"'})
         self._make_registry(tmp_path, {plugin_key: install_path}, {plugin_key: True})
         monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path / ".claude" / ".."))
-        monkeypatch.setattr("src.api.routes.slash_commands._INSTALLED_PLUGINS_FILE",
-                            tmp_path / ".claude" / "plugins" / "installed_plugins.json")
-        monkeypatch.setattr("src.api.routes.slash_commands._CC_SETTINGS_FILE",
-                            tmp_path / ".claude" / "settings.json")
+        monkeypatch.setattr(
+            "src.api.routes.slash_commands._INSTALLED_PLUGINS_FILE",
+            tmp_path / ".claude" / "plugins" / "installed_plugins.json",
+        )
+        monkeypatch.setattr("src.api.routes.slash_commands._CC_SETTINGS_FILE", tmp_path / ".claude" / "settings.json")
 
         resp = client.get("/api/slash-commands", headers=_auth())
         assert resp.status_code == 200
@@ -388,14 +375,13 @@ class TestPluginSkillCommands:
     ) -> None:
         """Descriptions wrapped in quotes are returned without the quotes."""
         plugin_key = "my-plugin@marketplace"
-        install_path, _ = self._make_plugin(
-            tmp_path, plugin_key, {"skill": 'description: "Quoted description"'}
-        )
+        install_path, _ = self._make_plugin(tmp_path, plugin_key, {"skill": 'description: "Quoted description"'})
         self._make_registry(tmp_path, {plugin_key: install_path}, {plugin_key: True})
-        monkeypatch.setattr("src.api.routes.slash_commands._INSTALLED_PLUGINS_FILE",
-                            tmp_path / ".claude" / "plugins" / "installed_plugins.json")
-        monkeypatch.setattr("src.api.routes.slash_commands._CC_SETTINGS_FILE",
-                            tmp_path / ".claude" / "settings.json")
+        monkeypatch.setattr(
+            "src.api.routes.slash_commands._INSTALLED_PLUGINS_FILE",
+            tmp_path / ".claude" / "plugins" / "installed_plugins.json",
+        )
+        monkeypatch.setattr("src.api.routes.slash_commands._CC_SETTINGS_FILE", tmp_path / ".claude" / "settings.json")
 
         resp = client.get("/api/slash-commands", headers=_auth())
         plugin_cmds = {c["name"]: c for c in resp.json()["commands"] if c["source"] == "claude_code_plugin"}
@@ -415,10 +401,11 @@ class TestPluginSkillCommands:
             },
         )
         self._make_registry(tmp_path, {plugin_key: install_path}, {plugin_key: True})
-        monkeypatch.setattr("src.api.routes.slash_commands._INSTALLED_PLUGINS_FILE",
-                            tmp_path / ".claude" / "plugins" / "installed_plugins.json")
-        monkeypatch.setattr("src.api.routes.slash_commands._CC_SETTINGS_FILE",
-                            tmp_path / ".claude" / "settings.json")
+        monkeypatch.setattr(
+            "src.api.routes.slash_commands._INSTALLED_PLUGINS_FILE",
+            tmp_path / ".claude" / "plugins" / "installed_plugins.json",
+        )
+        monkeypatch.setattr("src.api.routes.slash_commands._CC_SETTINGS_FILE", tmp_path / ".claude" / "settings.json")
 
         resp = client.get("/api/slash-commands", headers=_auth())
         plugin_names = {c["name"] for c in resp.json()["commands"] if c["source"] == "claude_code_plugin"}
@@ -430,14 +417,13 @@ class TestPluginSkillCommands:
     ) -> None:
         """Commands from a plugin listed as enabled=false are omitted."""
         plugin_key = "disabled-plugin@marketplace"
-        install_path, _ = self._make_plugin(
-            tmp_path, plugin_key, {"secret": 'description: "Should not appear"'}
-        )
+        install_path, _ = self._make_plugin(tmp_path, plugin_key, {"secret": 'description: "Should not appear"'})
         self._make_registry(tmp_path, {plugin_key: install_path}, {plugin_key: False})
-        monkeypatch.setattr("src.api.routes.slash_commands._INSTALLED_PLUGINS_FILE",
-                            tmp_path / ".claude" / "plugins" / "installed_plugins.json")
-        monkeypatch.setattr("src.api.routes.slash_commands._CC_SETTINGS_FILE",
-                            tmp_path / ".claude" / "settings.json")
+        monkeypatch.setattr(
+            "src.api.routes.slash_commands._INSTALLED_PLUGINS_FILE",
+            tmp_path / ".claude" / "plugins" / "installed_plugins.json",
+        )
+        monkeypatch.setattr("src.api.routes.slash_commands._CC_SETTINGS_FILE", tmp_path / ".claude" / "settings.json")
 
         resp = client.get("/api/slash-commands", headers=_auth())
         plugin_cmds = [c for c in resp.json()["commands"] if c["source"] == "claude_code_plugin"]
@@ -448,14 +434,13 @@ class TestPluginSkillCommands:
     ) -> None:
         """Each plugin command carries a 'plugin' field with the short plugin name."""
         plugin_key = "awesome-tool@marketplace"
-        install_path, _ = self._make_plugin(
-            tmp_path, plugin_key, {"run": 'description: "Run it"'}
-        )
+        install_path, _ = self._make_plugin(tmp_path, plugin_key, {"run": 'description: "Run it"'})
         self._make_registry(tmp_path, {plugin_key: install_path}, {plugin_key: True})
-        monkeypatch.setattr("src.api.routes.slash_commands._INSTALLED_PLUGINS_FILE",
-                            tmp_path / ".claude" / "plugins" / "installed_plugins.json")
-        monkeypatch.setattr("src.api.routes.slash_commands._CC_SETTINGS_FILE",
-                            tmp_path / ".claude" / "settings.json")
+        monkeypatch.setattr(
+            "src.api.routes.slash_commands._INSTALLED_PLUGINS_FILE",
+            tmp_path / ".claude" / "plugins" / "installed_plugins.json",
+        )
+        monkeypatch.setattr("src.api.routes.slash_commands._CC_SETTINGS_FILE", tmp_path / ".claude" / "settings.json")
 
         resp = client.get("/api/slash-commands", headers=_auth())
         plugin_cmds = [c for c in resp.json()["commands"] if c["source"] == "claude_code_plugin"]
@@ -467,10 +452,12 @@ class TestPluginSkillCommands:
         self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Endpoint should return gracefully when installed_plugins.json doesn't exist."""
-        monkeypatch.setattr("src.api.routes.slash_commands._INSTALLED_PLUGINS_FILE",
-                            tmp_path / "nonexistent" / "installed_plugins.json")
-        monkeypatch.setattr("src.api.routes.slash_commands._CC_SETTINGS_FILE",
-                            tmp_path / "nonexistent" / "settings.json")
+        monkeypatch.setattr(
+            "src.api.routes.slash_commands._INSTALLED_PLUGINS_FILE", tmp_path / "nonexistent" / "installed_plugins.json"
+        )
+        monkeypatch.setattr(
+            "src.api.routes.slash_commands._CC_SETTINGS_FILE", tmp_path / "nonexistent" / "settings.json"
+        )
 
         resp = client.get("/api/slash-commands", headers=_auth())
         assert resp.status_code == 200
@@ -480,17 +467,16 @@ class TestPluginSkillCommands:
     ) -> None:
         """Windows Zone.Identifier sidecar files in plugin command dirs are ignored."""
         plugin_key = "my-plugin@marketplace"
-        install_path, _ = self._make_plugin(
-            tmp_path, plugin_key, {"real": 'description: "Real command"'}
-        )
+        install_path, _ = self._make_plugin(tmp_path, plugin_key, {"real": 'description: "Real command"'})
         # Simulate a sidecar file
         sidecar = install_path / "commands" / "real.md:Zone.Identifier"
         sidecar.write_text("", encoding="utf-8")
         self._make_registry(tmp_path, {plugin_key: install_path}, {plugin_key: True})
-        monkeypatch.setattr("src.api.routes.slash_commands._INSTALLED_PLUGINS_FILE",
-                            tmp_path / ".claude" / "plugins" / "installed_plugins.json")
-        monkeypatch.setattr("src.api.routes.slash_commands._CC_SETTINGS_FILE",
-                            tmp_path / ".claude" / "settings.json")
+        monkeypatch.setattr(
+            "src.api.routes.slash_commands._INSTALLED_PLUGINS_FILE",
+            tmp_path / ".claude" / "plugins" / "installed_plugins.json",
+        )
+        monkeypatch.setattr("src.api.routes.slash_commands._CC_SETTINGS_FILE", tmp_path / ".claude" / "settings.json")
 
         resp = client.get("/api/slash-commands", headers=_auth())
         plugin_names = [c["name"] for c in resp.json()["commands"] if c["source"] == "claude_code_plugin"]
@@ -569,9 +555,7 @@ class TestRCFlowManagedPlugins:
         resp = client.get("/api/slash-commands", headers=_auth())
         assert resp.status_code == 200
 
-    def test_multiple_rcflow_plugins(
-        self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_multiple_rcflow_plugins(self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Commands from multiple plugin subdirectories are all returned."""
         plugins_dir = tmp_path / "plugins"
         self._make_rcflow_plugin(plugins_dir, "alpha", {"alpha-cmd": 'description: "Alpha"'})
@@ -590,9 +574,7 @@ class TestRCFlowManagedPlugins:
         plugins_dir = tmp_path / "plugins"
         self._make_rcflow_plugin(plugins_dir, "disabled-plugin", {"secret-cmd": 'description: "Should not appear"'})
         # Write plugins_state.json marking this plugin as disabled
-        (plugins_dir / "plugins_state.json").write_text(
-            json.dumps({"disabled": ["disabled-plugin"]}), encoding="utf-8"
-        )
+        (plugins_dir / "plugins_state.json").write_text(json.dumps({"disabled": ["disabled-plugin"]}), encoding="utf-8")
         monkeypatch.setattr("src.api.routes.slash_commands.get_managed_cc_plugins_dir", lambda: plugins_dir)
 
         resp = client.get("/api/slash-commands", headers=_auth())
@@ -607,9 +589,7 @@ class TestRCFlowManagedPlugins:
         plugins_dir = tmp_path / "plugins"
         self._make_rcflow_plugin(plugins_dir, "enabled-plugin", {"good-cmd": 'description: "Should appear"'})
         self._make_rcflow_plugin(plugins_dir, "off-plugin", {"bad-cmd": 'description: "Should NOT appear"'})
-        (plugins_dir / "plugins_state.json").write_text(
-            json.dumps({"disabled": ["off-plugin"]}), encoding="utf-8"
-        )
+        (plugins_dir / "plugins_state.json").write_text(json.dumps({"disabled": ["off-plugin"]}), encoding="utf-8")
         monkeypatch.setattr("src.api.routes.slash_commands.get_managed_cc_plugins_dir", lambda: plugins_dir)
 
         resp = client.get("/api/slash-commands", headers=_auth())

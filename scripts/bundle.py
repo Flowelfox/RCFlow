@@ -10,11 +10,11 @@ Usage:
     python scripts/bundle.py --sign                        # Build and sign for current platform
 
 Outputs:
-    dist/rcflow-{version}-{platform}-{arch}.tar.gz   (Linux archive)
-    dist/rcflow_{version}_{deb_arch}.deb              (Linux .deb package)
-    dist/rcflow-{version}-{platform}-{arch}.zip       (Windows archive)
-    dist/rcflow-{version}-{arch}-setup.exe            (Windows installer)
-    dist/rcflow-{version}-macos-{arch}.pkg            (macOS installer)
+    dist/rcflow-v{version}-{platform}-worker-{arch}.tar.gz   (Linux archive)
+    dist/rcflow-v{version}-linux-worker-{arch}.deb            (Linux .deb package)
+    dist/rcflow-v{version}-{platform}-worker-{arch}.zip       (Windows archive)
+    dist/rcflow-v{version}-windows-worker-{arch}.exe          (Windows installer)
+    dist/rcflow-v{version}-macos-worker-{arch}.dmg            (macOS DMG)
 
 Code signing (--sign):
     Signing is optional and controlled by the --sign flag. When enabled, the
@@ -68,7 +68,7 @@ def get_arch() -> str:
     """Get current machine architecture as a normalized string."""
     machine = platform.machine().lower()
     if machine in ("x86_64", "amd64"):
-        return "x64"
+        return "amd64"
     if machine in ("aarch64", "arm64"):
         return "arm64"
     return machine
@@ -335,7 +335,7 @@ def run_pyinstaller(target_platform: str, *, windowed: bool = False) -> Path:
 
 def assemble_bundle(pyinstaller_dir: Path, target_platform: str, version: str, arch: str) -> Path:
     """Assemble the final distributable bundle directory."""
-    bundle_name = f"rcflow-{version}-{target_platform}-{arch}"
+    bundle_name = f"rcflow-v{version}-{target_platform}-worker-{arch}"
     bundle_dir = PROJECT_ROOT / "build" / "bundle" / bundle_name
     if bundle_dir.exists():
         shutil.rmtree(bundle_dir)
@@ -487,7 +487,7 @@ def build_windows_installer(bundle_dir: Path, version: str, arch: str) -> Path |
 
     dist_dir = PROJECT_ROOT / "dist"
     dist_dir.mkdir(parents=True, exist_ok=True)
-    output_filename = f"rcflow-{version}-{arch}-setup"
+    output_filename = f"rcflow-v{version}-windows-worker-{arch}"
 
     cmd = [
         iscc,
@@ -526,7 +526,7 @@ def build_deb(bundle_dir: Path, version: str, arch: str) -> Path | None:
         return None
 
     deb_arch = get_deb_arch()
-    pkg_name = f"rcflow_{version}_{deb_arch}"
+    pkg_name = f"rcflow-v{version}-linux-worker-{deb_arch}"
     pkg_root = PROJECT_ROOT / "build" / "deb" / pkg_name
     install_dir = pkg_root / "opt" / "rcflow"
 
@@ -891,7 +891,7 @@ rm -rf {pkg_stage}
 
     dist_dir = PROJECT_ROOT / "dist"
     dist_dir.mkdir(parents=True, exist_ok=True)
-    pkg_path = dist_dir / f"rcflow-{version}-macos-{arch}.pkg"
+    pkg_path = dist_dir / f"rcflow-v{version}-macos-worker-{arch}.pkg"
 
     if pkg_path.exists():
         pkg_path.unlink()
@@ -1146,7 +1146,7 @@ def build_macos_dmg(app_path: Path, version: str, arch: str) -> Path | None:
     dist_dir = PROJECT_ROOT / "dist"
     dist_dir.mkdir(parents=True, exist_ok=True)
 
-    dmg_name = f"rcflow-{version}-macos-{arch}"
+    dmg_name = f"rcflow-v{version}-macos-worker-{arch}"
     final_dmg = dist_dir / f"{dmg_name}.dmg"
     tmp_dmg = PROJECT_ROOT / "build" / f"{dmg_name}-rw.dmg"
 

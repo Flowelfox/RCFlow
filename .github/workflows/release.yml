@@ -89,10 +89,10 @@ jobs:
           if-no-files-found: error
 
   # ===========================================================================
-  # BACKEND — macOS (Apple Silicon)
+  # BACKEND — macOS (Apple Silicon / arm64)
   # ===========================================================================
-  backend-macos:
-    name: Backend — macOS (signed + notarized)
+  backend-macos-arm64:
+    name: Backend — macOS arm64 (signed + notarized)
     runs-on: macos-latest
 
     steps:
@@ -165,7 +165,88 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: backend-macos
+          name: backend-macos-arm64
+          path: dist/
+          if-no-files-found: error
+
+  # ===========================================================================
+  # BACKEND — macOS (Intel / x64)
+  # ===========================================================================
+  backend-macos-x64:
+    name: Backend — macOS x64 (signed + notarized)
+    runs-on: macos-13
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python 3.12
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        # --extra tray installs pystray + Pillow for the menu bar UI and DMG
+        # background generation.
+        run: uv sync --extra bundle --extra tray
+
+      - name: Install signing certificate
+        env:
+          MACOS_CERTIFICATE_BASE64: ${{ secrets.MACOS_CERTIFICATE_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_INSTALLER_CERTIFICATE_BASE64: ${{ secrets.MACOS_INSTALLER_CERTIFICATE_BASE64 }}
+          MACOS_INSTALLER_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_INSTALLER_CERTIFICATE_PASSWORD }}
+        run: |
+          # Create a temporary keychain for CI
+          KEYCHAIN_PATH="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 32)"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          # Import application certificate
+          CERT_PATH="$RUNNER_TEMP/app_cert.p12"
+          echo "$MACOS_CERTIFICATE_BASE64" | base64 --decode > "$CERT_PATH"
+          security import "$CERT_PATH" -P "$MACOS_CERTIFICATE_PASSWORD" \
+            -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          rm "$CERT_PATH"
+
+          # Import installer certificate
+          INST_CERT_PATH="$RUNNER_TEMP/inst_cert.p12"
+          echo "$MACOS_INSTALLER_CERTIFICATE_BASE64" | base64 --decode > "$INST_CERT_PATH"
+          security import "$INST_CERT_PATH" -P "$MACOS_INSTALLER_CERTIFICATE_PASSWORD" \
+            -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          rm "$INST_CERT_PATH"
+
+          # Set the keychain as the default and add to search list
+          security list-keychains -d user -s "$KEYCHAIN_PATH" "$(security default-keychain -d user | tr -d '"')"
+          security default-keychain -s "$KEYCHAIN_PATH"
+
+          # Allow codesign to access the keychain without prompting
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          # Extract signing identity names for bundle.py
+          APP_IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | grep "Developer ID Application" | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          INST_IDENTITY=$(security find-identity -v "$KEYCHAIN_PATH" | grep "Developer ID Installer" | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          echo "SIGN_IDENTITY=$APP_IDENTITY" >> "$GITHUB_ENV"
+          echo "SIGN_INSTALLER_IDENTITY=$INST_IDENTITY" >> "$GITHUB_ENV"
+
+      - name: Build, sign, and notarize backend package
+        env:
+          SIGN_IDENTITY: ${{ env.SIGN_IDENTITY }}
+          SIGN_INSTALLER_IDENTITY: ${{ env.SIGN_INSTALLER_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: uv run python scripts/bundle.py --platform macos --installer --sign
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-macos-x64
           path: dist/
           if-no-files-found: error
 
@@ -248,11 +329,29 @@ jobs:
         working-directory: rcflowclient
         run: flutter build linux --release
 
+      - name: Get client version
+        run: |
+          CLIENT_VERSION=$(grep '^version:' rcflowclient/pubspec.yaml \
+            | sed 's/version: //' | sed 's/+.*//')
+          echo "CLIENT_VERSION=$CLIENT_VERSION" >> "$GITHUB_ENV"
+
       - name: Package Linux client
         run: |
+          CLIENT_VERSION="${{ env.CLIENT_VERSION }}"
+          PKG_NAME="rcflow-v${CLIENT_VERSION}-linux-client-amd64"
+          DEB_ROOT=$(mktemp -d)
+          install -Dm755 rcflowclient/build/linux/x64/release/bundle/rcflowclient \
+            "$DEB_ROOT/opt/rcflowclient/rcflowclient"
+          cp -r rcflowclient/build/linux/x64/release/bundle/data "$DEB_ROOT/opt/rcflowclient/"
+          cp -r rcflowclient/build/linux/x64/release/bundle/lib  "$DEB_ROOT/opt/rcflowclient/"
+          mkdir -p "$DEB_ROOT/usr/bin"
+          ln -s /opt/rcflowclient/rcflowclient "$DEB_ROOT/usr/bin/rcflowclient"
+          mkdir -p "$DEB_ROOT/DEBIAN"
+          printf 'Package: rcflow-client\nVersion: %s\nArchitecture: amd64\nMaintainer: RCFlow <rcflow@localhost>\nDescription: RCFlow Desktop Client\n Self-contained RCFlow Flutter desktop client.\nSection: net\nPriority: optional\n' \
+            "$CLIENT_VERSION" > "$DEB_ROOT/DEBIAN/control"
           mkdir -p dist
-          tar -czf dist/rcflowclient-linux-x86_64.tar.gz \
-            -C rcflowclient/build/linux/x64/release bundle
+          dpkg-deb --build --root-owner-group "$DEB_ROOT" "dist/${PKG_NAME}.deb"
+          rm -rf "$DEB_ROOT"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -262,10 +361,10 @@ jobs:
           if-no-files-found: error
 
   # ===========================================================================
-  # FLUTTER CLIENT — macOS (signed + notarized)
+  # FLUTTER CLIENT — macOS (Apple Silicon / arm64, signed + notarized)
   # ===========================================================================
-  client-macos:
-    name: Flutter client — macOS (signed + notarized)
+  client-macos-arm64:
+    name: Flutter client — macOS arm64 (signed + notarized)
     runs-on: macos-latest
 
     steps:
@@ -328,16 +427,123 @@ jobs:
             --password "$APPLE_APP_PASSWORD" --wait
           xcrun stapler staple "$APP_PATH"
 
+      - name: Get client version
+        run: |
+          CLIENT_VERSION=$(grep '^version:' rcflowclient/pubspec.yaml \
+            | sed 's/version: //' | sed 's/+.*//')
+          echo "CLIENT_VERSION=$CLIENT_VERSION" >> "$GITHUB_ENV"
+
       - name: Package macOS client
         run: |
+          CLIENT_VERSION="${{ env.CLIENT_VERSION }}"
+          CLIENT_ARCH=$(uname -m | sed 's/x86_64/amd64/')
+          DMG_NAME="rcflow-v${CLIENT_VERSION}-macos-client-${CLIENT_ARCH}"
+          APP_PATH="rcflowclient/build/macos/Build/Products/Release/RCFlow.app"
+          STAGE=$(mktemp -d)
+          cp -R "$APP_PATH" "$STAGE/"
+          ln -s /Applications "$STAGE/Applications"
           mkdir -p dist
-          tar -czf dist/rcflowclient-macos-$(uname -m).tar.gz \
-            -C rcflowclient/build/macos/Build/Products/Release RCFlow.app
+          hdiutil create -srcfolder "$STAGE" -volname "RCFlow Client" \
+            -fs HFS+ -format UDZO -o "dist/${DMG_NAME}.dmg"
+          rm -rf "$STAGE"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: client-macos
+          name: client-macos-arm64
+          path: dist/
+          if-no-files-found: error
+
+  # ===========================================================================
+  # FLUTTER CLIENT — macOS (Intel / x64, signed + notarized)
+  # ===========================================================================
+  client-macos-x64:
+    name: Flutter client — macOS x64 (signed + notarized)
+    runs-on: macos-13
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install signing certificate
+        env:
+          MACOS_CERTIFICATE_BASE64: ${{ secrets.MACOS_CERTIFICATE_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          KEYCHAIN_PATH="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 32)"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          CERT_PATH="$RUNNER_TEMP/app_cert.p12"
+          echo "$MACOS_CERTIFICATE_BASE64" | base64 --decode > "$CERT_PATH"
+          security import "$CERT_PATH" -P "$MACOS_CERTIFICATE_PASSWORD" \
+            -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          rm "$CERT_PATH"
+
+          security list-keychains -d user -s "$KEYCHAIN_PATH" "$(security default-keychain -d user | tr -d '"')"
+          security default-keychain -s "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+      - name: Set up Flutter (stable)
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install Flutter packages
+        working-directory: rcflowclient
+        run: flutter pub get
+
+      - name: Build macOS desktop
+        working-directory: rcflowclient
+        run: flutter build macos --release
+
+      - name: Sign .app bundle
+        env:
+          MACOS_CERTIFICATE_BASE64: ${{ secrets.MACOS_CERTIFICATE_BASE64 }}
+        run: |
+          APP_PATH="rcflowclient/build/macos/Build/Products/Release/RCFlow.app"
+          IDENTITY=$(security find-identity -v -p codesigning | grep "Developer ID Application" | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          codesign --deep --force --options runtime --sign "$IDENTITY" --timestamp "$APP_PATH"
+
+      - name: Notarize .app bundle
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          APP_PATH="rcflowclient/build/macos/Build/Products/Release/RCFlow.app"
+          ditto -c -k --keepParent "$APP_PATH" "$RUNNER_TEMP/RCFlow.zip"
+          xcrun notarytool submit "$RUNNER_TEMP/RCFlow.zip" \
+            --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_PASSWORD" --wait
+          xcrun stapler staple "$APP_PATH"
+
+      - name: Get client version
+        run: |
+          CLIENT_VERSION=$(grep '^version:' rcflowclient/pubspec.yaml \
+            | sed 's/version: //' | sed 's/+.*//')
+          echo "CLIENT_VERSION=$CLIENT_VERSION" >> "$GITHUB_ENV"
+
+      - name: Package macOS client
+        run: |
+          CLIENT_VERSION="${{ env.CLIENT_VERSION }}"
+          CLIENT_ARCH=$(uname -m | sed 's/x86_64/amd64/')
+          DMG_NAME="rcflow-v${CLIENT_VERSION}-macos-client-${CLIENT_ARCH}"
+          APP_PATH="rcflowclient/build/macos/Build/Products/Release/RCFlow.app"
+          STAGE=$(mktemp -d)
+          cp -R "$APP_PATH" "$STAGE/"
+          ln -s /Applications "$STAGE/Applications"
+          mkdir -p dist
+          hdiutil create -srcfolder "$STAGE" -volname "RCFlow Client" \
+            -fs HFS+ -format UDZO -o "dist/${DMG_NAME}.dmg"
+          rm -rf "$STAGE"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: client-macos-x64
           path: dist/
           if-no-files-found: error
 
@@ -360,6 +566,10 @@ jobs:
       - name: Install Flutter packages
         working-directory: rcflowclient
         run: flutter pub get
+
+      - name: Add Inno Setup to PATH
+        run: echo "C:\Program Files (x86)\Inno Setup 6" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        shell: pwsh
 
       - name: Build Windows desktop
         working-directory: rcflowclient
@@ -385,13 +595,26 @@ jobs:
             /tr http://timestamp.digicert.com /td sha256 /fd sha256 "$exePath"
         shell: pwsh
 
+      - name: Get client version
+        shell: bash
+        run: |
+          CLIENT_VERSION=$(grep '^version:' rcflowclient/pubspec.yaml \
+            | sed 's/version: //' | sed 's/+.*//')
+          echo "CLIENT_VERSION=$CLIENT_VERSION" >> "$GITHUB_ENV"
+
       - name: Package Windows client
         shell: pwsh
         run: |
+          $appVersion = "${{ env.CLIENT_VERSION }}"
+          $bundleDir = Resolve-Path 'rcflowclient\build\windows\x64\runner\Release'
+          $outputFilename = "rcflow-v${appVersion}-windows-client-amd64"
           if (-not (Test-Path dist)) { New-Item -ItemType Directory -Path dist | Out-Null }
-          Compress-Archive -Force `
-            -Path 'rcflowclient\build\windows\x64\runner\Release\*' `
-            -DestinationPath 'dist\rcflowclient-windows-x64.zip'
+          iscc scripts\inno_setup_client.iss `
+            "/DBundleDir=$bundleDir" `
+            "/DAppVersion=$appVersion" `
+            "/DArch=amd64" `
+            "/DOutputDir=dist" `
+            "/DOutputFilename=$outputFilename"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -452,10 +675,22 @@ jobs:
         working-directory: rcflowclient
         run: flutter build apk --release --split-per-abi
 
+      - name: Get client version
+        run: |
+          CLIENT_VERSION=$(grep '^version:' rcflowclient/pubspec.yaml \
+            | sed 's/version: //' | sed 's/+.*//')
+          echo "CLIENT_VERSION=$CLIENT_VERSION" >> "$GITHUB_ENV"
+
       - name: Collect Android APKs
         run: |
+          CLIENT_VERSION="${{ env.CLIENT_VERSION }}"
           mkdir -p dist
-          cp rcflowclient/build/app/outputs/flutter-apk/app-*-release.apk dist/
+          mv rcflowclient/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk \
+            "dist/rcflow-v${CLIENT_VERSION}-android-client-arm64.apk"
+          mv rcflowclient/build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk \
+            "dist/rcflow-v${CLIENT_VERSION}-android-client-armv7.apk"
+          mv rcflowclient/build/app/outputs/flutter-apk/app-x86_64-release.apk \
+            "dist/rcflow-v${CLIENT_VERSION}-android-client-x86_64.apk"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -471,10 +706,12 @@ jobs:
     name: Publish GitHub Release
     needs:
       - backend-linux
-      - backend-macos
+      - backend-macos-arm64
+      - backend-macos-x64
       - backend-windows
       - client-linux
-      - client-macos
+      - client-macos-arm64
+      - client-macos-x64
       - client-windows
       - client-android
     runs-on: ubuntu-latest

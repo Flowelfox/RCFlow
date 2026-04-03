@@ -106,6 +106,11 @@ class _InputAreaState extends State<InputArea> {
   // does not retry on every rebuild.  Reset when the cache key changes (new
   // project or worker) or when the user explicitly opens the dropdown.
   bool _worktreeFetchFailed = false;
+  // Set to true when the server responds with "Not a git repository" — a
+  // permanent condition for this project.  Unlike _worktreeFetchFailed this
+  // flag suppresses the worktree chip entirely and is only reset when the
+  // cache key changes (i.e. the user selects a different project/worker).
+  bool _noGitRepo = false;
 
   // Tracks the active pane so the worktree cache can be invalidated when the
   // user switches to a different session pane (the widget may be reused).
@@ -121,10 +126,22 @@ class _InputAreaState extends State<InputArea> {
     bool force = false,
   }) async {
     final cacheKey = '$workerId:$projectPath';
-    // When the cache key changes, reset the failed flag so a fresh attempt runs.
+    // When the cache key changes, reset local flags and check the shared cache
+    // for a previously discovered no-git-repo state.
     if (_worktreeCacheKey != cacheKey) {
       _worktreeFetchFailed = false;
+      final cached = context.read<AppState>().getProjectDataCache(cacheKey);
+      _noGitRepo = cached?.noGitRepo ?? false;
+      if (_noGitRepo) {
+        // Update the key so subsequent calls hit the early-return below.
+        _worktreeCacheKey = cacheKey;
+        if (mounted) setState(() {});
+        return;
+      }
     }
+    // Never retry for projects permanently marked as non-git repos, even with
+    // force — only a cache-key change (different project/worker) resets this.
+    if (_noGitRepo) return;
     if (!force &&
         _worktreeCacheKey == cacheKey &&
         (_preSessionWorktrees != null || _worktreeFetchFailed)) {
@@ -149,10 +166,21 @@ class _InputAreaState extends State<InputArea> {
               .cast<Map<String, dynamic>>();
         });
       }
-    } catch (_) {
-      // Mark as failed so the build-time trigger stops retrying until the
-      // cache key changes (different project/worker) or a forced refresh.
-      if (mounted) setState(() => _worktreeFetchFailed = true);
+    } catch (e) {
+      final isNoGitRepo = e.toString().contains('Not a git repository');
+      if (isNoGitRepo) {
+        // Persist to the shared cache so project_panel also knows.
+        context.read<AppState>().setProjectDataCache(
+          cacheKey,
+          noGitRepo: true,
+        );
+      }
+      if (mounted) {
+        setState(() {
+          _worktreeFetchFailed = true;
+          _noGitRepo = isNoGitRepo;
+        });
+      }
     } finally {
       if (mounted) setState(() => _loadingWorktrees = false);
     }
@@ -1062,6 +1090,7 @@ class _InputAreaState extends State<InputArea> {
     if (_lastPaneId != null && _lastPaneId != currentPaneId) {
       _preSessionWorktrees = null;
       _worktreeCacheKey = null;
+      _noGitRepo = false;
     }
     _lastPaneId = currentPaneId;
 
@@ -1116,10 +1145,6 @@ class _InputAreaState extends State<InputArea> {
     final selectedProjectPath = context.select<PaneState, String?>(
       (s) => s.effectiveProjectPath,
     );
-    final showWorktreeChip =
-        sessionId == null &&
-        selectedProject != null &&
-        selectedProjectPath != null;
 
     // Active-session worktree chip — shown when the current session has a
     // project attached, so the user can see / change the active worktree.
@@ -1129,15 +1154,37 @@ class _InputAreaState extends State<InputArea> {
     final activeSessionProjectPath = context.select<PaneState, String?>(
       (s) => s.currentMainProjectPath,
     );
+
+    // When the project path changes (user picks a different project), reset
+    // the per-project flags so they are re-evaluated for the new project.
+    final worktreeProjectPath = selectedProjectPath ?? activeSessionProjectPath;
+    final worktreeWorkerId = paneWorkerId ?? state.defaultWorkerId ?? '';
+    final currentCacheKey = worktreeProjectPath != null
+        ? '$worktreeWorkerId:$worktreeProjectPath'
+        : null;
+    if (currentCacheKey != null && currentCacheKey != _worktreeCacheKey) {
+      final cached = state.getProjectDataCache(currentCacheKey);
+      _noGitRepo = cached?.noGitRepo ?? false;
+      _worktreeFetchFailed = false;
+    }
+
+    // Hide the worktree chip entirely when the project is known to have no
+    // git repository — there is nothing to pick.
+    final showWorktreeChip =
+        sessionId == null &&
+        selectedProject != null &&
+        selectedProjectPath != null &&
+        !_noGitRepo;
     final showActiveWorktreeChip =
-        sessionId != null && activeSessionProjectPath != null;
+        sessionId != null &&
+        activeSessionProjectPath != null &&
+        !_noGitRepo;
 
     // Eagerly pre-fetch worktrees as soon as a project path is known so the
     // chip dropdown is ready on the first click.  _fetchWorktrees is
-    // idempotent (it returns immediately if already loaded or loading).
-    final worktreeProjectPath = selectedProjectPath ?? activeSessionProjectPath;
-    if (worktreeProjectPath != null) {
-      final worktreeWorkerId = paneWorkerId ?? state.defaultWorkerId ?? '';
+    // idempotent (it returns immediately if already loaded, loading, or if
+    // the project is known to have no git repository).
+    if (worktreeProjectPath != null && !_noGitRepo && !_worktreeFetchFailed) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _fetchWorktrees(worktreeProjectPath, worktreeWorkerId);
       });

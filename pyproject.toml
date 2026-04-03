@@ -72,6 +72,13 @@ show_missing = true
 skip_empty = true
 fail_under = 0
 
+[tool.ty.src]
+exclude = ["scripts/"]
+
+[[tool.ty.overrides]]
+include = ["tests/test_api/**"]
+rules.possibly-missing-attribute = "ignore"
+
 [tool.ruff]
 target-version = "py312"
 line-length = 120
