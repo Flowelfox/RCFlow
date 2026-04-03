@@ -157,8 +157,9 @@ class _InputAreaState extends State<InputArea> {
         _worktreeCacheKey = cacheKey;
       }
     });
+    final appState = context.read<AppState>();
     try {
-      final ws = context.read<AppState>().wsForWorker(workerId);
+      final ws = appState.wsForWorker(workerId);
       final result = await ws.listWorktrees(projectPath);
       if (mounted && _worktreeCacheKey == cacheKey) {
         setState(() {
@@ -170,7 +171,7 @@ class _InputAreaState extends State<InputArea> {
       final isNoGitRepo = e.toString().contains('Not a git repository');
       if (isNoGitRepo) {
         // Persist to the shared cache so project_panel also knows.
-        context.read<AppState>().setProjectDataCache(
+        appState.setProjectDataCache(
           cacheKey,
           noGitRepo: true,
         );
