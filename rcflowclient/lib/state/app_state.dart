@@ -460,6 +460,7 @@ class AppState extends ChangeNotifier implements PaneHost {
     ({
       List<Map<String, dynamic>>? worktrees,
       List<Map<String, dynamic>>? artifacts,
+      bool noGitRepo,
     })
   >
   _projectDataCache = {};
@@ -467,6 +468,7 @@ class AppState extends ChangeNotifier implements PaneHost {
   ({
     List<Map<String, dynamic>>? worktrees,
     List<Map<String, dynamic>>? artifacts,
+    bool noGitRepo,
   })?
   getProjectDataCache(String key) => _projectDataCache[key];
 
@@ -474,11 +476,13 @@ class AppState extends ChangeNotifier implements PaneHost {
     String key, {
     List<Map<String, dynamic>>? worktrees,
     List<Map<String, dynamic>>? artifacts,
+    bool? noGitRepo,
   }) {
     final existing = _projectDataCache[key];
     _projectDataCache[key] = (
       worktrees: worktrees ?? existing?.worktrees,
       artifacts: artifacts ?? existing?.artifacts,
+      noGitRepo: noGitRepo ?? existing?.noGitRepo ?? false,
     );
   }
 

@@ -136,7 +136,7 @@ class TestActiveSession:
             ephemeral_messages.append({"type": msg_type, "data": data})
             original_push(msg_type, data)
 
-        session.buffer.push_ephemeral = capture_ephemeral
+        session.buffer.push_ephemeral = capture_ephemeral  # type: ignore[method-assign]
 
         session.clear_subprocess_tracking()
 
@@ -397,6 +397,7 @@ class TestReloadStaleSessions:
 
         assert count == 1
         session = manager.get_session(str(row.id))
+        assert session is not None
         assert session.status == SessionStatus.ACTIVE
 
     @pytest.mark.asyncio
@@ -409,6 +410,7 @@ class TestReloadStaleSessions:
 
         assert count == 1
         session = manager.get_session(str(row.id))
+        assert session is not None
         assert session.status == SessionStatus.PAUSED
         assert session.ended_at is None
         assert session.metadata.get("was_paused_before_restart") is True
@@ -422,6 +424,7 @@ class TestReloadStaleSessions:
         await manager.reload_stale_sessions(db, "test-backend")
 
         session = manager.get_session(str(row.id))
+        assert session is not None
         assert session.metadata.get("restart_interrupted") is True
         # Existing metadata is preserved
         assert session.metadata.get("claude_code_session_id") == "abc"
@@ -466,6 +469,7 @@ class TestReloadStaleSessions:
         await manager.reload_stale_sessions(db, "test-backend")
 
         session = manager.get_session(str(row.id))
+        assert session is not None
         assert session.input_tokens == 200
         assert session.output_tokens == 100
         assert session.tool_cost_usd == 1.5
@@ -480,6 +484,7 @@ class TestReloadStaleSessions:
         await manager.reload_stale_sessions(db, "test-backend")
 
         session = manager.get_session(str(row.id))
+        assert session is not None
         assert session.conversation_history == history
 
 
@@ -590,6 +595,7 @@ class TestWorktreeContextInSessionList:
         manager.broadcast_session_update(session)
 
         update = queue.get_nowait()
+        assert update is not None
         assert update["type"] == "session_update"
         assert update["worktree"] == worktree_meta
 
@@ -603,6 +609,7 @@ class TestWorktreeContextInSessionList:
 
         manager.broadcast_session_update(session)
         update = queue.get_nowait()
+        assert update is not None
         assert "worktree" in update
         assert update["worktree"] is None
 
@@ -644,6 +651,7 @@ class TestSelectedWorktree:
         manager.broadcast_session_update(session)
 
         update = q.get_nowait()
+        assert update is not None
         assert update["selected_worktree_path"] == "/projects/myrepo/.worktrees/feature-abc"
 
     def test_selected_worktree_none_by_default(self):
@@ -653,6 +661,7 @@ class TestSelectedWorktree:
 
         manager.broadcast_session_update(session)
         update = q.get_nowait()
+        assert update is not None
         assert update["selected_worktree_path"] is None
 
 
@@ -709,6 +718,7 @@ class TestMainProjectPath:
         manager.broadcast_session_update(session)
 
         update = q.get_nowait()
+        assert update is not None
         assert update["type"] == "session_update"
         assert update["main_project_path"] == "/home/fox/Projects/MyApp"
 
@@ -722,6 +732,7 @@ class TestMainProjectPath:
 
         manager.broadcast_session_update(session)
         update = q.get_nowait()
+        assert update is not None
         assert "main_project_path" in update
         assert update["main_project_path"] is None
 
@@ -742,6 +753,7 @@ class TestMainProjectPath:
         session.pause()
         # pause() calls _on_update → broadcast
         update = q.get_nowait()
+        assert update is not None
         assert update["main_project_path"] == "/home/fox/Projects/MyApp"
 
     def test_list_all_with_archived_includes_main_project_path(self):
@@ -1066,7 +1078,7 @@ class TestArchiveSessionSQLiteIntegration:
             async with self.factory() as db:
                 await manager.archive_session(session.id, db)
         finally:
-            AsyncSession.commit = original_commit  # type: ignore[assignment]
+            AsyncSession.commit = original_commit
 
         assert commit_count == 1, (
             f"archive_session should use exactly 1 commit (got {commit_count}); "

@@ -2717,13 +2717,19 @@ RCFlow is distributed as a self-contained package built with PyInstaller. End us
 
 ### Build
 
+All artifacts follow the naming convention `rcflow-v{version}-{platform}-{component}-{arch}.{ext}` where `component` is `worker` (backend) or `client` (Flutter desktop/mobile).
+
 | Target | Command | Output |
 |--------|---------|--------|
-| Current platform (backend) | `just bundle` | `dist/rcflow-{version}-{platform}-{arch}.tar.gz` (or `.zip`) |
-| Linux backend (.deb) | `just bundle-linux-backend` | `dist/rcflow_{version}_{deb_arch}.deb` |
-| Linux client | `just bundle-linux-client` | `dist/rcflowclient-linux-{arch}.tar.gz` |
-| Windows client | `just bundle-windows-client` | `dist/rcflowclient-windows-x64.zip` |
-| Windows backend (installer) | `just bundle-windows-backend` | `dist/rcflow-{version}-x64-setup.exe` |
+| Linux worker (.deb) | `just bundle-linux-backend` | `dist/rcflow-v{version}-linux-worker-amd64.deb` |
+| Linux client (.deb) | `just bundle-linux-client` | `dist/rcflow-v{version}-linux-client-amd64.deb` |
+| macOS worker arm64 (DMG) | `just bundle-macos-backend` *(on Apple Silicon)* | `dist/rcflow-v{version}-macos-worker-arm64.dmg` |
+| macOS worker amd64 (DMG) | `just bundle-macos-backend` *(on Intel Mac)* | `dist/rcflow-v{version}-macos-worker-amd64.dmg` |
+| macOS client arm64 (DMG) | `just bundle-macos-client` *(on Apple Silicon)* | `dist/rcflow-v{version}-macos-client-arm64.dmg` |
+| macOS client amd64 (DMG) | `just bundle-macos-client` *(on Intel Mac)* | `dist/rcflow-v{version}-macos-client-amd64.dmg` |
+| Windows worker (.exe) | `just bundle-windows-backend` | `dist/rcflow-v{version}-windows-worker-amd64.exe` |
+| Windows client (.exe) | `just bundle-windows-client` | `dist/rcflow-v{version}-windows-client-amd64.exe` |
+| Android client (APKs, CI only) | *(release.yml / build.yml)* | `dist/rcflow-v{version}-android-client-{arch}.apk` |
 
 Backend build script: `scripts/bundle.py`. Requires PyInstaller (`uv add --dev pyinstaller`). Cross-compilation is not supported — build on the target platform. Client targets build the Flutter desktop app (`rcflowclient`) for the respective platform.
 
@@ -2818,7 +2824,7 @@ just bundle-macos-backend --sign            # macOS .pkg + notarization
 just bundle-windows-backend --sign          # Windows setup.exe + Authenticode
 ```
 
-**CI/CD:** The `release.yml` GitHub Actions workflow triggers on version tags (`v*.*.*`), builds all platforms in parallel with signing, generates `SHA256SUMS` (GPG-signed), and publishes a GitHub Release with all artifacts.
+**CI/CD:** The `release.yml` GitHub Actions workflow triggers on version tags (`v*.*.*`), builds all platforms in parallel with signing (including separate arm64 and x64 jobs for macOS), generates `SHA256SUMS` (GPG-signed), and publishes a GitHub Release with all artifacts.
 
 **Artifact verification:**
 
