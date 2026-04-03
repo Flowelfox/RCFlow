@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  Entitlements for the RCFlow backend .app bundle (hardened runtime).
+	  This is NOT a sandboxed app — the server must bind arbitrary ports,
+	  spawn subprocesses, and read/write files across the home directory.
+
+	  Required for notarization with --options runtime:
+	    - network.server   : bind the WebSocket server port (default 53890)
+	    - network.client   : outbound HTTP for health-check polling and LLM APIs
+	    - allow-unsigned-executable-memory : Python's ctypes / cffi / JIT require
+	                         the ability to map writable+executable memory pages
+	    - disable-library-validation : PyInstaller bundles third-party .dylib files
+	                         that are not individually signed by Apple; without this
+	                         the dynamic linker refuses to load them under the
+	                         hardened runtime
+	-->
+	<key>com.apple.security.network.server</key>
+	<true/>
+	<key>com.apple.security.network.client</key>
+	<true/>
+	<key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+	<true/>
+	<key>com.apple.security.cs.disable-library-validation</key>
+	<true/>
+</dict>
+</plist>

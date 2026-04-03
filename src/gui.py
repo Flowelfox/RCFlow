@@ -1,29 +1,41 @@
 """Windows GUI + system tray application for the RCFlow backend server.
 
-Launches a tkinter window with server controls, status, and live log output.
-The server runs as a subprocess. Closing the window minimizes to the system tray;
-double-clicking the tray icon restores the window. "Quit" from the tray stops
-the server and exits the application entirely.
+Launches a CustomTkinter window with server controls, a status badge,
+instance details, and a live log viewer.  The server runs as a managed
+subprocess via ServerManager.  Closing the window minimizes to the system
+tray; double-clicking the tray icon restores the window.  "Quit" from the
+tray stops the server and exits the application entirely.
 
 This is the default mode for frozen Windows builds.
 """
 
 from __future__ import annotations
 
-import collections
 import contextlib
 import logging
-import os
-import queue
-import socket
-import subprocess
 import sys
 import threading
 import time
 import tkinter as tk
 from pathlib import Path
-from tkinter import scrolledtext, ttk
 from typing import Protocol
+
+import customtkinter as ctk  # ty:ignore[unresolved-import]
+
+from src import theme
+from src.gui_core import (
+    MAX_LOG_LINES,
+    POLL_MS,
+    LogBuffer,
+    ServerManager,
+    poll_server_status,
+)
+
+# Apply appearance settings before any CTk window is created
+ctk.set_appearance_mode("system")
+ctk.set_default_color_theme("blue")
+
+logger = logging.getLogger(__name__)
 
 
 class _TrayIconProtocol(Protocol):
@@ -33,169 +45,200 @@ class _TrayIconProtocol(Protocol):
     def stop(self) -> None: ...
 
 
-logger = logging.getLogger(__name__)
-
-# How often the UI polls for updates (ms)
-_POLL_MS = 300
-# Max log lines kept in the text widget
-_MAX_LOG_LINES = 5000
-# Max log lines buffered from subprocess output
-_MAX_LOG_BUFFER = 10000
-
-
 class RCFlowGUI:
-    """Combined GUI window + system tray for the RCFlow server."""
+    """CTk window + system tray for the RCFlow server."""
 
     def __init__(self) -> None:
-        self._server_proc: subprocess.Popen[str] | None = None
-        self._server_lock = threading.Lock()
-        self._start_time: float | None = None
-        self._log_lines: collections.deque[str] = collections.deque(maxlen=_MAX_LOG_BUFFER)
-        self._log_queue: queue.Queue[str] = queue.Queue(maxsize=_MAX_LOG_BUFFER)
+        self._log_buffer = LogBuffer()
+        self._server = ServerManager(self._log_buffer)
         self._quitting = False
-
-        # Tray icon (optional — may not have pystray)
         self._tray_icon: _TrayIconProtocol | None = None
 
-        self._root = tk.Tk()
+        self._root = ctk.CTk()
         self._root.title("RCFlow Worker")
-        self._root.geometry("820x660")
-        self._root.minsize(620, 480)
+        self._root.geometry("860x700")
+        self._root.minsize(640, 500)
         self._root.protocol("WM_DELETE_WINDOW", self._on_window_close)
         self._set_window_icon()
-
-        self._setup_styles()
         self._build_ui()
         self._load_settings()
 
-    # ── UI construction ──────────────────────────────────────────────
-
-    def _setup_styles(self) -> None:
-        style = ttk.Style()
-        style.theme_use("clam" if "clam" in style.theme_names() else "default")
+    # ── UI construction ───────────────────────────────────────────────────
 
     def _set_window_icon(self) -> None:
-        """Set the title bar icon to the RCFlow icon."""
         from src.paths import get_install_dir, is_frozen  # noqa: PLC0415
 
-        if is_frozen():
-            icon_path = get_install_dir() / "tray_icon.ico"
-        else:
-            icon_path = Path(__file__).resolve().parent.parent / "assets" / "tray_icon.ico"
-
+        icon_path = (
+            get_install_dir() / "tray_icon.ico"
+            if is_frozen()
+            else Path(__file__).resolve().parent.parent / "assets" / "tray_icon.ico"
+        )
         if icon_path.exists():
-            try:
+            with contextlib.suppress(tk.TclError):
                 self._root.iconbitmap(str(icon_path))
-            except tk.TclError:
-                logger.debug("Failed to set window icon from %s", icon_path)
 
     def _build_ui(self) -> None:
-        root = self._root
+        p = theme.PAD_OUTER
+        g = theme.PAD_GROUP
+        s = theme.PAD_SMALL
 
-        # Top frame: settings + controls
-        top = ttk.Frame(root, padding=10)
-        top.pack(fill=tk.X)
+        self._root.grid_columnconfigure(0, weight=1)
+        self._root.grid_rowconfigure(3, weight=1)  # log row expands
 
-        settings_frame = ttk.LabelFrame(top, text="Server Settings", padding=8)
-        settings_frame.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        # ── Settings + controls ──────────────────────────────────────
+        top = ctk.CTkFrame(self._root, fg_color="transparent")
+        top.grid(row=0, column=0, sticky="ew", padx=p, pady=(p, 0))
+        top.grid_columnconfigure(0, weight=1)
 
-        ttk.Label(settings_frame, text="IP Address:").grid(row=0, column=0, sticky=tk.W, padx=(0, 6))
+        sc = ctk.CTkFrame(top, corner_radius=8)
+        sc.grid(row=0, column=0, sticky="ew")
+
+        ctk.CTkLabel(
+            sc,
+            text="Server Settings",
+            font=ctk.CTkFont(size=theme.FONT_SIZE_SMALL, weight="bold"),
+        ).grid(row=0, column=0, columnspan=6, sticky="w", padx=g, pady=(g, s))
+
+        ctk.CTkLabel(sc, text="IP Address", font=ctk.CTkFont(size=theme.FONT_SIZE_BODY)).grid(
+            row=1, column=0, sticky="w", padx=(g, s), pady=(0, g)
+        )
         self._ip_var = tk.StringVar(value="0.0.0.0")
-        self._ip_entry = ttk.Entry(settings_frame, textvariable=self._ip_var, width=18)
-        self._ip_entry.grid(row=0, column=1, sticky=tk.W, padx=(0, 16))
+        self._ip_entry = ctk.CTkEntry(
+            sc, textvariable=self._ip_var, width=155, font=ctk.CTkFont(size=theme.FONT_SIZE_BODY)
+        )
+        self._ip_entry.grid(row=1, column=1, sticky="w", padx=(0, g), pady=(0, g))
 
-        ttk.Label(settings_frame, text="Port:").grid(row=0, column=2, sticky=tk.W, padx=(0, 6))
+        ctk.CTkLabel(sc, text="Port", font=ctk.CTkFont(size=theme.FONT_SIZE_BODY)).grid(
+            row=1, column=2, sticky="w", padx=(0, s), pady=(0, g)
+        )
         from src.config import _DEFAULT_PORT  # noqa: PLC0415
 
         self._port_var = tk.StringVar(value=str(_DEFAULT_PORT))
-        self._port_entry = ttk.Entry(settings_frame, textvariable=self._port_var, width=8)
-        self._port_entry.grid(row=0, column=3, sticky=tk.W)
+        self._port_entry = ctk.CTkEntry(
+            sc, textvariable=self._port_var, width=76, font=ctk.CTkFont(size=theme.FONT_SIZE_BODY)
+        )
+        self._port_entry.grid(row=1, column=3, sticky="w", padx=(0, g), pady=(0, g))
 
         self._wss_var = tk.BooleanVar(value=True)
-        self._wss_check = ttk.Checkbutton(
-            settings_frame,
+        self._wss_check = ctk.CTkCheckBox(
+            sc,
             text="WSS Enabled",
             variable=self._wss_var,
             command=self._on_wss_toggle,
+            font=ctk.CTkFont(size=theme.FONT_SIZE_BODY),
         )
-        self._wss_check.grid(row=0, column=4, sticky=tk.W, padx=(16, 0))
+        self._wss_check.grid(row=1, column=4, sticky="w", padx=(0, g), pady=(0, g))
 
-        btn_frame = ttk.Frame(top, padding=(16, 0, 0, 0))
-        btn_frame.pack(side=tk.RIGHT)
+        # Action buttons (right of settings card)
+        btns = ctk.CTkFrame(top, fg_color="transparent")
+        btns.grid(row=0, column=1, sticky="ne", padx=(g, 0))
 
-        self._toggle_btn = ttk.Button(btn_frame, text="Start", width=10, command=self._on_toggle)
-        self._toggle_btn.pack()
+        self._toggle_btn = ctk.CTkButton(
+            btns,
+            text="Start",
+            width=104,
+            fg_color=theme.BTN_START_FG,
+            hover_color=theme.BTN_START_HOVER,
+            text_color=theme.BTN_START_TEXT,
+            font=ctk.CTkFont(size=theme.FONT_SIZE_BODY, weight="bold"),
+            command=self._on_toggle,
+        )
+        self._toggle_btn.pack(pady=(0, s))
 
-        self._copy_token_btn = ttk.Button(btn_frame, text="Copy Token", width=12, command=self._on_copy_token)
-        self._copy_token_btn.pack(pady=(4, 0))
+        self._copy_token_btn = ctk.CTkButton(
+            btns,
+            text="Copy Token",
+            width=104,
+            fg_color=theme.BTN_COPY_FG,
+            hover_color=theme.BTN_COPY_HOVER,
+            text_color=theme.BTN_COPY_TEXT,
+            font=ctk.CTkFont(size=theme.FONT_SIZE_BODY),
+            command=self._on_copy_token,
+        )
+        self._copy_token_btn.pack()
 
-        # Status bar
-        status_frame = ttk.Frame(root, padding=(10, 0, 10, 0))
-        status_frame.pack(fill=tk.X)
+        # ── Status pill ──────────────────────────────────────────────
+        self._status_label = ctk.CTkLabel(
+            self._root,
+            text="  Stopped  ",
+            fg_color=theme.STATUS_STOPPED,
+            text_color=("#ffffff", "#e5e7eb"),
+            corner_radius=6,
+            font=ctk.CTkFont(size=theme.FONT_SIZE_SMALL, weight="bold"),
+        )
+        self._status_label.grid(row=1, column=0, sticky="w", padx=p, pady=(s + 2, 0))
 
-        self._status_label = ttk.Label(status_frame, text="Stopped", foreground="gray")
-        self._status_label.pack(side=tk.LEFT)
+        # ── Instance details card ────────────────────────────────────
+        dc = ctk.CTkFrame(self._root, corner_radius=8)
+        dc.grid(row=2, column=0, sticky="ew", padx=p, pady=(s, 0))
 
-        # Instance details
-        details_frame = ttk.LabelFrame(root, text="Instance Details", padding=8)
-        details_frame.pack(fill=tk.X, padx=10, pady=(6, 0))
+        ctk.CTkLabel(
+            dc,
+            text="Instance Details",
+            font=ctk.CTkFont(size=theme.FONT_SIZE_SMALL, weight="bold"),
+        ).grid(row=0, column=0, columnspan=8, sticky="w", padx=g, pady=(g, s))
 
-        detail_grid = ttk.Frame(details_frame)
-        detail_grid.pack(fill=tk.X)
-
-        labels = [
-            ("Bound Address:", "_bound_addr_var"),
-            ("Uptime:", "_uptime_var"),
-            ("Active Sessions:", "_sessions_var"),
-            ("Backend ID:", "_backend_id_var"),
+        detail_info = [
+            ("Bound Address", "_bound_addr_var"),
+            ("Uptime", "_uptime_var"),
+            ("Active Sessions", "_sessions_var"),
+            ("Backend ID", "_backend_id_var"),
         ]
-        for i, (label_text, var_name) in enumerate(labels):
-            ttk.Label(detail_grid, text=label_text).grid(row=i, column=0, sticky=tk.W, padx=(0, 8), pady=1)
+        for col, (label, var_name) in enumerate(detail_info):
+            ctk.CTkLabel(
+                dc,
+                text=label,
+                font=ctk.CTkFont(size=theme.FONT_SIZE_SMALL),
+                text_color=("gray40", "gray60"),
+            ).grid(row=1, column=col * 2, sticky="w", padx=(g if col == 0 else g // 2, s), pady=(0, g))
             var = tk.StringVar(value="\u2014")
             setattr(self, var_name, var)
-            ttk.Label(detail_grid, textvariable=var).grid(row=i, column=1, sticky=tk.W, pady=1)
+            ctk.CTkLabel(
+                dc,
+                textvariable=var,
+                font=ctk.CTkFont(size=theme.FONT_SIZE_SMALL, weight="bold"),
+            ).grid(row=1, column=col * 2 + 1, sticky="w", padx=(0, g), pady=(0, g))
 
-        # Log output
-        log_frame = ttk.LabelFrame(root, text="Server Log", padding=4)
-        log_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(6, 10))
+        # ── Log viewer card ──────────────────────────────────────────
+        lc = ctk.CTkFrame(self._root, corner_radius=8)
+        lc.grid(row=3, column=0, sticky="nsew", padx=p, pady=(s, p))
+        lc.grid_rowconfigure(1, weight=1)
+        lc.grid_columnconfigure(0, weight=1)
 
-        self._log_text = scrolledtext.ScrolledText(
-            log_frame,
-            state=tk.DISABLED,
-            wrap=tk.WORD,
-            font=("Consolas", 9),
-            bg="#1e1e2e",
-            fg="#cdd6f4",
-            insertbackground="#cdd6f4",
-            selectbackground="#45475a",
-        )
-        self._log_text.pack(fill=tk.BOTH, expand=True)
+        ctk.CTkLabel(
+            lc,
+            text="Server Log",
+            font=ctk.CTkFont(size=theme.FONT_SIZE_SMALL, weight="bold"),
+        ).grid(row=0, column=0, sticky="w", padx=g, pady=(g, s))
 
-        self._log_text.tag_configure("error", foreground="#f38ba8")
-        self._log_text.tag_configure("warning", foreground="#fab387")
+        self._log_box = ctk.CTkTextbox(lc, state="disabled", wrap="word", font=(theme.mono_font(), theme.FONT_SIZE_LOG))
+        self._log_box.grid(row=1, column=0, sticky="nsew", padx=s, pady=(0, s))
 
-    # ── Settings I/O ─────────────────────────────────────────────────
+        # Apply syntax-highlight tags on the underlying tk.Text widget
+        _dark = ctk.get_appearance_mode().lower() == "dark"
+        self._log_widget = self._log_box._textbox
+        self._log_widget.tag_configure("error", foreground=theme.LOG_DARK_ERROR if _dark else theme.LOG_LIGHT_ERROR)
+        self._log_widget.tag_configure("warning", foreground=theme.LOG_DARK_WARN if _dark else theme.LOG_LIGHT_WARN)
+
+    # ── Settings I/O ─────────────────────────────────────────────────────
 
     def _load_settings(self) -> None:
-        """Load current config values into the input fields."""
         try:
             from src.config import Settings  # noqa: PLC0415
 
-            settings = Settings()
-            self._ip_var.set(settings.RCFLOW_HOST)
-            self._port_var.set(str(settings.RCFLOW_PORT))
-            self._wss_var.set(settings.WSS_ENABLED)
+            s = Settings()
+            self._ip_var.set(s.RCFLOW_HOST)
+            self._port_var.set(str(s.RCFLOW_PORT))
+            self._wss_var.set(s.WSS_ENABLED)
         except Exception:
             pass
 
     def _on_wss_toggle(self) -> None:
-        """Persist the WSS Enabled checkbox state to settings.json."""
         from src.config import update_settings_file  # noqa: PLC0415
 
         update_settings_file({"WSS_ENABLED": str(self._wss_var.get())})
 
     def _on_copy_token(self) -> None:
-        """Copy the API key (token) to the system clipboard."""
         try:
             from src.config import Settings  # noqa: PLC0415
 
@@ -205,19 +248,15 @@ class RCFlowGUI:
                 return
             self._root.clipboard_clear()
             self._root.clipboard_append(api_key)
-            self._root.update()  # Required for clipboard to persist on Windows
+            self._root.update()  # Required on Windows for clipboard to persist
             self._set_status("Token copied to clipboard")
         except Exception as exc:
             self._set_status(f"Failed to copy token: {exc}", error=True)
 
-    # ── Server subprocess management ─────────────────────────────────
-
-    def _is_server_running(self) -> bool:
-        with self._server_lock:
-            return self._server_proc is not None and self._server_proc.poll() is None
+    # ── Server controls ───────────────────────────────────────────────────
 
     def _on_toggle(self) -> None:
-        if self._is_server_running():
+        if self._server.is_running():
             self._stop_server()
         else:
             self._start_server()
@@ -229,7 +268,6 @@ class RCFlowGUI:
         if not host:
             self._set_status("Error: IP address is empty", error=True)
             return
-
         try:
             port = int(port_str)
             if not (1 <= port <= 65535):
@@ -238,251 +276,100 @@ class RCFlowGUI:
             self._set_status("Error: Invalid port number", error=True)
             return
 
-        # Check port availability
-        try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.bind((host, port))
-            sock.close()
-        except OSError as exc:
-            self._set_status(f"Error: Cannot bind {host}:{port} \u2014 {exc}", error=True)
+        err = self._server.start(host, port, self._wss_var.get())
+        if err:
+            self._set_status(err, error=True)
             return
 
-        # Persist user-entered host/port to settings.json so they survive restarts.
-        # WSS_ENABLED is already persisted by _on_wss_toggle, but host/port have no
-        # equivalent event handler, so we save them here at the moment of commitment.
-        from src.config import update_settings_file  # noqa: PLC0415
-
-        update_settings_file({"RCFLOW_HOST": host, "RCFLOW_PORT": str(port)})
-
-        # Build environment with overridden host/port and WSS setting
-        env = os.environ.copy()
-        env["RCFLOW_HOST"] = host
-        env["RCFLOW_PORT"] = str(port)
-        env["WSS_ENABLED"] = str(self._wss_var.get())
-
-        exe = self._get_executable_path()
-        if getattr(sys, "frozen", False):
-            cmd = [exe, "run"]
-            cwd = str(Path(exe).parent)
-        else:
-            cmd = [sys.executable, "-m", "src", "run"]
-            cwd = None
-
-        creation_flags = 0
-        if sys.platform == "win32":
-            creation_flags = subprocess.CREATE_NO_WINDOW
-
-        try:
-            proc = subprocess.Popen(
-                cmd,
-                cwd=cwd,
-                env=env,
-                creationflags=creation_flags,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,
-            )
-        except Exception as exc:
-            self._set_status(f"Error: Failed to start server \u2014 {exc}", error=True)
-            return
-
-        with self._server_lock:
-            self._server_proc = proc
-
-        self._start_time = time.monotonic()
-        self._ip_entry.configure(state=tk.DISABLED)
-        self._port_entry.configure(state=tk.DISABLED)
-        self._wss_check.configure(state=tk.DISABLED)
-        self._toggle_btn.configure(text="Stop")
+        self._ip_entry.configure(state="disabled")
+        self._port_entry.configure(state="disabled")
+        self._wss_check.configure(state="disabled")
+        self._toggle_btn.configure(
+            text="Stop", fg_color=theme.BTN_STOP_FG, hover_color=theme.BTN_STOP_HOVER, text_color=theme.BTN_STOP_TEXT
+        )
         protocol = "WSS" if self._wss_var.get() else "WS"
         self._set_status(f"Starting ({protocol})...")
 
-        # Start log reader thread
-        reader = threading.Thread(target=self._read_server_output, args=(proc,), daemon=True)
-        reader.start()
-
-        protocol = "wss" if self._wss_var.get() else "ws"
-        self._log_append(f"Server starting on {protocol}://{host}:{port} (PID {proc.pid})...")
-
     def _stop_server(self) -> None:
-        with self._server_lock:
-            proc = self._server_proc
-        if proc is None:
-            return
-
         self._set_status("Stopping...")
-        self._log_append("Stopping server...")
+        self._server.stop()
 
-        def _do_stop() -> None:
-            proc.terminate()
-            try:
-                proc.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                proc.wait(timeout=5)
-            with self._server_lock:
-                if self._server_proc is proc:
-                    self._server_proc = None
-            self._start_time = None
-
-        threading.Thread(target=_do_stop, daemon=True).start()
-
-    def _read_server_output(self, proc: subprocess.Popen[str]) -> None:
-        """Read stdout from the server subprocess and push lines to the log queue."""
-        try:
-            assert proc.stdout is not None
-            for line in proc.stdout:
-                line = line.rstrip("\n\r")
-                if line:
-                    self._log_queue.put_nowait(line)
-        except Exception:
-            pass
-
-    @staticmethod
-    def _get_executable_path() -> str:
-        if getattr(sys, "frozen", False):
-            return sys.executable
-        return sys.executable
-
-    # ── Log display ──────────────────────────────────────────────────
-
-    def _log_append(self, text: str) -> None:
-        """Append a local message to the log queue (not from subprocess)."""
-        with contextlib.suppress(queue.Full):
-            self._log_queue.put_nowait(text)
+    # ── Log display ───────────────────────────────────────────────────────
 
     def _drain_log_queue(self) -> None:
-        lines: list[str] = []
-        try:
-            while True:
-                lines.append(self._log_queue.get_nowait())
-        except queue.Empty:
-            pass
-
+        lines = self._log_buffer.drain()
         if not lines:
             return
 
-        self._log_text.configure(state=tk.NORMAL)
-        at_bottom = self._log_text.yview()[1] >= 0.95
+        self._log_box.configure(state="normal")
+        at_bottom = self._log_widget.yview()[1] >= 0.95
 
         for line in lines:
-            tag = ()
             upper = line.upper()
+            tag: tuple[str, ...] = ()
             if "ERROR" in upper or "CRITICAL" in upper:
                 tag = ("error",)
             elif "WARNING" in upper:
                 tag = ("warning",)
-            self._log_text.insert(tk.END, line + "\n", tag)
+            self._log_widget.insert(tk.END, line + "\n", tag)
 
-        total = int(self._log_text.index("end-1c").split(".")[0])
-        if total > _MAX_LOG_LINES:
-            self._log_text.delete("1.0", f"{total - _MAX_LOG_LINES}.0")
+        total = int(self._log_widget.index("end-1c").split(".")[0])
+        if total > MAX_LOG_LINES:
+            self._log_widget.delete("1.0", f"{total - MAX_LOG_LINES}.0")
 
         if at_bottom:
-            self._log_text.see(tk.END)
-        self._log_text.configure(state=tk.DISABLED)
+            self._log_widget.see(tk.END)
+        self._log_box.configure(state="disabled")
 
-    # ── Status & details ─────────────────────────────────────────────
+    # ── Status & details ──────────────────────────────────────────────────
 
     def _set_status(self, text: str, *, error: bool = False) -> None:
+        tl = text.lower()
         if error:
-            self._status_label.configure(text=text, foreground="#e64553")
-        elif "stop" in text.lower() or text == "Stopped":
-            self._status_label.configure(text=text, foreground="gray")
-        elif "start" in text.lower():
-            self._status_label.configure(text=text, foreground="#df8e1d")
+            color = theme.STATUS_ERROR
+        elif "stop" in tl or text == "Stopped":
+            color = theme.STATUS_STOPPED
+        elif "start" in tl:
+            color = theme.STATUS_STARTING
         else:
-            self._status_label.configure(text=text, foreground="#40a02b")
-
-    def _poll_server_status(self) -> None:
-        """Fetch active session count and backend ID from the server's HTTP API."""
-        if not self._is_server_running():
-            return
-
-        host = self._ip_var.get().strip()
-        port = self._port_var.get().strip()
-
-        wss_enabled = self._wss_var.get()
-
-        # Use a thread so the HTTP request doesn't block the UI
-        def _fetch() -> None:
-            import json  # noqa: PLC0415
-            import ssl  # noqa: PLC0415
-            import urllib.request  # noqa: PLC0415
-
-            scheme = "https" if wss_enabled else "http"
-            base = f"{scheme}://{'127.0.0.1' if host == '0.0.0.0' else host}:{port}"
-
-            # When using WSS with self-signed certs, skip verification for local health checks
-            ctx = None
-            if wss_enabled:
-                ctx = ssl.create_default_context()
-                ctx.check_hostname = False
-                ctx.verify_mode = ssl.CERT_NONE
-
-            try:
-                with urllib.request.urlopen(f"{base}/api/health", timeout=2, context=ctx) as resp:
-                    if resp.status != 200:
-                        return
-            except Exception:
-                return
-
-            # Try to get info (requires API key)
-            try:
-                from src.config import Settings  # noqa: PLC0415
-
-                api_key = Settings().RCFLOW_API_KEY
-                req = urllib.request.Request(
-                    f"{base}/api/info",
-                    headers={"X-API-Key": api_key},
-                )
-                with urllib.request.urlopen(req, timeout=2, context=ctx) as resp:
-                    data = json.loads(resp.read())
-                    sessions = data.get("active_sessions")
-                    backend_id = data.get("backend_id", "")
-                    if sessions is not None:
-                        self._sessions_var.set(str(sessions))  # ty:ignore[unresolved-attribute]
-                    if backend_id:
-                        display = backend_id[:8] + "..." if len(backend_id) > 12 else backend_id
-                        self._backend_id_var.set(display)  # ty:ignore[unresolved-attribute]
-            except Exception:
-                pass
-
-        threading.Thread(target=_fetch, daemon=True).start()
+            color = theme.STATUS_RUNNING
+        self._status_label.configure(text=f"  {text}  ", fg_color=color)
 
     def _update_ui(self) -> None:
-        """Periodic UI refresh."""
+        """Periodic UI refresh (300 ms)."""
         if self._quitting:
             return
 
         self._drain_log_queue()
-
-        running = self._is_server_running()
+        running = self._server.is_running()
 
         if running:
             protocol = "WSS" if self._wss_var.get() else "WS"
             self._set_status(f"Running ({protocol})")
-            if self._start_time:
-                elapsed = time.monotonic() - self._start_time
-                h, rem = divmod(int(elapsed), 3600)
+            t = self._server.start_time
+            if t is not None:
+                h, rem = divmod(int(time.monotonic() - t), 3600)
                 m, s = divmod(rem, 60)
                 self._uptime_var.set(f"{h:02d}:{m:02d}:{s:02d}")  # ty:ignore[unresolved-attribute]
-            self._bound_addr_var.set(f"{self._ip_var.get()}:{self._port_var.get()}")  # ty:ignore[unresolved-attribute]
+            self._bound_addr_var.set(  # ty:ignore[unresolved-attribute]
+                f"{self._ip_var.get()}:{self._port_var.get()}"
+            )
         else:
             if self._toggle_btn.cget("text") == "Stop":
-                # Server exited unexpectedly or was stopped
-                with self._server_lock:
-                    rc = self._server_proc.returncode if self._server_proc else None
-                    self._server_proc = None
-                self._start_time = None
-                self._ip_entry.configure(state=tk.NORMAL)
-                self._port_entry.configure(state=tk.NORMAL)
-                self._wss_check.configure(state=tk.NORMAL)
-                self._toggle_btn.configure(text="Start")
+                rc = self._server.exit_code
+                self._server.clear()
+                self._ip_entry.configure(state="normal")
+                self._port_entry.configure(state="normal")
+                self._wss_check.configure(state="normal")
+                self._toggle_btn.configure(
+                    text="Start",
+                    fg_color=theme.BTN_START_FG,
+                    hover_color=theme.BTN_START_HOVER,
+                    text_color=theme.BTN_START_TEXT,
+                )
                 if rc and rc != 0:
                     self._set_status(f"Stopped (exit code {rc})", error=True)
-                    self._log_append(f"Server exited with code {rc}")
+                    self._log_buffer.append(f"Server exited with code {rc}")
                 else:
                     self._set_status("Stopped")
                 self._uptime_var.set("\u2014")  # ty:ignore[unresolved-attribute]
@@ -491,9 +378,9 @@ class RCFlowGUI:
                 self._backend_id_var.set("\u2014")  # ty:ignore[unresolved-attribute]
                 self._update_tray_status()
 
-        self._root.after(_POLL_MS, self._update_ui)
+        self._root.after(POLL_MS, self._update_ui)
 
-    # ── System tray integration ──────────────────────────────────────
+    # ── System tray ───────────────────────────────────────────────────────
 
     def _setup_tray(self) -> bool:
         """Set up the system tray icon. Returns True on success."""
@@ -505,10 +392,9 @@ class RCFlowGUI:
             return False
 
         icon_image = self._load_tray_icon(Image)
-
         menu = pystray.Menu(
             pystray.MenuItem(
-                lambda item: "RCFlow Worker: Running" if self._is_server_running() else "RCFlow Worker: Stopped",
+                lambda item: "RCFlow Worker: Running" if self._server.is_running() else "RCFlow Worker: Stopped",
                 None,
                 enabled=False,
             ),
@@ -523,29 +409,23 @@ class RCFlowGUI:
             ),
             pystray.MenuItem("Quit", self._on_tray_quit),
         )
-
         icon = pystray.Icon("rcflow", icon_image, "RCFlow Worker", menu)
         self._tray_icon = icon
-
-        # Run pystray in a background thread
-        tray_thread = threading.Thread(target=icon.run, daemon=True)
-        tray_thread.start()
+        threading.Thread(target=icon.run, daemon=True).start()
         return True
 
     @staticmethod
     def _load_tray_icon(Image: type) -> object:  # noqa: N803
-        """Load or generate the tray icon."""
         from src.paths import get_install_dir, is_frozen  # noqa: PLC0415
 
-        if is_frozen():
-            icon_path = get_install_dir() / "tray_icon.ico"
-        else:
-            icon_path = Path(__file__).resolve().parent.parent / "assets" / "tray_icon.ico"
-
+        icon_path = (
+            get_install_dir() / "tray_icon.ico"
+            if is_frozen()
+            else Path(__file__).resolve().parent.parent / "assets" / "tray_icon.ico"
+        )
         if icon_path.exists():
             return Image.open(str(icon_path))  # ty:ignore[unresolved-attribute]
 
-        # Fallback: generate a simple icon
         from PIL import ImageDraw  # noqa: PLC0415  # ty:ignore[unresolved-import]
 
         img = Image.new("RGBA", (64, 64), (15, 23, 42, 255))  # ty:ignore[unresolved-attribute]
@@ -560,7 +440,6 @@ class RCFlowGUI:
                 self._tray_icon.update_menu()
 
     def _on_tray_open(self, icon: object = None, item: object = None) -> None:
-        """Restore the GUI window from the tray."""
         self._root.after(0, self._show_window)
 
     def _show_window(self) -> None:
@@ -569,54 +448,52 @@ class RCFlowGUI:
         self._root.focus_force()
 
     def _on_toggle_autostart(self, icon: object, item: object) -> None:
-        current = _is_autostart_enabled()
-        _set_autostart(not current)
+        _set_autostart(not _is_autostart_enabled())
         self._update_tray_status()
 
     def _on_tray_quit(self, icon: object = None, item: object = None) -> None:
-        """Quit the entire application: stop server, close tray, destroy window."""
         self._quitting = True
-        self._stop_server()
-
+        self._server.stop()
         if self._tray_icon is not None:
             with contextlib.suppress(Exception):
                 self._tray_icon.stop()
-
-        # Destroy the tkinter window from the main thread
         self._root.after(0, self._root.destroy)
 
-    # ── Window lifecycle ─────────────────────────────────────────────
+    # ── Window lifecycle ──────────────────────────────────────────────────
 
     def _on_window_close(self) -> None:
-        """Handle the X button: minimize to tray if available, otherwise quit."""
         if self._tray_icon is not None:
             self._root.withdraw()
         else:
-            # No tray support — actually quit
             self._on_tray_quit()
 
     def run(self) -> None:
         """Start the GUI event loop."""
         self._setup_tray()
-
-        # Auto-start the server on launch
         self._start_server()
+        self._root.after(POLL_MS, self._update_ui)
 
-        # Start periodic UI updates
-        self._root.after(_POLL_MS, self._update_ui)
-
-        # Poll server status via HTTP every 5 seconds
         def _status_loop() -> None:
             if not self._quitting:
-                self._poll_server_status()
+                poll_server_status(
+                    self._ip_var.get().strip(),
+                    self._port_var.get().strip(),
+                    self._wss_var.get(),
+                    self._on_status_result,
+                )
                 self._root.after(5000, _status_loop)
 
-        self._root.after(3000, _status_loop)  # First check after 3s to let server start
-
+        self._root.after(3000, _status_loop)  # First check after 3 s to let server start
         self._root.mainloop()
 
+    def _on_status_result(self, sessions: int | None, backend_id: str | None) -> None:
+        if sessions is not None:
+            self._sessions_var.set(str(sessions))  # ty:ignore[unresolved-attribute]
+        if backend_id:
+            self._backend_id_var.set(backend_id)  # ty:ignore[unresolved-attribute]
 
-# ── Windows autostart helpers ────────────────────────────────────────
+
+# ── Windows autostart helpers ─────────────────────────────────────────────────
 
 _AUTOSTART_REG_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 _AUTOSTART_VALUE_NAME = "RCFlow"
@@ -643,13 +520,12 @@ def _set_autostart(enabled: bool) -> None:
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _AUTOSTART_REG_KEY, 0, winreg.KEY_SET_VALUE) as key:
             if enabled:
-                exe = sys.executable
-                winreg.SetValueEx(key, _AUTOSTART_VALUE_NAME, 0, winreg.REG_SZ, f'"{exe}" gui')
+                winreg.SetValueEx(key, _AUTOSTART_VALUE_NAME, 0, winreg.REG_SZ, f'"{sys.executable}" gui')
             else:
                 with contextlib.suppress(FileNotFoundError):
                     winreg.DeleteValue(key, _AUTOSTART_VALUE_NAME)
-    except OSError as e:
-        logger.error("Failed to update autostart registry: %s", e)
+    except OSError as exc:
+        logger.error("Failed to update autostart registry: %s", exc)
 
 
 def run_gui() -> None:

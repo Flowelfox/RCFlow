@@ -1,3 +1,17 @@
+# ── Startup trace — uses only stdlib builtins available before any other import ──
+import datetime as _dt
+import os as _os
+import sys as _sys
+
+try:
+    _tdir = _os.path.expanduser("~/Library/Logs")
+    _os.makedirs(_tdir, exist_ok=True)
+    with open(_os.path.join(_tdir, "rcflow-worker-trace.log"), "a") as _tf:
+        _tf.write(f"{_dt.datetime.now().isoformat()} __main__ module loaded  frozen={getattr(_sys, 'frozen', False)}\n")
+except Exception:
+    pass
+# ────────────────────────────────────────────────────────────────────────────────
+
 import argparse
 import ipaddress
 import os
@@ -83,10 +97,12 @@ def _ensure_self_signed_certs(certfile: Path, keyfile: Path) -> None:
     print(f"Generating self-signed certificate: {certfile}")
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 
-    subject = issuer = x509.Name([
-        x509.NameAttribute(NameOID.COMMON_NAME, "RCFlow"),
-        x509.NameAttribute(NameOID.ORGANIZATION_NAME, "RCFlow"),
-    ])
+    subject = issuer = x509.Name(
+        [
+            x509.NameAttribute(NameOID.COMMON_NAME, "RCFlow"),
+            x509.NameAttribute(NameOID.ORGANIZATION_NAME, "RCFlow"),
+        ]
+    )
     cert = (
         x509.CertificateBuilder()
         .subject_name(subject)
@@ -96,11 +112,13 @@ def _ensure_self_signed_certs(certfile: Path, keyfile: Path) -> None:
         .not_valid_before(datetime.datetime.now(datetime.UTC))
         .not_valid_after(datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=3650))
         .add_extension(
-            x509.SubjectAlternativeName([
-                x509.DNSName("localhost"),
-                x509.IPAddress(ipaddress.IPv4Address("127.0.0.1")),
-                x509.IPAddress(ipaddress.IPv4Address("0.0.0.0")),
-            ]),
+            x509.SubjectAlternativeName(
+                [
+                    x509.DNSName("localhost"),
+                    x509.IPAddress(ipaddress.IPv4Address("127.0.0.1")),
+                    x509.IPAddress(ipaddress.IPv4Address("0.0.0.0")),
+                ]
+            ),
             critical=False,
         )
         .sign(key, hashes.SHA256())
@@ -129,13 +147,18 @@ def _cmd_run(args: argparse.Namespace) -> None:
     ssl_certfile: str | None = None
     ssl_keyfile: str | None = None
     if settings.WSS_ENABLED:
-        from src.paths import get_install_dir  # noqa: PLC0415
+        from src.paths import get_data_dir  # noqa: PLC0415
 
-        certfile = Path(settings.SSL_CERTFILE) if settings.SSL_CERTFILE else get_install_dir() / "certs" / "cert.pem"
-        keyfile = Path(settings.SSL_KEYFILE) if settings.SSL_KEYFILE else get_install_dir() / "certs" / "key.pem"
+        certfile = Path(settings.SSL_CERTFILE) if settings.SSL_CERTFILE else get_data_dir() / "certs" / "cert.pem"
+        keyfile = Path(settings.SSL_KEYFILE) if settings.SSL_KEYFILE else get_data_dir() / "certs" / "key.pem"
         _ensure_self_signed_certs(certfile, keyfile)
         ssl_certfile = str(certfile)
         ssl_keyfile = str(keyfile)
+
+        # Publish the resolved paths so the lifespan validation in main.py
+        # sees them (it re-reads Settings from env vars).
+        os.environ["SSL_CERTFILE"] = ssl_certfile
+        os.environ["SSL_KEYFILE"] = ssl_keyfile
     elif settings.SSL_CERTFILE and settings.SSL_KEYFILE:
         ssl_certfile = settings.SSL_CERTFILE
         ssl_keyfile = settings.SSL_KEYFILE
@@ -155,7 +178,7 @@ def _cmd_migrate(args: argparse.Namespace) -> None:
     from alembic import command  # noqa: PLC0415
     from alembic.config import Config  # noqa: PLC0415
 
-    from src.paths import get_alembic_ini, get_install_dir, get_migrations_dir  # noqa: PLC0415
+    from src.paths import get_alembic_ini, get_migrations_dir  # noqa: PLC0415
 
     ini_path = get_alembic_ini()
     if not ini_path.exists():
@@ -173,26 +196,61 @@ def _cmd_migrate(args: argparse.Namespace) -> None:
 
 
 def _cmd_gui(args: argparse.Namespace) -> None:
-    """Run RCFlow with a graphical window interface."""
-    _check_not_root()
-    from src.gui import run_gui  # noqa: PLC0415
+    """Run RCFlow with a graphical window interface.
 
-    run_gui()
+    On macOS: launches the native menu bar icon + settings panel (Aqua theme).
+    On Windows: launches the tkinter window + system tray icon.
+    """
+    _check_not_root()
+    if sys.platform == "darwin":
+        import datetime  # noqa: PLC0415
+        import traceback as _tb  # noqa: PLC0415
+        from pathlib import Path as _Path  # noqa: PLC0415
+
+        _trace = _Path.home() / "Library" / "Logs" / "rcflow-worker-trace.log"
+
+        def _t(msg: str) -> None:
+            try:
+                _trace.parent.mkdir(parents=True, exist_ok=True)
+                with _trace.open("a", encoding="utf-8") as _f:
+                    _f.write(f"{datetime.datetime.now().isoformat()} {msg}\n")
+            except OSError:
+                pass
+
+        _t(f"_cmd_gui() entered — frozen={getattr(sys, 'frozen', False)}")
+        try:
+            from src.gui_macos import run_gui_macos  # noqa: PLC0415
+
+            _t("src.gui_macos imported OK")
+        except Exception:
+            _t(f"IMPORT FAILED:\n{_tb.format_exc()}")
+            raise
+
+        run_gui_macos()
+    else:
+        from src.gui import run_gui  # noqa: PLC0415
+
+        run_gui()
 
 
 def _cmd_tray(args: argparse.Namespace) -> None:
-    """Run RCFlow as a Windows tray application (delegates to GUI mode)."""
+    """Run RCFlow as a system tray / menu bar application (delegates to GUI mode)."""
     _check_not_root()
-    from src.gui import run_gui  # noqa: PLC0415
+    if sys.platform == "darwin":
+        from src.gui_macos import run_gui_macos  # noqa: PLC0415
 
-    run_gui()
+        run_gui_macos()
+    else:
+        from src.gui import run_gui  # noqa: PLC0415
+
+        run_gui()
 
 
 def _cmd_version(args: argparse.Namespace) -> None:
     """Print the RCFlow version."""
     from importlib.metadata import PackageNotFoundError, version  # noqa: PLC0415
 
-    from src.paths import get_install_dir, is_frozen  # noqa: PLC0415
+    from src.paths import is_frozen  # noqa: PLC0415
 
     if is_frozen():
         version_file = get_install_dir() / "VERSION"
@@ -209,9 +267,11 @@ def _cmd_version(args: argparse.Namespace) -> None:
 
 def _cmd_info(args: argparse.Namespace) -> None:
     """Print server configuration info (bind IP, port, WSS status)."""
+    from src.paths import get_data_dir  # noqa: PLC0415
+
     settings = get_settings()
     protocol = "wss" if settings.WSS_ENABLED else "ws"
-    logs_dir = get_install_dir() / "logs"
+    logs_dir = get_data_dir() / "logs"
     print("RCFlow Server Info")
     print(f"  Bind address : {settings.RCFLOW_HOST}")
     print(f"  Port         : {settings.RCFLOW_PORT}")
@@ -261,7 +321,7 @@ def main() -> None:
     gui_parser.set_defaults(func=_cmd_gui)
 
     # rcflow tray
-    tray_parser = subparsers.add_parser("tray", help="Run as Windows tray application")
+    tray_parser = subparsers.add_parser("tray", help="Run as system tray / menu bar application")
     tray_parser.set_defaults(func=_cmd_tray)
 
     # rcflow version
@@ -284,9 +344,9 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.command is None:
-        # On Windows frozen builds, default to GUI mode so the user sees a UI.
-        # Otherwise fall back to plain server mode (Linux, dev, etc.).
-        if sys.platform == "win32" and getattr(sys, "frozen", False):
+        # On Windows and macOS frozen builds, default to GUI / menu bar mode.
+        # On Linux (or any unfrozen build), fall back to plain server mode.
+        if sys.platform in ("win32", "darwin") and getattr(sys, "frozen", False):
             _cmd_gui(args)
         else:
             _cmd_run(args)

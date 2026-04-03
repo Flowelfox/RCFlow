@@ -56,12 +56,14 @@ jobs:
             bundle-args: "--platform linux --installer"
 
           # ── macOS (Apple Silicon) ───────────────────────────────────────────
-          # Output: dist/rcflow-<ver>-macos-arm64.pkg
+          # Output: dist/rcflow-<ver>-macos-arm64.dmg  (.app bundle inside)
           # Note: produced unsigned — see file header for details.
           # Use macos-13 instead of macos-latest for an x86_64 build.
+          # --extra tray installs pystray + Pillow for the menu bar UI and DMG
+          # background generation.
           - platform: macos
             os: macos-latest
-            uv-extras: "--extra bundle"
+            uv-extras: "--extra bundle --extra tray"
             bundle-args: "--platform macos --installer"
 
           # ── Windows ────────────────────────────────────────────────────────

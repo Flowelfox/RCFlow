@@ -3,7 +3,7 @@ import logging.config
 from typing import Any
 
 from src.config import Settings
-from src.paths import get_install_dir
+from src.paths import get_data_dir
 
 _LOG_FORMAT = "%(asctime)s %(levelname)-8s %(name)s %(message)s"
 _DATE_FORMAT = "%Y-%m-%d,%H:%M:%S"
@@ -43,7 +43,7 @@ class MultiLineExceptionFormatter(logging.Formatter):
 def setup_logging(settings: Settings) -> None:
     level = settings.LOG_LEVEL.upper()
 
-    logs_folder = get_install_dir() / "logs"
+    logs_folder = get_data_dir() / "logs"
     logs_folder.mkdir(parents=True, exist_ok=True)
 
     config: dict[str, Any] = {
