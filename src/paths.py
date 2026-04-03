@@ -35,6 +35,34 @@ def get_install_dir() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
+def get_data_dir() -> Path:
+    """Return the user-writable data directory for settings, logs, and certs.
+
+    On macOS frozen builds the install directory lives inside the read-only
+    ``.app`` bundle (``Contents/MacOS/``), so user data must go elsewhere.
+
+    Resolution:
+    - **macOS frozen** → ``~/Library/Application Support/rcflow/``
+    - **Windows**      → ``%LOCALAPPDATA%/rcflow/``  (or ``~/AppData/Local/rcflow/``)
+    - **Linux / dev**  → same as :func:`get_install_dir` (writable project root
+      or ``/opt/rcflow`` managed by the systemd installer)
+    """
+    if sys.platform == "darwin" and is_frozen():
+        candidate = Path.home() / "Library" / "Application Support" / "rcflow"
+        with contextlib.suppress(OSError):
+            candidate.mkdir(parents=True, exist_ok=True)
+        return candidate
+
+    if sys.platform == "win32":
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        candidate = Path(local_app_data) / "rcflow" if local_app_data else Path.home() / "AppData" / "Local" / "rcflow"
+        with contextlib.suppress(OSError):
+            candidate.mkdir(parents=True, exist_ok=True)
+        return candidate
+
+    return get_install_dir()
+
+
 def get_default_tools_dir() -> Path:
     """Return the default tools directory path.
 

@@ -233,15 +233,31 @@ def run_pyinstaller(target_platform: str, *, windowed: bool = False) -> Path:
 
     # Windows tray build needs pystray + PIL, terminal needs pywinpty
     if target_platform == "windows":
-        hidden_imports.extend([
-            "src.tray",
-            "pystray",
-            "pystray._win32",
-            "PIL",
-            "PIL.Image",
-            "PIL.ImageDraw",
-            "winpty",
-        ])
+        hidden_imports.extend(
+            [
+                "src.tray",
+                "pystray",
+                "pystray._win32",
+                "PIL",
+                "PIL.Image",
+                "PIL.ImageDraw",
+                "winpty",
+            ]
+        )
+
+    # macOS menu bar build needs src.gui_macos, PyObjC AppKit bridge, and PIL
+    if target_platform == "macos":
+        hidden_imports.extend(
+            [
+                "src.gui_macos",
+                "AppKit",
+                "Foundation",
+                "objc",
+                "PIL",
+                "PIL.Image",
+                "PIL.ImageDraw",
+            ]
+        )
 
     # Data files to include inside the PyInstaller bundle (_MEIPASS)
     # Templates need to be in _MEIPASS so Path(__file__)-based resolution works
@@ -250,11 +266,17 @@ def run_pyinstaller(target_platform: str, *, windowed: bool = False) -> Path:
     ]
 
     cmd = [
-        sys.executable, "-m", "PyInstaller",
-        "--name", "rcflow",
-        "--distpath", str(dist_dir),
-        "--workpath", str(build_dir),
-        "--specpath", str(PROJECT_ROOT),
+        sys.executable,
+        "-m",
+        "PyInstaller",
+        "--name",
+        "rcflow",
+        "--distpath",
+        str(dist_dir),
+        "--workpath",
+        str(build_dir),
+        "--specpath",
+        str(PROJECT_ROOT),
         "--noconfirm",
         "--clean",
     ]
@@ -273,6 +295,20 @@ def run_pyinstaller(target_platform: str, *, windowed: bool = False) -> Path:
         if icon_path.exists():
             cmd.extend(["--icon", str(icon_path)])
 
+    # macOS: always windowed (needed for NSStatusBar / LSUIElement app)
+    if target_platform == "macos":
+        cmd.append("--windowed")
+        cmd.extend(["--osx-bundle-identifier", "com.rcflow.worker"])
+        icns_path = PROJECT_ROOT / "assets" / "tray_icon.icns"
+        if icns_path.exists():
+            # --icon copies tray_icon.icns to Contents/Resources/ automatically;
+            # do NOT also add it via --add-data or PyInstaller will try to create
+            # a directory with the same name and conflict with the already-placed file.
+            cmd.extend(["--icon", str(icns_path)])
+        cmd.extend(["--collect-all", "objc"])
+        cmd.extend(["--collect-all", "AppKit"])
+        cmd.extend(["--collect-all", "Foundation"])
+
     # Collect all submodules of src
     cmd.extend(["--collect-submodules", "src"])
     cmd.extend(["--collect-submodules", "uvicorn"])
@@ -287,7 +323,9 @@ def run_pyinstaller(target_platform: str, *, windowed: bool = False) -> Path:
     print(f"Running PyInstaller: {' '.join(cmd[-5:])}")
     subprocess.check_call(cmd, cwd=str(PROJECT_ROOT))
 
-    output_dir = dist_dir / "rcflow"
+    # macOS --windowed produces a .app bundle; other platforms produce a flat dir
+    output_dir = dist_dir / "rcflow.app" if target_platform == "macos" else dist_dir / "rcflow"
+
     if not output_dir.exists():
         print(f"ERROR: Expected PyInstaller output at {output_dir}", file=sys.stderr)
         sys.exit(1)
@@ -482,8 +520,7 @@ def build_deb(bundle_dir: Path, version: str, arch: str) -> Path | None:
     """
     if not shutil.which("dpkg-deb"):
         print(
-            "ERROR: dpkg-deb not found. Install dpkg:\n"
-            "  sudo apt-get install dpkg",
+            "ERROR: dpkg-deb not found. Install dpkg:\n  sudo apt-get install dpkg",
             file=sys.stderr,
         )
         return None
@@ -515,7 +552,7 @@ def build_deb(bundle_dir: Path, version: str, arch: str) -> Path | None:
     systemd_dir = pkg_root / "lib" / "systemd" / "system"
     systemd_dir.mkdir(parents=True)
     (systemd_dir / "rcflow.service").write_text(
-        f"""\
+        """\
 [Unit]
 Description=RCFlow Action Server
 After=network.target
@@ -561,7 +598,7 @@ Description: RCFlow Action Server
  Self-contained RCFlow backend server with all dependencies bundled.
 Section: net
 Priority: optional
-Installed-Size: {sum(f.stat().st_size for f in install_dir.rglob('*') if f.is_file()) // 1024}
+Installed-Size: {sum(f.stat().st_size for f in install_dir.rglob("*") if f.is_file()) // 1024}
 """
     )
 
@@ -786,8 +823,7 @@ def build_macos_pkg(bundle_dir: Path, version: str, arch: str) -> Path | None:
     pkgbuild = shutil.which("pkgbuild")
     if not pkgbuild:
         print(
-            "ERROR: pkgbuild not found. Install Xcode command line tools:\n"
-            "  xcode-select --install",
+            "ERROR: pkgbuild not found. Install Xcode command line tools:\n  xcode-select --install",
             file=sys.stderr,
         )
         return None
@@ -861,20 +897,22 @@ rm -rf {pkg_stage}
         pkg_path.unlink()
 
     print(f"Building {pkg_path.name}...")
-    subprocess.check_call([
-        pkgbuild,
-        "--root",
-        str(bundle_dir),
-        "--scripts",
-        str(pkg_scripts_dir),
-        "--identifier",
-        "com.rcflow.backend",
-        "--version",
-        version,
-        "--install-location",
-        pkg_stage,
-        str(pkg_path),
-    ])
+    subprocess.check_call(
+        [
+            pkgbuild,
+            "--root",
+            str(bundle_dir),
+            "--scripts",
+            str(pkg_scripts_dir),
+            "--identifier",
+            "com.rcflow.backend",
+            "--version",
+            version,
+            "--install-location",
+            pkg_stage,
+            str(pkg_path),
+        ]
+    )
 
     if pkg_path.exists():
         size_mb = pkg_path.stat().st_size / (1024 * 1024)
@@ -882,6 +920,374 @@ rm -rf {pkg_stage}
         return pkg_path
 
     print(f"WARNING: Expected .pkg at {pkg_path} but it was not found.", file=sys.stderr)
+    return None
+
+
+def assemble_macos_app(pyinstaller_app: Path, version: str, arch: str) -> Path:
+    """Copy the PyInstaller .app, inject Info.plist keys, and bundle data files.
+
+    Handles the macOS-specific assembly path.  The output is a stand-alone
+    ``.app`` bundle that can be signed and wrapped in a DMG.
+
+    Args:
+        pyinstaller_app: Path to the raw ``.app`` produced by PyInstaller
+                         (``build/pyinstaller_dist/rcflow.app``).
+        version: Release version string (e.g. ``"0.32.0"``).
+        arch: Architecture string (e.g. ``"arm64"`` or ``"x64"``).
+
+    Returns:
+        Path to the finished ``.app`` bundle in ``build/bundle/``.
+    """
+    import plistlib  # noqa: PLC0415
+
+    app_name = "RCFlow Worker.app"
+    dest = PROJECT_ROOT / "build" / "bundle" / app_name
+    if dest.exists():
+        shutil.rmtree(dest)
+
+    print(f"Copying .app bundle to {dest.name}...")
+    shutil.copytree(pyinstaller_app, dest)
+
+    # The macOS executable and data files live in Contents/MacOS/
+    contents_macos = dest / "Contents" / "MacOS"
+    contents_resources = dest / "Contents" / "Resources"
+    contents_resources.mkdir(parents=True, exist_ok=True)
+
+    # 1. Copy tray_icon.icns to Contents/Resources/ (standard .app location)
+    icns_src = PROJECT_ROOT / "assets" / "tray_icon.icns"
+    if icns_src.exists():
+        shutil.copy2(icns_src, contents_resources / "tray_icon.icns")
+        print("Copied tray_icon.icns → Contents/Resources/")
+
+    # 2. Copy tool definitions, migrations, alembic.ini next to the executable
+    for src_rel, dest_name in (
+        ("tools", "tools"),
+        ("src/db/migrations", "migrations"),
+    ):
+        src = PROJECT_ROOT / src_rel
+        if src.exists():
+            dest_sub = contents_macos / dest_name
+            if dest_sub.exists():
+                shutil.rmtree(dest_sub)
+            shutil.copytree(src, dest_sub)
+            # Remove __pycache__ from copied Python source trees
+            for cache in dest_sub.rglob("__pycache__"):
+                shutil.rmtree(cache)
+            print(f"Copied {src_rel}/ → Contents/MacOS/{dest_name}/")
+
+    bundled_ini = create_alembic_ini_for_bundle()
+    shutil.copy2(bundled_ini, contents_macos / "alembic.ini")
+    print("Created bundled alembic.ini")
+
+    (contents_macos / "VERSION").write_text(version + "\n")
+
+    license_file = PROJECT_ROOT / "LICENSE"
+    if license_file.exists():
+        shutil.copy2(license_file, contents_macos / "LICENSE")
+
+    # 3. Patch Info.plist — inject keys that make it a proper LSUIElement app.
+    #    PyInstaller's default Info.plist omits these; they may already be set
+    #    if the rcflow.spec BUNDLE() was used, but we set them here regardless.
+    info_plist_path = dest / "Contents" / "Info.plist"
+    if info_plist_path.exists():
+        with info_plist_path.open("rb") as fh:
+            info = plistlib.load(fh)
+    else:
+        info = {}
+
+    info.update(
+        {
+            "LSUIElement": True,
+            "NSHighResolutionCapable": True,
+            "NSRequiresAquaSystemAppearance": False,
+            "CFBundleName": "RCFlow Worker",
+            "CFBundleDisplayName": "RCFlow Worker",
+            "CFBundleShortVersionString": version,
+            "CFBundleVersion": version,
+            "CFBundleIdentifier": "com.rcflow.worker",
+            "CFBundleIconFile": "tray_icon",
+        }
+    )
+
+    with info_plist_path.open("wb") as fh:
+        plistlib.dump(info, fh)
+    print("Patched Contents/Info.plist (LSUIElement, version, icon, bundle-id)")
+
+    # Make the main executable executable
+    exe = contents_macos / "rcflow"
+    if exe.exists():
+        os.chmod(exe, 0o755)
+
+    print(f"macOS app assembled: {dest}")
+    return dest
+
+
+def _make_dmg_background(icns_path: Path, output_png: Path, width: int = 540, height: int = 380) -> bool:
+    """Generate the DMG window background image using Pillow.
+
+    Produces a gradient from dark navy to steel blue with the app icon
+    composited near the top-center and subtle "Drag to Applications" text
+    at the bottom.  Saved as a PNG at *output_png*.
+
+    Args:
+        icns_path: Path to the app icon (``.icns`` or ``.png``).
+        output_png: Where to write the output PNG.
+        width: Canvas width in pixels (default 540).
+        height: Canvas height in pixels (default 380).
+
+    Returns:
+        ``True`` if the background was written successfully, ``False`` if
+        Pillow is unavailable or an error occurred.
+    """
+    try:
+        from PIL import Image, ImageDraw, ImageFilter, ImageFont  # noqa: PLC0415
+    except ImportError:
+        print("WARNING: Pillow not available — DMG will use plain white background.", file=sys.stderr)
+        return False
+
+    # ── Gradient background ──────────────────────────────────────────
+    # Horizontal linear gradient: dark navy (#0d1117) → steel blue (#1a3a5c)
+    dark = (13, 17, 23)
+    mid = (26, 58, 92)
+    bg = Image.new("RGBA", (width, height), dark)
+    draw = ImageDraw.Draw(bg)
+
+    for x in range(width):
+        t = x / (width - 1)
+        r = int(dark[0] + (mid[0] - dark[0]) * t)
+        g = int(dark[1] + (mid[1] - dark[1]) * t)
+        b = int(dark[2] + (mid[2] - dark[2]) * t)
+        draw.line([(x, 0), (x, height)], fill=(r, g, b, 255))
+
+    # ── App icon ──────────────────────────────────────────────────────
+    icon_size = 128
+    icon_x = (width - icon_size) // 2
+    icon_y = 80
+
+    if icns_path.exists():
+        try:
+            icon = Image.open(str(icns_path)).convert("RGBA")
+            icon = icon.resize((icon_size, icon_size), Image.LANCZOS)
+
+            # Soft drop shadow: blurred dark ellipse behind the icon
+            shadow = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+            shadow_draw = ImageDraw.Draw(shadow)
+            shadow_draw.ellipse(
+                [icon_x + 8, icon_y + icon_size - 12, icon_x + icon_size - 8, icon_y + icon_size + 20],
+                fill=(0, 0, 0, 120),
+            )
+            shadow = shadow.filter(ImageFilter.GaussianBlur(radius=10))
+            bg = Image.alpha_composite(bg, shadow)
+
+            bg.paste(icon, (icon_x, icon_y), icon)
+        except Exception as exc:
+            print(f"WARNING: Could not composite app icon into DMG background: {exc}", file=sys.stderr)
+
+    # ── "Drag to Applications" label ────────────────────────────────
+    draw = ImageDraw.Draw(bg)
+    label = "Drag to Applications"
+    label_color = (180, 200, 220, 200)
+
+    # Use a default font — ImageFont.load_default() gives a basic bitmap font.
+    # On macOS we attempt to load the system Helvetica Neue.
+    font = None
+    for font_path in (
+        "/System/Library/Fonts/HelveticaNeue.ttc",
+        "/System/Library/Fonts/Helvetica.ttc",
+        "/System/Library/Fonts/Arial.ttf",
+    ):
+        if os.path.exists(font_path):
+            try:
+                font = ImageFont.truetype(font_path, 13)
+                break
+            except Exception:
+                continue
+
+    if font:
+        bbox = draw.textbbox((0, 0), label, font=font)
+        text_w = bbox[2] - bbox[0]
+        text_x = (width - text_w) // 2
+        draw.text((text_x, height - 38), label, fill=label_color, font=font)
+    else:
+        draw.text((width // 2 - 60, height - 38), label, fill=label_color)
+
+    # ── Save ─────────────────────────────────────────────────────────
+    output_png.parent.mkdir(parents=True, exist_ok=True)
+    bg.convert("RGB").save(str(output_png), "PNG")
+    print(f"Generated DMG background: {output_png.name} ({width}x{height})")
+    return True
+
+
+def build_macos_dmg(app_path: Path, version: str, arch: str) -> Path | None:
+    """Build a styled macOS ``.dmg`` from the assembled ``.app`` bundle.
+
+    Creates a read-write DMG, sets a custom gradient background with the app
+    icon, positions the app and an /Applications symlink, then converts to a
+    compressed read-only UDZO DMG.
+
+    Requires ``hdiutil`` and ``osascript`` (both standard on macOS).
+
+    Args:
+        app_path: Path to the finished ``.app`` bundle (output of
+                  :func:`assemble_macos_app`).
+        version: Release version string used in the output filename.
+        arch: Architecture string used in the output filename.
+
+    Returns:
+        Path to the created ``.dmg``, or ``None`` on failure.
+    """
+    if not shutil.which("hdiutil"):
+        print("ERROR: hdiutil not found (are you on macOS?)", file=sys.stderr)
+        return None
+    if not shutil.which("osascript"):
+        print("ERROR: osascript not found (are you on macOS?)", file=sys.stderr)
+        return None
+
+    dist_dir = PROJECT_ROOT / "dist"
+    dist_dir.mkdir(parents=True, exist_ok=True)
+
+    dmg_name = f"rcflow-{version}-macos-{arch}"
+    final_dmg = dist_dir / f"{dmg_name}.dmg"
+    tmp_dmg = PROJECT_ROOT / "build" / f"{dmg_name}-rw.dmg"
+
+    # Clean up any leftover temp DMG
+    if tmp_dmg.exists():
+        tmp_dmg.unlink()
+    if final_dmg.exists():
+        final_dmg.unlink()
+
+    # ── Generate background image ────────────────────────────────────
+    bg_png = PROJECT_ROOT / "build" / "dmg_background.png"
+    icns_src = PROJECT_ROOT / "assets" / "tray_icon.icns"
+    _make_dmg_background(icns_src, bg_png)
+
+    # ── Create a blank read-write DMG ────────────────────────────────
+    print(f"Creating DMG: {final_dmg.name}...")
+    subprocess.check_call(
+        [
+            "hdiutil",
+            "create",
+            "-size",
+            "400m",
+            "-fs",
+            "HFS+",
+            "-volname",
+            "RCFlow Worker",
+            "-o",
+            str(tmp_dmg),
+        ]
+    )
+
+    # ── Mount the DMG ────────────────────────────────────────────────
+    result = subprocess.run(
+        ["hdiutil", "attach", str(tmp_dmg), "-noautoopen", "-nobrowse"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    # Parse the mount point from hdiutil output (last tab-separated column of the /dev/diskN line)
+    mount_point: str | None = None
+    for line in result.stdout.splitlines():
+        if "/Volumes/" in line:
+            mount_point = line.strip().split("\t")[-1].strip()
+            break
+
+    if not mount_point or not os.path.isdir(mount_point):
+        print("ERROR: Could not determine DMG mount point from hdiutil output.", file=sys.stderr)
+        return None
+
+    try:
+        vol_path = Path(mount_point)
+
+        # ── Copy .app into volume ────────────────────────────────────
+        app_dest = vol_path / app_path.name
+        print(f"  Copying {app_path.name}...")
+        shutil.copytree(app_path, app_dest)
+
+        # ── Create /Applications symlink ─────────────────────────────
+        applications_link = vol_path / "Applications"
+        applications_link.symlink_to("/Applications")
+
+        # ── Copy background image into hidden .background/ folder ────
+        has_background = bg_png.exists()
+        if has_background:
+            bg_dir = vol_path / ".background"
+            bg_dir.mkdir()
+            shutil.copy2(bg_png, bg_dir / "background.png")
+
+        # ── Set DMG window appearance via AppleScript ─────────────────
+        # Window: 540x380, icons at fixed positions, background image, no sidebar.
+        app_icon_x, app_icon_y = 140, 190
+        apps_icon_x, apps_icon_y = 400, 190
+        win_x1, win_y1, win_x2, win_y2 = 200, 200, 740, 580
+
+        bg_line = (
+            'set background picture of viewOptions to file ".background:background.png"'
+            if has_background
+            else "-- no custom background"
+        )
+        applescript = f"""
+tell application "Finder"
+    tell disk "RCFlow Worker"
+        open
+        set current view of container window to icon view
+        set toolbar visible of container window to false
+        set statusbar visible of container window to false
+        set the bounds of container window to {{{win_x1}, {win_y1}, {win_x2}, {win_y2}}}
+        set viewOptions to the icon view options of container window
+        set arrangement of viewOptions to not arranged
+        set icon size of viewOptions to 96
+        {bg_line}
+        set position of item "{app_path.name}" of container window to {{{app_icon_x}, {app_icon_y}}}
+        set position of item "Applications" of container window to {{{apps_icon_x}, {apps_icon_y}}}
+        close
+        open
+        update without registering applications
+        delay 2
+        close
+    end tell
+end tell
+"""
+        print("  Setting DMG window layout via AppleScript...")
+        subprocess.run(
+            ["osascript", "-e", applescript],
+            check=False,  # Non-fatal: window layout is cosmetic
+            capture_output=True,
+        )
+
+        # Sync and unmount
+        subprocess.run(["sync"], check=False)
+
+    finally:
+        subprocess.run(
+            ["hdiutil", "detach", mount_point, "-quiet"],
+            check=False,
+            capture_output=True,
+        )
+
+    # ── Convert to compressed read-only DMG ─────────────────────────
+    print("  Converting to compressed DMG...")
+    subprocess.check_call(
+        [
+            "hdiutil",
+            "convert",
+            str(tmp_dmg),
+            "-format",
+            "UDZO",
+            "-imagekey",
+            "zlib-level=9",
+            "-o",
+            str(final_dmg),
+        ]
+    )
+    tmp_dmg.unlink()
+
+    if final_dmg.exists():
+        size_mb = final_dmg.stat().st_size / (1024 * 1024)
+        print(f"DMG created: {final_dmg} ({size_mb:.1f} MB)")
+        return final_dmg
+
+    print(f"WARNING: Expected DMG at {final_dmg} but it was not found.", file=sys.stderr)
     return None
 
 
@@ -924,7 +1330,7 @@ def sign_windows(path: Path) -> None:
     signtool = shutil.which("signtool")
     if not signtool:
         # Check Windows SDK default locations
-        sdk_root = os.environ.get("WindowsSdkVerBinPath", "")
+        sdk_root = os.environ.get("WindowsSdkVerBinPath", "")  # noqa: SIM112
         if sdk_root:
             candidate = os.path.join(sdk_root, "x64", "signtool.exe")
             if os.path.isfile(candidate):
@@ -940,19 +1346,24 @@ def sign_windows(path: Path) -> None:
 
     if not signtool:
         print(
-            "ERROR: signtool.exe not found.\n"
-            "  Install the Windows SDK or add signtool.exe to PATH.",
+            "ERROR: signtool.exe not found.\n  Install the Windows SDK or add signtool.exe to PATH.",
             file=sys.stderr,
         )
         sys.exit(1)
 
     cmd = [
-        signtool, "sign",
-        "/f", env["SIGN_CERT_PATH"],
-        "/p", env["SIGN_CERT_PASSWORD"],
-        "/tr", timestamp_url,
-        "/td", "sha256",
-        "/fd", "sha256",
+        signtool,
+        "sign",
+        "/f",
+        env["SIGN_CERT_PATH"],
+        "/p",
+        env["SIGN_CERT_PASSWORD"],
+        "/tr",
+        timestamp_url,
+        "/td",
+        "sha256",
+        "/fd",
+        "sha256",
         str(path),
     ]
     print(f"Signing {path.name} with Authenticode...")
@@ -963,17 +1374,23 @@ def sign_windows(path: Path) -> None:
 def sign_macos(path: Path) -> None:
     """Sign a macOS binary or .app bundle with codesign.
 
+    Uses ``scripts/rcflow_macos.entitlements`` (hardened runtime, no sandbox)
+    which is appropriate for the backend server app.  The Flutter client uses
+    its own entitlements under ``rcflowclient/macos/``.
+
     Required env var: SIGN_IDENTITY (e.g. "Developer ID Application: Name (TEAMID)").
     """
     env = _check_sign_env(["SIGN_IDENTITY"])
 
-    entitlements = PROJECT_ROOT / "rcflowclient" / "macos" / "Runner" / "Release.entitlements"
+    entitlements = PROJECT_ROOT / "scripts" / "rcflow_macos.entitlements"
     cmd = [
         "codesign",
         "--deep",
         "--force",
-        "--options", "runtime",
-        "--sign", env["SIGN_IDENTITY"],
+        "--options",
+        "runtime",
+        "--sign",
+        env["SIGN_IDENTITY"],
         "--timestamp",
     ]
     if entitlements.exists():
@@ -995,7 +1412,8 @@ def sign_macos_pkg(path: Path) -> None:
     signed_path = path.with_suffix(".signed.pkg")
     cmd = [
         "productsign",
-        "--sign", env["SIGN_INSTALLER_IDENTITY"],
+        "--sign",
+        env["SIGN_INSTALLER_IDENTITY"],
         "--timestamp",
         str(path),
         str(signed_path),
@@ -1019,11 +1437,16 @@ def notarize_macos(path: Path) -> None:
 
     print(f"Submitting {path.name} for notarization...")
     submit_cmd = [
-        "xcrun", "notarytool", "submit",
+        "xcrun",
+        "notarytool",
+        "submit",
         str(path),
-        "--apple-id", env["APPLE_ID"],
-        "--team-id", env["APPLE_TEAM_ID"],
-        "--password", env["APPLE_APP_PASSWORD"],
+        "--apple-id",
+        env["APPLE_ID"],
+        "--team-id",
+        env["APPLE_TEAM_ID"],
+        "--password",
+        env["APPLE_APP_PASSWORD"],
         "--wait",
     ]
     subprocess.check_call(submit_cmd)
@@ -1043,11 +1466,14 @@ def sign_linux(path: Path) -> None:
     sig_path = Path(str(path) + ".asc")
     cmd = [
         "gpg",
-        "--batch", "--yes",
-        "--local-user", env["GPG_KEY_ID"],
+        "--batch",
+        "--yes",
+        "--local-user",
+        env["GPG_KEY_ID"],
         "--armor",
         "--detach-sign",
-        "--output", str(sig_path),
+        "--output",
+        str(sig_path),
         str(path),
     ]
 
@@ -1079,13 +1505,20 @@ def generate_checksums(artifacts: list[Path]) -> Path | None:
     gpg_key = os.environ.get("GPG_KEY_ID")
     if gpg_key:
         sig_path = Path(str(checksums_path) + ".asc")
-        subprocess.check_call([
-            "gpg", "--batch", "--yes",
-            "--local-user", gpg_key,
-            "--armor", "--detach-sign",
-            "--output", str(sig_path),
-            str(checksums_path),
-        ])
+        subprocess.check_call(
+            [
+                "gpg",
+                "--batch",
+                "--yes",
+                "--local-user",
+                gpg_key,
+                "--armor",
+                "--detach-sign",
+                "--output",
+                str(sig_path),
+                str(checksums_path),
+            ]
+        )
         print(f"  GPG-signed: {sig_path.name}")
 
     return checksums_path
@@ -1101,19 +1534,24 @@ def run_install(bundle_dir: Path, installer_path: Path | None, target_platform: 
             print("Running install.sh...")
             subprocess.check_call(["sudo", "bash", str(bundle_dir / "install.sh")])
     elif target_platform == "macos":
-        if installer_path:
-            print(f"Installing {installer_path.name}...")
-            subprocess.check_call(["sudo", "installer", "-pkg", str(installer_path), "-target", "/"])
-        else:
-            print("Running install.sh...")
-            subprocess.check_call(["bash", str(bundle_dir / "install.sh")])
+        # bundle_dir is the .app path for macOS GUI builds; installer_path is the DMG.
+        # Install by copying the .app to /Applications (no sudo needed for ~/Applications
+        # fallback, but /Applications requires it).
+        app_path = bundle_dir  # assemble_macos_app returns the .app directly
+        dest = Path("/Applications") / app_path.name
+        print(f"Installing {app_path.name} → {dest}...")
+        if dest.exists():
+            shutil.rmtree(dest)
+        shutil.copytree(app_path, dest)
     elif target_platform == "windows":
         if installer_path:
             print(f"Launching {installer_path.name}...")
             os.startfile(str(installer_path))  # type: ignore[attr-defined]  # Windows-only
         else:
             print("Running install.ps1...")
-            subprocess.check_call(["powershell", "-ExecutionPolicy", "Bypass", "-File", str(bundle_dir / "install.ps1")])
+            subprocess.check_call(
+                ["powershell", "-ExecutionPolicy", "Bypass", "-File", str(bundle_dir / "install.ps1")]
+            )
     else:
         print(f"Auto-install not supported on {target_platform}", file=sys.stderr)
         sys.exit(1)
@@ -1177,6 +1615,58 @@ def main() -> None:
     # Step 1: Ensure PyInstaller is available
     ensure_pyinstaller()
 
+    # ── macOS: .app bundle → sign → DMG path ────────────────────────
+    if target_platform == "macos":
+        if args.skip_pyinstaller:
+            pyinstaller_app = PROJECT_ROOT / "build" / "pyinstaller_dist" / "rcflow.app"
+            if not pyinstaller_app.exists():
+                print("ERROR: No existing PyInstaller .app found. Run without --skip-pyinstaller.", file=sys.stderr)
+                sys.exit(1)
+            print("Skipping PyInstaller (using existing .app build)")
+        else:
+            print("=== Step 1: Running PyInstaller ===")
+            # macOS always builds as a windowed .app
+            pyinstaller_app = run_pyinstaller(target_platform, windowed=True)
+        print()
+
+        print("=== Step 2: Assembling .app bundle ===")
+        app_path = assemble_macos_app(pyinstaller_app, version, arch)
+        print()
+
+        if args.sign:
+            print("=== Step 3: Signing .app ===")
+            sign_macos(app_path)
+            print()
+
+        print("=== Step 4: Building DMG ===")
+        dmg_path = build_macos_dmg(app_path, version, arch)
+        print()
+
+        if args.sign and dmg_path:
+            print("=== Step 5: Notarizing DMG ===")
+            notarize_macos(dmg_path)
+            print()
+
+        produced_artifacts = [a for a in [dmg_path] if a is not None]
+        print("=== Checksums ===")
+        generate_checksums(produced_artifacts)
+        print()
+
+        print("=== Build complete ===")
+        print(f"  App:     {app_path}")
+        if dmg_path:
+            print(f"  DMG:     {dmg_path}")
+        if args.sign:
+            print("  Signing: enabled")
+        print()
+
+        if args.install and dmg_path:
+            run_install(app_path, dmg_path, target_platform)
+
+        return
+
+    # ── Linux / Windows path ─────────────────────────────────────────
+
     # Step 2: Run PyInstaller
     use_windowed = target_platform == "windows" and args.installer
     if args.skip_pyinstaller:
@@ -1195,7 +1685,7 @@ def main() -> None:
     bundle_dir = assemble_bundle(pyinstaller_dir, target_platform, version, arch)
     print()
 
-    # Step 4: Sign the main executable (before archiving, so the archive contains the signed binary)
+    # Step 4: Sign the main executable (before archiving)
     if args.sign:
         exe_name = "rcflow.exe" if target_platform == "windows" else "rcflow"
         exe_path = bundle_dir / exe_name
@@ -1203,8 +1693,6 @@ def main() -> None:
             print("=== Step 3a: Signing executable ===")
             if target_platform == "windows":
                 sign_windows(exe_path)
-            elif target_platform == "macos":
-                sign_macos(exe_path)
             print()
 
     # Step 5: Create archive
@@ -1223,10 +1711,6 @@ def main() -> None:
             print("=== Step 4: Building .deb package ===")
             installer_path = build_deb(bundle_dir, version, arch)
             print()
-        elif target_platform == "macos":
-            print("=== Step 4: Building .pkg package ===")
-            installer_path = build_macos_pkg(bundle_dir, version, arch)
-            print()
         else:
             print(f"WARNING: --installer is not supported on {target_platform}. Skipping.", file=sys.stderr)
 
@@ -1236,10 +1720,6 @@ def main() -> None:
         if target_platform == "windows":
             if installer_path:
                 sign_windows(installer_path)
-        elif target_platform == "macos":
-            if installer_path:
-                sign_macos_pkg(installer_path)
-                notarize_macos(installer_path)
         elif target_platform == "linux":
             sign_linux(archive_path)
             if installer_path:
@@ -1263,11 +1743,8 @@ def main() -> None:
         print("  Signing:  enabled")
     print()
 
-    # Step 6: Auto-install if requested
     if args.install:
-        print("=== Installing ===")
         run_install(bundle_dir, installer_path, target_platform)
-        return
 
     print("To test locally:")
     if installer_path and target_platform == "linux":

@@ -11,7 +11,7 @@ from typing import Any
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from src.paths import get_default_tools_dir, get_install_dir
+from src.paths import get_default_tools_dir
 
 # Provider-aware model lists for model_select fields.
 PROVIDER_MODELS: dict[str, dict[str, Any]] = {
@@ -55,8 +55,15 @@ def _default_tools_dir() -> Path:
 
 
 def _get_settings_path() -> Path:
-    """Return the path to settings.json (next to the executable or project root)."""
-    return get_install_dir() / "settings.json"
+    """Return the path to settings.json.
+
+    Uses :func:`~src.paths.get_data_dir` so that on macOS frozen builds the
+    file lives in ``~/Library/Application Support/rcflow/`` rather than inside
+    the read-only ``.app`` bundle.
+    """
+    from src.paths import get_data_dir  # noqa: PLC0415
+
+    return get_data_dir() / "settings.json"
 
 
 def _load_settings_into_env() -> None:
@@ -113,7 +120,7 @@ def _migrate_env_to_json(json_path: Path) -> None:
         eq_pos = stripped.find("=")
         if eq_pos > 0:
             key = stripped[:eq_pos].strip()
-            value = stripped[eq_pos + 1:].strip()
+            value = stripped[eq_pos + 1 :].strip()
             updates[key] = value
 
     if updates:
@@ -219,7 +226,6 @@ class Settings(BaseSettings):
             return []
         parts = [p.strip() for p in raw.split(",") if p.strip()]
         return [Path(p).expanduser().resolve() for p in parts]
-
 
 
 def get_settings() -> Settings:
@@ -600,8 +606,7 @@ def update_settings_file(updates: dict[str, str]) -> None:
         tmp_path.replace(path)
     except PermissionError:
         print(
-            f"WARNING: Cannot write to {path} — permission denied. "
-            f"Settings applied in-memory only.",
+            f"WARNING: Cannot write to {path} — permission denied. Settings applied in-memory only.",
             file=sys.stderr,
         )
 

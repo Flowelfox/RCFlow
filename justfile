@@ -68,15 +68,16 @@ bundle-linux-backend *FLAGS:
 bundle-linux-backend-install:
     uv run --extra bundle python scripts/bundle.py --platform linux --install
 
-# Build macOS backend installer (.pkg, must be on macOS)
+# Build macOS backend DMG (.app bundle, must be on macOS)
+# --extra tray installs pystray + Pillow for the menu bar UI and DMG background
 [macos]
 bundle-macos-backend *FLAGS:
-    uv run --extra bundle python scripts/bundle.py --platform macos --installer {{ FLAGS }}
+    uv run --extra bundle --extra tray python scripts/bundle.py --platform macos --installer {{ FLAGS }}
 
-# Build and install macOS backend (.pkg, must be on macOS)
+# Build and install macOS backend DMG (.app bundle, must be on macOS)
 [macos]
 bundle-macos-backend-install:
-    uv run --extra bundle python scripts/bundle.py --platform macos --install
+    uv run --extra bundle --extra tray python scripts/bundle.py --platform macos --install
 
 # Build Linux Flutter client distributable (must be on Linux)
 # Requires: cmake, ninja, clang, pkg-config, libgtk-3-dev
