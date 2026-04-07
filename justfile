@@ -102,7 +102,7 @@ bundle-linux-client:
     PKG_NAME="rcflow-v${CLIENT_VERSION}-linux-client-amd64"
     DEB_ROOT=$(mktemp -d)
     trap "rm -rf '$DEB_ROOT'" EXIT
-    install -Dm755 rcflowclient/build/linux/x64/release/bundle/rcflowclient \
+    install -Dm755 rcflowclient/build/linux/x64/release/bundle/rcflow \
       "$DEB_ROOT/opt/rcflowclient/rcflowclient"
     cp -r rcflowclient/build/linux/x64/release/bundle/data "$DEB_ROOT/opt/rcflowclient/"
     cp -r rcflowclient/build/linux/x64/release/bundle/lib "$DEB_ROOT/opt/rcflowclient/"

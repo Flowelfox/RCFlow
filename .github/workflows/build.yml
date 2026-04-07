@@ -249,7 +249,7 @@ jobs:
       - name: Build Android APKs
         if: matrix.platform == 'android'
         working-directory: rcflowclient
-        run: flutter build apk --release --split-per-abi
+        run: flutter build apk --release --split-per-abi --no-pub
 
       # ── Package outputs ───────────────────────────────────────────────────
       # Mirror the layout produced by the justfile bundle-* recipes so local
@@ -263,7 +263,7 @@ jobs:
           CLIENT_VERSION="${{ env.CLIENT_VERSION }}"
           PKG_NAME="rcflow-v${CLIENT_VERSION}-linux-client-amd64"
           DEB_ROOT=$(mktemp -d)
-          install -Dm755 rcflowclient/build/linux/x64/release/bundle/rcflowclient \
+          install -Dm755 rcflowclient/build/linux/x64/release/bundle/rcflow \
             "$DEB_ROOT/opt/rcflowclient/rcflowclient"
           cp -r rcflowclient/build/linux/x64/release/bundle/data "$DEB_ROOT/opt/rcflowclient/"
           cp -r rcflowclient/build/linux/x64/release/bundle/lib  "$DEB_ROOT/opt/rcflowclient/"
@@ -294,7 +294,7 @@ jobs:
           rm -rf "$STAGE"
 
       # Windows client: Inno Setup installer (.exe) wrapping the Flutter build
-      # output directory (rcflowclient.exe + DLLs + data/).
+      # output directory (rcflow.exe + DLLs + data/).
       - name: Package Windows client
         if: matrix.platform == 'windows'
         shell: pwsh

@@ -58,32 +58,32 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Files]
 ; Main Flutter executable
-Source: "{#BundleDir}\rcflowclient.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#BundleDir}\rcflow.exe"; DestDir: "{app}"; Flags: ignoreversion
 ; Flutter engine and plugin DLLs (all *.dll files in the release directory)
 Source: "{#BundleDir}\*.dll"; DestDir: "{app}"; Flags: ignoreversion
 ; Flutter app data (assets, fonts, icudtl.dat, etc.)
 Source: "{#BundleDir}\data\*"; DestDir: "{app}\data"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\RCFlow Client"; Filename: "{app}\rcflowclient.exe"; Comment: "RCFlow Desktop Client"
+Name: "{group}\RCFlow Client"; Filename: "{app}\rcflow.exe"; Comment: "RCFlow Desktop Client"
 Name: "{group}\Uninstall RCFlow Client"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\RCFlow Client"; Filename: "{app}\rcflowclient.exe"; Tasks: desktopicon
+Name: "{autodesktop}\RCFlow Client"; Filename: "{app}\rcflow.exe"; Tasks: desktopicon
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional options:"
 
 [Run]
-Filename: "{app}\rcflowclient.exe"; Description: "Launch RCFlow Client"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\rcflow.exe"; Description: "Launch RCFlow Client"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
-Filename: "taskkill"; Parameters: "/F /IM rcflowclient.exe"; Flags: runhidden; RunOnceId: "KillRCFlowClient"
+Filename: "taskkill"; Parameters: "/F /IM rcflow.exe"; Flags: runhidden; RunOnceId: "KillRCFlowClient"
 
 [Code]
 procedure KillClientProcesses;
 var
   ResultCode: Integer;
 begin
-  Exec('taskkill', '/F /IM rcflowclient.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec('taskkill', '/F /IM rcflow.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
 
 procedure DeinitializeSetup;
