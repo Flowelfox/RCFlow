@@ -340,7 +340,7 @@ jobs:
           CLIENT_VERSION="${{ env.CLIENT_VERSION }}"
           PKG_NAME="rcflow-v${CLIENT_VERSION}-linux-client-amd64"
           DEB_ROOT=$(mktemp -d)
-          install -Dm755 rcflowclient/build/linux/x64/release/bundle/rcflowclient \
+          install -Dm755 rcflowclient/build/linux/x64/release/bundle/rcflow \
             "$DEB_ROOT/opt/rcflowclient/rcflowclient"
           cp -r rcflowclient/build/linux/x64/release/bundle/data "$DEB_ROOT/opt/rcflowclient/"
           cp -r rcflowclient/build/linux/x64/release/bundle/lib  "$DEB_ROOT/opt/rcflowclient/"
@@ -590,7 +590,7 @@ jobs:
           SIGN_CERT_PATH: ${{ env.SIGN_CERT_PATH }}
           SIGN_CERT_PASSWORD: ${{ secrets.SIGN_CERT_PASSWORD }}
         run: |
-          $exePath = "rcflowclient\build\windows\x64\runner\Release\rcflowclient.exe"
+          $exePath = "rcflowclient\build\windows\x64\runner\Release\rcflow.exe"
           & signtool sign /f "$env:SIGN_CERT_PATH" /p "$env:SIGN_CERT_PASSWORD" `
             /tr http://timestamp.digicert.com /td sha256 /fd sha256 "$exePath"
         shell: pwsh
@@ -673,7 +673,7 @@ jobs:
 
       - name: Build signed Android APKs
         working-directory: rcflowclient
-        run: flutter build apk --release --split-per-abi
+        run: flutter build apk --release --split-per-abi --no-pub
 
       - name: Get client version
         run: |

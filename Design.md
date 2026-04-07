@@ -2803,7 +2803,7 @@ All release artifacts are signed to prevent OS security warnings and verify inte
 
 | Platform | Tool | What is signed |
 |----------|------|---------------|
-| **Windows** | `signtool.exe` (Authenticode) | `rcflow.exe`, `setup.exe` (Inno Setup), `rcflowclient.exe` |
+| **Windows** | `signtool.exe` (Authenticode) | `rcflow.exe`, `setup.exe` (Inno Setup installer) |
 | **macOS** | `codesign` + `notarytool` | `rcflow` binary, `.pkg` installer, `RCFlow.app` client bundle |
 | **Linux** | GPG detached signatures | `.tar.gz` archive, `.deb` package |
 | **Android** | Gradle `signingConfigs` | Release APK (via `key.properties` keystore) |
