@@ -10,8 +10,9 @@
 # • PyInstaller and Flutter desktop builds do NOT support cross-compilation.
 #   Each platform MUST build on a matching GitHub-hosted runner.
 #
-# • macOS runners (macos-latest = macOS 14) run on Apple Silicon (arm64).
-#   Switch individual matrix entries to macos-13 for x86_64 macOS output.
+# • macOS runners (macos-latest) run on Apple Silicon (arm64).
+#   GitHub has sunset all Intel (x64) macOS runners (macos-13), so only
+#   arm64 macOS builds are produced.
 #
 # • The macOS backend .pkg and macOS Flutter .app are produced unsigned.
 #   Users installing them will see a Gatekeeper warning; this is normal for
@@ -61,19 +62,11 @@ jobs:
           # Note: produced unsigned — see file header for details.
           # --extra tray installs pystray + Pillow for the menu bar UI and DMG
           # background generation.
+          # GitHub has sunset all Intel (x64) macOS runners, so only arm64 is
+          # built.  Cross-compilation is not supported by PyInstaller.
           - label: macos-arm64
             platform: macos
             os: macos-latest
-            uv-extras: "--extra bundle --extra tray"
-            bundle-args: "--platform macos --installer"
-
-          # ── macOS (Intel / x64) ─────────────────────────────────────────────
-          # Output: dist/rcflow-<ver>-macos-x64.dmg  (.app bundle inside)
-          # macos-13 runs on Intel x86_64 hardware.
-          # Note: produced unsigned — see file header for details.
-          - label: macos-x64
-            platform: macos
-            os: macos-13
             uv-extras: "--extra bundle --extra tray"
             bundle-args: "--platform macos --installer"
 
@@ -146,17 +139,12 @@ jobs:
 
           # ── macOS desktop (Apple Silicon / arm64) ───────────────────────────
           # Xcode command-line tools are pre-installed on macos-latest.
-          # Output: dist/rcflowclient-macos-arm64.tar.gz (unsigned .app inside)
+          # Output: dist/rcflowclient-macos-arm64.dmg (unsigned .app inside)
+          # GitHub has sunset all Intel (x64) macOS runners, so only arm64 is
+          # built.  Cross-compilation is not supported by Flutter.
           - label: macos-arm64
             platform: macos
             os: macos-latest
-
-          # ── macOS desktop (Intel / x64) ─────────────────────────────────────
-          # macos-13 runs on Intel x86_64 hardware.
-          # Output: dist/rcflowclient-macos-x86_64.tar.gz (unsigned .app inside)
-          - label: macos-x64
-            platform: macos
-            os: macos-13
 
           # ── Windows desktop ─────────────────────────────────────────────────
           # Visual Studio Build Tools are pre-installed on windows-latest.
