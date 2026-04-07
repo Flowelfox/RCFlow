@@ -431,15 +431,18 @@ jobs:
       - name: Package Windows client
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
           $appVersion = "${{ env.CLIENT_VERSION }}"
           $bundleDir = Resolve-Path 'rcflowclient\build\windows\x64\runner\Release'
           $outputFilename = "rcflow-v${appVersion}-windows-client-amd64"
-          if (-not (Test-Path dist)) { New-Item -ItemType Directory -Path dist | Out-Null }
+          # Use an absolute path for OutputDir so Inno Setup does not resolve it
+          # relative to the .iss file's directory (scripts/) instead of the repo root.
+          $distDir = (New-Item -ItemType Directory -Path dist -Force).FullName
           iscc scripts\inno_setup_client.iss `
             "/DBundleDir=$bundleDir" `
             "/DAppVersion=$appVersion" `
             "/DArch=amd64" `
-            "/DOutputDir=dist" `
+            "/DOutputDir=$distDir" `
             "/DOutputFilename=$outputFilename"
 
       - name: Upload artifacts
