@@ -6,6 +6,7 @@ import '../../../models/ws_messages.dart';
 import '../../../state/pane_state.dart';
 import '../../../theme.dart';
 import '../../utils/link_utils.dart';
+import '../../utils/selectable_code_block_builder.dart';
 
 class PlanReviewAskCard extends StatefulWidget {
   final DisplayMessage message;
@@ -81,6 +82,15 @@ class _PlanReviewAskCardState extends State<PlanReviewAskCard> {
               data: widget.message.content,
               shrinkWrap: true,
               onTapLink: openLinkOnCtrlClick,
+              builders: {
+                'pre': SelectableCodeBlockBuilder(
+                  textStyle: TextStyle(
+                    color: context.appColors.textPrimary,
+                    fontSize: 12,
+                    fontFamily: 'monospace',
+                  ),
+                ),
+              },
               styleSheet: MarkdownStyleSheet(
                 p: TextStyle(
                   color: context.appColors.textPrimary,

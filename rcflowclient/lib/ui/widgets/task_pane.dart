@@ -9,6 +9,7 @@ import '../../models/task_info.dart';
 import '../../state/app_state.dart';
 import '../../state/pane_state.dart';
 import '../../theme.dart';
+import '../utils/selectable_code_block_builder.dart';
 
 /// Full-pane task detail view.
 ///
@@ -514,6 +515,15 @@ class _TaskDetailContentState extends State<_TaskDetailContent> {
                       data: task.description!,
                       shrinkWrap: true,
                       selectable: true,
+                      builders: {
+                        'pre': SelectableCodeBlockBuilder(
+                          textStyle: TextStyle(
+                            color: context.appColors.textPrimary,
+                            fontSize: 12.5,
+                            fontFamily: 'monospace',
+                          ),
+                        ),
+                      },
                       styleSheet: MarkdownStyleSheet(
                         p: TextStyle(
                           color: context.appColors.textPrimary,

@@ -4,6 +4,7 @@ import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import '../../../models/ws_messages.dart';
 import '../../../theme.dart';
 import '../../utils/link_utils.dart';
+import '../../utils/selectable_code_block_builder.dart';
 
 class UserBubble extends StatelessWidget {
   final DisplayMessage message;
@@ -50,6 +51,15 @@ class UserBubble extends StatelessWidget {
                 data: message.content.replaceAll('\n', '  \n'),
                 shrinkWrap: true,
                 onTapLink: openLinkOnCtrlClick,
+                builders: {
+                  'pre': SelectableCodeBlockBuilder(
+                    textStyle: TextStyle(
+                      color: context.appColors.textPrimary,
+                      fontSize: 13.5,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                },
                 styleSheet: MarkdownStyleSheet(
                   p: TextStyle(
                     color: context.appColors.textPrimary,
