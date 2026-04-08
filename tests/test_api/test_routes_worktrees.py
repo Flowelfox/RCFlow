@@ -1,12 +1,13 @@
 """Tests for src/api/routes/worktrees.py.
 
 Covers:
-- ``GET /api/worktrees`` — list success, non-git path → 400
+- ``GET /api/worktrees`` — list success, non-git path → 400, non-existent path → 404
 - ``POST /api/worktrees`` — create 201 success, WorktreeExists → 409,
-  InvalidBranchType → 422, NotInGitRepository → 400
+  InvalidBranchType → 422, NotInGitRepository → 400, non-existent path → 404
 - ``POST /api/worktrees/{name}/merge`` — success, WorktreeNotFound → 404,
   MergeError → 500, UncommittedChanges → 409, GitOperationError → 500
 - ``DELETE /api/worktrees/{name}`` — success, WorktreeNotFound → 404
+- ``_manager`` — non-existent path raises HTTP 404 before touching git
 - ``_map_exception`` — all exception types produce the correct HTTP codes
 - Auth enforcement on all endpoints
 """
@@ -29,7 +30,7 @@ from wtpython import (
     WorktreeNotFound,
 )
 
-from src.api.routes.worktrees import _map_exception
+from src.api.routes.worktrees import _manager, _map_exception
 
 if TYPE_CHECKING:
     from fastapi import FastAPI
@@ -97,19 +98,21 @@ class TestListWorktrees:
     def test_non_git_repo_returns_400(self, client: TestClient) -> None:
         with patch(
             "src.api.routes.worktrees._manager",
-            side_effect=lambda _: (_ for _ in ()).throw(
-                NotImplementedError  # _manager itself raises HTTPException
-            ),
-        ):
-            pass  # We test this via the real _manager raising HTTPException
-
-        # Patch _manager to raise HTTPException(400) directly
-        with patch(
-            "src.api.routes.worktrees._manager",
             side_effect=FastHTTPException(status_code=400, detail="Not a git repository"),
         ):
             resp = client.get("/api/worktrees?repo_path=/not/a/repo", headers=_auth())
         assert resp.status_code == 400
+
+    def test_nonexistent_path_returns_404(self, client: TestClient) -> None:
+        with patch(
+            "src.api.routes.worktrees._manager",
+            side_effect=FastHTTPException(status_code=404, detail="Path not found"),
+        ):
+            resp = client.get(
+                "/api/worktrees?repo_path=/Users/vpohribnichenko/Projects/espa",
+                headers=_auth(),
+            )
+        assert resp.status_code == 404
 
     def test_missing_repo_path_returns_422(self, client: TestClient) -> None:
         resp = client.get("/api/worktrees", headers=_auth())
@@ -183,6 +186,21 @@ class TestCreateWorktree:
                 headers=_auth(),
             )
         assert resp.status_code == 400
+
+    def test_nonexistent_path_returns_404(self, client: TestClient) -> None:
+        with patch(
+            "src.api.routes.worktrees._manager",
+            side_effect=FastHTTPException(status_code=404, detail="Path not found"),
+        ):
+            resp = client.post(
+                "/api/worktrees",
+                json={
+                    "branch": "feature/X-1/test",
+                    "repo_path": "/Users/vpohribnichenko/Projects/espa",
+                },
+                headers=_auth(),
+            )
+        assert resp.status_code == 404
 
     def test_missing_body_returns_422(self, client: TestClient) -> None:
         resp = client.post("/api/worktrees", json={}, headers=_auth())
@@ -314,6 +332,25 @@ class TestRemoveWorktree:
     def test_requires_auth(self, client: TestClient) -> None:
         resp = client.delete("/api/worktrees/foo?repo_path=/repo")
         assert resp.status_code in (401, 403, 422)
+
+
+# ---------------------------------------------------------------------------
+# _manager — direct unit tests
+# ---------------------------------------------------------------------------
+
+
+class TestManager:
+    def test_nonexistent_path_raises_404(self) -> None:
+        """A path that doesn't exist on disk must return 404 before hitting git."""
+        with pytest.raises(FastHTTPException) as exc_info:
+            _manager("/Users/vpohribnichenko/Projects/espa")
+        assert exc_info.value.status_code == 404
+
+    def test_existing_non_git_dir_raises_400(self, tmp_path) -> None:
+        """An existing directory that is not a git repo must return 400."""
+        with pytest.raises(FastHTTPException) as exc_info:
+            _manager(str(tmp_path))
+        assert exc_info.value.status_code == 400
 
 
 # ---------------------------------------------------------------------------

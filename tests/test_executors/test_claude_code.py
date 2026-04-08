@@ -1,3 +1,4 @@
+import asyncio
 import json
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -544,6 +545,41 @@ class TestGotResult:
 
         assert len(chunks) == 0
         assert executor.got_result is False
+
+    @pytest.mark.asyncio
+    async def test_cancelled_error_propagates_from_read_loop(
+        self, executor: ClaudeCodeExecutor, claude_code_tool: ToolDefinition
+    ):
+        """CancelledError must NOT be swallowed by the read loop.
+
+        When a stream task is cancelled mid-read (e.g. because a follow-up
+        message arrives while Claude Code is still processing the initial
+        prompt), asyncio.CancelledError must propagate out of execute_streaming
+        so the task is properly marked cancelled.  If it were suppressed, the
+        post-stream code would see got_result=False with a still-running process
+        and emit a spurious 'Exit error with code: None' message.
+        """
+        # Simulate a slow readline that we can cancel
+        slow_readline = AsyncMock(side_effect=asyncio.CancelledError)
+        mock_stdout = AsyncMock()
+        mock_stdout.readline = slow_readline
+
+        mock_process = MagicMock()
+        mock_process.stdout = mock_stdout
+        mock_process.stderr = AsyncMock()
+        mock_process.stderr.readline = AsyncMock(return_value=b"")
+        mock_process.returncode = None  # still running
+        mock_process.pid = 12345
+
+        with (
+            patch("asyncio.create_subprocess_exec", AsyncMock(return_value=mock_process)),
+            pytest.raises(asyncio.CancelledError),
+        ):
+            async for _ in executor.execute_streaming(
+                claude_code_tool,
+                {"prompt": "test", "working_directory": "/tmp"},
+            ):
+                pass
 
 
 class TestExitCode:
