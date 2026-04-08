@@ -161,25 +161,12 @@ bundle-macos-client-install: bundle-macos-client
 [windows]
 bundle-windows-client:
     Set-Location rcflowclient; flutter build windows --release
-    $appVersion = (Get-Content rcflowclient/pubspec.yaml | Select-String '^version:').Line `
-      -replace 'version: ', '' -replace '\+.*', ''
-    $bundleDir = Resolve-Path 'rcflowclient\build\windows\x64\runner\Release'
-    $outputFilename = "rcflow-v${appVersion}-windows-client-amd64"
-    if (-not (Test-Path dist)) { New-Item -ItemType Directory -Path dist | Out-Null }
-    iscc scripts\inno_setup_client.iss `
-      "/DBundleDir=$bundleDir" `
-      "/DAppVersion=$appVersion" `
-      "/DArch=amd64" `
-      "/DOutputDir=dist" `
-      "/DOutputFilename=$outputFilename"
+    $appVersion = ((Get-Content rcflowclient/pubspec.yaml | Select-String '^version:').Line -replace 'version: ', '' -replace '\+.*', ''); $bundleDir = (Resolve-Path 'rcflowclient\build\windows\x64\runner\Release').Path; $outputFilename = "rcflow-v${appVersion}-windows-client-amd64"; if (-not (Test-Path dist)) { New-Item -ItemType Directory -Path dist | Out-Null }; iscc scripts\inno_setup_client.iss "/DBundleDir=$bundleDir" "/DAppVersion=$appVersion" "/DArch=amd64" "/DOutputDir=dist" "/DOutputFilename=$outputFilename"
 
 # Build and install Windows Flutter client (must be on Windows)
 [windows]
 bundle-windows-client-install: bundle-windows-client
-    $appVersion = (Get-Content rcflowclient/pubspec.yaml | Select-String '^version:').Line `
-      -replace 'version: ', '' -replace '\+.*', ''
-    $installer = "dist\rcflow-v${appVersion}-windows-client-amd64.exe"
-    Start-Process -FilePath $installer -Wait
+    $appVersion = ((Get-Content rcflowclient/pubspec.yaml | Select-String '^version:').Line -replace 'version: ', '' -replace '\+.*', ''); $installer = "dist\rcflow-v${appVersion}-windows-client-amd64.exe"; Start-Process -FilePath $installer -Wait
 
 # Build Windows backend installer (setup.exe, must be on Windows)
 [windows]
