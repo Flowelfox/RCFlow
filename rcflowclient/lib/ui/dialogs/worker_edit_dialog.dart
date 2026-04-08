@@ -433,75 +433,59 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
             },
           ),
           SizedBox(height: 16),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                flex: 3,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _buildLabel('Host', required: true),
-                    SizedBox(height: 6),
-                    TextField(
-                      controller: _hostCtrl,
-                      style: TextStyle(
-                        color: context.appColors.textPrimary,
-                        fontSize: 15,
-                      ),
-                      decoration: InputDecoration(
-                        hintText: '127.0.0.1',
-                        prefixIcon: Icon(
-                          Icons.dns_outlined,
-                          color: context.appColors.textMuted,
-                          size: 20,
-                        ),
-                        fillColor: context.appColors.bgElevated,
-                        border: OutlineInputBorder(
-                          borderSide: BorderSide.none,
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                        errorText: _fieldError(_hostCtrl),
-                      ),
-                      onChanged: (_) {
-                        if (_submitted) setState(() {});
-                      },
-                    ),
-                  ],
-                ),
+          _buildLabel('Host', required: true),
+          SizedBox(height: 6),
+          TextField(
+            controller: _hostCtrl,
+            style: TextStyle(
+              color: context.appColors.textPrimary,
+              fontSize: 15,
+            ),
+            decoration: InputDecoration(
+              hintText: '127.0.0.1',
+              prefixIcon: Icon(
+                Icons.dns_outlined,
+                color: context.appColors.textMuted,
+                size: 20,
               ),
-              SizedBox(width: 12),
-              Expanded(
-                flex: 1,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _buildLabel('Port', required: true),
-                    SizedBox(height: 6),
-                    TextField(
-                      controller: _portCtrl,
-                      keyboardType: TextInputType.number,
-                      style: TextStyle(
-                        color: context.appColors.textPrimary,
-                        fontSize: 15,
-                      ),
-                      decoration: InputDecoration(
-                        hintText: '53890',
-                        fillColor: context.appColors.bgElevated,
-                        border: OutlineInputBorder(
-                          borderSide: BorderSide.none,
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                        errorText: _fieldError(_portCtrl),
-                      ),
-                      onChanged: (_) {
-                        if (_submitted) setState(() {});
-                      },
-                    ),
-                  ],
-                ),
+              fillColor: context.appColors.bgElevated,
+              border: OutlineInputBorder(
+                borderSide: BorderSide.none,
+                borderRadius: BorderRadius.circular(14),
               ),
-            ],
+              errorText: _fieldError(_hostCtrl),
+            ),
+            onChanged: (_) {
+              if (_submitted) setState(() {});
+            },
+          ),
+          SizedBox(height: 16),
+          _buildLabel('Port', required: true),
+          SizedBox(height: 6),
+          TextField(
+            controller: _portCtrl,
+            keyboardType: TextInputType.number,
+            style: TextStyle(
+              color: context.appColors.textPrimary,
+              fontSize: 15,
+            ),
+            decoration: InputDecoration(
+              hintText: '53890',
+              prefixIcon: Icon(
+                Icons.tag,
+                color: context.appColors.textMuted,
+                size: 20,
+              ),
+              fillColor: context.appColors.bgElevated,
+              border: OutlineInputBorder(
+                borderSide: BorderSide.none,
+                borderRadius: BorderRadius.circular(14),
+              ),
+              errorText: _fieldError(_portCtrl),
+            ),
+            onChanged: (_) {
+              if (_submitted) setState(() {});
+            },
           ),
           SizedBox(height: 16),
           _buildLabel('API Key', required: true),
@@ -702,71 +686,85 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
   Widget _buildTestArea() {
     return Padding(
       padding: EdgeInsets.fromLTRB(24, 8, 24, 12),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          OutlinedButton.icon(
-            onPressed: _testStatus == _TestStatus.testing
-                ? null
-                : _testConnection,
-            icon: Icon(Icons.wifi_tethering_rounded, size: 18),
-            label: Text('Test Connection'),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: context.appColors.textSecondary,
-              side: BorderSide(color: context.appColors.divider),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
-              ),
-              padding: EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            ),
-          ),
-          SizedBox(width: 12),
-          if (_testStatus == _TestStatus.testing)
-            SizedBox(
-              width: 18,
-              height: 18,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                color: context.appColors.accentLight,
-              ),
-            ),
-          if (_testStatus == _TestStatus.success) ...[
-            Icon(
-              Icons.check_circle_rounded,
-              color: context.appColors.successText,
-              size: 18,
-            ),
-            SizedBox(width: 6),
-            Flexible(
-              child: Text(
-                _testMessage,
-                style: TextStyle(
-                  color: context.appColors.successText,
-                  fontSize: 13,
+          Row(
+            children: [
+              OutlinedButton.icon(
+                onPressed: _testStatus == _TestStatus.testing
+                    ? null
+                    : _testConnection,
+                icon: Icon(Icons.wifi_tethering_rounded, size: 18),
+                label: Text('Test Connection'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: context.appColors.textSecondary,
+                  side: BorderSide(color: context.appColors.divider),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  padding: EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                 ),
-                overflow: TextOverflow.ellipsis,
               ),
+              if (_testStatus == _TestStatus.testing) ...[
+                SizedBox(width: 12),
+                SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: context.appColors.accentLight,
+                  ),
+                ),
+              ],
+            ],
+          ),
+          if (_testStatus == _TestStatus.success) ...[
+            SizedBox(height: 8),
+            Row(
+              children: [
+                Icon(
+                  Icons.check_circle_rounded,
+                  color: context.appColors.successText,
+                  size: 18,
+                ),
+                SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    _testMessage,
+                    style: TextStyle(
+                      color: context.appColors.successText,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ],
           if (_testStatus == _TestStatus.failure) ...[
-            Icon(
-              Icons.cancel_rounded,
-              color: context.appColors.errorText,
-              size: 18,
-            ),
-            SizedBox(width: 6),
-            Flexible(
-              child: Tooltip(
-                message: _testMessage,
-                child: Text(
-                  _testMessage,
-                  style: TextStyle(
+            SizedBox(height: 8),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: EdgeInsets.only(top: 1),
+                  child: Icon(
+                    Icons.cancel_rounded,
                     color: context.appColors.errorText,
-                    fontSize: 13,
+                    size: 18,
                   ),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
                 ),
-              ),
+                SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    _testMessage,
+                    style: TextStyle(
+                      color: context.appColors.errorText,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ],
         ],
