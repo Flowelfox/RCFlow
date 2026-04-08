@@ -7,6 +7,7 @@ import '../../models/split_tree.dart';
 import '../../state/app_state.dart';
 import '../../state/pane_state.dart';
 import '../../theme.dart';
+import '../utils/selectable_code_block_builder.dart';
 
 /// Full-pane artifact viewer.
 ///
@@ -524,6 +525,15 @@ class _ArtifactContentState extends State<_ArtifactContent> {
       data: _content!,
       shrinkWrap: true,
       selectable: true,
+      builders: {
+        'pre': SelectableCodeBlockBuilder(
+          textStyle: TextStyle(
+            color: context.appColors.textPrimary,
+            fontSize: 12.5,
+            fontFamily: 'monospace',
+          ),
+        ),
+      },
       styleSheet: MarkdownStyleSheet(
         p: TextStyle(
           color: context.appColors.textPrimary,

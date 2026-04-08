@@ -4,6 +4,7 @@ import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import '../../../models/ws_messages.dart';
 import '../../../theme.dart';
 import '../../utils/link_utils.dart';
+import '../../utils/selectable_code_block_builder.dart';
 
 class AssistantBubble extends StatelessWidget {
   final DisplayMessage message;
@@ -17,6 +18,15 @@ class AssistantBubble extends StatelessWidget {
         data: message.content.replaceAll('[SessionEndAsk]', '').trimRight(),
         shrinkWrap: true,
         onTapLink: openLinkOnCtrlClick,
+        builders: {
+          'pre': SelectableCodeBlockBuilder(
+            textStyle: TextStyle(
+              color: context.appColors.assistantText,
+              fontSize: 12.5,
+              fontFamily: 'monospace',
+            ),
+          ),
+        },
         styleSheet: MarkdownStyleSheet(
           p: TextStyle(
             color: context.appColors.assistantText,
