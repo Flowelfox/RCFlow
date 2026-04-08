@@ -598,6 +598,11 @@ class PaneState extends ChangeNotifier {
     }
     _projectNameError = null;
 
+    // Restore the agent chip from the session's known agent type so that
+    // switching to an existing session (e.g. after reconnect) shows which
+    // agent drove that session without requiring the user to re-select it.
+    _selectedToolMention = session?.agentType;
+
     notifyListeners();
   }
 

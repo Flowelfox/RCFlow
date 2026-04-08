@@ -307,6 +307,11 @@ class WorkerConnection extends ChangeNotifier {
     final projectNameErrorProvided = msg.containsKey('project_name_error');
     final newProjectNameError = msg['project_name_error'] as String?;
 
+    // Parse agent type (always present in server broadcasts; use containsKey
+    // sentinel so a missing field never clears existing data).
+    final agentTypeProvided = msg.containsKey('agent_type');
+    final newAgentType = msg['agent_type'] as String?;
+
     final index = sessions.indexWhere((s) => s.sessionId == sessionId);
     if (index >= 0) {
       final existing = sessions[index];
@@ -337,6 +342,7 @@ class WorkerConnection extends ChangeNotifier {
         mainProjectPath: mainProjectPathProvided
             ? newMainProjectPath
             : existing.mainProjectPath,
+        agentType: agentTypeProvided ? newAgentType : existing.agentType,
       );
       // Fire callback when project path is attached or changes.
       if (newMainProjectPath != null &&
@@ -366,6 +372,7 @@ class WorkerConnection extends ChangeNotifier {
           worktreeInfo: worktreeInfo,
           selectedWorktreePath: newSelectedWorktreePath,
           mainProjectPath: newMainProjectPath,
+          agentType: newAgentType,
         ),
       );
       // Fire callback for a brand-new session that already has a project.

@@ -95,6 +95,7 @@ SessionInfo _session(
   String status, {
   String? mainProjectPath,
   String? selectedWorktreePath,
+  String? agentType,
 }) => SessionInfo(
   sessionId: id,
   sessionType: 'conversational',
@@ -102,6 +103,7 @@ SessionInfo _session(
   workerId: 'worker1',
   mainProjectPath: mainProjectPath,
   selectedWorktreePath: selectedWorktreePath,
+  agentType: agentType,
 );
 
 // ---------------------------------------------------------------------------
@@ -588,17 +590,20 @@ void main() {
       expect(pane.selectedToolMention, isNull);
     });
 
-    test('switchSession clears selectedToolMention', () {
-      final pane = PaneState(
-        paneId: 'p1',
-        host: _StubPaneHost([_session('s1', 'active')]),
-      );
-      pane.setSelectedTool('ClaudeCode');
+    test(
+      'switchSession clears selectedToolMention when session has no agentType',
+      () {
+        final pane = PaneState(
+          paneId: 'p1',
+          host: _StubPaneHost([_session('s1', 'active')]),
+        );
+        pane.setSelectedTool('ClaudeCode');
 
-      pane.switchSession('s1');
+        pane.switchSession('s1');
 
-      expect(pane.selectedToolMention, isNull);
-    });
+        expect(pane.selectedToolMention, isNull);
+      },
+    );
   });
 
   // ---------------------------------------------------------------------------
@@ -698,6 +703,86 @@ void main() {
       final pane = PaneState(paneId: 'p1', host: _StubPaneHost([]));
 
       expect(pane.currentSelectedWorktreePath, isNull);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Agent type chip restoration on session switch
+  // ---------------------------------------------------------------------------
+
+  group('PaneState.switchSession — agent chip restoration', () {
+    test('restores selectedToolMention from session.agentType on switch', () {
+      final pane = PaneState(
+        paneId: 'p1',
+        host: _StubPaneHost([
+          _session('s1', 'active', agentType: 'claude_code'),
+        ]),
+      );
+
+      pane.switchSession('s1');
+
+      expect(
+        pane.selectedToolMention,
+        'claude_code',
+        reason: 'agent chip must reflect the session agentType after switch',
+      );
+    });
+
+    test('clears agent chip when switching to session with no agentType', () {
+      final pane = PaneState(
+        paneId: 'p1',
+        host: _StubPaneHost([
+          _session('s1', 'active', agentType: 'claude_code'),
+          _session('s2', 'active'), // pure-LLM session, no agent
+        ]),
+      );
+
+      pane.switchSession('s1');
+      expect(pane.selectedToolMention, 'claude_code');
+
+      pane.switchSession('s2');
+      expect(
+        pane.selectedToolMention,
+        isNull,
+        reason: 'chip must be cleared when the session has no agentType',
+      );
+    });
+
+    test('updates agent chip correctly when switching between sessions', () {
+      final pane = PaneState(
+        paneId: 'p1',
+        host: _StubPaneHost([
+          _session('s1', 'active', agentType: 'claude_code'),
+          _session('s2', 'active', agentType: 'codex'),
+          _session('s3', 'completed', agentType: 'claude_code'),
+        ]),
+      );
+
+      pane.switchSession('s1');
+      expect(pane.selectedToolMention, 'claude_code');
+
+      pane.switchSession('s2');
+      expect(pane.selectedToolMention, 'codex');
+
+      pane.switchSession('s3');
+      expect(pane.selectedToolMention, 'claude_code');
+    });
+
+    test('restores agent chip for a completed session with agentType', () {
+      final pane = PaneState(
+        paneId: 'p1',
+        host: _StubPaneHost([
+          _session('s1', 'completed', agentType: 'claude_code'),
+        ]),
+      );
+
+      pane.switchSession('s1');
+
+      expect(
+        pane.selectedToolMention,
+        'claude_code',
+        reason: 'chip must be restored even for ended sessions',
+      );
     });
   });
 
