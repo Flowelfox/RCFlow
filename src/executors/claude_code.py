@@ -353,7 +353,7 @@ class ClaudeCodeExecutor(BaseExecutor):
         self._stderr_output = ""
         process = await asyncio.create_subprocess_exec(
             *cmd,
-            stdin=slave_fd,   # child's stdin  → PTY slave (isatty → True)
+            stdin=slave_fd,  # child's stdin  → PTY slave (isatty → True)
             stdout=slave_fd,  # child's stdout → PTY slave (isatty → True)
             stderr=asyncio.subprocess.PIPE,  # kept separate for diagnostics
             cwd=working_directory,
@@ -502,7 +502,13 @@ class ClaudeCodeExecutor(BaseExecutor):
                     )
                     self._done = True
                     break
-                except (asyncio.CancelledError, ConnectionResetError):
+                except asyncio.CancelledError:
+                    # Propagate cancellation — the task was intentionally cancelled
+                    # (e.g. by a follow-up message arriving while this read was active).
+                    # Do NOT suppress it; letting it propagate prevents the post-stream
+                    # code from misinterpreting the still-running process as an error.
+                    raise
+                except ConnectionResetError:
                     break
 
                 if not line:
@@ -561,7 +567,10 @@ class ClaudeCodeExecutor(BaseExecutor):
                     )
                     self._done = True
                     break
-                except (asyncio.CancelledError, ConnectionResetError, OSError):
+                except asyncio.CancelledError:
+                    # Propagate cancellation — same rationale as _read_events_pipe.
+                    raise
+                except (ConnectionResetError, OSError):
                     break
 
                 if not line_bytes:

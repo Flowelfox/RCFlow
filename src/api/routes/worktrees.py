@@ -55,6 +55,8 @@ def _worktree_to_dict(wt: Any) -> dict[str, Any]:
 def _manager(repo_path: str) -> WorktreeManager:
     """Return a WorktreeManager for *repo_path*, raising HTTP 400/404 on bad paths."""
     path = Path(repo_path).expanduser().resolve()
+    if not path.is_dir():
+        raise HTTPException(status_code=404, detail=f"Path not found: {repo_path}")
     try:
         return WorktreeManager(repo_path=path)
     except NotInGitRepository:
@@ -146,7 +148,7 @@ async def create_worktree(body: CreateWorktreeRequest) -> dict[str, Any]:
             body.branch,
             body.base or _DEFAULT_BASE,
             False,  # open_tmux
-            True,   # validate_type
+            True,  # validate_type
         )
         return {"worktree": _worktree_to_dict(wt)}
     except Exception as exc:
@@ -183,10 +185,7 @@ async def merge_worktree(name: str, body: MergeWorktreeRequest) -> dict[str, Any
 @router.delete(
     "/worktrees/{name}",
     summary="Remove a worktree",
-    description=(
-        "Remove a git worktree and delete its branch without merging. "
-        "Use this to discard abandoned work."
-    ),
+    description=("Remove a git worktree and delete its branch without merging. Use this to discard abandoned work."),
     dependencies=[Depends(verify_http_api_key)],
 )
 async def remove_worktree(
