@@ -51,6 +51,9 @@ if [[ $EUID -ne 0 ]]; then
     exit 1
 fi
 
+# Check whether systemd is actually running (not the case on WSL2 by default)
+has_systemd() { [ -d /run/systemd/system ]; }
+
 if [[ ! -d "$INSTALL_PREFIX" ]]; then
     echo -e "${RED}[ERROR]${NC} No installation found at ${INSTALL_PREFIX}" >&2
     exit 1
@@ -75,23 +78,28 @@ if ! $SKIP_CONFIRM; then
 fi
 
 # Stop and disable service
-if systemctl is-active --quiet rcflow 2>/dev/null; then
-    info "Stopping RCFlow service..."
-    systemctl stop rcflow
-    ok "Service stopped"
-fi
+if has_systemd; then
+    if systemctl is-active --quiet rcflow 2>/dev/null; then
+        info "Stopping RCFlow service..."
+        systemctl stop rcflow
+        ok "Service stopped"
+    fi
 
-if systemctl is-enabled --quiet rcflow 2>/dev/null; then
-    info "Disabling RCFlow service..."
-    systemctl disable rcflow
-    ok "Service disabled"
-fi
+    if systemctl is-enabled --quiet rcflow 2>/dev/null; then
+        info "Disabling RCFlow service..."
+        systemctl disable rcflow
+        ok "Service disabled"
+    fi
 
-if [[ -f /etc/systemd/system/rcflow.service ]]; then
-    info "Removing systemd service file..."
-    rm -f /etc/systemd/system/rcflow.service
-    systemctl daemon-reload
-    ok "Service file removed"
+    if [[ -f /etc/systemd/system/rcflow.service ]]; then
+        info "Removing systemd service file..."
+        rm -f /etc/systemd/system/rcflow.service
+        systemctl daemon-reload
+        ok "Service file removed"
+    fi
+else
+    warn "systemd not running — skipping service teardown"
+    rm -f /etc/systemd/system/rcflow.service 2>/dev/null || true
 fi
 
 # Optionally preserve data
