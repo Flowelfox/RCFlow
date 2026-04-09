@@ -344,6 +344,7 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+          cache: gradle
 
       - name: Set up Flutter (stable)
         uses: subosito/flutter-action@v2
@@ -374,7 +375,7 @@ jobs:
           storePassword=$ANDROID_KEYSTORE_PASSWORD
           keyPassword=$ANDROID_KEY_PASSWORD
           keyAlias=$ANDROID_KEY_ALIAS
-          storeFile=app/release.keystore
+          storeFile=release.keystore
           EOF
 
       - name: Build signed Android APKs

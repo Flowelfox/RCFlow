@@ -21,6 +21,63 @@
 - All configuration via environment variables / `.env` file
 - Type-annotate all public functions and class attributes
 
+## Justfile Targets
+
+Run targets with `just <target>`. Run `just` with no arguments to list all available recipes.
+
+### Development
+
+- `install` — install production dependencies (`uv sync`)
+- `dev` — install with dev dependencies and set up pre-commit hooks
+- `run` — start the server (`uv run rcflow`)
+
+### Code Quality
+
+- `lint` — run ruff linter on `src/` and `tests/`
+- `format` — auto-format and fix code with ruff
+- `typecheck` — run ty type checker on `src/`
+- `check` — run all static checks (ruff + ty + flutter analyze)
+
+### Testing
+
+- `test` — run all tests (Python pytest + Flutter)
+- `coverage` — run Python tests with coverage report
+
+### Database Migrations
+
+- `migrate` — apply all pending Alembic migrations
+- `migrate-gen <msg>` — generate a new Alembic migration with the given message
+- `migrate-down` — rollback the last migration
+
+### Bundling / Packaging
+
+- `bundle [FLAGS]` — build distributable package for the current platform
+- `bundle-linux-backend [FLAGS]` — build Linux backend `.deb` package
+- `bundle-linux-backend-install` — build and install Linux backend `.deb`
+- `bundle-linux-client` — build Linux Flutter client `.deb`
+- `bundle-linux-client-install` — build and install Linux Flutter client `.deb`
+- `bundle-macos-backend [FLAGS]` — build macOS backend DMG (macOS only)
+- `bundle-macos-backend-install` — build and install macOS backend DMG (macOS only)
+- `bundle-macos-client` — build macOS Flutter client `.dmg` (macOS only)
+- `bundle-macos-client-install` — build and install macOS Flutter client (macOS only)
+- `bundle-windows-backend [FLAGS]` — build Windows backend installer (Windows only)
+- `bundle-windows-backend-install` — build and install Windows backend (Windows only)
+- `bundle-windows-client` — build Windows Flutter client `.exe` installer (Windows only)
+- `bundle-windows-client-install` — build and install Windows Flutter client (Windows only)
+
+### Flutter / Emulator (Unix/WSL2)
+
+- `start-emulator` — start Windows Android emulator (cold boot) from WSL2
+- `setup-emulator` — set up WSL2 ADB connection to Windows emulator
+- `flutter-run` — run Flutter app in hot reload mode (connects to Windows emulator)
+- `flutter-build` — build Flutter debug APK
+- `flutter-release` — build Flutter release APK (split per ABI)
+- `flutter-windows` — build Flutter Windows desktop app (Windows only)
+
+### Cleanup
+
+- `clean` — remove build artifacts, caches, and coverage files
+
 ## Versioning
 
 This project uses [Semantic Versioning](https://semver.org/) (MAJOR.MINOR.PATCH).
