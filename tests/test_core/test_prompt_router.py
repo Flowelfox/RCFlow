@@ -232,7 +232,8 @@ async def test_generate_and_set_title_failure_does_not_raise(session_manager: Se
     # Should not raise
     await router._generate_and_set_title(session, "hello", "world")
 
-    assert session.title is None
+    # On LLM failure the finally-block sets a fallback title derived from user_text
+    assert session.title == "hello"
 
 
 @pytest.mark.asyncio
