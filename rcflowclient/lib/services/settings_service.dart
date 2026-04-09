@@ -341,7 +341,7 @@ class SettingsService {
   /// Returns `(content: '', cachedAt: null)` when no draft exists.
   ({String content, DateTime? cachedAt}) getDraft(String key) {
     final content = _prefs.getString('$_draftPrefix$key') ?? '';
-    final tsMs = _prefs.getInt('${_draftPrefix}${key}_ts');
+    final tsMs = _prefs.getInt('$_draftPrefix${key}_ts');
     final cachedAt = tsMs != null
         ? DateTime.fromMillisecondsSinceEpoch(tsMs, isUtc: true)
         : null;
@@ -352,7 +352,7 @@ class SettingsService {
   void saveDraft(String key, String content) {
     _prefs.setString('$_draftPrefix$key', content);
     _prefs.setInt(
-      '${_draftPrefix}${key}_ts',
+      '$_draftPrefix${key}_ts',
       DateTime.now().millisecondsSinceEpoch,
     );
   }
@@ -360,7 +360,7 @@ class SettingsService {
   /// Remove the draft and its timestamp companion for [key].
   void clearDraft(String key) {
     _prefs.remove('$_draftPrefix$key');
-    _prefs.remove('${_draftPrefix}${key}_ts');
+    _prefs.remove('$_draftPrefix${key}_ts');
   }
 
   // --- Helpers for list persistence (avoids setStringList/getStringList
