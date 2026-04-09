@@ -44,8 +44,10 @@ def get_data_dir() -> Path:
     Resolution:
     - **macOS frozen** → ``~/Library/Application Support/rcflow/``
     - **Windows**      → ``%LOCALAPPDATA%/rcflow/``  (or ``~/AppData/Local/rcflow/``)
-    - **Linux / dev**  → same as :func:`get_install_dir` (writable project root
-      or ``/opt/rcflow`` managed by the systemd installer)
+    - **Linux / dev**  → :func:`get_install_dir` when writable (e.g. the
+      ``rcflow`` system user running the systemd service owns ``/opt/rcflow``);
+      otherwise ``~/.local/share/rcflow/`` so that interactive invocations by
+      other users do not hit a ``PermissionError`` on start-up.
     """
     if sys.platform == "darwin" and is_frozen():
         candidate = Path.home() / "Library" / "Application Support" / "rcflow"
@@ -60,7 +62,18 @@ def get_data_dir() -> Path:
             candidate.mkdir(parents=True, exist_ok=True)
         return candidate
 
-    return get_install_dir()
+    # Linux / dev: prefer the install directory (the rcflow system user owns it
+    # after a standard installation).  Fall back to the XDG user data dir when
+    # the current process does not have write access — e.g. a developer or
+    # admin running `rcflow` interactively on a host where /opt/rcflow is
+    # owned by the service account.
+    install_dir = get_install_dir()
+    if os.access(install_dir, os.W_OK):
+        return install_dir
+    candidate = Path.home() / ".local" / "share" / "rcflow"
+    with contextlib.suppress(OSError):
+        candidate.mkdir(parents=True, exist_ok=True)
+    return candidate
 
 
 def get_default_tools_dir() -> Path:

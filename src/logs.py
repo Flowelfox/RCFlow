@@ -1,5 +1,6 @@
 import logging
 import logging.config
+import sys
 from typing import Any
 
 from src.config import Settings
@@ -44,7 +45,41 @@ def setup_logging(settings: Settings) -> None:
     level = settings.LOG_LEVEL.upper()
 
     logs_folder = get_data_dir() / "logs"
-    logs_folder.mkdir(parents=True, exist_ok=True)
+    file_logging = True
+    try:
+        logs_folder.mkdir(parents=True, exist_ok=True)
+    except PermissionError:
+        file_logging = False
+
+    handlers: dict[str, Any] = {
+        "console": {
+            "level": "DEBUG",
+            "formatter": "default",
+            "class": "logging.StreamHandler",
+            "stream": "ext://sys.stderr",
+        },
+    }
+    if file_logging:
+        handlers["app_file"] = {
+            "level": "DEBUG",
+            "formatter": "default",
+            "class": "logging.handlers.RotatingFileHandler",
+            "maxBytes": 10485760,
+            "backupCount": 5,
+            "encoding": "utf8",
+            "filename": str(logs_folder / "app.log"),
+        }
+        handlers["err_file"] = {
+            "level": "ERROR",
+            "formatter": "default",
+            "class": "logging.handlers.RotatingFileHandler",
+            "maxBytes": 10485760,
+            "backupCount": 5,
+            "encoding": "utf8",
+            "filename": str(logs_folder / "errors.log"),
+        }
+
+    active = list(handlers.keys())
 
     config: dict[str, Any] = {
         "version": 1,
@@ -56,88 +91,79 @@ def setup_logging(settings: Settings) -> None:
                 "datefmt": _DATE_FORMAT,
             },
         },
-        "handlers": {
-            "console": {
-                "level": "DEBUG",
-                "formatter": "default",
-                "class": "logging.StreamHandler",
-                "stream": "ext://sys.stderr",
-            },
-            "app_file": {
-                "level": "DEBUG",
-                "formatter": "default",
-                "class": "logging.handlers.RotatingFileHandler",
-                "maxBytes": 10485760,
-                "backupCount": 5,
-                "encoding": "utf8",
-                "filename": str(logs_folder / "app.log"),
-            },
-            "err_file": {
-                "level": "ERROR",
-                "formatter": "default",
-                "class": "logging.handlers.RotatingFileHandler",
-                "maxBytes": 10485760,
-                "backupCount": 5,
-                "encoding": "utf8",
-                "filename": str(logs_folder / "errors.log"),
-            },
-        },
+        "handlers": handlers,
         "loggers": {
             "": {
-                "handlers": ["console", "app_file", "err_file"],
+                "handlers": active,
                 "level": "INFO",
                 "propagate": True,
             },
             "src": {
-                "handlers": ["console", "app_file", "err_file"],
+                "handlers": active,
                 "level": level,
                 "propagate": False,
             },
             "sqlalchemy": {
-                "handlers": ["console", "app_file", "err_file"],
+                "handlers": active,
                 "level": "WARNING",
                 "propagate": False,
             },
             "sqlalchemy.engine": {
-                "handlers": ["console", "app_file", "err_file"],
+                "handlers": active,
                 "level": "WARNING",
                 "propagate": False,
             },
             "sqlalchemy.pool": {
-                "handlers": ["console", "app_file", "err_file"],
+                "handlers": active,
                 "level": "WARNING",
                 "propagate": False,
             },
             "sqlalchemy.dialects": {
-                "handlers": ["console", "app_file", "err_file"],
+                "handlers": active,
                 "level": "WARNING",
                 "propagate": False,
             },
             "sqlalchemy.orm": {
-                "handlers": ["console", "app_file", "err_file"],
+                "handlers": active,
                 "level": "WARNING",
                 "propagate": False,
             },
             "alembic": {
-                "handlers": ["console", "app_file", "err_file"],
+                "handlers": active,
                 "level": "INFO",
                 "propagate": False,
             },
             "httpx": {
-                "handlers": ["console", "app_file", "err_file"],
+                "handlers": active,
                 "level": "WARNING",
                 "propagate": False,
             },
             "uvicorn": {
-                "handlers": ["console", "app_file", "err_file"],
+                "handlers": active,
                 "level": "INFO",
                 "propagate": False,
             },
             "anthropic": {
-                "handlers": ["console", "app_file", "err_file"],
+                "handlers": active,
                 "level": "WARNING",
                 "propagate": False,
             },
         },
     }
-    logging.config.dictConfig(config)
+    try:
+        logging.config.dictConfig(config)
+    except OSError as exc:
+        # File handlers could not be opened (e.g. a race-condition permission
+        # issue that slipped past the mkdir check).  Degrade gracefully to
+        # console-only so the application can still start.
+        logging.basicConfig(
+            level=level,
+            format=_LOG_FORMAT,
+            datefmt=_DATE_FORMAT,
+            stream=sys.stderr,
+        )
+        logging.warning(
+            "Could not configure file logging (%s: %s); falling back to console only",
+            type(exc).__name__,
+            exc,
+        )
