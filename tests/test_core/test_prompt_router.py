@@ -1598,3 +1598,13 @@ class TestBuildClaudeCodeExtraEnv:
         router._tool_settings = mock_ts
         env = router._build_claude_code_extra_env()
         assert "CLAUDE_CODE_UNDERCOVER" not in env
+
+    def test_undercover_not_set_when_key_missing_from_config(self, session_manager: SessionManager):
+        """CLAUDE_CODE_UNDERCOVER is absent when config exists but lacks the key."""
+        mock_ts = MagicMock()
+        mock_ts.get_settings.return_value = {"provider": "anthropic"}
+        mock_ts.get_config_dir.return_value = MagicMock()
+        router = _make_router(session_manager)
+        router._tool_settings = mock_ts
+        env = router._build_claude_code_extra_env()
+        assert "CLAUDE_CODE_UNDERCOVER" not in env
