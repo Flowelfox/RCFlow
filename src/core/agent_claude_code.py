@@ -63,8 +63,10 @@ class ClaudeCodeAgentMixin:
         # injecting the global ANTHROPIC_API_KEY so the settings.json env
         # section takes precedence.
         tool_provider = ""
+        tool_cfg: dict[str, Any] = {}
         if self._tool_settings:  # ty:ignore[unresolved-attribute]
-            tool_provider = self._tool_settings.get_settings("claude_code").get("provider", "")  # ty:ignore[unresolved-attribute]
+            tool_cfg = self._tool_settings.get_settings("claude_code")  # ty:ignore[unresolved-attribute]
+            tool_provider = tool_cfg.get("provider", "")
 
         if tool_provider == "anthropic_login":
             # Anthropic Login uses OAuth tokens from .credentials.json —
@@ -90,7 +92,7 @@ class ClaudeCodeAgentMixin:
 
         # Signal to Claude Code that it is running under RCFlow orchestration
         # when the user has opted into undercover mode via tool settings.
-        if self._tool_settings and self._tool_settings.get_settings("claude_code").get("undercover", False):  # ty:ignore[unresolved-attribute]
+        if tool_cfg.get("undercover", False):
             extra_env["CLAUDE_CODE_UNDERCOVER"] = "1"
 
         return extra_env
