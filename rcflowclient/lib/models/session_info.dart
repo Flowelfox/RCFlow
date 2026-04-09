@@ -68,6 +68,10 @@ class SessionInfo {
   /// sessions always return ``null``.
   final String? agentType;
 
+  /// Custom ordering position. Lower values appear first in the session list.
+  /// Null means "use default createdAt ordering".
+  final int? sortOrder;
+
   SessionInfo({
     required this.sessionId,
     required this.sessionType,
@@ -88,6 +92,7 @@ class SessionInfo {
     this.selectedWorktreePath,
     this.mainProjectPath,
     this.agentType,
+    this.sortOrder,
   });
 
   bool get isProcessing {
@@ -130,6 +135,7 @@ class SessionInfo {
       selectedWorktreePath: json['selected_worktree_path'] as String?,
       mainProjectPath: json['main_project_path'] as String?,
       agentType: json['agent_type'] as String?,
+      sortOrder: (json['sort_order'] as num?)?.toInt(),
     );
   }
 
@@ -154,6 +160,7 @@ class SessionInfo {
       'selected_worktree_path': selectedWorktreePath,
     if (mainProjectPath != null) 'main_project_path': mainProjectPath,
     if (agentType != null) 'agent_type': agentType,
+    if (sortOrder != null) 'sort_order': sortOrder,
   };
 
   String get shortId =>
@@ -181,6 +188,8 @@ class SessionInfo {
     String? mainProjectPath,
     // Pass Object() sentinel to explicitly clear agentType
     Object? agentType = _keep,
+    // Pass Object() sentinel to explicitly clear sortOrder
+    Object? sortOrder = _keep,
   }) {
     return SessionInfo(
       sessionId: sessionId ?? this.sessionId,
@@ -207,6 +216,9 @@ class SessionInfo {
       agentType: identical(agentType, _keep)
           ? this.agentType
           : agentType as String?,
+      sortOrder: identical(sortOrder, _keep)
+          ? this.sortOrder
+          : sortOrder as int?,
     );
   }
 }
