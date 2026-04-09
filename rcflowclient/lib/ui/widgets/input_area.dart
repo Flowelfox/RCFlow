@@ -216,6 +216,13 @@ class _InputAreaState extends State<InputArea> {
   int? _mentionStart;
   _MentionType? _mentionType;
   Timer? _debounceTimer;
+  // Separate timer for draft persistence — longer interval than the mention
+  // suggestion debounce to avoid excessive network calls on every keypress.
+  Timer? _draftTimer;
+  // Pre-captured PaneState reference — safe to use inside timer callbacks
+  // because it is captured once in initState while the element is active,
+  // avoiding the context.read-in-timer anti-pattern.
+  late final PaneState _pane;
   bool _showingNoResults = false;
 
   /// Saved reference to the AppState's focus request notifier so we can safely
@@ -225,11 +232,15 @@ class _InputAreaState extends State<InputArea> {
   @override
   void initState() {
     super.initState();
+    // Capture PaneState once while the element is active. All timer callbacks
+    // reference _pane directly instead of calling context.read.
+    _pane = context.read<PaneState>();
+    _pane.registerDraftProvider(() => _controller.text);
     _controller.addListener(_onTextChanged);
     _focusRequestNotifier = context.read<AppState>().inputFocusRequest;
     _focusRequestNotifier.addListener(_onFocusRequest);
     // Check for pending input text on next frame (e.g. from "Start Session
-    // from Task" which pre-fills the input area).
+    // from Task" which pre-fills the input area, or from draft restoration).
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _consumePendingInput();
     });
@@ -241,8 +252,10 @@ class _InputAreaState extends State<InputArea> {
 
   @override
   void dispose() {
+    _pane.unregisterDraftProvider();
     _focusRequestNotifier.removeListener(_onFocusRequest);
     _debounceTimer?.cancel();
+    _draftTimer?.cancel();
     _removeOverlay();
     _controller.dispose();
     _focusNode.dispose();
@@ -321,6 +334,13 @@ class _InputAreaState extends State<InputArea> {
   void _onTextChanged() {
     final has = _controller.text.trim().isNotEmpty;
     if (has != _hasText) setState(() => _hasText = has);
+
+    // Debounced draft autosave — 800ms so it fires after the user pauses but
+    // not on every keystroke. Uses pre-captured _pane (no context.read here).
+    _draftTimer?.cancel();
+    _draftTimer = Timer(const Duration(milliseconds: 800), () {
+      _pane.triggerDraftSave();
+    });
 
     // Snapshot mention state before _checkForMention potentially dismisses it
     final prevMentionStart = _mentionStart;
