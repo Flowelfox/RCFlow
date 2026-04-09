@@ -135,7 +135,6 @@ info "Install directory: ${INSTALL_PREFIX}"
 info "Service user:      ${SERVICE_USER}"
 info "Server port:       ${RCFLOW_PORT}"
 info "Owner user:        ${OWNER_USER:-<none>}"
-echo ""
 
 # ── Stop existing service ───────────────────────────────────────────────────
 

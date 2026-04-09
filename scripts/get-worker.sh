@@ -492,7 +492,6 @@ main() {
     info "Platform: ${platform}"
     info "Architecture: ${arch}"
     info "Version: v${version}"
-    printf "\n"
 
     case "$platform" in
         linux)  install_linux "$version" "$arch" "$@" ;;
