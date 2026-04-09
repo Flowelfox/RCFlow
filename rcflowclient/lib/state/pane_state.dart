@@ -821,7 +821,6 @@ class PaneState extends ChangeNotifier {
     notifyListeners();
 
     // Load the new-session pane draft for the target worker (local-only).
-    final targetWorker = _workerId ?? _host.defaultWorkerId;
     if (targetWorker != null) {
       // ignore: discarded_futures
       _loadNewSessionDraftAsync(targetWorker);

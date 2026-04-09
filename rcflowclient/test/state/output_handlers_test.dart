@@ -72,6 +72,16 @@ class _FakePaneHost implements PaneHost {
 
   @override
   void muteSessionSound(String sessionId) {}
+
+  @override
+  ({String content, DateTime? cachedAt}) getDraft(String key) =>
+      (content: '', cachedAt: null);
+
+  @override
+  void saveDraft(String key, String content) {}
+
+  @override
+  void clearDraft(String key) {}
 }
 
 void main() {
