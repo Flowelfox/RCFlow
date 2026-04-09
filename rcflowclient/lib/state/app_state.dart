@@ -1246,6 +1246,17 @@ class AppState extends ChangeNotifier implements PaneHost {
       _settings.getLastAgentForWorker(workerId);
 
   @override
+  ({String content, DateTime? cachedAt}) getDraft(String key) =>
+      _settings.getDraft(key);
+
+  @override
+  void saveDraft(String key, String content) =>
+      _settings.saveDraft(key, content);
+
+  @override
+  void clearDraft(String key) => _settings.clearDraft(key);
+
+  @override
   Future<String?> resolveProjectOnWorker(
     String workerId,
     String projectName,

@@ -1626,7 +1626,7 @@ wheels = [
 
 [[package]]
 name = "rcflow"
-version = "0.35.1"
+version = "0.35.2"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
