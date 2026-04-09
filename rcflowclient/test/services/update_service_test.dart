@@ -36,13 +36,11 @@ Future<SettingsService> _buildSettings({
   String? dismissedUpdateVersion,
 }) async {
   SharedPreferences.setMockInitialValues({
-    if (currentVersion != null) 'rcflow_current_version': currentVersion,
-    if (cachedLatestVersion != null)
-      'rcflow_cached_latest_version': cachedLatestVersion,
+    'rcflow_current_version': ?currentVersion,
+    'rcflow_cached_latest_version': ?cachedLatestVersion,
     if (lastUpdateCheck != null)
       'rcflow_last_update_check': lastUpdateCheck.toUtc().toIso8601String(),
-    if (dismissedUpdateVersion != null)
-      'rcflow_dismissed_update_version': dismissedUpdateVersion,
+    'rcflow_dismissed_update_version': ?dismissedUpdateVersion,
   });
   final settings = SettingsService();
   await settings.init();

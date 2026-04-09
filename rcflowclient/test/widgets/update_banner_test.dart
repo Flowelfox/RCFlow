@@ -38,8 +38,7 @@ Future<AppState> _buildAppState({
 }) async {
   SharedPreferences.setMockInitialValues({
     'rcflow_current_version': currentVersion,
-    if (cachedLatestVersion != null)
-      'rcflow_cached_latest_version': cachedLatestVersion,
+    'rcflow_cached_latest_version': ?cachedLatestVersion,
   });
   final settings = SettingsService();
   await settings.init();
