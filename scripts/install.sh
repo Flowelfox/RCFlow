@@ -289,6 +289,7 @@ if [[ ! -f "$INSTALL_PREFIX/settings.json" ]]; then
   "TOOLS_DIR": "${INSTALL_PREFIX}/tools",
   "TOOL_AUTO_UPDATE": "true",
   "TOOL_UPDATE_INTERVAL_HOURS": "6",
+  "WSS_ENABLED": "true",
   "LOG_LEVEL": "INFO"
 }
 JSONEOF
