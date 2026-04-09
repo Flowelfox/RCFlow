@@ -20,6 +20,7 @@ import asyncio  # noqa: TC003
 import json
 import logging
 import os
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -34,7 +35,7 @@ from src.core.background_tasks import BackgroundTasksMixin
 from src.core.buffer import MessageType
 from src.core.context import ContextMixin
 from src.core.llm import LLMClient, StreamDone, TextChunk, ToolCallRequest
-from src.core.session import ActiveSession, ActivityState, SessionManager, SessionStatus
+from src.core.session import ActiveSession, ActivityState, SessionManager, SessionStatus, SessionType
 from src.core.session_lifecycle import SessionLifecycleMixin
 from src.executors.base import BaseExecutor, ExecutionChunk
 from src.executors.claude_code import ClaudeCodeExecutor
@@ -43,6 +44,9 @@ from src.executors.http import HttpExecutor
 from src.executors.opencode import OpenCodeExecutor
 from src.executors.shell import ShellExecutor
 from src.executors.worktree import WorktreeExecutor
+from src.models.db import Session as SessionModel
+from src.models.db import Task as TaskModel
+from src.models.db import TaskSession as TaskSessionModel
 from src.services.artifact_scanner import ArtifactScanner
 from src.services.telemetry_service import InFlightTurn, TelemetryService
 from src.services.tool_manager import ToolManager
@@ -60,6 +64,32 @@ def _truncate_tool_output(content: str) -> str:
     if len(content) > _MAX_TOOL_OUTPUT_CHARS:
         return content[:_MAX_TOOL_OUTPUT_CHARS] + f"\n\n... (truncated, {len(content):,} total chars)"
     return content
+
+
+def _build_planning_prompt(title: str, description: str, plan_path: Path) -> str:
+    """Build the initial user message for a planning session."""
+    lines = [
+        "You are a software planning assistant. Your job is to produce a detailed",
+        "implementation plan — not to implement anything.",
+        "",
+        "## Task",
+        f"**Title:** {title}",
+    ]
+    if description:
+        lines += ["", "**Description:**", description]
+    lines += [
+        "",
+        "## Instructions",
+        "1. Explore the codebase thoroughly using Read, Grep, and Glob tools.",
+        "2. Identify all files, components, APIs, and data models that need to change.",
+        "3. Write a detailed step-by-step implementation plan in Markdown.",
+        "4. Include: files to change, data model implications, API changes, UI changes,",
+        "   edge cases, testing strategy, and rollout notes.",
+        "5. Do NOT implement anything. Do NOT run shell commands or modify any files",
+        f"   except to write your final plan to exactly: `{plan_path}`",
+        "6. Create the plan directory if it does not exist, then write the plan file.",
+    ]
+    return "\n".join(lines)
 
 
 class PromptRouter(
@@ -100,6 +130,7 @@ class PromptRouter(
         self._pending_summary_tasks: set[asyncio.Task[None]] = set()
         self._pending_task_creation_tasks: set[asyncio.Task[None]] = set()
         self._pending_task_update_tasks: set[asyncio.Task[None]] = set()
+        self._pending_plan_finalization_tasks: set[asyncio.Task[None]] = set()
 
     # ------------------------------------------------------------------
     # Executor / config helpers
@@ -229,15 +260,49 @@ class PromptRouter(
     )
     _TEXT_EXTENSIONS = frozenset(
         {
-            ".txt", ".md", ".rst", ".log", ".csv",
-            ".py", ".js", ".ts", ".jsx", ".tsx",
-            ".dart", ".java", ".kt", ".swift", ".go", ".rs", ".rb",
-            ".c", ".cpp", ".h", ".hpp", ".cs", ".php",
-            ".html", ".css", ".scss", ".less",
-            ".json", ".yaml", ".yml", ".toml", ".xml",
-            ".sh", ".bash", ".zsh", ".fish", ".ps1",
-            ".sql", ".graphql", ".proto",
-            ".gitignore", ".env", "Dockerfile",
+            ".txt",
+            ".md",
+            ".rst",
+            ".log",
+            ".csv",
+            ".py",
+            ".js",
+            ".ts",
+            ".jsx",
+            ".tsx",
+            ".dart",
+            ".java",
+            ".kt",
+            ".swift",
+            ".go",
+            ".rs",
+            ".rb",
+            ".c",
+            ".cpp",
+            ".h",
+            ".hpp",
+            ".cs",
+            ".php",
+            ".html",
+            ".css",
+            ".scss",
+            ".less",
+            ".json",
+            ".yaml",
+            ".yml",
+            ".toml",
+            ".xml",
+            ".sh",
+            ".bash",
+            ".zsh",
+            ".fish",
+            ".ps1",
+            ".sql",
+            ".graphql",
+            ".proto",
+            ".gitignore",
+            ".env",
+            "Dockerfile",
         }
     )
     _IMAGE_MIME_TYPES = frozenset({"image/jpeg", "image/png", "image/gif", "image/webp"})
@@ -249,12 +314,11 @@ class PromptRouter(
         if att.mime_type in self._TEXT_MIME_TYPES:
             return True
         import os  # noqa: PLC0415
+
         _, ext = os.path.splitext(att.file_name.lower())
         return ext in self._TEXT_EXTENSIONS
 
-    def _build_attachment_blocks(
-        self, attachments: list[ResolvedAttachment]
-    ) -> list[dict[str, Any]]:
+    def _build_attachment_blocks(self, attachments: list[ResolvedAttachment]) -> list[dict[str, Any]]:
         """Convert resolved attachments into LLM content blocks.
 
         - Images → image content blocks (Anthropic base64 or OpenAI image_url),
@@ -410,8 +474,7 @@ class PromptRouter(
         if resolved is None:
             self._push_project_error(
                 session,
-                f'Project not found: "{project_name}". '
-                f"Check that it exists under a configured projects directory.",
+                f'Project not found: "{project_name}". Check that it exists under a configured projects directory.',
             )
             return
 
@@ -449,6 +512,119 @@ class PromptRouter(
             self._session_manager.broadcast_session_update(session)
 
     # ------------------------------------------------------------------
+    # Plan session setup
+    # ------------------------------------------------------------------
+
+    async def prepare_plan_session(
+        self,
+        task_id: str,
+        project_name: str | None = None,
+        selected_worktree_path: str | None = None,
+    ) -> tuple[str, str]:
+        """Set up a read-only planning session for a task.
+
+        Returns ``(session_id, planning_prompt)``. The caller is responsible for
+        firing ``handle_prompt(planning_prompt, session_id, ...)`` as a background
+        task. Does NOT start the agentic loop.
+
+        Raises:
+            ValueError: If the task does not exist.
+            RuntimeError: If the database is not configured or no project is
+                available to determine the plan output path.
+        """
+        if self._db_session_factory is None:
+            raise RuntimeError("Database not configured")
+
+        task_uuid = uuid.UUID(task_id)
+        async with self._db_session_factory() as db:
+            task = await db.get(TaskModel, task_uuid)
+            if task is None:
+                raise ValueError(f"Task not found: {task_id}")
+            task_title = task.title
+            task_description = task.description or ""
+
+        # Create a ONE_SHOT session (one prompt → plan → auto-ends).
+        session = self._session_manager.create_session(SessionType.ONE_SHOT)
+
+        # Apply project context if provided.
+        if project_name:
+            self._apply_project_name(session, project_name)
+        if selected_worktree_path:
+            session.metadata["selected_worktree_path"] = selected_worktree_path
+
+        # Determine the plan output path.
+        project_root = session.main_project_path
+        if not project_root and self._settings and self._settings.projects_dirs:
+            project_root = str(self._settings.projects_dirs[0])
+        if not project_root:
+            raise RuntimeError(
+                "No project configured — cannot determine plan output path. "
+                "Select a project before starting a plan session."
+            )
+
+        plan_dir = Path(project_root) / ".rcflow" / "plans"
+        plan_path = plan_dir / f"{task_id}.md"
+
+        session.metadata["session_purpose"] = "plan"
+        session.metadata["task_id"] = task_id
+        session.metadata["plan_output_path"] = str(plan_path)
+
+        # Pre-seed restrictive permission rules.
+        # Rule ordering: PermissionManager.check_cached() iterates self._rules in
+        # REVERSE (most-recently-added rules checked first). Deny-all rules are
+        # added first (checked last as fallback); the specific Write-allow for the
+        # plan directory is added last (checked first, overrides the Write deny).
+        session.metadata["permission_rules"] = [
+            # Per-tool denies (added first → checked last as fallback).
+            # Must use "tool_session" scope (not "all_session") so that
+            # check_cached() matches them in its TOOL_SESSION branch.
+            # "all_session" is only matched when tool_name == "*".
+            {"tool_name": "Bash", "decision": "deny", "scope": "tool_session", "path_prefix": None},
+            {"tool_name": "Edit", "decision": "deny", "scope": "tool_session", "path_prefix": None},
+            {"tool_name": "Agent", "decision": "deny", "scope": "tool_session", "path_prefix": None},
+            {"tool_name": "Write", "decision": "deny", "scope": "tool_session", "path_prefix": None},
+            # Specific allow (added last → checked first, overrides Write deny for plan dir)
+            {"tool_name": "Write", "decision": "allow", "scope": "tool_path", "path_prefix": str(plan_dir)},
+        ]
+
+        # Enforce the permission rules on the live session immediately.
+        # (restore_rules() is normally only called during restore_session();
+        # for new plan sessions we must seed the PermissionManager directly.)
+        from src.core.permissions import PermissionManager  # noqa: PLC0415
+
+        pm = PermissionManager()
+        pm.restore_rules(session.metadata["permission_rules"])
+        session.permission_manager = pm
+
+        # Attach session to task in DB so task.sessions list is populated.
+        backend_id = self._settings.RCFLOW_BACKEND_ID if self._settings else ""
+        async with self._db_session_factory() as db:
+            session_uuid = uuid.UUID(session.id)
+            existing = await db.get(SessionModel, session_uuid)
+            if existing is None:
+                db.add(
+                    SessionModel(
+                        id=session_uuid,
+                        backend_id=backend_id,
+                        created_at=session.created_at,
+                        ended_at=session.ended_at,
+                        session_type=session.session_type.value,
+                        status=session.status.value,
+                    )
+                )
+                await db.flush()
+            link = TaskSessionModel(task_id=task_uuid, session_id=session_uuid)
+            db.add(link)
+            try:
+                await db.commit()
+            except Exception:
+                await db.rollback()
+                # Link may already exist — non-fatal
+
+        planning_prompt = _build_planning_prompt(task_title, task_description, plan_path)
+        return session.id, planning_prompt
+
+    # ------------------------------------------------------------------
     # Main prompt handler
     # ------------------------------------------------------------------
 
@@ -459,6 +635,7 @@ class PromptRouter(
         attachments: list[ResolvedAttachment] | None = None,
         project_name: str | None = None,
         selected_worktree_path: str | None = None,
+        task_id: str | None = None,
     ) -> str:
         """Handle a user prompt. Creates a new session or resumes an existing one.
 
@@ -483,6 +660,12 @@ class PromptRouter(
         resolved_id = self.ensure_session(session_id)
         session = self._session_manager.get_session(resolved_id)
         assert session is not None  # ensure_session guarantees this
+
+        # Store task_id in session metadata so _build_plan_context can inject
+        # the plan on the first LLM turn. Only set once to avoid overwriting if
+        # this is a subsequent prompt in the same session.
+        if task_id and "primary_task_id" not in session.metadata:
+            session.metadata["primary_task_id"] = task_id
 
         # Resolve and validate the project_name from the client picker BEFORE the
         # DB row write, so the initial INSERT already contains main_project_path.
@@ -518,8 +701,7 @@ class PromptRouter(
             buffer_data: dict[str, Any] = {"content": text, "role": "user"}
             if attachments:
                 buffer_data["attachments"] = [
-                    {"name": a.file_name, "mime_type": a.mime_type, "size": len(a.data)}
-                    for a in attachments
+                    {"name": a.file_name, "mime_type": a.mime_type, "size": len(a.data)} for a in attachments
                 ]
             session.buffer.push_text(MessageType.TEXT_CHUNK, buffer_data)
             await self._forward_to_claude_code(session, text)
@@ -530,8 +712,7 @@ class PromptRouter(
             buffer_data2: dict[str, Any] = {"content": text, "role": "user"}
             if attachments:
                 buffer_data2["attachments"] = [
-                    {"name": a.file_name, "mime_type": a.mime_type, "size": len(a.data)}
-                    for a in attachments
+                    {"name": a.file_name, "mime_type": a.mime_type, "size": len(a.data)} for a in attachments
                 ]
             session.buffer.push_text(MessageType.TEXT_CHUNK, buffer_data2)
             await self._forward_to_codex(session, text)
@@ -542,8 +723,7 @@ class PromptRouter(
             buffer_data3oc: dict[str, Any] = {"content": text, "role": "user"}
             if attachments:
                 buffer_data3oc["attachments"] = [
-                    {"name": a.file_name, "mime_type": a.mime_type, "size": len(a.data)}
-                    for a in attachments
+                    {"name": a.file_name, "mime_type": a.mime_type, "size": len(a.data)} for a in attachments
                 ]
             session.buffer.push_text(MessageType.TEXT_CHUNK, buffer_data3oc)
             await self._forward_to_opencode(session, text)
@@ -555,8 +735,7 @@ class PromptRouter(
             buffer_data3: dict[str, Any] = {"content": text, "role": "user"}
             if attachments:
                 buffer_data3["attachments"] = [
-                    {"name": a.file_name, "mime_type": a.mime_type, "size": len(a.data)}
-                    for a in attachments
+                    {"name": a.file_name, "mime_type": a.mime_type, "size": len(a.data)} for a in attachments
                 ]
             session.buffer.push_text(MessageType.TEXT_CHUNK, buffer_data3)
             await self._handle_direct_prompt(session, text)
@@ -570,8 +749,7 @@ class PromptRouter(
             buffer_data4: dict[str, Any] = {"content": text, "role": "user"}
             if attachments:
                 buffer_data4["attachments"] = [
-                    {"name": a.file_name, "mime_type": a.mime_type, "size": len(a.data)}
-                    for a in attachments
+                    {"name": a.file_name, "mime_type": a.mime_type, "size": len(a.data)} for a in attachments
                 ]
             session.buffer.push_text(MessageType.TEXT_CHUNK, buffer_data4)
             await self._handle_direct_prompt(session, text)
@@ -588,8 +766,7 @@ class PromptRouter(
             # Injected every turn so the LLM always has the project in context,
             # not only on the first turn where the picker selection was made.
             project_context = (
-                self._build_project_context_from_path(session.main_project_path)
-                if session.main_project_path else None
+                self._build_project_context_from_path(session.main_project_path) if session.main_project_path else None
             )
 
             tool_mentions = self._extract_tool_mentions(text)
@@ -602,6 +779,11 @@ class PromptRouter(
             # selected for this session so the LLM knows which working directory
             # to pass when it calls an agent tool (claude_code / codex).
             worktree_context = self._build_active_worktree_context(session)
+
+            # Plan context: injected on the first turn of implementation sessions
+            # that have a task with a completed plan artifact. Skipped for planning
+            # sessions themselves.
+            plan_context = await self._build_plan_context(session)
 
             context_blocks: list[dict[str, Any]] = []
             if project_context:
@@ -620,11 +802,13 @@ class PromptRouter(
                 context_blocks.append(
                     {"type": "text", "text": worktree_context, "cache_control": {"type": "ephemeral"}},
                 )
+            if plan_context:
+                context_blocks.append(
+                    {"type": "text", "text": plan_context, "cache_control": {"type": "ephemeral"}},
+                )
 
             # Build attachment content blocks (images, text files, etc.)
-            attachment_blocks: list[dict[str, Any]] = (
-                self._build_attachment_blocks(attachments) if attachments else []
-            )
+            attachment_blocks: list[dict[str, Any]] = self._build_attachment_blocks(attachments) if attachments else []
 
             if context_blocks or attachment_blocks:
                 content: str | list[dict[str, Any]] = [
@@ -648,8 +832,7 @@ class PromptRouter(
             buffer_data: dict[str, Any] = {"content": text, "role": "user"}
             if attachments:
                 buffer_data["attachments"] = [
-                    {"name": a.file_name, "mime_type": a.mime_type, "size": len(a.data)}
-                    for a in attachments
+                    {"name": a.file_name, "mime_type": a.mime_type, "size": len(a.data)} for a in attachments
                 ]
             session.buffer.push_text(MessageType.TEXT_CHUNK, buffer_data)
 
@@ -807,6 +990,7 @@ class PromptRouter(
                     },
                 )
                 session.fail(str(e))
+                self._fire_plan_finalization_task(session)
                 self._fire_archive_task(session.id)
 
         return session.id
@@ -881,10 +1065,9 @@ class PromptRouter(
         if tool_def.executor == "worktree" and tool_call.tool_input.get("action") != "list":
             if session.permission_manager is None:
                 from src.core.permissions import PermissionManager  # noqa: PLC0415
+
                 session.permission_manager = PermissionManager()
-            decision = await self._handle_permission_check(
-                session, tool_call.tool_name, tool_call.tool_input
-            )
+            decision = await self._handle_permission_check(session, tool_call.tool_name, tool_call.tool_input)
             if decision.value == "deny":
                 deny_msg = f"Worktree operation '{tool_call.tool_input.get('action')}' denied by user."
                 session.buffer.push_text(
@@ -956,9 +1139,7 @@ class PromptRouter(
 
         except Exception as e:
             if self._telemetry is not None and _tel_tool_call is not None:
-                await self._telemetry.record_tool_end(
-                    _tel_tool_call, status="error", error=str(e)
-                )
+                await self._telemetry.record_tool_end(_tel_tool_call, status="error", error=str(e))
             result_text = f"Tool execution failed: {e}"
             session.buffer.push_text(
                 MessageType.ERROR,

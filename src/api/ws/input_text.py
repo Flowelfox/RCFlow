@@ -275,6 +275,54 @@ async def ws_input_text(
                     await websocket.send_json({"type": "linear_issue_list", "issues": []})
                 continue
 
+            if msg_type == "start_plan_session":
+                task_id_str = message.get("task_id")
+                plan_project_name: str | None = message.get("project_name") or None
+                plan_worktree_path: str | None = message.get("selected_worktree_path") or None
+                if not task_id_str:
+                    await websocket.send_json(
+                        {
+                            "type": "error",
+                            "content": "Missing task_id",
+                            "code": "MISSING_TASK_ID",
+                        }
+                    )
+                    continue
+                try:
+                    plan_session_id, planning_prompt = await prompt_router.prepare_plan_session(
+                        task_id=task_id_str,
+                        project_name=plan_project_name,
+                        selected_worktree_path=plan_worktree_path,
+                    )
+                    await websocket.send_json(
+                        {
+                            "type": "ack",
+                            "session_id": plan_session_id,
+                            "purpose": "plan",
+                        }
+                    )
+                    # Fire agentic loop as background task (same pattern as "prompt")
+                    plan_task = asyncio.create_task(
+                        prompt_router.handle_prompt(
+                            planning_prompt,
+                            plan_session_id,
+                            project_name=plan_project_name,
+                            selected_worktree_path=plan_worktree_path,
+                            task_id=task_id_str,
+                        )
+                    )
+                    background_tasks.add(plan_task)
+                    plan_task.add_done_callback(background_tasks.discard)
+                except (ValueError, RuntimeError) as e:
+                    await websocket.send_json(
+                        {
+                            "type": "error",
+                            "content": str(e),
+                            "code": "PLAN_SESSION_ERROR",
+                        }
+                    )
+                continue
+
             if msg_type != "prompt":
                 await websocket.send_json(
                     {
@@ -293,6 +341,7 @@ async def ws_input_text(
             session_id = message.get("session_id")
             project_name: str | None = message.get("project_name") or None
             selected_worktree_path: str | None = message.get("selected_worktree_path") or None
+            prompt_task_id: str | None = message.get("task_id") or None
 
             # Resolve optional attachments
             resolved_attachments: list[ResolvedAttachment] | None = None
@@ -335,6 +384,7 @@ async def ws_input_text(
                     attachments=resolved_attachments,
                     project_name=project_name,
                     selected_worktree_path=selected_worktree_path,
+                    task_id=prompt_task_id,
                 )
             )
             background_tasks.add(task)

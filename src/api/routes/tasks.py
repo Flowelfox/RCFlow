@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from datetime import UTC, datetime
@@ -107,6 +108,7 @@ async def _task_to_dict_full(task: TaskModel, db: AsyncSession) -> dict[str, Any
         "source": task.source,
         "created_at": task.created_at.isoformat() if task.created_at else "",
         "updated_at": task.updated_at.isoformat() if task.updated_at else "",
+        "plan_artifact_id": str(task.plan_artifact_id) if task.plan_artifact_id else None,
         "sessions": sessions,
     }
 
@@ -129,6 +131,14 @@ class UpdateTaskRequest(BaseModel):
     title: str | None = None
     description: str | None = None
     status: str | None = None
+    plan_artifact_id: str | None = None  # None means "not provided"; explicit null clears the plan link
+
+
+class StartPlanRequest(BaseModel):
+    """Body for POST /api/tasks/{task_id}/plan."""
+
+    project_name: str | None = None
+    selected_worktree_path: str | None = None
 
 
 class AttachSessionRequest(BaseModel):
@@ -305,6 +315,17 @@ async def update_task(task_id: str, body: UpdateTaskRequest, request: Request) -
             validate_status_transition(task.status, body.status)
             task.status = body.status
             changed = True
+        if "plan_artifact_id" in body.model_fields_set:
+            # Field was explicitly supplied (even as null — clears the plan link)
+            if body.plan_artifact_id is None:
+                task.plan_artifact_id = None
+                changed = True
+            else:
+                try:
+                    task.plan_artifact_id = uuid.UUID(body.plan_artifact_id)
+                    changed = True
+                except ValueError:
+                    raise HTTPException(status_code=400, detail="Invalid plan_artifact_id") from None
 
         if changed:
             task.updated_at = datetime.now(UTC)
@@ -317,6 +338,50 @@ async def update_task(task_id: str, body: UpdateTaskRequest, request: Request) -
     session_manager.broadcast_task_update(result)
 
     return result
+
+
+@router.post(
+    "/tasks/{task_id}/plan",
+    summary="Start a planning session for a task",
+    description=(
+        "Creates a new read-only planning session for the task. "
+        "The session explores the project and saves a Markdown plan to "
+        ".rcflow/plans/<task_id>.md, then links it as an artifact. "
+        "Returns immediately with the new session_id; the planning session "
+        "runs asynchronously."
+    ),
+    tags=["tasks"],
+    dependencies=[Depends(verify_http_api_key)],
+)
+async def start_task_plan(
+    task_id: str,
+    body: StartPlanRequest,
+    request: Request,
+) -> dict[str, str]:
+    """Trigger a planning session for a task."""
+    prompt_router = request.app.state.prompt_router
+    try:
+        plan_session_id, planning_prompt = await prompt_router.prepare_plan_session(
+            task_id=task_id,
+            project_name=body.project_name,
+            selected_worktree_path=body.selected_worktree_path,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from None
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from None
+
+    # Fire agentic loop as a true background task (not tied to HTTP request lifetime)
+    _plan_task = asyncio.create_task(  # noqa: RUF006
+        prompt_router.handle_prompt(
+            planning_prompt,
+            plan_session_id,
+            project_name=body.project_name,
+            selected_worktree_path=body.selected_worktree_path,
+            task_id=task_id,
+        )
+    )
+    return {"session_id": plan_session_id}
 
 
 @router.delete(

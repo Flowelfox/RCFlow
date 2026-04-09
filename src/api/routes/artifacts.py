@@ -92,6 +92,7 @@ def _artifact_to_dict(artifact: ArtifactModel) -> dict[str, Any]:
         "file_extension": artifact.file_extension,
         "file_size": artifact.file_size,
         "mime_type": artifact.mime_type,
+        "file_exists": artifact.file_exists,
         "discovered_at": artifact.discovered_at.isoformat() if artifact.discovered_at else None,
         "modified_at": artifact.modified_at.isoformat() if artifact.modified_at else None,
         "session_id": str(artifact.session_id) if artifact.session_id else None,
@@ -338,6 +339,72 @@ async def get_artifact_content(artifact_id: str, request: Request) -> PlainTextR
             raise HTTPException(status_code=500, detail="Error reading file") from None
 
         return PlainTextResponse(content=content, media_type=artifact.mime_type or "text/plain")
+
+
+@router.post(
+    "/artifacts/recheck",
+    summary="Recheck artifact file existence",
+    description=(
+        "Validates whether each saved artifact file still exists on disk. "
+        "Updates the file_exists flag for all artifacts and broadcasts the refreshed list to connected clients."
+    ),
+    tags=["Artifacts"],
+    dependencies=[Depends(verify_http_api_key)],
+)
+async def recheck_artifacts(request: Request) -> dict[str, Any]:
+    """Check disk existence for all artifacts and update the file_exists flag."""
+    settings: Settings = request.app.state.settings
+    db_session_factory = request.app.state.db_session_factory
+    if db_session_factory is None:
+        return {"checked": 0, "missing": 0}
+
+    checked = 0
+    missing = 0
+    async with db_session_factory() as db:
+        stmt = select(ArtifactModel).where(ArtifactModel.backend_id == settings.RCFLOW_BACKEND_ID)
+        result = await db.execute(stmt)
+        artifacts = result.scalars().all()
+        for artifact in artifacts:
+            exists = Path(artifact.file_path).exists()
+            if artifact.file_exists != exists:
+                artifact.file_exists = exists
+            checked += 1
+            if not exists:
+                missing += 1
+        await db.commit()
+
+    # Broadcast refreshed list so all clients update immediately
+    session_manager: SessionManager = request.app.state.session_manager
+    async with db_session_factory() as db:
+        stmt = (
+            select(ArtifactModel)
+            .where(ArtifactModel.backend_id == settings.RCFLOW_BACKEND_ID)
+            .order_by(ArtifactModel.discovered_at.desc())
+        )
+        result = await db.execute(stmt)
+        projects_dirs = settings.projects_dirs
+        from src.core.prompt_router import PromptRouter  # noqa: PLC0415
+
+        artifacts_out = [
+            {
+                "artifact_id": str(a.id),
+                "file_path": a.file_path,
+                "file_name": a.file_name,
+                "file_extension": a.file_extension,
+                "file_size": a.file_size,
+                "mime_type": a.mime_type,
+                "file_exists": a.file_exists,
+                "discovered_at": a.discovered_at.isoformat() if a.discovered_at else "",
+                "modified_at": a.modified_at.isoformat() if a.modified_at else "",
+                "session_id": str(a.session_id) if a.session_id else None,
+                "project_name": PromptRouter._resolve_artifact_project(a.file_path, projects_dirs),
+            }
+            for a in result.scalars()
+        ]
+    session_manager.broadcast_artifact_list(artifacts_out)
+
+    logger.info("Artifact recheck: %d checked, %d missing", checked, missing)
+    return {"checked": checked, "missing": missing}
 
 
 @router.delete(

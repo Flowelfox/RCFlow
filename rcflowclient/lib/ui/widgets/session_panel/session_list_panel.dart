@@ -1,8 +1,10 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../../../models/session_info.dart';
+import '../../../models/worker_config.dart';
 import '../../../services/notification_service.dart';
 import '../../../state/app_state.dart';
 import '../../../theme.dart';
@@ -11,8 +13,69 @@ import '../../onboarding_keys.dart' as onboarding;
 import '../notification_toast.dart';
 import '../settings_menu.dart';
 import 'artifact_list_panel.dart';
+import 'helpers.dart';
 import 'task_list_panel.dart';
 import 'worker_group.dart';
+
+/// Computes the ordered flat list of *visible* sessions across all workers,
+/// respecting worker expansion and project sub-group collapse state.
+///
+/// Used for Shift+click range selection in the workers tab. Exposed at library
+/// level so it can be unit-tested without a widget environment.
+List<SessionInfo> computeFlatVisibleSessionList({
+  required List<WorkerConfig> configs,
+  required Map<String, List<SessionInfo>> groupedSessions,
+  required Set<String> expandedWorkers,
+  required bool groupByProject,
+  required Map<String, Set<String>> collapsedWorkerProjects,
+}) {
+  final result = <SessionInfo>[];
+  for (final config in configs) {
+    if (!expandedWorkers.contains(config.id)) continue;
+    final sessions = groupedSessions[config.id] ?? [];
+
+    if (!groupByProject) {
+      // Sort newest-first (matches WorkerGroup render order).
+      final sorted = [...sessions]
+        ..sort(
+          (a, b) => (b.createdAt ?? DateTime(2000)).compareTo(
+            a.createdAt ?? DateTime(2000),
+          ),
+        );
+      result.addAll(sorted);
+    } else {
+      // Replicate the project grouping logic from WorkerGroup.
+      final byProject = <String?, List<SessionInfo>>{};
+      for (final s in sessions) {
+        final projectName = s.mainProjectPath
+            ?.split('/')
+            .where((p) => p.isNotEmpty)
+            .lastOrNull;
+        byProject.putIfAbsent(projectName, () => []).add(s);
+      }
+      final projectNames = byProject.keys.toList()
+        ..sort((a, b) {
+          if (a == null && b == null) return 0;
+          if (a == null) return 1;
+          if (b == null) return -1;
+          return a.toLowerCase().compareTo(b.toLowerCase());
+        });
+      final collapsedProjects = collapsedWorkerProjects[config.id] ?? {};
+      for (final projectName in projectNames) {
+        final collapseKey = projectName ?? '\x00other';
+        if (collapsedProjects.contains(collapseKey)) continue;
+        final projectSessions = [...byProject[projectName]!]
+          ..sort(
+            (a, b) => (b.createdAt ?? DateTime(2000)).compareTo(
+              a.createdAt ?? DateTime(2000),
+            ),
+          );
+        result.addAll(projectSessions);
+      }
+    }
+  }
+  return result;
+}
 
 /// Reusable session list that works both inline (sidebar) and inside a sheet.
 ///
@@ -35,6 +98,22 @@ class _SessionListPanelState extends State<SessionListPanel>
   final TextEditingController _workerSearchController = TextEditingController();
   String _workerSearchQuery = '';
   final Set<String> _activeStatusFilters = {};
+
+  // ---- Workers-tab multi-select state ----
+  final Set<String> _selectedSessionIds = {};
+
+  /// Anchor index for Shift+click range selection. Points into
+  /// [_currentFlatSessionList].
+  int? _lastClickedVisibleSessionIndex;
+
+  /// Populated at the start of each [_buildWorkersTab] build; used by
+  /// [_handleSessionTap] to resolve Shift+click ranges.
+  List<SessionInfo> _currentFlatSessionList = [];
+
+  /// Per-worker project sub-group collapse state. Key: workerId,
+  /// Value: set of collapsed project keys (project name or '\x00other').
+  /// Lifted from WorkerGroup so the parent can compute the flat visible list.
+  final Map<String, Set<String>> _collapsedWorkerProjects = {};
 
   static const _statusOrder = [
     'active',
@@ -220,6 +299,314 @@ class _SessionListPanelState extends State<SessionListPanel>
   static String _normalizeStatus(String status) =>
       status == 'executing' ? 'active' : status;
 
+  // ---------------------------------------------------------------------------
+  // Workers-tab multi-select helpers
+  // ---------------------------------------------------------------------------
+
+  /// Handles a tap on a session tile, respecting Shift/Ctrl/Meta modifiers.
+  ///
+  /// - **Shift+click**: range-selects from the last clicked index to [flatIndex].
+  /// - **Ctrl/Meta+click**: toggles [sessionId] in the selection.
+  /// - **Plain click** while selection is non-empty: toggles [sessionId].
+  /// - **Plain click** while selection is empty: opens the session in a pane.
+  void _handleSessionTap(
+    BuildContext context,
+    String sessionId,
+    int flatIndex,
+    AppState state,
+  ) {
+    final keys = HardwareKeyboard.instance.logicalKeysPressed;
+    final shift =
+        keys.contains(LogicalKeyboardKey.shiftLeft) ||
+        keys.contains(LogicalKeyboardKey.shiftRight);
+    final ctrl =
+        keys.contains(LogicalKeyboardKey.controlLeft) ||
+        keys.contains(LogicalKeyboardKey.controlRight) ||
+        keys.contains(LogicalKeyboardKey.metaLeft) ||
+        keys.contains(LogicalKeyboardKey.metaRight);
+
+    if (shift && _lastClickedVisibleSessionIndex != null) {
+      final anchor = _lastClickedVisibleSessionIndex!;
+      final lo = anchor < flatIndex ? anchor : flatIndex;
+      final hi = anchor < flatIndex ? flatIndex : anchor;
+      setState(() {
+        for (var i = lo; i <= hi; i++) {
+          if (i < _currentFlatSessionList.length) {
+            _selectedSessionIds.add(_currentFlatSessionList[i].sessionId);
+          }
+        }
+        _lastClickedVisibleSessionIndex = flatIndex;
+      });
+    } else if (ctrl) {
+      setState(() {
+        if (_selectedSessionIds.contains(sessionId)) {
+          _selectedSessionIds.remove(sessionId);
+        } else {
+          _selectedSessionIds.add(sessionId);
+        }
+        _lastClickedVisibleSessionIndex = flatIndex;
+      });
+    } else if (_selectedSessionIds.isNotEmpty) {
+      setState(() {
+        if (_selectedSessionIds.contains(sessionId)) {
+          _selectedSessionIds.remove(sessionId);
+        } else {
+          _selectedSessionIds.add(sessionId);
+        }
+        _lastClickedVisibleSessionIndex = flatIndex;
+      });
+    } else {
+      // No selection, no modifiers — default: open session in pane.
+      setState(() => _lastClickedVisibleSessionIndex = flatIndex);
+      state.ensureChatPane().switchSession(sessionId);
+      widget.onSessionSelected?.call();
+    }
+  }
+
+  /// The thin bar shown below the filter bar when sessions are selected.
+  Widget _buildSessionSelectionBar(BuildContext context, AppState state) {
+    final count = _selectedSessionIds.length;
+    return Container(
+      color: context.appColors.accent.withAlpha(18),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 5),
+      child: Row(
+        children: [
+          Icon(
+            Icons.check_box_outlined,
+            size: 14,
+            color: context.appColors.accent,
+          ),
+          const SizedBox(width: 6),
+          Text(
+            '$count session${count == 1 ? '' : 's'} selected',
+            style: TextStyle(
+              color: context.appColors.accentLight,
+              fontSize: 11,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const Spacer(),
+          GestureDetector(
+            onTap: () => setState(() => _selectedSessionIds.clear()),
+            child: const Tooltip(
+              message: 'Clear selection (Esc)',
+              child: Icon(Icons.close_rounded, size: 14),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Shows the bulk right-click context menu for the current session selection.
+  void _showBulkSessionContextMenu(
+    BuildContext context,
+    Offset position,
+    AppState state,
+  ) {
+    final count = _selectedSessionIds.length;
+    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+
+    // Determine which bulk actions are applicable based on selected states.
+    final selectedSessions =
+        _selectedSessionIds
+            .map((id) => state.getSession(id))
+            .whereType<SessionInfo>()
+            .toList();
+    final hasActive = selectedSessions.any(
+      (s) => !isTerminalStatus(s.status) && s.status != 'paused',
+    );
+    final hasPaused = selectedSessions.any((s) => s.status == 'paused');
+    final hasNonTerminal = selectedSessions.any(
+      (s) => !isTerminalStatus(s.status),
+    );
+
+    showMenu<String>(
+      context: context,
+      position: RelativeRect.fromRect(
+        position & const Size(1, 1),
+        Offset.zero & overlay.size,
+      ),
+      color: context.appColors.bgSurface,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      items: [
+        PopupMenuItem(
+          enabled: false,
+          height: 28,
+          child: Text(
+            '$count session${count == 1 ? '' : 's'} selected',
+            style: TextStyle(
+              color: context.appColors.textMuted,
+              fontSize: 11,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ),
+        const PopupMenuDivider(),
+        if (hasActive)
+          PopupMenuItem(
+            value: 'pause',
+            child: Row(
+              children: [
+                Icon(
+                  Icons.pause_rounded,
+                  color: context.appColors.accentLight,
+                  size: 18,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  'Pause all running',
+                  style: TextStyle(color: context.appColors.textPrimary),
+                ),
+              ],
+            ),
+          ),
+        if (hasPaused)
+          PopupMenuItem(
+            value: 'resume',
+            child: Row(
+              children: [
+                Icon(
+                  Icons.play_arrow_rounded,
+                  color: context.appColors.accentLight,
+                  size: 18,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  'Resume all paused',
+                  style: TextStyle(color: context.appColors.textPrimary),
+                ),
+              ],
+            ),
+          ),
+        if (hasNonTerminal)
+          PopupMenuItem(
+            value: 'end',
+            child: Row(
+              children: [
+                Icon(
+                  Icons.stop_circle_outlined,
+                  color: context.appColors.errorText,
+                  size: 18,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  'End $count session${count == 1 ? '' : 's'}\u2026',
+                  style: TextStyle(color: context.appColors.errorText),
+                ),
+              ],
+            ),
+          ),
+        const PopupMenuDivider(),
+        PopupMenuItem(
+          value: 'clear',
+          child: Row(
+            children: [
+              Icon(
+                Icons.close_rounded,
+                color: context.appColors.textSecondary,
+                size: 18,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'Clear selection',
+                style: TextStyle(color: context.appColors.textPrimary),
+              ),
+            ],
+          ),
+        ),
+      ],
+    ).then((value) {
+      if (!context.mounted || value == null) return;
+      switch (value) {
+        case 'pause':
+          _bulkPauseSessions(state);
+        case 'resume':
+          _bulkResumeSessions(state);
+        case 'end':
+          _confirmBulkEndSessions(context, state);
+        case 'clear':
+          setState(() => _selectedSessionIds.clear());
+      }
+    });
+  }
+
+  void _bulkPauseSessions(AppState state) {
+    final ids = List<String>.from(_selectedSessionIds);
+    setState(() => _selectedSessionIds.clear());
+    for (final id in ids) {
+      final session = state.getSession(id);
+      if (session == null ||
+          isTerminalStatus(session.status) ||
+          session.status == 'paused') {
+        continue;
+      }
+      state.pauseSessionDirect(id, session.workerId);
+    }
+  }
+
+  void _bulkResumeSessions(AppState state) {
+    final ids = List<String>.from(_selectedSessionIds);
+    setState(() => _selectedSessionIds.clear());
+    for (final id in ids) {
+      final session = state.getSession(id);
+      if (session == null || session.status != 'paused') continue;
+      state.resumeSessionDirect(id, session.workerId);
+    }
+  }
+
+  Future<void> _confirmBulkEndSessions(
+    BuildContext context,
+    AppState state,
+  ) async {
+    final count = _selectedSessionIds.length;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: context.appColors.bgSurface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        title: Text(
+          'End $count session${count == 1 ? '' : 's'}',
+          style: TextStyle(color: context.appColors.textPrimary, fontSize: 16),
+        ),
+        content: Text(
+          'End $count session${count == 1 ? '' : 's'}? This cannot be undone.',
+          style: TextStyle(
+            color: context.appColors.textSecondary,
+            fontSize: 14,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: Text(
+              'Cancel',
+              style: TextStyle(color: context.appColors.textSecondary),
+            ),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: context.appColors.errorText,
+            ),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text(
+              'End sessions',
+              style: TextStyle(color: Colors.white),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+    final ids = List<String>.from(_selectedSessionIds);
+    setState(() => _selectedSessionIds.clear());
+    for (final id in ids) {
+      final session = state.getSession(id);
+      if (session == null || isTerminalStatus(session.status)) continue;
+      state.cancelSessionDirect(id, session.workerId);
+    }
+  }
+
   Widget _buildWorkersTab() {
     return Consumer<AppState>(
       builder: (context, state, _) {
@@ -290,10 +677,30 @@ class _SessionListPanelState extends State<SessionListPanel>
           return false;
         }).toList();
 
-        return Column(
-          children: [
-            // Search bar and status filter chips
-            Padding(
+        // Compute the global flat visible list for Shift+click range selection.
+        _currentFlatSessionList = computeFlatVisibleSessionList(
+          configs: filteredConfigs,
+          groupedSessions: filteredGrouped,
+          expandedWorkers: _expandedWorkers,
+          groupByProject: _groupByProject,
+          collapsedWorkerProjects: _collapsedWorkerProjects,
+        );
+
+        return Focus(
+          autofocus: false,
+          onKeyEvent: (node, event) {
+            if (event is KeyDownEvent &&
+                event.logicalKey == LogicalKeyboardKey.escape &&
+                _selectedSessionIds.isNotEmpty) {
+              setState(() => _selectedSessionIds.clear());
+              return KeyEventResult.handled;
+            }
+            return KeyEventResult.ignored;
+          },
+          child: Column(
+            children: [
+              // Search bar and status filter chips
+              Padding(
               padding: const EdgeInsets.fromLTRB(10, 8, 10, 4),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -489,6 +896,8 @@ class _SessionListPanelState extends State<SessionListPanel>
                 ],
               ),
             ),
+            if (_selectedSessionIds.isNotEmpty)
+              _buildSessionSelectionBar(context, state),
             Expanded(
               child: filteredConfigs.isEmpty && _hasActiveFilters
                   ? Center(
@@ -554,11 +963,41 @@ class _SessionListPanelState extends State<SessionListPanel>
                           },
                           state: state,
                           onSessionSelected: widget.onSessionSelected,
+                          selectedSessionIds: _selectedSessionIds,
+                          currentFlatList: _currentFlatSessionList,
+                          onSessionSelectTap: (sessionId, flatIndex) =>
+                              _handleSessionTap(
+                                context,
+                                sessionId,
+                                flatIndex,
+                                state,
+                              ),
+                          onBulkSecondaryTap: (sessionId, position) =>
+                              _showBulkSessionContextMenu(
+                                context,
+                                position,
+                                state,
+                              ),
+                          collapsedProjects:
+                              _collapsedWorkerProjects[config.id] ??
+                              const {},
+                          onProjectToggle: (collapseKey) {
+                            setState(() {
+                              final set = _collapsedWorkerProjects
+                                  .putIfAbsent(config.id, () => {});
+                              if (set.contains(collapseKey)) {
+                                set.remove(collapseKey);
+                              } else {
+                                set.add(collapseKey);
+                              }
+                            });
+                          },
                         );
                       },
                     ),
             ),
           ],
+        ),
         );
       },
     );

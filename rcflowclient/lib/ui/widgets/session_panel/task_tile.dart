@@ -123,10 +123,35 @@ class TaskTile extends StatelessWidget {
             _subtitle(),
             style: TextStyle(color: context.appColors.textMuted, fontSize: 10),
           ),
-          trailing: (sessionCount > 0 || issueCount > 0)
+          trailing: (sessionCount > 0 || issueCount > 0 || task.planArtifactId != null)
               ? Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    if (task.planArtifactId != null)
+                      Tooltip(
+                        message: 'Open plan',
+                        child: GestureDetector(
+                          onTap: () => state.openArtifactInPane(
+                            task.planArtifactId!,
+                          ),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 5,
+                              vertical: 2,
+                            ),
+                            margin: const EdgeInsets.only(right: 4),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF10B981).withAlpha(30),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const Icon(
+                              Icons.description_outlined,
+                              size: 11,
+                              color: Color(0xFF10B981),
+                            ),
+                          ),
+                        ),
+                      ),
                     if (issueCount > 0)
                       Tooltip(
                         message:
@@ -297,6 +322,41 @@ class TaskTile extends StatelessWidget {
             ],
           ),
         ),
+        PopupMenuItem(
+          value: 'make_plan',
+          child: Row(
+            children: [
+              Icon(
+                Icons.auto_awesome_outlined,
+                color: context.appColors.textSecondary,
+                size: 18,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'Make plan',
+                style: TextStyle(color: context.appColors.textPrimary),
+              ),
+            ],
+          ),
+        ),
+        if (task.planArtifactId != null)
+          PopupMenuItem(
+            value: 'open_plan',
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.description_outlined,
+                  color: Color(0xFF10B981),
+                  size: 18,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  'Open plan',
+                  style: TextStyle(color: context.appColors.textPrimary),
+                ),
+              ],
+            ),
+          ),
         const PopupMenuDivider(),
         if (task.status != 'done')
           PopupMenuItem(
@@ -356,6 +416,12 @@ class TaskTile extends StatelessWidget {
       if (!context.mounted) return;
       if (value == 'start_session') {
         _startSession(context);
+      } else if (value == 'make_plan') {
+        _startPlanSession(context);
+      } else if (value == 'open_plan') {
+        if (task.planArtifactId != null) {
+          state.openArtifactInPane(task.planArtifactId!);
+        }
       } else if (value == 'done') {
         _updateStatus(context, 'done');
       } else if (value == 'reopen') {
@@ -364,6 +430,12 @@ class TaskTile extends StatelessWidget {
         _confirmDeleteTask(context);
       }
     });
+  }
+
+  void _startPlanSession(BuildContext context) {
+    final paneId = state.activePaneId;
+    state.startPlanSession(paneId, task);
+    onTaskSelected?.call();
   }
 
   void _updateStatus(BuildContext context, String newStatus) async {
