@@ -77,6 +77,9 @@ generate_api_key() {
         || head -c 32 /dev/urandom | base64 | tr -d '/+=' | head -c 32
 }
 
+# Check whether systemd is actually running (not the case on WSL2 by default)
+has_systemd() { [ -d /run/systemd/system ]; }
+
 # ── Checks ──────────────────────────────────────────────────────────────────
 
 if [[ $EUID -ne 0 ]]; then
@@ -98,14 +101,6 @@ BUNDLE_VERSION="unknown"
 if [[ -f "$SCRIPT_DIR/VERSION" ]]; then
     BUNDLE_VERSION="$(cat "$SCRIPT_DIR/VERSION" | tr -d '[:space:]')"
 fi
-
-# ── Banner ──────────────────────────────────────────────────────────────────
-
-echo ""
-echo -e "${CYAN}╔══════════════════════════════════════════╗${NC}"
-echo -e "${CYAN}║       RCFlow Installer v${BUNDLE_VERSION}$(printf '%*s' $((14 - ${#BUNDLE_VERSION})) '')║${NC}"
-echo -e "${CYAN}╚══════════════════════════════════════════╝${NC}"
-echo ""
 
 # ── Check for existing installation ─────────────────────────────────────────
 
@@ -138,7 +133,7 @@ info "Owner user:        ${OWNER_USER:-<none>}"
 
 # ── Stop existing service ───────────────────────────────────────────────────
 
-if systemctl is-active --quiet rcflow 2>/dev/null; then
+if has_systemd && systemctl is-active --quiet rcflow 2>/dev/null; then
     info "Stopping existing RCFlow service..."
     systemctl stop rcflow
     ok "Service stopped"
@@ -334,10 +329,11 @@ ok "Database migrations complete"
 # ── Setup systemd service ───────────────────────────────────────────────────
 
 if $SETUP_SERVICE; then
-    info "Setting up systemd service..."
+    if has_systemd; then
+        info "Setting up systemd service..."
 
-    # Generate service file from template, substituting actual values
-    cat > /etc/systemd/system/rcflow.service <<SVCEOF
+        # Generate service file from template, substituting actual values
+        cat > /etc/systemd/system/rcflow.service <<SVCEOF
 [Unit]
 Description=RCFlow Action Server
 After=network.target
@@ -369,19 +365,23 @@ PrivateTmp=true
 WantedBy=multi-user.target
 SVCEOF
 
-    systemctl daemon-reload
-    systemctl enable rcflow
-    ok "Systemd service installed and enabled"
+        systemctl daemon-reload
+        systemctl enable rcflow
+        ok "Systemd service installed and enabled"
 
-    info "Starting RCFlow service..."
-    systemctl start rcflow
+        info "Starting RCFlow service..."
+        systemctl start rcflow
 
-    # Wait a moment and check status
-    sleep 2
-    if systemctl is-active --quiet rcflow; then
-        ok "RCFlow is running!"
+        # Wait a moment and check status
+        sleep 2
+        if systemctl is-active --quiet rcflow; then
+            ok "RCFlow is running!"
+        else
+            warn "Service may have failed to start. Check: journalctl -u rcflow -n 50"
+        fi
     else
-        warn "Service may have failed to start. Check: journalctl -u rcflow -n 50"
+        warn "systemd not running — skipping service setup"
+        warn "To start RCFlow manually: cd ${INSTALL_PREFIX} && sudo -u ${SERVICE_USER} ./rcflow"
     fi
 fi
 

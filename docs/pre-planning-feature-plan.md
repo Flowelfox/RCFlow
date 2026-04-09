@@ -94,20 +94,20 @@ class Task(Base):
 
 ### 3.2 Migration
 
-**New file:** `src/db/migrations/versions/<revision_id>_add_plan_artifact_id_to_tasks.py`
+**Note:** `plan_artifact_id` is part of the squashed initial migration (`0001_initial_schema.py`).
 
-Convention: use a new hex revision ID following the pattern of existing files; set `down_revision` to the current head (`a2b3c4d5e6f7`).
+The snippet below shows the original pre-squash migration for reference only:
 
 ```python
 """Add plan_artifact_id to tasks table
 
-Revision ID: <new_hex_id>
-Revises: a2b3c4d5e6f7
+Revision ID: c3d4e5f6a7b8
+Revises: a2b3c4d5e6f7  (pre-squash head — now superseded by 0001)
 """
 import sqlalchemy as sa
 from alembic import op
 
-revision = '<new_hex_id>'
+revision = 'c3d4e5f6a7b8'
 down_revision = 'a2b3c4d5e6f7'
 branch_labels = None
 depends_on = None
