@@ -99,7 +99,7 @@ resolve_version() {
         return
     fi
 
-    info "Resolving latest release..."
+    info "Resolving latest release..." >&2
 
     latest_tag=$(fetch "${GITHUB_API}/repos/${REPO}/releases/latest" \
         | grep '"tag_name"' | head -1 | sed 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/')
