@@ -36,9 +36,9 @@ YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
-info()  { printf "${CYAN}[INFO]${NC}  %s\n" "$*"; }
-ok()    { printf "${GREEN}[OK]${NC}    %s\n" "$*"; }
-warn()  { printf "${YELLOW}[WARN]${NC}  %s\n" "$*"; }
+info()  { printf "${CYAN}[INFO]${NC}  %s\n" "$*" >&2; }
+ok()    { printf "${GREEN}[OK]${NC}    %s\n" "$*" >&2; }
+warn()  { printf "${YELLOW}[WARN]${NC}  %s\n" "$*" >&2; }
 error() { printf "${RED}[ERROR]${NC} %s\n" "$*" >&2; }
 fatal() { error "$@"; exit 1; }
 
@@ -113,7 +113,7 @@ resolve_version() {
         return
     fi
 
-    info "Resolving latest release..." >&2
+    info "Resolving latest release..."
 
     # Use the GitHub API redirect to find the latest release tag
     latest_tag=$(fetch "${GITHUB_API}/repos/${REPO}/releases/latest" \
@@ -375,6 +375,7 @@ install_macos_inline() {
   "TOOLS_DIR": "${install_prefix}/tools",
   "TOOL_AUTO_UPDATE": "true",
   "TOOL_UPDATE_INTERVAL_HOURS": "6",
+  "WSS_ENABLED": "true",
   "LOG_LEVEL": "INFO"
 }
 JSONEOF
@@ -511,11 +512,18 @@ main() {
     if [ -f "$settings_path" ]; then
         host_val="$(grep '"RCFLOW_HOST"' "$settings_path" 2>/dev/null | sed 's/.*: *"\([^"]*\)".*/\1/' || true)"
         port_val="$(grep '"RCFLOW_PORT"' "$settings_path" 2>/dev/null | sed 's/.*: *"\([^"]*\)".*/\1/' || true)"
+        wss_val="$(grep '"WSS_ENABLED"' "$settings_path" 2>/dev/null | sed 's/.*: *"\([^"]*\)".*/\1/' || true)"
         [ -n "$host_val" ] && bind_host="$host_val"
         [ -n "$port_val" ] && bind_port="$port_val"
     fi
 
-    printf "\n${CYAN}✓ RCFlow Worker installed · running on ${bind_host}:${bind_port}${NC}\n"
+    if [ "${wss_val:-}" = "true" ]; then
+        proto="wss"
+    else
+        proto="ws"
+    fi
+
+    printf "\n${CYAN}✓ RCFlow Worker installed · running on ${proto}://${bind_host}:${bind_port}${NC}\n"
 }
 
 main "$@"
