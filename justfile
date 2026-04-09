@@ -29,16 +29,20 @@ format:
 typecheck:
     ty check src/
 
-# Run tests
+# Run all tests (Python + Flutter)
 test:
     uv run pytest tests/ -v
+    cd rcflowclient && flutter test
 
 # Run tests with coverage
 coverage:
     uv run pytest tests/ -v --cov=src --cov-report=term-missing
 
-# Run all checks (lint + typecheck + test)
-check: lint typecheck test
+# Run all static checks (ruff + ty + flutter analyze)
+check:
+    uv run ruff check src/ tests/
+    ty check src/
+    cd rcflowclient && flutter analyze
 
 # Run the server
 run:
