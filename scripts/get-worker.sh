@@ -113,7 +113,7 @@ resolve_version() {
         return
     fi
 
-    info "Resolving latest release..."
+    info "Resolving latest release..." >&2
 
     # Use the GitHub API redirect to find the latest release tag
     latest_tag=$(fetch "${GITHUB_API}/repos/${REPO}/releases/latest" \
