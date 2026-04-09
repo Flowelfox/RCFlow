@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -120,15 +121,17 @@ class BackgroundTasksMixin:
             async with self._db_session_factory() as db:  # ty:ignore[unresolved-attribute]
                 existing = await db.get(SessionModel, session_uuid)
                 if existing is None:
-                    db.add(SessionModel(
-                        id=session_uuid,
-                        backend_id=backend_id,
-                        created_at=session.created_at,
-                        session_type=session.session_type.value,
-                        status=session.status.value,
-                        main_project_path=session.main_project_path,
-                        metadata_=session.metadata,
-                    ))
+                    db.add(
+                        SessionModel(
+                            id=session_uuid,
+                            backend_id=backend_id,
+                            created_at=session.created_at,
+                            session_type=session.session_type.value,
+                            status=session.status.value,
+                            main_project_path=session.main_project_path,
+                            metadata_=session.metadata,
+                        )
+                    )
                     await db.commit()
                 elif existing.main_project_path != session.main_project_path:
                     # Update main_project_path if it was set after the initial stub write.
@@ -235,6 +238,18 @@ class BackgroundTasksMixin:
             logger.info("Generated title for session %s: %s", session.id, title)
         except Exception:
             logger.exception("Failed to generate title for session %s", session.id)
+        finally:
+            # Ensure the session always gets *some* title even if the LLM call
+            # failed or was cancelled, so it never persists as NULL.
+            if session.title is None:
+                fallback = user_text[:50]
+                if len(user_text) > 50:
+                    space_idx = fallback.rfind(" ")
+                    if space_idx > 20:
+                        fallback = fallback[:space_idx]
+                    fallback += "..."
+                session.title = fallback
+                logger.info("Set fallback title for session %s: %s", session.id, fallback)
 
     # --- Task creation/update agents ---
 
@@ -581,9 +596,7 @@ class BackgroundTasksMixin:
         self._pending_archive_tasks.add(task)  # ty:ignore[unresolved-attribute]
         task.add_done_callback(self._pending_archive_tasks.discard)  # ty:ignore[unresolved-attribute]
 
-    async def _text_artifact_scan(
-        self, session_id: str, texts: list[str], project_path: Path | None
-    ) -> None:
+    async def _text_artifact_scan(self, session_id: str, texts: list[str], project_path: Path | None) -> None:
         """Extract artifacts from raw text strings. Never raises."""
         assert self._artifact_scanner is not None  # ty:ignore[unresolved-attribute]
         try:
@@ -626,6 +639,127 @@ class BackgroundTasksMixin:
         )
         return artifact_data
 
+    # --- Plan finalization ---
+
+    def _fire_plan_finalization_task(self, session: ActiveSession) -> None:
+        """Schedule plan artifact registration after a plan session ends (any reason)."""
+        if session.metadata.get("session_purpose") != "plan":
+            return
+        task = asyncio.create_task(self._finalize_plan_session(session))
+        self._pending_plan_finalization_tasks.add(task)  # ty:ignore[unresolved-attribute]
+        task.add_done_callback(self._pending_plan_finalization_tasks.discard)  # ty:ignore[unresolved-attribute]
+
+    async def _finalize_plan_session(self, session: ActiveSession) -> None:
+        """Register the plan file as an artifact and link it to the task. Never raises."""
+        try:
+            plan_path_str = session.metadata.get("plan_output_path")
+            task_id_str = session.metadata.get("task_id")
+            if not plan_path_str or not task_id_str:
+                return
+
+            plan_path = Path(plan_path_str)
+            if not plan_path.exists():
+                logger.warning(
+                    "Plan session %s ended but plan file not found at %s",
+                    session.id,
+                    plan_path,
+                )
+                return
+
+            if self._db_session_factory is None or self._settings is None:  # ty:ignore[unresolved-attribute]
+                return
+
+            backend_id = self._settings.RCFLOW_BACKEND_ID  # ty:ignore[unresolved-attribute]
+            task_uuid = uuid.UUID(task_id_str)
+            stat = plan_path.stat()
+            now = datetime.now(UTC)
+
+            # Ensure the plan directory exists before inserting (defensive)
+            plan_path.parent.mkdir(parents=True, exist_ok=True)
+
+            task_obj: TaskModel | None = None
+            task_dict: dict | None = None
+            artifact_id: uuid.UUID | None = None
+
+            async with self._db_session_factory() as db:  # ty:ignore[unresolved-attribute]
+                # Upsert the artifact record.
+                # Race condition note: ArtifactScanner may have already inserted
+                # this file (if the LLM printed the path in its output). Handle
+                # the (backend_id, file_path) UniqueConstraint by attempting a
+                # select first; if absent, insert; if IntegrityError on insert,
+                # select again.
+                stmt = select(ArtifactModel).where(
+                    ArtifactModel.backend_id == backend_id,
+                    ArtifactModel.file_path == str(plan_path),
+                )
+                result = await db.execute(stmt)
+                artifact = result.scalar_one_or_none()
+
+                if artifact is None:
+                    artifact = ArtifactModel(
+                        backend_id=backend_id,
+                        file_path=str(plan_path),
+                        file_name=plan_path.name,
+                        file_extension=plan_path.suffix,
+                        file_size=stat.st_size,
+                        mime_type="text/markdown",
+                        file_exists=True,
+                        discovered_at=now,
+                        modified_at=now,
+                        session_id=uuid.UUID(session.id),
+                    )
+                    db.add(artifact)
+                    try:
+                        await db.flush()  # generates artifact.id before commit
+                    except Exception:
+                        # Another writer (ArtifactScanner) beat us — re-fetch
+                        await db.rollback()
+                        result2 = await db.execute(stmt)
+                        artifact = result2.scalar_one()
+                else:
+                    artifact.file_size = stat.st_size
+                    artifact.file_exists = True
+                    artifact.modified_at = now
+                    artifact.session_id = uuid.UUID(session.id)
+
+                artifact_id = artifact.id
+
+                # Link to task
+                task_obj = await db.get(TaskModel, task_uuid)
+                if task_obj is not None:
+                    task_obj.plan_artifact_id = artifact_id
+                    task_obj.updated_at = now
+
+                # Build broadcast payload BEFORE commit so SQLAlchemy attributes
+                # are still accessible (commit() expires all loaded attributes).
+                if task_obj is not None:
+                    task_dict = {
+                        "task_id": str(task_obj.id),
+                        "title": task_obj.title,
+                        "description": task_obj.description,
+                        "status": task_obj.status,
+                        "source": task_obj.source,
+                        "created_at": task_obj.created_at.isoformat() if task_obj.created_at else "",
+                        "updated_at": task_obj.updated_at.isoformat() if task_obj.updated_at else "",
+                        "plan_artifact_id": str(task_obj.plan_artifact_id) if task_obj.plan_artifact_id else None,
+                        "sessions": [],  # client refreshes sessions on demand
+                    }
+
+                await db.commit()
+
+            # Broadcast outside the DB session
+            if task_dict is not None:
+                self._session_manager.broadcast_task_update(task_dict)  # ty:ignore[unresolved-attribute]
+
+            logger.info(
+                "Plan artifact saved and linked: task=%s artifact=%s",
+                task_id_str,
+                artifact_id,
+            )
+
+        except Exception:
+            logger.exception("Failed to finalize plan session %s", session.id)
+
     async def _broadcast_artifact_list(self) -> None:
         """Fetch all artifacts for this backend and broadcast to connected clients."""
         if self._db_session_factory is None or self._settings is None:  # ty:ignore[unresolved-attribute]
@@ -646,6 +780,7 @@ class BackgroundTasksMixin:
                     "file_extension": a.file_extension,
                     "file_size": a.file_size,
                     "mime_type": a.mime_type,
+                    "file_exists": a.file_exists,
                     "discovered_at": a.discovered_at.isoformat() if a.discovered_at else "",
                     "modified_at": a.modified_at.isoformat() if a.modified_at else "",
                     "session_id": str(a.session_id) if a.session_id else None,

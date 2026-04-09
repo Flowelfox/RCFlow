@@ -26,6 +26,7 @@ class _ArtifactListPanelState extends State<ArtifactListPanel> {
   final Set<String> _expandedWorkers = {};
   final Set<String> _expandedProjects = {};
   bool _initialized = false;
+  bool _rechecking = false;
 
   @override
   void initState() {
@@ -54,6 +55,23 @@ class _ArtifactListPanelState extends State<ArtifactListPanel> {
   void _saveFilters() {
     final settings = Provider.of<AppState>(context, listen: false).settings;
     settings.artifactsFilterSearch = _searchQuery;
+  }
+
+  Future<void> _recheckArtifacts(AppState state) async {
+    if (_rechecking) return;
+    setState(() => _rechecking = true);
+    try {
+      final workers = state.workerConfigs
+          .map((c) => state.getWorker(c.id))
+          .where((w) => w != null && w.isConnected);
+      await Future.wait(workers.map((w) => w!.ws.recheckArtifacts()));
+    } catch (e) {
+      if (mounted) {
+        state.addSystemMessage('Artifact recheck failed: $e', isError: true);
+      }
+    } finally {
+      if (mounted) setState(() => _rechecking = false);
+    }
   }
 
   void _saveExpandedState() {
@@ -302,6 +320,7 @@ class _ArtifactListPanelState extends State<ArtifactListPanel> {
   }
 
   Widget _buildFilterBar(BuildContext context) {
+    final state = Provider.of<AppState>(context, listen: false);
     return Padding(
       padding: const EdgeInsets.fromLTRB(10, 8, 10, 4),
       child: SizedBox(
@@ -406,6 +425,33 @@ class _ArtifactListPanelState extends State<ArtifactListPanel> {
                   ).settings.artifactsGroupByProject = _groupByProject;
                 },
               ),
+            ),
+            const SizedBox(width: 4),
+            SizedBox(
+              width: 30,
+              height: 30,
+              child: _rechecking
+                  ? Padding(
+                      padding: const EdgeInsets.all(7),
+                      child: SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 1.5,
+                          color: context.appColors.textMuted,
+                        ),
+                      ),
+                    )
+                  : IconButton(
+                      padding: EdgeInsets.zero,
+                      icon: Icon(
+                        Icons.sync_rounded,
+                        color: context.appColors.textSecondary,
+                        size: 16,
+                      ),
+                      tooltip: 'Recheck artifact file existence',
+                      onPressed: () => _recheckArtifacts(state),
+                    ),
             ),
           ],
         ),
@@ -592,6 +638,7 @@ class _ArtifactTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final isViewed = _isArtifactViewed();
     final isActive = _isArtifactActive();
+    final isMissing = !artifact.fileExists;
     final icon =
         _extIcons[artifact.fileExtension.toLowerCase()] ??
         Icons.insert_drive_file_outlined;
@@ -617,20 +664,44 @@ class _ArtifactTile extends StatelessWidget {
             : null,
       ),
       child: ListTile(
-        leading: Container(
-          width: 30,
-          height: 30,
-          decoration: BoxDecoration(
-            color: context.appColors.accent.withAlpha(30),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Icon(icon, color: context.appColors.accentLight, size: 16),
+        leading: Stack(
+          children: [
+            Container(
+              width: 30,
+              height: 30,
+              decoration: BoxDecoration(
+                color: isMissing
+                    ? context.appColors.textMuted.withAlpha(30)
+                    : context.appColors.accent.withAlpha(30),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Icon(
+                icon,
+                color: isMissing
+                    ? context.appColors.textMuted
+                    : context.appColors.accentLight,
+                size: 16,
+              ),
+            ),
+            if (isMissing)
+              Positioned(
+                right: 0,
+                bottom: 0,
+                child: Icon(
+                  Icons.warning_amber_rounded,
+                  color: Colors.orange.shade400,
+                  size: 11,
+                ),
+              ),
+          ],
         ),
         title: Text(
           artifact.fileName,
           style: TextStyle(
             color: isActive
                 ? context.appColors.accentLight
+                : isMissing
+                ? context.appColors.textMuted
                 : context.appColors.textPrimary,
             fontSize: 12,
             fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
@@ -639,8 +710,13 @@ class _ArtifactTile extends StatelessWidget {
           overflow: TextOverflow.ellipsis,
         ),
         subtitle: Text(
-          _subtitle(),
-          style: TextStyle(color: context.appColors.textMuted, fontSize: 10),
+          isMissing ? '${_subtitle()} · missing' : _subtitle(),
+          style: TextStyle(
+            color: isMissing
+                ? Colors.orange.shade400.withAlpha(180)
+                : context.appColors.textMuted,
+            fontSize: 10,
+          ),
         ),
         trailing: Text(
           artifact.displaySize,

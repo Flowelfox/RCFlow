@@ -102,6 +102,7 @@ class WorkerConnection extends ChangeNotifier {
     if (wasConnected && !connected) {
       _status = WorkerConnectionStatus.disconnected;
       subscribedSessions.clear();
+      sessions = [];
       _inputSub?.cancel();
       _outputSub?.cancel();
       _inputSub = null;
@@ -109,6 +110,7 @@ class WorkerConnection extends ChangeNotifier {
       if (!_manualDisconnect) {
         _scheduleReconnect();
       }
+      onSessionsChanged?.call();
       notifyListeners();
     }
   }
@@ -175,6 +177,7 @@ class WorkerConnection extends ChangeNotifier {
     _manualDisconnect = true;
     _cancelReconnect();
     subscribedSessions.clear();
+    sessions = [];
     serverOs = null;
     supportsAttachments = true;
     supportsImageAttachments = true;
@@ -185,6 +188,7 @@ class WorkerConnection extends ChangeNotifier {
     _inputSub = null;
     _outputSub = null;
     _status = WorkerConnectionStatus.disconnected;
+    onSessionsChanged?.call();
     notifyListeners();
   }
 

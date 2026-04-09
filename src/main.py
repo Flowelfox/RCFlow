@@ -82,6 +82,28 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     app.state.artifact_scanner = artifact_scanner
     app.state.db_session_factory = db_session_factory
 
+    # Validate artifact file existence on startup
+    from pathlib import Path  # noqa: PLC0415
+
+    from sqlalchemy import select as _select  # noqa: PLC0415
+
+    from src.models.db import Artifact as _ArtifactModel  # noqa: PLC0415
+
+    async with db_session_factory() as db:
+        result = await db.execute(
+            _select(_ArtifactModel).where(_ArtifactModel.backend_id == settings.RCFLOW_BACKEND_ID)
+        )
+        _artifacts = result.scalars().all()
+        _changed = 0
+        for _a in _artifacts:
+            _exists = Path(_a.file_path).exists()
+            if _a.file_exists != _exists:
+                _a.file_exists = _exists
+                _changed += 1
+        if _changed:
+            await db.commit()
+    logger.info("Artifact startup check: %d records updated for file existence", _changed)
+
     # Tool registry
     tool_registry = ToolRegistry()
     tool_registry.load_from_directory(settings.TOOLS_DIR)
@@ -138,6 +160,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # Start telemetry aggregation (runs every 60 s) + nightly retention cleanup
     async def _run_telemetry_loop() -> None:
         import asyncio as _asyncio  # noqa: PLC0415
+
         tick = 0
         while True:
             await _asyncio.sleep(60)
@@ -156,6 +179,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         from src.api.integrations.linear import _issue_to_dict, _upsert_issues  # noqa: PLC0415
         from src.services.linear_service import LinearService as _LinearService  # noqa: PLC0415
         from src.services.linear_service import LinearServiceError as _LinearServiceError  # noqa: PLC0415
+
         async def _run_startup_sync() -> None:
             try:
                 async with _LinearService(settings.LINEAR_API_KEY) as svc:
@@ -169,6 +193,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
                 logger.warning("Linear startup sync failed: %s", exc)
             except Exception as exc:
                 logger.warning("Linear startup sync unexpected error: %s", exc)
+
         _t = asyncio.create_task(_run_startup_sync())
         _bg_tasks.add(_t)
         _t.add_done_callback(_bg_tasks.discard)

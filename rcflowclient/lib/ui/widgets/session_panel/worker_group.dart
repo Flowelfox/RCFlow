@@ -26,6 +26,31 @@ class WorkerGroup extends StatefulWidget {
   final AppState state;
   final VoidCallback? onSessionSelected;
 
+  /// Sessions currently selected in the workers tab. Used for highlight and
+  /// routing secondary taps to the bulk context menu.
+  final Set<String> selectedSessionIds;
+
+  /// The global flat visible list of sessions used for Shift+click index
+  /// resolution. Owned by the parent; passed by reference.
+  final List<SessionInfo> currentFlatList;
+
+  /// Callback invoked when a session tile is tapped. The parent handles all
+  /// modifier-key logic (Shift, Ctrl/Meta) and selection state updates.
+  final void Function(String sessionId, int flatIndex) onSessionSelectTap;
+
+  /// Callback invoked on a secondary (right-click) tap when the selection
+  /// set is non-empty. The parent shows the bulk context menu. When the
+  /// selection is empty the normal per-session context menu is shown instead.
+  final void Function(String sessionId, Offset globalPosition)?
+  onBulkSecondaryTap;
+
+  /// Collapsed project sub-groups for this worker (keyed by project name or
+  /// '\x00other'). Owned by the parent and passed by reference.
+  final Set<String> collapsedProjects;
+
+  /// Callback to toggle a project sub-group's collapsed state.
+  final void Function(String collapseKey) onProjectToggle;
+
   const WorkerGroup({
     super.key,
     required this.config,
@@ -37,6 +62,12 @@ class WorkerGroup extends StatefulWidget {
     required this.onSessionTap,
     required this.state,
     required this.onSessionSelected,
+    required this.selectedSessionIds,
+    required this.currentFlatList,
+    required this.onSessionSelectTap,
+    required this.collapsedProjects,
+    required this.onProjectToggle,
+    this.onBulkSecondaryTap,
     this.groupByProject = false,
   });
 
@@ -45,9 +76,6 @@ class WorkerGroup extends StatefulWidget {
 }
 
 class _WorkerGroupState extends State<WorkerGroup> {
-  /// Project names that are collapsed when groupByProject is active.
-  final Set<String> _collapsedProjects = {};
-
   WorkerConfig get config => widget.config;
   WorkerConnection? get worker => widget.worker;
   List<SessionInfo> get sessions => widget.sessions;
@@ -297,7 +325,7 @@ class _WorkerGroupState extends State<WorkerGroup> {
           ),
         );
       final collapseKey = projectName ?? '\x00other';
-      final collapsed = _collapsedProjects.contains(collapseKey);
+      final collapsed = widget.collapsedProjects.contains(collapseKey);
 
       result.add(
         _buildProjectSubHeader(
@@ -305,13 +333,7 @@ class _WorkerGroupState extends State<WorkerGroup> {
           projectName: projectName,
           count: projectSessions.length,
           collapsed: collapsed,
-          onToggle: () => setState(() {
-            if (collapsed) {
-              _collapsedProjects.remove(collapseKey);
-            } else {
-              _collapsedProjects.add(collapseKey);
-            }
-          }),
+          onToggle: () => widget.onProjectToggle(collapseKey),
         ),
       );
 
@@ -383,6 +405,7 @@ class _WorkerGroupState extends State<WorkerGroup> {
     final isActiveSession =
         !state.hasNoPanes && s.sessionId == state.activePane.sessionId;
     final isViewedByAnyPane = state.isSessionViewed(s.sessionId);
+    final isSelected = widget.selectedSessionIds.contains(s.sessionId);
     final dimmed = !isConnected;
     final dragData = SessionDragData(
       sessionId: s.sessionId,
@@ -390,8 +413,20 @@ class _WorkerGroupState extends State<WorkerGroup> {
       label: s.title ?? s.shortId,
     );
     final tile = GestureDetector(
-      onSecondaryTapUp: (details) =>
-          _showContextMenu(context, details.globalPosition, state, s),
+      onSecondaryTapUp: (details) {
+        if (widget.selectedSessionIds.isNotEmpty &&
+            widget.onBulkSecondaryTap != null) {
+          // Add this session to the selection if not already selected, then
+          // show the bulk context menu (mirrors tasks tab behaviour).
+          if (!widget.selectedSessionIds.contains(s.sessionId)) {
+            final flatIdx = widget.currentFlatList.indexOf(s);
+            widget.onSessionSelectTap(s.sessionId, flatIdx);
+          }
+          widget.onBulkSecondaryTap!(s.sessionId, details.globalPosition);
+        } else {
+          _showContextMenu(context, details.globalPosition, state, s);
+        }
+      },
       child: Opacity(
         opacity: dimmed ? 0.5 : 1.0,
         child: LayoutBuilder(
@@ -402,12 +437,21 @@ class _WorkerGroupState extends State<WorkerGroup> {
             final isNarrow = constraints.maxWidth < 180;
             return Container(
               decoration: BoxDecoration(
-                color: isActiveSession
+                color: isSelected
+                    ? context.appColors.accent.withAlpha(35)
+                    : isActiveSession
                     ? context.appColors.accent.withAlpha(25)
                     : isViewedByAnyPane
                     ? context.appColors.accent.withAlpha(12)
                     : null,
-                border: isActiveSession
+                border: isSelected
+                    ? Border(
+                        left: BorderSide(
+                          color: context.appColors.accent.withAlpha(160),
+                          width: 3,
+                        ),
+                      )
+                    : isActiveSession
                     ? Border(
                         left: BorderSide(
                           color: context.appColors.accent,
@@ -543,7 +587,10 @@ class _WorkerGroupState extends State<WorkerGroup> {
                   left: extraIndent ? 48 : 36,
                   right: 8,
                 ),
-                onTap: () => onSessionTap(s.sessionId),
+                onTap: () {
+                  final flatIdx = widget.currentFlatList.indexOf(s);
+                  widget.onSessionSelectTap(s.sessionId, flatIdx);
+                },
                 onLongPress: () => _showRenameDialog(context, state, s),
               ),
             );

@@ -264,6 +264,7 @@ The client can connect to multiple RCFlow servers simultaneously. Each server co
 | DELETE | `/api/tasks/{task_id}`                  | Yes  | Delete a task and all session associations. |
 | POST   | `/api/tasks/{task_id}/sessions`         | Yes  | Attach a session to a task. Body: `{"session_id": "..."}`. Returns 201. |
 | DELETE | `/api/tasks/{task_id}/sessions/{sid}`   | Yes  | Detach a session from a task. |
+| POST   | `/api/tasks/{task_id}/plan`             | Yes  | Start a read-only planning session for a task. Body: `{"project_name"?, "selected_worktree_path"?}`. Returns `{"session_id", "task_id"}`. The plan is saved as a Markdown artifact and linked to the task via `plan_artifact_id` when the session ends. |
 | POST   | `/api/uploads`                          | Yes  | Upload a file attachment for inclusion in a prompt. Accepts `multipart/form-data` with field `file`. Returns `{attachment_id, file_name, mime_type, size, is_image}`. Max 20 MB. Attachment expires after 10 minutes if not consumed. |
 | GET    | `/api/worktrees`                        | Yes  | List worktrees for a repo. Required query param `repo_path`. Returns `{"worktrees": [{name, branch, base, path, created_at}]}`. Linux/macOS only. |
 | POST   | `/api/worktrees`                        | Yes  | Create a worktree. Body: `{"branch", "base"="main", "repo_path"}`. Branch must follow `type/ticket/description` pattern. Returns 201 with `{"worktree": {...}}`. |
@@ -328,6 +329,20 @@ The server resolves each `attachment_id` from the `AttachmentStore`, builds mult
 - `attachments`: Optional list. Each entry must have `id` (from `POST /api/uploads`) and `name`/`mime_type` for display. Entries with missing or expired IDs are silently skipped.
 - `project_name`: Optional folder name (not a full path) of the project to attach to this session. The backend resolves it via `PROJECTS_DIR` and sets `session.main_project_path`. On failure (project not found or unreadable) the backend pushes an `error` message with code `PROJECT_ERROR` and broadcasts a `session_update` with a non-null `project_name_error`. The client sends this field from the project chip (not from `@mention` text).
 - `selected_worktree_path`: Optional absolute path of a worktree pre-selected by the client **before the first message is sent**. Applied to `session.metadata["selected_worktree_path"]` only when the session does not already have a worktree selection (i.e., idempotent and non-clobbering). Subsequent worktree changes must use `PATCH /api/sessions/{id}/worktree`. The client sends this field from the worktree chip (visible only when `session_id == null` and a project is selected).
+- `task_id`: Optional UUID string. When set on a new-session prompt, `session.metadata["primary_task_id"]` is populated so plan context can be injected into implementation sessions (see [Pre-Planning Sessions](#pre-planning-sessions) below).
+
+Start a read-only pre-planning session for a task (ONE_SHOT, write-restricted):
+
+```json
+{
+  "type": "start_plan_session",
+  "task_id": "uuid",
+  "project_name": "my-project",
+  "selected_worktree_path": "/path/to/worktree"
+}
+```
+
+The server calls `prepare_plan_session()`, fires the planning prompt as a background task, and immediately sends a `session_update` ack. When the session ends (for any reason) the plan file is upserted as an artifact and linked to the task via `plan_artifact_id`, which triggers a `task_update` broadcast.
 
 End a session (user-confirmed completion):
 
@@ -992,6 +1007,39 @@ Activity state transitions happen in `PromptRouter` alongside the existing `Sess
 All new sessions created by the prompt router use the **conversational** type by default. Sessions stay active until the user explicitly ends them (via the end-session confirmation or `POST /api/sessions/{id}/end`). The LLM includes a `[SessionEndAsk]` tag at the end of its response when it believes the task is complete; the client strips this tag and shows an inline confirmation card.
 
 The tool JSON definition specifies which type a tool uses (see Tool Definitions below).
+
+### Pre-Planning Sessions
+
+Pre-planning sessions are **read-only ONE_SHOT sessions** that generate a Markdown plan for a task before implementation begins. They are triggered by:
+
+- The `start_plan_session` WebSocket message
+- `POST /api/tasks/{task_id}/plan` HTTP endpoint
+
+**Setup** (`prepare_plan_session()`):
+
+1. A `ONE_SHOT` session is created and associated with the task in the DB.
+2. `session.metadata["session_purpose"] = "plan"` and `session.metadata["task_id"] = task_id` are set so the finalization logic can identify it.
+3. The plan output path is `<project_root>/.rcflow/plans/<task_id>.md`.
+4. Restrictive permission rules are pre-seeded on the `PermissionManager`:
+   - Deny `Bash`, `Edit`, `Agent`, `Write` for the entire session.
+   - Allow `Write` for the plan directory only (overrides the deny).
+5. The planning prompt is injected via `handle_prompt()` as a background task.
+
+**Finalization** (`_finalize_plan_session()`):
+
+When the session ends (complete, cancel, or fail), a background task runs:
+1. Reads the plan file; logs a warning and exits if not found.
+2. Upserts an `Artifact` record (handles race condition with `ArtifactScanner` via UniqueConstraint + retry).
+3. Sets `task.plan_artifact_id = artifact.id` and updates `task.updated_at`.
+4. Broadcasts a `task_update` WebSocket message so clients refresh the task.
+
+**Context injection**:
+
+For implementation sessions (non-plan sessions) with `session.metadata["primary_task_id"]` set, `_build_plan_context()` reads the task's `plan_artifact_id`, loads the plan artifact content, and prepends it as a `<plan_context>` block in the LLM context. Content is truncated to 8 000 characters.
+
+**Task data**:
+
+Tasks carry a `plan_artifact_id` field (UUID string or `null`) in all API responses (`GET /api/tasks`, `GET /api/tasks/{id}`, `list_tasks` WebSocket output, and `task_update` broadcasts). Client renders a plan badge on the task tile and a `_PlanBanner` in the task detail pane.
 
 ### Storage
 
@@ -2007,7 +2055,8 @@ CREATE TABLE tasks (
     status VARCHAR(20) NOT NULL DEFAULT 'todo',  -- 'todo', 'in_progress', 'review', 'done'
     source VARCHAR(20) NOT NULL DEFAULT 'user',  -- 'user' or 'ai'
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    plan_artifact_id UUID REFERENCES artifacts(id) ON DELETE SET NULL  -- linked pre-planning artifact
 );
 CREATE INDEX ix_tasks_backend_id ON tasks(backend_id);
 CREATE INDEX ix_tasks_status ON tasks(status);
@@ -2035,6 +2084,7 @@ CREATE TABLE artifacts (
     discovered_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     modified_at TIMESTAMPTZ NOT NULL,
     session_id UUID REFERENCES sessions(id),
+    file_exists BOOLEAN NOT NULL DEFAULT true,  -- false when file deleted but record retained
     UNIQUE(backend_id, file_path)
 );
 CREATE INDEX ix_artifacts_backend_id ON artifacts(backend_id);
@@ -2757,6 +2807,28 @@ The archive contains: the PyInstaller executable + runtime (`_internal/`), tool 
 
 ### Installation
 
+#### One-line install (Linux / macOS)
+
+Worker and client can both be installed via a `curl | sh` pattern that detects the platform and architecture, resolves the latest GitHub release, downloads the correct artifact, and runs the platform installer:
+
+```bash
+# Worker (backend server)
+curl -fsSL https://rcflow.app/get-worker.sh | sh
+
+# Desktop client
+curl -fsSL https://rcflow.app/get-client.sh | sh
+```
+
+Pin a version with `RCFLOW_VERSION=0.35.0` and pass options with `sh -s -- --port 8080 --unattended`. The scripts are hosted at `scripts/get-worker.sh` and `scripts/get-client.sh` in the repository.
+
+**`get-worker.sh`** — Downloads the `.tar.gz` (Linux) or `.dmg` (macOS) worker artifact. On Linux it delegates to the bundled `install.sh` inside the tarball. On macOS it mounts the DMG, extracts the `.app` contents, and performs a headless install (copies to `~/.local/lib/rcflow`, creates a LaunchAgent, symlinks to `~/.local/bin/rcflow`). Passes `--unattended` automatically when stdin is not a terminal.
+
+**`get-client.sh`** — Downloads the `.deb` (Linux) or `.dmg` (macOS) client artifact. On Linux it installs via `dpkg -i`. On macOS it copies the `.app` to `/Applications`.
+
+Environment variables: `RCFLOW_VERSION` (pin version), `RCFLOW_REPO` (override GitHub owner/repo), `INSTALL_DIR` (override install prefix, worker only).
+
+#### Manual installation
+
 **Linux (.deb):** `sudo dpkg -i rcflow_*.deb` — installs to `/opt/rcflow/`, creates `rcflow` system user, sets up systemd service, generates `settings.json` on first server start. Remove with `sudo apt remove rcflow` (or `--purge` to also delete data).
 
 **Linux (tar.gz/manual):** `sudo ./install.sh` — installs to `/opt/rcflow/`, creates `rcflow` system user, sets up systemd service, generates `settings.json` with random API key, runs migrations.
@@ -2765,7 +2837,7 @@ The archive contains: the PyInstaller executable + runtime (`_internal/`), tool 
 
 **Windows (setup.exe):** Run the Inno Setup installer — installs to `%PROGRAMFILES%\RCFlow\` (user-level, no admin required), runs migrations, optionally registers "Start with Windows" autostart, and optionally launches the GUI. `settings.json` is generated automatically on first server start. The GUI runs the server as a background subprocess and provides a window with server controls, live logs, and a system tray icon.
 
-Both scripts are idempotent — safe to run again for upgrades. Existing `settings.json` and `data/` are preserved.
+All install scripts are idempotent — safe to run again for upgrades. Existing `settings.json` and `data/` are preserved.
 
 ### Path Resolution
 

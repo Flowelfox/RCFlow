@@ -26,6 +26,7 @@ from sqlalchemy import func, select
 from src.core.buffer import MessageType
 from src.core.session import ActiveSession, ActivityState
 from src.models.db import Artifact as ArtifactModel
+from src.models.db import Task as TaskModel
 
 if TYPE_CHECKING:
     from src.tools.loader import ToolDefinition
@@ -174,7 +175,7 @@ class ContextMixin:
                 f'  - action: "new"\n'
                 f"  - repo_path: the absolute path of the referenced project or repository\n"
                 f"  - branch: a short kebab-case branch name derived from the user's task\n\n"
-                f"Step 2 — From the worktree result JSON, extract the \"path\" field. "
+                f'Step 2 — From the worktree result JSON, extract the "path" field. '
                 f"Then call the agent tool with that path as working_directory:\n"
                 f"{agent_lines}\n\n"
                 f"Do NOT call the agent tool before the worktree is created. "
@@ -211,8 +212,7 @@ class ContextMixin:
         if worktree_tools and agent_tools and other_tools:
             tool_lines = "\n".join(f'- "{name}": {desc}' for name, desc in other_tools)
             parts.append(
-                f"[Tool preference: The user has also requested:\n{tool_lines}\n"
-                f"Use these tools where appropriate.]"
+                f"[Tool preference: The user has also requested:\n{tool_lines}\nUse these tools where appropriate.]"
             )
 
         return "\n\n".join(parts)
@@ -344,9 +344,7 @@ class ContextMixin:
         branch: str = wt_info.get("branch", "")
         repo_path: str = wt_info.get("repo_path", "")
 
-        parts: list[str] = [
-            f"[Active worktree: The user has selected a git worktree at '{selected_wt}'."
-        ]
+        parts: list[str] = [f"[Active worktree: The user has selected a git worktree at '{selected_wt}'."]
         if branch:
             parts.append(f" Branch: '{branch}'.")
         if repo_path:
@@ -358,12 +356,12 @@ class ContextMixin:
         )
         parts.append(
             f" IMPORTANT — merge direction disambiguation:"
-            f" The worktree tool's action=\"merge\" merges the worktree branch INTO main"
+            f' The worktree tool\'s action="merge" merges the worktree branch INTO main'
             f" (i.e. finishing the feature branch) and then deletes the worktree."
             f" It does NOT update the worktree from main."
-            f" When the user says anything like \"pull main into worktree\","
-            f" \"merge main into worktree\", \"update worktree from main\","
-            f" \"sync worktree with main\", or similar phrasing where the direction"
+            f' When the user says anything like "pull main into worktree",'
+            f' "merge main into worktree", "update worktree from main",'
+            f' "sync worktree with main", or similar phrasing where the direction'
             f" is main → worktree, you MUST NOT call the worktree tool."
             f" Instead, invoke the agent tool (claude_code) with"
             f" working_directory='{selected_wt}' and instruct it to run the appropriate"
@@ -371,6 +369,65 @@ class ContextMixin:
             f" the worktree directory.]"
         )
         return "".join(parts)
+
+    # ------------------------------------------------------------------
+    # Plan context injection
+    # ------------------------------------------------------------------
+
+    _MAX_PLAN_CONTEXT_CHARS = 8_000  # Truncate plans that would overflow context
+
+    async def _build_plan_context(self, session: ActiveSession) -> str | None:
+        """If the session's primary task has a plan artifact, return it for injection.
+
+        Skipped for planning sessions themselves (``session_purpose == "plan"``) so
+        the LLM explores freely without being pre-biased by a prior plan.
+
+        Returns None when no plan is available or applicable.
+        """
+        if session.metadata.get("session_purpose") == "plan":
+            return None
+
+        task_id_str = session.metadata.get("primary_task_id")
+        if not task_id_str or self._db_session_factory is None:  # ty:ignore[unresolved-attribute]
+            return None
+
+        try:
+            task_uuid = uuid.UUID(task_id_str)
+        except ValueError:
+            return None
+
+        file_path: str | None = None
+        async with self._db_session_factory() as db:  # ty:ignore[unresolved-attribute]
+            task = await db.get(TaskModel, task_uuid)
+            if task is None or task.plan_artifact_id is None:
+                return None
+            artifact = await db.get(ArtifactModel, task.plan_artifact_id)
+            if artifact is None or not artifact.file_exists:
+                return None
+            file_path = artifact.file_path
+
+        if file_path is None:
+            return None
+
+        plan_path = Path(file_path)
+        if not plan_path.exists():
+            return None
+
+        try:
+            plan_text = plan_path.read_text(encoding="utf-8")
+        except OSError:
+            return None
+
+        if len(plan_text) > self._MAX_PLAN_CONTEXT_CHARS:
+            plan_text = plan_text[: self._MAX_PLAN_CONTEXT_CHARS]
+            plan_text += f"\n\n... (plan truncated; full plan at {file_path})"
+
+        return (
+            "## Implementation Plan\n\n"
+            "The following plan was generated for this task. "
+            "Use it as your primary guide for implementation.\n\n"
+            f"{plan_text}\n"
+        )
 
     # ------------------------------------------------------------------
     # Bare agent mention detection

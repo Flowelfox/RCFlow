@@ -47,15 +47,31 @@ class SessionLifecycleMixin:
         """Cancel and await all pending background tasks.
 
         Should be called during shutdown before the DB engine is disposed.
+
+        Title tasks are given a grace period to finish naturally so that
+        session titles are persisted before ``save_all_sessions`` runs.
+        All other background tasks are cancelled immediately.
         """
+        # --- 1. Let title tasks finish (they are short LLM calls) ---
+        title_tasks = set(self._pending_title_tasks)  # ty:ignore[unresolved-attribute]
+        if title_tasks:
+            logger.info("Awaiting %d pending title task(s) before shutdown", len(title_tasks))
+            _done, pending = await asyncio.wait(title_tasks, timeout=10)
+            if pending:
+                logger.warning("Cancelling %d title task(s) that did not finish in time", len(pending))
+                for task in pending:
+                    task.cancel()
+                await asyncio.gather(*pending, return_exceptions=True)
+
+        # --- 2. Cancel everything else ---
         all_pending: set[asyncio.Task[None]] = set()
         for task_set in (
             self._pending_log_tasks,  # ty:ignore[unresolved-attribute]
-            self._pending_title_tasks,  # ty:ignore[unresolved-attribute]
             self._pending_archive_tasks,  # ty:ignore[unresolved-attribute]
             self._pending_summary_tasks,  # ty:ignore[unresolved-attribute]
             self._pending_task_creation_tasks,  # ty:ignore[unresolved-attribute]
             self._pending_task_update_tasks,  # ty:ignore[unresolved-attribute]
+            self._pending_plan_finalization_tasks,  # ty:ignore[unresolved-attribute]
         ):
             all_pending.update(task_set)
 
@@ -75,11 +91,14 @@ class SessionLifecycleMixin:
             if session is None:
                 logger.warning("Session %s not found, will create new session", session_id)
             elif session.status in (
-                SessionStatus.COMPLETED, SessionStatus.FAILED, SessionStatus.CANCELLED,
+                SessionStatus.COMPLETED,
+                SessionStatus.FAILED,
+                SessionStatus.CANCELLED,
             ):
                 logger.warning(
                     "Session %s is in terminal state %s, will create new session",
-                    session_id, session.status.value,
+                    session_id,
+                    session.status.value,
                 )
                 session = None
         if session is None:
@@ -176,6 +195,7 @@ class SessionLifecycleMixin:
 
         # Update attached task statuses if not already triggered by a tool result
         self._fire_task_update_on_session_end(session)  # ty:ignore[unresolved-attribute]
+        self._fire_plan_finalization_task(session)  # ty:ignore[unresolved-attribute]
 
         session.cancel()
         self._fire_archive_task(session_id)  # ty:ignore[unresolved-attribute]
@@ -273,6 +293,7 @@ class SessionLifecycleMixin:
 
         # Update attached task statuses if not already triggered by a tool result
         self._fire_task_update_on_session_end(session)  # ty:ignore[unresolved-attribute]
+        self._fire_plan_finalization_task(session)  # ty:ignore[unresolved-attribute]
 
         session.complete()
         self._fire_archive_task(session_id)  # ty:ignore[unresolved-attribute]
@@ -328,16 +349,11 @@ class SessionLifecycleMixin:
         # state instead of re-presenting the pending widget.
         accepted = PermissionDecision(decision) == PermissionDecision.ALLOW
         for msg in session.buffer.text_history:
-            if (
-                msg.message_type == MessageType.PERMISSION_REQUEST
-                and msg.data.get("request_id") == request_id
-            ):
+            if msg.message_type == MessageType.PERMISSION_REQUEST and msg.data.get("request_id") == request_id:
                 msg.data["accepted"] = accepted
                 break
 
-    async def send_interactive_response(
-        self, session_id: str, text: str, *, accepted: bool = True
-    ) -> None:
+    async def send_interactive_response(self, session_id: str, text: str, *, accepted: bool = True) -> None:
         """Send an interactive response directly to Claude Code's stdin.
 
         Used for answering AskUserQuestion prompts, plan mode approval, plan
@@ -573,7 +589,10 @@ class SessionLifecycleMixin:
 
         logger.info(
             "Interrupted subprocess for session %s (claude_code=%s, codex=%s, opencode=%s)",
-            session_id, had_claude_code, had_codex, had_opencode,
+            session_id,
+            had_claude_code,
+            had_codex,
+            had_opencode,
         )
         return session
 

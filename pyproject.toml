@@ -1,8 +1,9 @@
 [project]
 name = "rcflow"
-version = "0.33.0"
+version = "0.35.1"
 description = "WebSocket-based action server that translates natural language prompts into tool executions via LLM"
 readme = "Design.md"
+license = "MIT"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115.0",

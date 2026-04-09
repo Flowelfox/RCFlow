@@ -245,6 +245,7 @@ async def ws_output_text(
                                     "source": t.source,
                                     "created_at": t.created_at.isoformat() if t.created_at else "",
                                     "updated_at": t.updated_at.isoformat() if t.updated_at else "",
+                                    "plan_artifact_id": str(t.plan_artifact_id) if t.plan_artifact_id else None,
                                     "sessions": sess_refs,
                                 }
                             )
@@ -275,6 +276,7 @@ async def ws_output_text(
                                     "file_extension": a.file_extension,
                                     "file_size": a.file_size,
                                     "mime_type": a.mime_type,
+                                    "file_exists": a.file_exists,
                                     "discovered_at": a.discovered_at.isoformat() if a.discovered_at else "",
                                     "modified_at": a.modified_at.isoformat() if a.modified_at else "",
                                     "session_id": str(a.session_id) if a.session_id else None,

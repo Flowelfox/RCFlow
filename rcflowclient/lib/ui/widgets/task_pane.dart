@@ -193,6 +193,22 @@ class _TaskPaneHeader extends StatelessWidget {
                 onPressed: () => _confirmDeleteTask(context, t, appState),
               ),
             ),
+            if (t.planArtifactId != null)
+              SizedBox(
+                width: 26,
+                height: 26,
+                child: IconButton(
+                  padding: EdgeInsets.zero,
+                  icon: const Icon(
+                    Icons.description_outlined,
+                    color: Color(0xFF10B981),
+                    size: 14,
+                  ),
+                  tooltip: 'Open plan',
+                  onPressed: () =>
+                      appState.openArtifactInPane(t.planArtifactId!),
+                ),
+              ),
           ],
           if (multiPane) ...[
             SizedBox(
@@ -707,6 +723,28 @@ class _TaskDetailContentState extends State<_TaskDetailContent> {
               ),
             ),
             const SizedBox(width: 8),
+            if (task.planArtifactId == null)
+              OutlinedButton.icon(
+                onPressed: () =>
+                    appState.startPlanSession(widget.paneId, task),
+                icon: const Icon(
+                  Icons.auto_awesome_outlined,
+                  size: 18,
+                ),
+                label: const Text('Make Plan'),
+                style: OutlinedButton.styleFrom(
+                  side: BorderSide(color: context.appColors.divider),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 10,
+                  ),
+                  textStyle: const TextStyle(fontSize: 13),
+                ),
+              ),
+            const SizedBox(width: 8),
             if (task.status != 'done')
               OutlinedButton.icon(
                 onPressed: () => _updateStatus(context, 'done'),
@@ -762,6 +800,12 @@ class _TaskDetailContentState extends State<_TaskDetailContent> {
           ],
         ),
         const SizedBox(height: 16),
+
+        // Plan banner
+        if (task.planArtifactId != null) ...[
+          _PlanBanner(task: task, appState: appState, paneId: widget.paneId),
+          const SizedBox(height: 16),
+        ],
 
         // Linked sessions
         Text(
@@ -1690,6 +1734,75 @@ class _LinkIssueDialogState extends State<_LinkIssueDialog> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _PlanBanner extends StatelessWidget {
+  final TaskInfo task;
+  final AppState appState;
+  final String paneId;
+
+  const _PlanBanner({
+    required this.task,
+    required this.appState,
+    required this.paneId,
+  });
+
+  static const _green = Color(0xFF10B981);
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: _green.withAlpha(18),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: _green.withAlpha(60)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.description_outlined, color: _green, size: 16),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'A plan has been generated for this task.',
+              style: TextStyle(
+                color: context.appColors.textSecondary,
+                fontSize: 12,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          TextButton(
+            onPressed: () =>
+                appState.openArtifactInPane(task.planArtifactId!),
+            style: TextButton.styleFrom(
+              foregroundColor: _green,
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              textStyle: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            child: const Text('Open plan'),
+          ),
+          const SizedBox(width: 4),
+          TextButton(
+            onPressed: () => appState.startPlanSession(paneId, task),
+            style: TextButton.styleFrom(
+              foregroundColor: context.appColors.textSecondary,
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              textStyle: const TextStyle(fontSize: 12),
+            ),
+            child: const Text('Regenerate'),
+          ),
+        ],
       ),
     );
   }

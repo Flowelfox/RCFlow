@@ -26,6 +26,9 @@ class TaskSessionRef {
   }
 }
 
+// Private sentinel used by copyWith to distinguish "not provided" from null.
+const _unset = Object();
+
 class TaskInfo {
   final String taskId;
   String title;
@@ -37,6 +40,7 @@ class TaskInfo {
   final DateTime createdAt;
   DateTime updatedAt;
   List<TaskSessionRef> sessions;
+  String? planArtifactId;
 
   TaskInfo({
     required this.taskId,
@@ -49,6 +53,7 @@ class TaskInfo {
     required this.createdAt,
     required this.updatedAt,
     this.sessions = const [],
+    this.planArtifactId,
   });
 
   factory TaskInfo.fromJson(
@@ -74,6 +79,7 @@ class TaskInfo {
       sessions: sessionsRaw
           .map((s) => TaskSessionRef.fromJson(s as Map<String, dynamic>))
           .toList(),
+      planArtifactId: json['plan_artifact_id'] as String?,
     );
   }
 
@@ -83,6 +89,7 @@ class TaskInfo {
     String? status,
     DateTime? updatedAt,
     List<TaskSessionRef>? sessions,
+    Object? planArtifactId = _unset,
   }) {
     return TaskInfo(
       taskId: taskId,
@@ -95,6 +102,9 @@ class TaskInfo {
       createdAt: createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       sessions: sessions ?? this.sessions,
+      planArtifactId: identical(planArtifactId, _unset)
+          ? this.planArtifactId
+          : planArtifactId as String?,
     );
   }
 }

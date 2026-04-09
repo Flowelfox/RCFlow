@@ -21,59 +21,57 @@ A coding agent orchestration platform: a backend server paired with a Flutter de
 - **[uv](https://docs.astral.sh/uv/)** — Python package manager (`curl -LsSf https://astral.sh/uv/install.sh | sh`)
 - An LLM API key — **Anthropic**, **OpenAI**, or **AWS Bedrock** access
 
-### From a Release
+### Quick Install (Linux / macOS)
 
-Download the latest release archive from the [Releases page](../../releases), extract it, and install:
-
-```bash
-# Extract the release archive
-tar -xf rcflow-<version>.tar.gz
-cd rcflow-<version>
-
-# Install into /opt/rcflow (or any directory you prefer)
-sudo mkdir -p /opt/rcflow
-sudo cp -r . /opt/rcflow
-cd /opt/rcflow
-
-# Create virtual environment and install dependencies
-uv sync --no-dev
-```
-
-For PostgreSQL support instead of the default SQLite:
+Install the latest worker (backend server) with a single command:
 
 ```bash
-uv sync --no-dev --extra postgres
+curl -fsSL https://rcflow.app/get-worker.sh | sh
 ```
 
-### Run the Server
+Install the desktop client:
 
 ```bash
-uv run rcflow
+curl -fsSL https://rcflow.app/get-client.sh | sh
 ```
 
-On first run, `settings.json` is created automatically with default values and a generated API key. The server binds to `0.0.0.0:53890` by default.
-
-Apply database migrations before first use:
+Pin a specific version with `RCFLOW_VERSION`:
 
 ```bash
-uv run alembic upgrade head
+curl -fsSL .../get-worker.sh | RCFLOW_VERSION=0.35.0 sh
 ```
 
-### systemd Service (Linux)
-
-A service file is included in the release:
+Pass options to the underlying installer (e.g. port, install directory):
 
 ```bash
-sudo cp systemd/rcflow.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now rcflow
+curl -fsSL .../get-worker.sh | sh -s -- --port 8080 --prefix /opt/rcflow
 ```
 
-The service expects the application at `/opt/rcflow` with `settings.json` and the virtual environment in place.
+### From a Release (manual)
+
+Download the latest release archive from the [Releases page](../../releases), extract it, and run the bundled installer:
+
+```bash
+# Linux
+tar -xf rcflow-v*-linux-worker-amd64.tar.gz
+cd rcflow-v*-linux-worker-amd64
+sudo ./install.sh
+```
+
+Pre-built APKs (Android), Windows installers, and macOS DMGs are also attached to each release.
 
 ### Flutter Client
 
-Pre-built APKs (Android) and Windows installers are attached to each release. Download and install the appropriate artifact for your platform — no build step required.
+Pre-built APKs (Android), Windows installers, macOS DMGs, and Linux `.deb` packages are attached to each release. Download and install the appropriate artifact for your platform — no build step required.
+
+### Development
+
+```bash
+uv sync          # Install dependencies
+uv run rcflow    # Start the server
+```
+
+On first run, `settings.json` is created automatically with default values and a generated API key. The server binds to `0.0.0.0:53890` by default.
 
 ## Configuration
 
@@ -174,4 +172,4 @@ uv run pytest tests/ -v --cov --cov-report=term-missing
 
 ## License
 
-Not yet specified.
+MIT — see [LICENSE](LICENSE).

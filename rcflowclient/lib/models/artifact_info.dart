@@ -5,6 +5,7 @@ class ArtifactInfo {
   final String fileExtension;
   final int fileSize;
   final String? mimeType;
+  final bool fileExists;
   final DateTime? discoveredAt;
   final DateTime? modifiedAt;
   final String? sessionId;
@@ -19,6 +20,7 @@ class ArtifactInfo {
     required this.fileExtension,
     required this.fileSize,
     this.mimeType,
+    this.fileExists = true,
     this.discoveredAt,
     this.modifiedAt,
     this.sessionId,
@@ -51,6 +53,7 @@ class ArtifactInfo {
       fileExtension: json['file_extension'] as String? ?? '',
       fileSize: json['file_size'] as int? ?? 0,
       mimeType: json['mime_type'] as String?,
+      fileExists: json['file_exists'] as bool? ?? true,
       discoveredAt: discoveredAt,
       modifiedAt: modifiedAt,
       sessionId: json['session_id'] as String?,
@@ -63,6 +66,7 @@ class ArtifactInfo {
   ArtifactInfo copyWith({
     String? fileName,
     int? fileSize,
+    bool? fileExists,
     DateTime? modifiedAt,
     String? sessionId,
     String? projectName,
@@ -74,6 +78,7 @@ class ArtifactInfo {
       fileExtension: fileExtension,
       fileSize: fileSize ?? this.fileSize,
       mimeType: mimeType,
+      fileExists: fileExists ?? this.fileExists,
       discoveredAt: discoveredAt,
       modifiedAt: modifiedAt ?? this.modifiedAt,
       sessionId: sessionId ?? this.sessionId,

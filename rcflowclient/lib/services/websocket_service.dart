@@ -139,6 +139,7 @@ class WebSocketService {
     List<Map<String, dynamic>>? attachments,
     String? projectName,
     String? selectedWorktreePath,
+    String? taskId,
   }) {
     if (_inputChannel == null) return;
     final msg = <String, dynamic>{
@@ -147,6 +148,25 @@ class WebSocketService {
       'session_id': sessionId,
       if (attachments != null && attachments.isNotEmpty)
         'attachments': attachments,
+      'project_name': ?projectName,
+      'selected_worktree_path': ?selectedWorktreePath,
+      'task_id': ?taskId,
+    };
+    _inputChannel!.sink.add(jsonEncode(msg));
+  }
+
+  /// Send a start_plan_session message over the input WebSocket.
+  /// The server responds with an ack containing the session_id, which is handled
+  /// by the standard ack routing in AppState._handleInputMessage.
+  void startPlanSession(
+    String taskId, {
+    String? projectName,
+    String? selectedWorktreePath,
+  }) {
+    if (_inputChannel == null) return;
+    final msg = <String, dynamic>{
+      'type': 'start_plan_session',
+      'task_id': taskId,
       'project_name': ?projectName,
       'selected_worktree_path': ?selectedWorktreePath,
     };
@@ -1778,6 +1798,26 @@ class WebSocketService {
     try {
       final request = await client.deleteUrl(url);
       request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      final response = await request.close();
+      final body = await response
+          .transform(const io.SystemEncoding().decoder)
+          .join();
+      if (response.statusCode != 200) {
+        throw Exception('Server returned ${response.statusCode}: $body');
+      }
+    } finally {
+      client.close();
+    }
+  }
+
+  Future<void> recheckArtifacts() async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url = _serverUrl!.http('/api/artifacts/recheck');
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.postUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      request.headers.contentLength = 0;
       final response = await request.close();
       final body = await response
           .transform(const io.SystemEncoding().decoder)

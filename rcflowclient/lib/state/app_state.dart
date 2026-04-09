@@ -291,6 +291,17 @@ class AppState extends ChangeNotifier implements PaneHost {
 
   TaskInfo? getTask(String taskId) => _tasks[taskId];
 
+  /// Look up a [SessionInfo] by its ID across all connected workers.
+  /// Returns null if the session is not currently known to any worker.
+  SessionInfo? getSession(String sessionId) {
+    for (final worker in _workers.values) {
+      for (final s in worker.sessions) {
+        if (s.sessionId == sessionId) return s;
+      }
+    }
+    return null;
+  }
+
   /// Check if a session is attached to any task (for sidebar indicator).
   bool isSessionAttachedToTask(String sessionId) {
     return _tasks.values.any(
@@ -779,6 +790,11 @@ class AppState extends ChangeNotifier implements PaneHost {
       }
     });
 
+    // Store task_id so sendPrompt sends it with the first message.
+    // The backend stores it in session.metadata["primary_task_id"],
+    // enabling plan context injection before the first LLM call.
+    pane.setPendingTaskId(task.taskId);
+
     // Build context prompt from task
     final buffer = StringBuffer('Task: ${task.title}');
     if (task.description != null && task.description!.isNotEmpty) {
@@ -788,6 +804,39 @@ class AppState extends ChangeNotifier implements PaneHost {
     // Pre-fill input area so the user can review/edit before sending
     pane.setPendingInputText(buffer.toString());
     requestInputFocus();
+  }
+
+  /// Start a read-only planning session for the given task.
+  /// Switches the pane to chat mode and fires the plan session in the background.
+  /// The ack from the server is handled by the standard input-channel ack routing.
+  void startPlanSession(String paneId, TaskInfo task) {
+    final pane = _panes[paneId];
+    if (pane == null) return;
+
+    final worker = _workers[task.workerId];
+    if (worker == null || !worker.isConnected) {
+      addSystemMessage('Worker not connected', isError: true);
+      return;
+    }
+
+    // Save project name and worktree before startNewChat clears them.
+    final projectName = pane.selectedProjectName;
+    final worktreePath = pane.pendingWorktreePath;
+
+    // Switch pane from task view to chat so streaming output is visible.
+    closeTaskView(paneId);
+    pane.startNewChat();
+    pane.setTargetWorker(task.workerId);
+
+    // Mark the pane as awaiting an ack so the ack router delivers the plan
+    // session_id to this pane (same mechanism used by sendPrompt).
+    pane.pendingAck = true;
+
+    worker.ws.startPlanSession(
+      task.taskId,
+      projectName: projectName,
+      selectedWorktreePath: worktreePath,
+    );
   }
 
   PaneState get activePane {

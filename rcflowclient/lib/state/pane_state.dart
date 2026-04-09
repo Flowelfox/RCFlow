@@ -144,6 +144,23 @@ class PaneState extends ChangeNotifier {
     notifyListeners();
   }
 
+  // Task ID to associate with the first prompt of a new session. Sent as
+  // task_id in the first sendPrompt call so the backend stores it in
+  // session.metadata["primary_task_id"] and injects the plan context.
+  // Cleared after the first send so subsequent messages in the same session
+  // do not re-send it.
+  String? _pendingTaskId;
+  String? get pendingTaskId => _pendingTaskId;
+
+  void setPendingTaskId(String? taskId) {
+    _pendingTaskId = taskId;
+    notifyListeners();
+  }
+
+  void _clearPendingTaskId() {
+    _pendingTaskId = null;
+  }
+
   // Task pane state (when pane shows a task detail view)
   String? _taskId;
   String? get taskId => _taskId;
@@ -510,13 +527,18 @@ class PaneState extends ChangeNotifier {
     // Pass the pre-selected worktree path only for new sessions (no session yet).
     // After the session exists the user adjusts the worktree via the Project panel.
     final worktreeToSend = _sessionId == null ? _pendingWorktreePath : null;
+    // Pass the pending task ID only for new sessions so the backend can inject
+    // plan context. Cleared immediately after sending.
+    final taskIdToSend = _sessionId == null ? _pendingTaskId : null;
     _ws?.sendPrompt(
       effectiveText,
       _sessionId,
       attachments: attachments,
       projectName: _selectedProjectName,
       selectedWorktreePath: worktreeToSend,
+      taskId: taskIdToSend,
     );
+    _clearPendingTaskId();
   }
 
   void switchSession(String sessionId, {bool recordHistory = true}) {
@@ -657,6 +679,7 @@ class PaneState extends ChangeNotifier {
     _selectedProjectPath = null;
     _projectNameError = null;
     _pendingWorktreePath = null;
+    _pendingTaskId = null;
     // Apply per-worker cached defaults (project + agent) for the new chat.
     // The sync fallback ensures the tool chip isn't blank during async work.
     final targetWorker = _workerId ?? _host.defaultWorkerId;

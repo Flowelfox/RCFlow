@@ -50,9 +50,7 @@ class Session(Base):
         back_populates="session", order_by="SessionMessage.sequence"
     )
     tool_executions: Mapped[list["ToolExecution"]] = relationship(back_populates="session")
-    tasks: Mapped[list["Task"]] = relationship(
-        secondary="task_sessions", back_populates="sessions"
-    )
+    tasks: Mapped[list["Task"]] = relationship(secondary="task_sessions", back_populates="sessions")
     turns: Mapped[list["SessionTurn"]] = relationship(back_populates="session")
     tool_calls_telemetry: Mapped[list["ToolCall"]] = relationship(back_populates="session")
 
@@ -131,17 +129,27 @@ class Task(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
-    # Relationship to sessions via association table
-    sessions: Mapped[list["Session"]] = relationship(
-        secondary="task_sessions", back_populates="tasks"
+    # FK to the most recently generated plan Artifact for this task. Null means
+    # no plan has been created yet. ON DELETE SET NULL so deleting the artifact
+    # record clears the reference without deleting the task.
+    plan_artifact_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid,
+        ForeignKey("artifacts.id", ondelete="SET NULL"),
+        nullable=True,
     )
+    plan_artifact: Mapped["Artifact | None"] = relationship(
+        "Artifact",
+        foreign_keys="[Task.plan_artifact_id]",
+        lazy="select",
+    )
+
+    # Relationship to sessions via association table
+    sessions: Mapped[list["Session"]] = relationship(secondary="task_sessions", back_populates="tasks")
 
 
 class TaskSession(Base):
     __tablename__ = "task_sessions"
-    __table_args__ = (
-        UniqueConstraint("task_id", "session_id"),
-    )
+    __table_args__ = (UniqueConstraint("task_id", "session_id"),)
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     task_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False)
@@ -198,6 +206,7 @@ class Artifact(Base):
     file_extension: Mapped[str] = mapped_column(String(50), nullable=False)
     file_size: Mapped[int] = mapped_column(Integer, nullable=False)
     mime_type: Mapped[str | None] = mapped_column(String(100))
+    file_exists: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
     discovered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     modified_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     session_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, ForeignKey("sessions.id"))
