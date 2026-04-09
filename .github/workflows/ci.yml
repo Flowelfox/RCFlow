@@ -59,7 +59,12 @@ jobs:
 
       # RCFLOW_API_KEY is auto-generated at server startup; not needed here.
       - name: Run tests with coverage
-        run: uv run pytest tests/ -v --tb=short --cov --cov-report=term-missing
+        run: uv run pytest tests/ -v --tb=short --cov --cov-report=term-missing --cov-report=xml
+
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
 
   # ---------------------------------------------------------------------------
   # Flutter client — analyze · test
