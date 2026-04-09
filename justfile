@@ -204,12 +204,13 @@ flutter-build:
     @mkdir -p build/artifacts
     cp rcflowclient/build/app/outputs/flutter-apk/app-debug.apk build/artifacts/
 
-# Build Flutter release APK (split per ABI)
+# Build Flutter release APK (arm64 only — fastest for local testing)
+# CI builds all ABIs directly via: flutter build apk --release --split-per-abi
 [unix]
 flutter-release:
-    cd rcflowclient && flutter build apk --release --split-per-abi
+    cd rcflowclient && flutter build apk --release --target-platform android-arm64
     @mkdir -p build/artifacts
-    cp rcflowclient/build/app/outputs/flutter-apk/app-*.apk build/artifacts/
+    cp rcflowclient/build/app/outputs/flutter-apk/app-release.apk build/artifacts/
 
 # Build Flutter Windows desktop app (release)
 [windows]

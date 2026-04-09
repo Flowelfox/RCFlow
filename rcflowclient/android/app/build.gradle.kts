@@ -8,13 +8,17 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
-// Load release signing configuration from key.properties if it exists.
+// Load release signing configuration from key.properties if both the
+// properties file and the referenced keystore file exist.  This allows CI
+// builds without a private keystore to fall back to debug signing gracefully.
 // See: https://flutter.dev/to/reference-keystore
 val keyPropertiesFile = rootProject.file("key.properties")
 val keyProperties = Properties()
 if (keyPropertiesFile.exists()) {
     keyProperties.load(FileInputStream(keyPropertiesFile))
 }
+val releaseKeystoreFile = keyProperties.getProperty("storeFile")?.let { file(it) }
+val hasReleaseSigning = keyPropertiesFile.exists() && releaseKeystoreFile?.exists() == true
 
 android {
     namespace = "com.rcflow.rcflowclient"
@@ -39,11 +43,11 @@ android {
     }
 
     signingConfigs {
-        if (keyPropertiesFile.exists()) {
+        if (hasReleaseSigning) {
             create("release") {
                 keyAlias = keyProperties.getProperty("keyAlias")
                 keyPassword = keyProperties.getProperty("keyPassword")
-                storeFile = file(keyProperties.getProperty("storeFile"))
+                storeFile = releaseKeystoreFile
                 storePassword = keyProperties.getProperty("storePassword")
             }
         }
@@ -57,7 +61,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            signingConfig = if (keyPropertiesFile.exists()) {
+            signingConfig = if (hasReleaseSigning) {
                 signingConfigs.getByName("release")
             } else {
                 signingConfigs.getByName("debug")
