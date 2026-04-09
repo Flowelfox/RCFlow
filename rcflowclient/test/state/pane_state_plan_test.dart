@@ -8,8 +8,6 @@
 /// - taskId is NOT forwarded on follow-up messages (session already exists)
 library;
 
-import 'dart:convert';
-
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rcflowclient/models/app_notification.dart';
 import 'package:rcflowclient/models/session_info.dart';
