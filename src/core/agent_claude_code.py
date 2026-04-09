@@ -88,8 +88,10 @@ class ClaudeCodeAgentMixin:
                 current_path = os.environ.get("PATH", "")
                 extra_env["PATH"] = f"{venv_bin}:{current_path}"
 
-        # Signal to Claude Code that it is running under RCFlow orchestration.
-        extra_env["CLAUDE_CODE_UNDERCOVER"] = "1"
+        # Signal to Claude Code that it is running under RCFlow orchestration
+        # when the user has opted into undercover mode via tool settings.
+        if self._tool_settings and self._tool_settings.get_settings("claude_code").get("undercover", False):  # ty:ignore[unresolved-attribute]
+            extra_env["CLAUDE_CODE_UNDERCOVER"] = "1"
 
         return extra_env
 
