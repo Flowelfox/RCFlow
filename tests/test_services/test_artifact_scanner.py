@@ -123,11 +123,7 @@ class TestFilePathRegex:
         assert "/home/user/c++/main.cpp" in matches
 
     def test_multiline_extraction(self):
-        text = (
-            "First file: /home/user/a.md\n"
-            "Second file: /home/user/b.py\n"
-            "Third: ./local/c.txt"
-        )
+        text = "First file: /home/user/a.md\nSecond file: /home/user/b.py\nThird: ./local/c.txt"
         matches = _FILE_PATH_RE.findall(text)
         assert "/home/user/a.md" in matches
         assert "/home/user/b.py" in matches
@@ -157,33 +153,23 @@ class TestShouldIncludeFile:
 
     def test_exclude_node_modules(self, settings: Settings):
         scanner = _make_scanner(settings)
-        assert not scanner._should_include_file(
-            Path("/home/user/project/node_modules/pkg/index.js")
-        )
+        assert not scanner._should_include_file(Path("/home/user/project/node_modules/pkg/index.js"))
 
     def test_exclude_pycache(self, settings: Settings):
         scanner = _make_scanner(settings)
-        assert not scanner._should_include_file(
-            Path("/home/user/project/__pycache__/module.cpython-312.pyc")
-        )
+        assert not scanner._should_include_file(Path("/home/user/project/__pycache__/module.cpython-312.pyc"))
 
     def test_exclude_git_directory(self, settings: Settings):
         scanner = _make_scanner(settings)
-        assert not scanner._should_include_file(
-            Path("/home/user/project/.git/config")
-        )
+        assert not scanner._should_include_file(Path("/home/user/project/.git/config"))
 
     def test_exclude_venv(self, settings: Settings):
         scanner = _make_scanner(settings)
-        assert not scanner._should_include_file(
-            Path("/home/user/project/.venv/lib/python3.12/site.py")
-        )
+        assert not scanner._should_include_file(Path("/home/user/project/.venv/lib/python3.12/site.py"))
 
     def test_exclude_pyc_extension(self, settings: Settings):
         scanner = _make_scanner(settings)
-        assert not scanner._should_include_file(
-            Path("/home/user/project/src/module.pyc")
-        )
+        assert not scanner._should_include_file(Path("/home/user/project/src/module.pyc"))
 
     def test_normal_file_not_excluded(self, settings: Settings):
         scanner = _make_scanner(settings)
@@ -245,9 +231,7 @@ class TestExtractPathsFromText:
 
     def test_deduplicates_paths(self, settings: Settings):
         scanner = _make_scanner(settings)
-        paths = scanner._extract_paths_from_text(
-            "File /home/user/a.md and again /home/user/a.md"
-        )
+        paths = scanner._extract_paths_from_text("File /home/user/a.md and again /home/user/a.md")
         assert paths == {"/home/user/a.md"}
 
 

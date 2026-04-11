@@ -59,6 +59,7 @@ def _make_plugins_dir(tmp_path: Path) -> Path:
 # Tool-scoped endpoints — list
 # ---------------------------------------------------------------------------
 
+
 class TestListToolPlugins:
     def test_returns_200_for_claude_code(
         self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -121,9 +122,7 @@ class TestListToolPlugins:
         pd = _make_plugins_dir(tmp_path)
         _make_plugin(pd, "disabled-one", {"cmd": 'description: "X"'})
         # Write the plugins_state.json marking this plugin as disabled
-        (pd / "plugins_state.json").write_text(
-            json.dumps({"disabled": ["disabled-one"]}), encoding="utf-8"
-        )
+        (pd / "plugins_state.json").write_text(json.dumps({"disabled": ["disabled-one"]}), encoding="utf-8")
         monkeypatch.setattr("src.api.routes.rcflow_plugins.get_tool_plugins_dir", lambda _: pd)
         resp = client.get("/api/tools/claude_code/plugins", headers=_auth())
         plugin = next(p for p in resp.json()["plugins"] if p["name"] == "disabled-one")
@@ -143,10 +142,14 @@ class TestListToolPlugins:
         self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         pd = _make_plugins_dir(tmp_path)
-        _make_plugin(pd, "my-tool", {
-            "visible": 'description: "OK"',
-            "hidden": 'description: "Nope"\nhide-from-slash-command-tool: "true"',
-        })
+        _make_plugin(
+            pd,
+            "my-tool",
+            {
+                "visible": 'description: "OK"',
+                "hidden": 'description: "Nope"\nhide-from-slash-command-tool: "true"',
+            },
+        )
         monkeypatch.setattr("src.api.routes.rcflow_plugins.get_tool_plugins_dir", lambda _: pd)
         resp = client.get("/api/tools/claude_code/plugins", headers=_auth())
         plugin = next(p for p in resp.json()["plugins"] if p["name"] == "my-tool")
@@ -173,6 +176,7 @@ class TestListToolPlugins:
 # ---------------------------------------------------------------------------
 # Tool-scoped endpoints — install
 # ---------------------------------------------------------------------------
+
 
 class TestInstallToolPlugin:
     def test_install_from_local_path_201(
@@ -286,10 +290,9 @@ class TestInstallToolPlugin:
 # Tool-scoped endpoints — uninstall
 # ---------------------------------------------------------------------------
 
+
 class TestUninstallToolPlugin:
-    def test_uninstall_200(
-        self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_uninstall_200(self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         pd = _make_plugins_dir(tmp_path)
         _make_plugin(pd, "bye-plugin", {"cmd": 'description: "X"'})
         monkeypatch.setattr("src.api.routes.rcflow_plugins.get_tool_plugins_dir", lambda _: pd)
@@ -320,9 +323,7 @@ class TestUninstallToolPlugin:
         pd = _make_plugins_dir(tmp_path)
         _make_plugin(pd, "was-disabled", {"cmd": 'description: "X"'})
         # Pre-mark as disabled
-        (pd / "plugins_state.json").write_text(
-            json.dumps({"disabled": ["was-disabled"]}), encoding="utf-8"
-        )
+        (pd / "plugins_state.json").write_text(json.dumps({"disabled": ["was-disabled"]}), encoding="utf-8")
         monkeypatch.setattr("src.api.routes.rcflow_plugins.get_tool_plugins_dir", lambda _: pd)
         client.delete("/api/tools/claude_code/plugins/was-disabled", headers=_auth())
         # After uninstall, the state file should no longer list it
@@ -333,6 +334,7 @@ class TestUninstallToolPlugin:
 # ---------------------------------------------------------------------------
 # Tool-scoped endpoints — enable/disable (PATCH)
 # ---------------------------------------------------------------------------
+
 
 class TestSetToolPluginEnabled:
     def test_disable_plugin_returns_enabled_false(
@@ -354,9 +356,7 @@ class TestSetToolPluginEnabled:
     ) -> None:
         pd = _make_plugins_dir(tmp_path)
         _make_plugin(pd, "toggle-me", {"cmd": 'description: "X"'})
-        (pd / "plugins_state.json").write_text(
-            json.dumps({"disabled": ["toggle-me"]}), encoding="utf-8"
-        )
+        (pd / "plugins_state.json").write_text(json.dumps({"disabled": ["toggle-me"]}), encoding="utf-8")
         monkeypatch.setattr("src.api.routes.rcflow_plugins.get_tool_plugins_dir", lambda _: pd)
         resp = client.patch(
             "/api/tools/claude_code/plugins/toggle-me",
@@ -385,9 +385,7 @@ class TestSetToolPluginEnabled:
     ) -> None:
         pd = _make_plugins_dir(tmp_path)
         _make_plugin(pd, "re-enable", {"cmd": 'description: "X"'})
-        (pd / "plugins_state.json").write_text(
-            json.dumps({"disabled": ["re-enable"]}), encoding="utf-8"
-        )
+        (pd / "plugins_state.json").write_text(json.dumps({"disabled": ["re-enable"]}), encoding="utf-8")
         monkeypatch.setattr("src.api.routes.rcflow_plugins.get_tool_plugins_dir", lambda _: pd)
         client.patch(
             "/api/tools/claude_code/plugins/re-enable",
@@ -426,6 +424,7 @@ class TestSetToolPluginEnabled:
 # Deprecated legacy endpoints — still work, carry deprecation header
 # ---------------------------------------------------------------------------
 
+
 class TestDeprecatedLegacyEndpoints:
     def test_list_returns_200(self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         pd = _make_plugins_dir(tmp_path)
@@ -448,9 +447,7 @@ class TestDeprecatedLegacyEndpoints:
         resp = client.get("/api/rcflow-plugins", headers=_auth())
         assert any(p["name"] == "my-tool" for p in resp.json()["plugins"])
 
-    def test_install_returns_201(
-        self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_install_returns_201(self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         pd = _make_plugins_dir(tmp_path)
         source_dir = tmp_path / "src-p"
         source_dir.mkdir()

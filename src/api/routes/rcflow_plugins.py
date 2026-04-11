@@ -127,7 +127,7 @@ def _visible_commands(plugin_dir: Path) -> list[str]:
                 if end != -1:
                     fm = text[3:end]
                     h = _hide_re.search(fm)
-                    if h and h.group(1).strip().strip('"\'').lower() == "true":
+                    if h and h.group(1).strip().strip("\"'").lower() == "true":
                         continue
         except OSError:
             continue
@@ -175,8 +175,7 @@ def _require_supported_tool(tool_name: str) -> None:
         raise HTTPException(
             status_code=422,
             detail=(
-                f"Plugin support is not yet available for {tool_name!r}. "
-                "Currently only 'claude_code' supports plugins."
+                f"Plugin support is not yet available for {tool_name!r}. Currently only 'claude_code' supports plugins."
             ),
         )
 
@@ -251,10 +250,7 @@ async def install_tool_plugin(tool_name: str, body: InstallPluginRequest) -> dic
     if dest.exists():
         raise HTTPException(
             status_code=409,
-            detail=(
-                f"Plugin '{plugin_name}' already exists at {dest}. "
-                "Uninstall it first or choose a different name."
-            ),
+            detail=(f"Plugin '{plugin_name}' already exists at {dest}. Uninstall it first or choose a different name."),
         )
 
     source_path = Path(source).expanduser()
@@ -273,7 +269,12 @@ async def install_tool_plugin(tool_name: str, body: InstallPluginRequest) -> dic
             )
         try:
             proc = await asyncio.create_subprocess_exec(
-                git, "clone", "--depth", "1", source, str(dest),
+                git,
+                "clone",
+                "--depth",
+                "1",
+                source,
+                str(dest),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -366,9 +367,7 @@ async def set_tool_plugin_enabled(
     state = PluginStateManager(plugins_dir)
     await state.set_enabled(name, enabled=body.enabled)
     disabled = state.get_disabled()
-    logger.info(
-        "%s plugin '%s' %s", tool_name, name, "enabled" if body.enabled else "disabled"
-    )
+    logger.info("%s plugin '%s' %s", tool_name, name, "enabled" if body.enabled else "disabled")
     return {"plugin": _plugin_info(plugin_dir, disabled)}
 
 
@@ -376,19 +375,13 @@ async def set_tool_plugin_enabled(
 # Legacy / deprecated endpoints  (aliases → claude_code)
 # ---------------------------------------------------------------------------
 
-_DEPRECATION_NOTICE = (
-    "This endpoint is deprecated. "
-    "Use /api/tools/claude_code/plugins instead."
-)
+_DEPRECATION_NOTICE = "This endpoint is deprecated. Use /api/tools/claude_code/plugins instead."
 
 
 @router.get(
     "/rcflow-plugins",
     summary="[Deprecated] List RCFlow-managed plugins",
-    description=(
-        "Deprecated alias for ``GET /api/tools/claude_code/plugins``. "
-        "Use the tool-scoped endpoint instead."
-    ),
+    description=("Deprecated alias for ``GET /api/tools/claude_code/plugins``. Use the tool-scoped endpoint instead."),
     deprecated=True,
     dependencies=[Depends(verify_http_api_key)],
 )
@@ -414,10 +407,7 @@ class _LegacyInstallRequest(BaseModel):
 @router.post(
     "/rcflow-plugins",
     summary="[Deprecated] Install an RCFlow-managed plugin",
-    description=(
-        "Deprecated alias for ``POST /api/tools/claude_code/plugins``. "
-        "Use the tool-scoped endpoint instead."
-    ),
+    description=("Deprecated alias for ``POST /api/tools/claude_code/plugins``. Use the tool-scoped endpoint instead."),
     deprecated=True,
     dependencies=[Depends(verify_http_api_key)],
     status_code=201,
@@ -438,8 +428,7 @@ async def install_rcflow_plugin_deprecated(
     "/rcflow-plugins/{name}",
     summary="[Deprecated] Uninstall an RCFlow-managed plugin",
     description=(
-        "Deprecated alias for ``DELETE /api/tools/claude_code/plugins/{name}``. "
-        "Use the tool-scoped endpoint instead."
+        "Deprecated alias for ``DELETE /api/tools/claude_code/plugins/{name}``. Use the tool-scoped endpoint instead."
     ),
     deprecated=True,
     dependencies=[Depends(verify_http_api_key)],

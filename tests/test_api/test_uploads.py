@@ -158,9 +158,7 @@ class TestUploadCapabilityGating:
     """Upload endpoint should enforce model-level attachment capabilities."""
 
     @pytest.mark.parametrize("mime", ["image/jpeg", "image/png", "image/gif", "image/webp"])
-    def test_image_rejected_when_vision_not_supported(
-        self, client_no_vision: TestClient, mime: str
-    ) -> None:
+    def test_image_rejected_when_vision_not_supported(self, client_no_vision: TestClient, mime: str) -> None:
         resp = client_no_vision.post(
             "/api/uploads",
             headers=_auth(),
@@ -170,9 +168,7 @@ class TestUploadCapabilityGating:
         assert "image" in resp.json()["detail"].lower()
 
     @pytest.mark.parametrize("mime", ["image/jpeg", "image/png", "image/gif", "image/webp"])
-    def test_image_accepted_when_vision_supported(
-        self, client_vision: TestClient, mime: str
-    ) -> None:
+    def test_image_accepted_when_vision_supported(self, client_vision: TestClient, mime: str) -> None:
         resp = client_vision.post(
             "/api/uploads",
             headers=_auth(),
@@ -181,9 +177,7 @@ class TestUploadCapabilityGating:
         assert resp.status_code == 200
         assert resp.json()["is_image"] is True
 
-    def test_text_file_always_accepted_regardless_of_vision(
-        self, client_no_vision: TestClient
-    ) -> None:
+    def test_text_file_always_accepted_regardless_of_vision(self, client_no_vision: TestClient) -> None:
         resp = client_no_vision.post(
             "/api/uploads",
             headers=_auth(),
@@ -191,9 +185,7 @@ class TestUploadCapabilityGating:
         )
         assert resp.status_code == 200
 
-    def test_no_llm_client_skips_capability_check(
-        self, client_with_store: TestClient
-    ) -> None:
+    def test_no_llm_client_skips_capability_check(self, client_with_store: TestClient) -> None:
         """When llm_client is absent from app.state, capability check is skipped."""
         # client_with_store has no llm_client on app.state
         if hasattr(client_with_store.app.state, "llm_client"):
@@ -264,9 +256,7 @@ class TestBuildAttachmentBlocks:
         png_1x1 = base64.b64decode(
             "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
         )
-        blocks = router._build_attachment_blocks(
-            [ResolvedAttachment("photo.png", "image/png", png_1x1)]
-        )
+        blocks = router._build_attachment_blocks([ResolvedAttachment("photo.png", "image/png", png_1x1)])
         assert len(blocks) == 1
         block = blocks[0]
         assert block["type"] == "image"
@@ -279,9 +269,7 @@ class TestBuildAttachmentBlocks:
     def test_image_openai_format(self) -> None:
         router = _make_router_with_provider("openai")
         data = b"fakepngbytes"
-        blocks = router._build_attachment_blocks(
-            [ResolvedAttachment("img.jpg", "image/jpeg", data)]
-        )
+        blocks = router._build_attachment_blocks([ResolvedAttachment("img.jpg", "image/jpeg", data)])
         assert len(blocks) == 1
         block = blocks[0]
         assert block["type"] == "image_url"
@@ -290,9 +278,7 @@ class TestBuildAttachmentBlocks:
     def test_text_file_inlined(self) -> None:
         router = _make_router_with_provider("anthropic")
         code = b"def hello():\n    return 'world'\n"
-        blocks = router._build_attachment_blocks(
-            [ResolvedAttachment("hello.py", "text/x-python", code)]
-        )
+        blocks = router._build_attachment_blocks([ResolvedAttachment("hello.py", "text/x-python", code)])
         assert len(blocks) == 1
         assert blocks[0]["type"] == "text"
         assert "hello.py" in blocks[0]["text"]
@@ -301,9 +287,7 @@ class TestBuildAttachmentBlocks:
     def test_markdown_file_inlined(self) -> None:
         router = _make_router_with_provider("anthropic")
         md = b"# Title\n\nSome text."
-        blocks = router._build_attachment_blocks(
-            [ResolvedAttachment("README.md", "text/markdown", md)]
-        )
+        blocks = router._build_attachment_blocks([ResolvedAttachment("README.md", "text/markdown", md)])
         assert blocks[0]["type"] == "text"
         assert "README.md" in blocks[0]["text"]
         assert "# Title" in blocks[0]["text"]

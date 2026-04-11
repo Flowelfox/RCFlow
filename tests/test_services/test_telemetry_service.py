@@ -1,4 +1,5 @@
 """Tests for TelemetryService and telemetry API endpoints."""
+
 from __future__ import annotations
 
 import uuid
@@ -23,12 +24,22 @@ from src.services.telemetry_service import TelemetryService
 # ---------------------------------------------------------------------------
 
 _COUNTER_ATTRS = (
-    "tokens_sent", "tokens_received", "cache_creation", "cache_read",
-    "llm_duration_sum_us", "llm_duration_count",
-    "tool_duration_sum_us", "tool_duration_count",
-    "inter_tool_gap_sum_us", "inter_tool_gap_count",
-    "inter_turn_gap_sum_us", "inter_turn_gap_count",
-    "turn_count", "tool_call_count", "error_count", "parallel_tool_calls",
+    "tokens_sent",
+    "tokens_received",
+    "cache_creation",
+    "cache_read",
+    "llm_duration_sum_us",
+    "llm_duration_count",
+    "tool_duration_sum_us",
+    "tool_duration_count",
+    "inter_tool_gap_sum_us",
+    "inter_tool_gap_count",
+    "inter_turn_gap_sum_us",
+    "inter_turn_gap_count",
+    "turn_count",
+    "tool_call_count",
+    "error_count",
+    "parallel_tool_calls",
 )
 
 
@@ -465,8 +476,8 @@ class TestRecordTurnStartFKGuard:
         from src.models.db import Session as SessionModel  # noqa: PLC0415
         from src.models.db import SessionTurn  # noqa: PLC0415
 
-        stub_db = _fresh_db(session_exists=False)   # for _ensure_session_stub
-        turn_db = _fresh_db(session_exists=True)    # for the SessionTurn insert
+        stub_db = _fresh_db(session_exists=False)  # for _ensure_session_stub
+        turn_db = _fresh_db(session_exists=True)  # for the SessionTurn insert
         service = TelemetryService(
             db_factory=_make_db_factory_sequence([stub_db, turn_db]),
             backend_id="be-1",
@@ -508,7 +519,7 @@ class TestRecordTurnStartFKGuard:
         """When the session row already exists, only the turn is inserted (no stub write)."""
         from src.models.db import Session as SessionModel  # noqa: PLC0415
 
-        stub_db = _fresh_db(session_exists=True)    # get() returns existing row
+        stub_db = _fresh_db(session_exists=True)  # get() returns existing row
         turn_db = _fresh_db(session_exists=True)
         service = TelemetryService(
             db_factory=_make_db_factory_sequence([stub_db, turn_db]),

@@ -43,6 +43,7 @@ def _backend_id(request: Request) -> str:
 # Response helpers
 # ------------------------------------------------------------------
 
+
 def _avg_ms(sum_us: int, count: int) -> float | None:
     if count == 0:
         return None
@@ -60,6 +61,7 @@ def _p95_ms(values_ms: list[int]) -> float | None:
 # ------------------------------------------------------------------
 # GET /api/telemetry/summary
 # ------------------------------------------------------------------
+
 
 @router.get(
     "/summary",
@@ -99,19 +101,25 @@ async def get_global_summary(
         SessionTurn.interrupted.is_(False),
     )
     llm_durations = [r[0] for r in (await db.execute(llm_dur_stmt)).all()]
-    avg_llm_ms = _p95_ms(llm_durations[:max(0, len(llm_durations) - int(len(llm_durations) * 0.05))])
+    avg_llm_ms = _p95_ms(llm_durations[: max(0, len(llm_durations) - int(len(llm_durations) * 0.05))])
     if llm_durations:
         avg_llm_ms = round(sum(llm_durations) / len(llm_durations), 2)
 
     # Tool stats
-    tool_stmt = select(
-        ToolCall.tool_name,
-        func.count(ToolCall.id),
-        func.avg(ToolCall.duration_ms),
-    ).where(
-        ToolCall.backend_id == backend_id,
-        ToolCall.ts_end.is_not(None),
-    ).group_by(ToolCall.tool_name).order_by(func.count(ToolCall.id).desc()).limit(10)
+    tool_stmt = (
+        select(
+            ToolCall.tool_name,
+            func.count(ToolCall.id),
+            func.avg(ToolCall.duration_ms),
+        )
+        .where(
+            ToolCall.backend_id == backend_id,
+            ToolCall.ts_end.is_not(None),
+        )
+        .group_by(ToolCall.tool_name)
+        .order_by(func.count(ToolCall.id).desc())
+        .limit(10)
+    )
     tool_rows = (await db.execute(tool_stmt)).all()
     top_tools = [
         {
@@ -137,6 +145,7 @@ async def get_global_summary(
 # ------------------------------------------------------------------
 # GET /api/telemetry/worker/summary
 # ------------------------------------------------------------------
+
 
 @router.get(
     "/worker/summary",
@@ -241,6 +250,7 @@ async def get_worker_summary(
 # GET /api/telemetry/sessions/{session_id}/summary
 # ------------------------------------------------------------------
 
+
 @router.get(
     "/sessions/{session_id}/summary",
     summary="Per-session telemetry summary",
@@ -262,10 +272,14 @@ async def get_session_summary(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail="Invalid session_id UUID") from exc
 
-    turns_stmt = select(SessionTurn).where(
-        SessionTurn.session_id == sid,
-        SessionTurn.backend_id == backend_id,
-    ).order_by(SessionTurn.turn_index)
+    turns_stmt = (
+        select(SessionTurn)
+        .where(
+            SessionTurn.session_id == sid,
+            SessionTurn.backend_id == backend_id,
+        )
+        .order_by(SessionTurn.turn_index)
+    )
     turns = (await db.execute(turns_stmt)).scalars().all()
 
     tool_stmt = select(ToolCall).where(
@@ -294,9 +308,7 @@ async def get_session_summary(
     if turns and completed_turns:
         last_ts_end = completed_turns[-1].ts_end
         assert last_ts_end is not None  # guaranteed by the filter above
-        session_duration_ms = int(
-            (last_ts_end - turns[0].ts_start).total_seconds() * 1000
-        )
+        session_duration_ms = int((last_ts_end - turns[0].ts_start).total_seconds() * 1000)
 
     # Per-turn breakdown
     turn_list = []
@@ -305,20 +317,22 @@ async def get_session_summary(
         ttft_ms = None
         if t.ts_first_token is not None:
             ttft_ms = int((t.ts_first_token - t.ts_start).total_seconds() * 1000)
-        turn_list.append({
-            "turn_index": t.turn_index,
-            "ts_start": t.ts_start.isoformat() if t.ts_start else None,
-            "ts_end": t.ts_end.isoformat() if t.ts_end else None,
-            "llm_duration_ms": t.llm_duration_ms,
-            "ttft_ms": ttft_ms,
-            "input_tokens": t.input_tokens,
-            "output_tokens": t.output_tokens,
-            "cache_creation_tokens": t.cache_creation_tokens,
-            "cache_read_tokens": t.cache_read_tokens,
-            "tool_calls": tool_count,
-            "model": t.model,
-            "interrupted": t.interrupted,
-        })
+        turn_list.append(
+            {
+                "turn_index": t.turn_index,
+                "ts_start": t.ts_start.isoformat() if t.ts_start else None,
+                "ts_end": t.ts_end.isoformat() if t.ts_end else None,
+                "llm_duration_ms": t.llm_duration_ms,
+                "ttft_ms": ttft_ms,
+                "input_tokens": t.input_tokens,
+                "output_tokens": t.output_tokens,
+                "cache_creation_tokens": t.cache_creation_tokens,
+                "cache_read_tokens": t.cache_read_tokens,
+                "tool_calls": tool_count,
+                "model": t.model,
+                "interrupted": t.interrupted,
+            }
+        )
 
     return {
         "session_id": session_id,
@@ -339,6 +353,7 @@ async def get_session_summary(
 # ------------------------------------------------------------------
 # GET /api/telemetry/timeseries
 # ------------------------------------------------------------------
+
 
 @router.get(
     "/timeseries",
@@ -378,12 +393,16 @@ async def get_timeseries(
     if end.tzinfo is None:
         end = end.replace(tzinfo=UTC)
 
-    stmt = select(TelemetryMinutely).where(
-        TelemetryMinutely.backend_id == backend_id,
-        TelemetryMinutely.bucket >= start,
-        TelemetryMinutely.bucket < end,
-        TelemetryMinutely.session_id == sid,
-    ).order_by(TelemetryMinutely.bucket)
+    stmt = (
+        select(TelemetryMinutely)
+        .where(
+            TelemetryMinutely.backend_id == backend_id,
+            TelemetryMinutely.bucket >= start,
+            TelemetryMinutely.bucket < end,
+            TelemetryMinutely.session_id == sid,
+        )
+        .order_by(TelemetryMinutely.bucket)
+    )
     rows = (await db.execute(stmt)).scalars().all()
 
     # Group rows into zoom-level buckets

@@ -277,9 +277,7 @@ class LinearService:
         if resp.status_code == 429:
             raise LinearServiceError("Linear API rate limit exceeded", status_code=429)
         if resp.status_code >= 400:
-            raise LinearServiceError(
-                f"Linear API returned HTTP {resp.status_code}", status_code=resp.status_code
-            )
+            raise LinearServiceError(f"Linear API returned HTTP {resp.status_code}", status_code=resp.status_code)
 
         body = resp.json()
         if "errors" in body:

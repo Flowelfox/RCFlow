@@ -36,29 +36,27 @@ else:
 # Shell validation
 # ---------------------------------------------------------------------------
 
-_FALLBACK_SHELLS = frozenset({
-    "/bin/bash",
-    "/bin/sh",
-    "/bin/zsh",
-    "/bin/fish",
-    "/usr/bin/bash",
-    "/usr/bin/zsh",
-    "/usr/bin/fish",
-    "/usr/local/bin/bash",
-    "/usr/local/bin/zsh",
-    "/usr/local/bin/fish",
-})
+_FALLBACK_SHELLS = frozenset(
+    {
+        "/bin/bash",
+        "/bin/sh",
+        "/bin/zsh",
+        "/bin/fish",
+        "/usr/bin/bash",
+        "/usr/bin/zsh",
+        "/usr/bin/fish",
+        "/usr/local/bin/bash",
+        "/usr/local/bin/zsh",
+        "/usr/local/bin/fish",
+    }
+)
 
 
 def _read_etc_shells() -> set[str]:
     """Read valid shells from /etc/shells."""
     try:
         with open("/etc/shells") as f:
-            return {
-                line.strip()
-                for line in f
-                if line.strip() and not line.startswith("#")
-            }
+            return {line.strip() for line in f if line.strip() and not line.startswith("#")}
     except OSError:
         return set()
 
@@ -221,9 +219,7 @@ class PTYSession:
                     break
         finally:
             exit_code = await self._wait_for_exit_unix()
-            logger.info(
-                "PTY session %s exited (code=%s)", self.terminal_id, exit_code
-            )
+            logger.info("PTY session %s exited (code=%s)", self.terminal_id, exit_code)
             if self._on_exit and not self._closed:
                 await self._on_exit(exit_code)
 
@@ -244,9 +240,7 @@ class PTYSession:
         if self._pid is None:
             return None
         try:
-            _, status = await asyncio.get_event_loop().run_in_executor(
-                None, os.waitpid, self._pid, 0
-            )
+            _, status = await asyncio.get_event_loop().run_in_executor(None, os.waitpid, self._pid, 0)
             if os.WIFEXITED(status):
                 return os.WEXITSTATUS(status)
             return -1
@@ -270,9 +264,7 @@ class PTYSession:
                     break
         finally:
             exit_code = self._get_exitstatus_windows()
-            logger.info(
-                "PTY session %s exited (code=%s)", self.terminal_id, exit_code
-            )
+            logger.info("PTY session %s exited (code=%s)", self.terminal_id, exit_code)
             if self._on_exit and not self._closed:
                 await self._on_exit(exit_code)
 
