@@ -25,6 +25,19 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Sentinel used to push sessions with no sort_order to the end of the list.
+_SORT_ORDER_NULLS_LAST = 2**62
+
+
+def session_sort_key(item: dict[str, Any]) -> tuple[int, float]:
+    """Return a sort key for session dicts: sort_order ASC (nulls last), created_at DESC."""
+    sort_order = item.get("sort_order")
+    created_at = item.get("created_at")
+    return (
+        sort_order if sort_order is not None else _SORT_ORDER_NULLS_LAST,
+        -(created_at.replace(tzinfo=None).timestamp() if created_at else 0),
+    )
+
 
 class SessionStatus(StrEnum):
     CREATED = "created"
@@ -409,6 +422,18 @@ class SessionManager:
         for queue in self._update_subscribers.values():
             queue.put_nowait(msg)
 
+    def broadcast_github_pr_update(self, pr_data: dict[str, Any]) -> None:
+        """Broadcast a GitHub pull request update to all connected output clients."""
+        msg = {"type": "github_pr_update", **pr_data}
+        for queue in self._update_subscribers.values():
+            queue.put_nowait(msg)
+
+    def broadcast_github_pr_deleted(self, pr_id: str) -> None:
+        """Broadcast a GitHub pull request deletion to all connected output clients."""
+        msg = {"type": "github_pr_deleted", "id": pr_id}
+        for queue in self._update_subscribers.values():
+            queue.put_nowait(msg)
+
     def broadcast_artifact_update(self, artifact_data: dict[str, Any]) -> None:
         """Broadcast an artifact update to all connected output clients."""
         msg = {"type": "artifact_update", **artifact_data}
@@ -693,14 +718,7 @@ class SessionManager:
                     }
                 )
 
-        # Sort by sort_order ascending (nulls last), then created_at descending
-        sort_order_max = 2**62
-        result.sort(
-            key=lambda x: (
-                x["sort_order"] if x["sort_order"] is not None else sort_order_max,
-                -(x["created_at"].replace(tzinfo=None).timestamp() if x["created_at"] else 0),
-            ),
-        )
+        result.sort(key=session_sort_key)
         return result
 
     async def archive_all_completed(self, db: AsyncSession) -> None:
