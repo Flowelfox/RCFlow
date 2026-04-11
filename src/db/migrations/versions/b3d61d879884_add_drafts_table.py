@@ -1,7 +1,7 @@
 """add drafts table
 
 Revision ID: b3d61d879884
-Revises: 0001
+Revises: e4f5a6b7c8d9
 Create Date: 2026-04-09 21:10:57.559099
 
 """
@@ -13,7 +13,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "b3d61d879884"
-down_revision: str | Sequence[str] | None = "0001"
+down_revision: str | Sequence[str] | None = "e4f5a6b7c8d9"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
