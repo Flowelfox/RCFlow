@@ -100,8 +100,9 @@ void main() async {
   }
 
   final appState = AppState(settings: settings);
-  // Fire the first update-check (non-blocking; UpdateService notifies when done).
-  await appState.initAsync();
+  // Fire the first update-check (non-blocking, fire-and-forget).
+  // ignore: unawaited_futures
+  appState.initAsync();
 
   runApp(
     ChangeNotifierProvider<AppState>.value(
