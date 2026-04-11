@@ -1,7 +1,7 @@
 # =============================================================================
 # Continuous Integration
 #
-# Runs on every push (all branches) and on pull requests targeting main.
+# Runs on pushes to main and on pull requests targeting main.
 # Validates both the Python backend and the Flutter client.
 # No API keys or external services are required — tests use SQLite in-memory
 # and mock any LLM/HTTP calls.
@@ -11,9 +11,12 @@ name: CI
 
 on:
   push:
-    branches: ["**"]
+    branches: [main]
   pull_request:
     branches: [main]
+
+permissions:
+  contents: write
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -70,10 +73,13 @@ jobs:
       - name: Commit coverage badge
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "Flowelfox"
+          git config user.email "Flowelfox@users.noreply.github.com"
           git add docs/badges/coverage.svg
-          git diff --staged --quiet || git commit -m "chore: update coverage badge [skip ci]" && git push
+          if ! git diff --staged --quiet; then
+            git commit -m "chore: update coverage badge [skip ci]"
+            git push
+          fi
 
   # ---------------------------------------------------------------------------
   # Flutter client — analyze · test

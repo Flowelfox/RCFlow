@@ -199,6 +199,14 @@ CLAUDE_CODE_SETTINGS_SCHEMA: list[dict[str, Any]] = [
         ),
         "managed_only": True,
     },
+    {
+        "key": "undercover",
+        "label": "Undercover mode",
+        "type": "boolean",
+        "default": False,
+        "description": "Strip AI attribution from commits and PRs created by Claude Code.",
+        "managed_only": True,
+    },
 ]
 
 CODEX_SETTINGS_SCHEMA: list[dict[str, Any]] = [
