@@ -9,6 +9,7 @@ import pytest
 if TYPE_CHECKING:
     from pathlib import Path
 
+from src.config import CONFIG_OPTIONS
 from src.services.tool_settings import (
     _CAVEMAN_CLAUDE_MD_TEXT,
     ToolSettingsManager,
@@ -113,3 +114,33 @@ class TestCavemanSettingsIntegration:
     def test_caveman_managed_only_rejected_when_external(self, manager: ToolSettingsManager) -> None:
         with pytest.raises(ValueError, match="Cannot update managed-only"):
             manager.update_settings("claude_code", {"caveman_mode": True}, managed=False)
+
+    def test_unrelated_claude_md_does_not_report_enabled(self, manager: ToolSettingsManager) -> None:
+        """A manually-created CLAUDE.md with different content must not show as enabled."""
+        config_dir = manager.get_config_dir("claude_code")
+        config_dir.mkdir(parents=True, exist_ok=True)
+        (config_dir / "CLAUDE.md").write_text("# My custom instructions\n")
+        result = manager.get_settings_with_schema("claude_code")
+        caveman_field = next(f for f in result["fields"] if f["key"] == "caveman_mode")
+        assert caveman_field["value"] is False
+
+
+# ---------------------------------------------------------------------------
+# CONFIG_OPTIONS schema validation
+# ---------------------------------------------------------------------------
+
+
+class TestConfigOptionsCaveman:
+    def test_caveman_mode_in_config_options(self) -> None:
+        keys = {opt["key"] for opt in CONFIG_OPTIONS}
+        assert "CAVEMAN_MODE" in keys
+        assert "CAVEMAN_LEVEL" in keys
+
+    def test_caveman_level_visible_when_mode_true(self) -> None:
+        level_opt = next(o for o in CONFIG_OPTIONS if o["key"] == "CAVEMAN_LEVEL")
+        assert level_opt["visible_when"] == {"key": "CAVEMAN_MODE", "value": "true"}
+
+    def test_caveman_mode_not_restart_required(self) -> None:
+        for key in ("CAVEMAN_MODE", "CAVEMAN_LEVEL"):
+            opt = next(o for o in CONFIG_OPTIONS if o["key"] == key)
+            assert opt["restart_required"] is False
