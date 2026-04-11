@@ -17,7 +17,6 @@ library;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rcflowclient/models/app_notification.dart';
 import 'package:rcflowclient/models/session_info.dart';
-import 'package:rcflowclient/models/subprocess_info.dart';
 import 'package:rcflowclient/services/websocket_service.dart';
 import 'package:rcflowclient/state/pane_state.dart';
 
@@ -135,18 +134,6 @@ PaneState _paneWithSession(
   return pane;
 }
 
-/// Build a PaneState with only a workerId (new-session pane, no session yet).
-PaneState _newSessionPane(
-  _RecordingPaneHost host, {
-  String workerId = 'worker1',
-}) {
-  final pane = PaneState(paneId: 'p1', host: host);
-  // goHome triggers _loadNewSessionDraftAsync and sets up workerId via
-  // the host's defaultWorkerId. We just need a pane that has no _sessionId.
-  // Directly registering a provider is sufficient for save-path tests.
-  return pane;
-}
-
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -251,7 +238,6 @@ void main() {
     });
 
     test('does not save when no session and no workerId', () {
-      final host = _RecordingPaneHost();
       // Build a bare pane with no workerId via defaultWorkerId=null.
       final noWorkerHost = _RecordingPaneHostNoWorker();
       final pane = PaneState(paneId: 'p1', host: noWorkerHost);
