@@ -6,12 +6,14 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy import func, select
 
 from src.api.deps import verify_http_api_key
 from src.core.buffer import MessageType
 from src.core.session import session_sort_key
+from src.models.db import Draft as DraftModel
 from src.models.db import Session as SessionModel
 from src.models.db import SessionMessage as SessionMessageModel
 
@@ -658,3 +660,94 @@ async def set_session_worktree(
 
     logger.info("Session %s selected_worktree_path set to %r via HTTP API", session_id, path)
     return {"session_id": session_id, "selected_worktree_path": path}
+
+
+class DraftUpsertRequest(BaseModel):
+    """Body for the save-draft endpoint."""
+
+    content: str
+
+
+class DraftResponse(BaseModel):
+    """Response body for the get-draft endpoint."""
+
+    content: str
+    updated_at: datetime
+
+
+@router.put(
+    "/sessions/{session_id}/draft",
+    summary="Save or update a session draft",
+    description=(
+        "Upsert the unsent message draft for a session. "
+        "Sending an empty string clears the draft. "
+        "Returns 204 No Content on success."
+    ),
+    response_class=Response,
+    status_code=204,
+    dependencies=[Depends(verify_http_api_key)],
+)
+async def upsert_draft(
+    session_id: str,
+    body: DraftUpsertRequest,
+    request: Request,
+) -> Response:
+    """Save or update the unsent message draft for a session."""
+    db_session_factory = request.app.state.db_session_factory
+    if db_session_factory is None:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+
+    try:
+        session_uuid = uuid.UUID(session_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid session ID: {session_id}") from None
+
+    async with db_session_factory() as db:
+        row = await db.get(SessionModel, session_uuid)
+        if row is None:
+            raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+
+        now = datetime.now(UTC)
+        result = await db.execute(select(DraftModel).where(DraftModel.session_id == session_uuid))
+        draft = result.scalar_one_or_none()
+        if draft is None:
+            draft = DraftModel(session_id=session_uuid, content=body.content, updated_at=now)
+            db.add(draft)
+        else:
+            draft.content = body.content
+            draft.updated_at = now
+        await db.commit()
+
+    logger.info("Session %s draft saved (%d chars) via HTTP API", session_id, len(body.content))
+    return Response(status_code=204)
+
+
+@router.get(
+    "/sessions/{session_id}/draft",
+    summary="Get a session draft",
+    description=(
+        "Retrieve the unsent message draft for a session. "
+        "Returns an empty string when no draft has been saved yet — never 404."
+    ),
+    dependencies=[Depends(verify_http_api_key)],
+)
+async def get_draft(
+    session_id: str,
+    request: Request,
+) -> DraftResponse:
+    """Return the unsent message draft for a session, or empty string if none."""
+    db_session_factory = request.app.state.db_session_factory
+    if db_session_factory is None:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+
+    try:
+        session_uuid = uuid.UUID(session_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid session ID: {session_id}") from None
+
+    async with db_session_factory() as db:
+        result = await db.execute(select(DraftModel).where(DraftModel.session_id == session_uuid))
+        draft = result.scalar_one_or_none()
+        if draft is None:
+            return DraftResponse(content="", updated_at=datetime.now(UTC))
+        return DraftResponse(content=draft.content, updated_at=draft.updated_at)

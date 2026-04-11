@@ -202,11 +202,23 @@ The client can connect to multiple RCFlow servers simultaneously. Each server co
 - `rcflow_workers`: JSON array of `WorkerConfig` objects.
 - `rcflow_last_session_per_worker`: JSON map `{workerId: sessionId}`.
 - `rcflow_cached_sessions_per_worker`: JSON map `{workerId: jsonEncodedSessionList}`.
+- `rcflow_draft_session_{key}` / `rcflow_draft_session_{key}_ts`: Per-session draft text and write timestamp (ms since epoch). Key is a session UUID for real sessions or `new_{workerId}` for the new-session pane. See **Draft persistence** below.
 - Legacy single-server keys (`rcflow_host`, `rcflow_api_key`, `rcflow_use_ssl`) kept for migration.
 - `rcflow_current_version`: installed version string (e.g. `"1.38.0"`), written at startup.
 - `rcflow_last_update_check`: ISO-8601 UTC timestamp of the last successful update check.
 - `rcflow_cached_latest_version`: latest version returned by the update server.
 - `rcflow_dismissed_update_version`: version the user has dismissed from the banner.
+
+**Draft persistence** (drafts per session):
+
+Each session pane maintains its own unsent message draft. Drafts survive session switches, app restarts, and multiple clients.
+
+- `PaneState._draftProvider`: A `String Function()` callback registered by `InputArea` in `initState` (unregistered in `dispose`). Allows `PaneState` to read the live `TextEditingController` text synchronously at switch time without owning the controller.
+- `PaneState._lastLoadedDraft`: The text last *loaded* (not typed) into the input. Guards against multi-pane overwrites: a pane that loaded a draft and never typed will not save back an unchanged snapshot, so a sibling pane's live draft is never clobbered.
+- Save triggers: `switchSession()`, `goHome()`, `startNewChat()` call `_saveDraftIfChanged()` synchronously before clearing state. `InputArea._onTextChanged()` starts an 800 ms debounce timer (`_draftTimer`) that calls `PaneState.triggerDraftSave()` when the user pauses.
+- Two-phase load on session switch: (1) local `SettingsService` cache — instant, no network; (2) backend `GET /sessions/{id}/draft` — authoritative, wins if `updated_at` is newer than local cache timestamp. Result delivered to `InputArea` via the existing `setPendingInputText` / `consumePendingInputText` mechanism.
+- New-session pane drafts are local-only (no session ID to write against the backend). Key: `new_{workerId}`. Cleared in `handleAck()` when the first prompt creates the real session.
+- Backend draft is cleared (set to `""`) when a session is deleted (CASCADE on `drafts.session_id → sessions.id`).
 
 **WorkerConnection** (`lib/services/worker_connection.dart`): Wraps one `WebSocketService` instance with per-worker lifecycle. Enum `WorkerConnectionStatus`: `disconnected`, `connecting`, `connected`, `reconnecting`. Manages its own session list (tagged with `workerId`), reconnection loop (3 retries, 10s delay), and session subscriptions. Routes `session_list` and `session_update` messages internally; forwards all other messages to AppState via callbacks.
 
@@ -250,6 +262,8 @@ The client can connect to multiple RCFlow servers simultaneously. Each server co
 | POST   | `/api/sessions/{session_id}/resume`     | Yes  | Resume a paused session. Client can subscribe to receive all buffered output. |
 | POST   | `/api/sessions/{session_id}/restore`    | Yes  | Restore an archived (completed/failed/cancelled) session back to active state. Rebuilds conversation history, buffer, and Claude Code executor state. |
 | PATCH  | `/api/sessions/{session_id}/title`      | Yes  | Set or clear a session title (max 200 chars). Body: `{"title": "..."}` or `{"title": null}`. |
+| PUT    | `/api/sessions/{session_id}/draft`      | Yes  | Save or update the unsent message draft for a session. Body: `{"content": "..."}`. Returns 204. |
+| GET    | `/api/sessions/{session_id}/draft`      | Yes  | Retrieve the unsent message draft. Returns `{"content": "...", "updated_at": "..."}`. Returns `content: ""` (never 404) when no draft exists. |
 | GET    | `/api/config`                           | Yes  | Get server configuration schema with current values. Secret values are masked. Options grouped by section. |
 | PATCH  | `/api/config`                           | Yes  | Update server configuration. Body: `{"updates": {"KEY": "value", ...}}`. Persists to `settings.json`, reloads settings, and hot-reloads LLM client. Returns updated schema. |
 | GET    | `/api/tools/status`                     | Yes  | Get installation status, versions, and update availability for managed CLI tools (Claude Code, Codex, OpenCode). |
@@ -2212,6 +2226,16 @@ CREATE TABLE telemetry_minutely (
     UNIQUE(backend_id, bucket, session_id)
 );
 CREATE INDEX idx_telemetry_minutely_lookup ON telemetry_minutely(backend_id, bucket, session_id);
+
+-- One unsent message draft per session.
+-- Automatically deleted when the parent session is deleted (CASCADE).
+CREATE TABLE drafts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    session_id UUID NOT NULL UNIQUE REFERENCES sessions(id) ON DELETE CASCADE,
+    content TEXT NOT NULL DEFAULT '',
+    updated_at TIMESTAMPTZ NOT NULL    -- set explicitly on every write (never relies on trigger)
+);
+CREATE INDEX ix_drafts_session_id ON drafts(session_id);
 ```
 
 ---

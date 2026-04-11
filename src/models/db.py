@@ -273,6 +273,29 @@ class ToolCall(Base):
     session: Mapped[Session] = relationship("Session", back_populates="tool_calls_telemetry")
 
 
+class Draft(Base):
+    """One unsent message draft per session.
+
+    Created/updated when the client saves a draft via PUT /sessions/{id}/draft.
+    Automatically deleted when the parent session is deleted (CASCADE).
+    """
+
+    __tablename__ = "drafts"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey("sessions.id", ondelete="CASCADE"),
+        unique=True,
+        nullable=False,
+        index=True,
+    )
+    content: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    # Set explicitly in every write — never relies on onupdate, which does not
+    # fire for raw SQL upserts.
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class TelemetryMinutely(Base):
     """Pre-aggregated 1-minute buckets for fast time-series queries."""
 
