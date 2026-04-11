@@ -380,6 +380,45 @@ class SettingsService {
   set showCompletedTasks(bool value) =>
       _prefs.setBool(_showCompletedTasksKey, value);
 
+  // --- Per-session draft cache ---
+  //
+  // Key scheme:
+  //   • Real session: "rcflow_draft_session_{sessionId}"
+  //   • New-session pane (no ID yet): "rcflow_draft_new_{workerId}"
+  //
+  // Each draft has a companion "_ts" key storing the write timestamp as
+  // milliseconds-since-epoch so the client can compare it to the backend's
+  // updated_at when deciding which copy to trust.
+
+  static const _draftPrefix = 'rcflow_draft_session_';
+
+  /// Read the cached draft for [key].
+  ///
+  /// Returns `(content: '', cachedAt: null)` when no draft exists.
+  ({String content, DateTime? cachedAt}) getDraft(String key) {
+    final content = _prefs.getString('$_draftPrefix$key') ?? '';
+    final tsMs = _prefs.getInt('$_draftPrefix${key}_ts');
+    final cachedAt = tsMs != null
+        ? DateTime.fromMillisecondsSinceEpoch(tsMs, isUtc: true)
+        : null;
+    return (content: content, cachedAt: cachedAt);
+  }
+
+  /// Persist [content] as the draft for [key] and record the current time.
+  void saveDraft(String key, String content) {
+    _prefs.setString('$_draftPrefix$key', content);
+    _prefs.setInt(
+      '$_draftPrefix${key}_ts',
+      DateTime.now().millisecondsSinceEpoch,
+    );
+  }
+
+  /// Remove the draft and its timestamp companion for [key].
+  void clearDraft(String key) {
+    _prefs.remove('$_draftPrefix$key');
+    _prefs.remove('$_draftPrefix${key}_ts');
+  }
+
   // --- Helpers for list persistence (avoids setStringList/getStringList
   //     which can lose type info on Windows after JSON round-trip) ---
 

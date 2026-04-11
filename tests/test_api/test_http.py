@@ -1,11 +1,19 @@
+import time
+import uuid as _uuid_mod
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine as _sync_create_engine
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.orm import Session as _OrmSession
 
 from src.core.buffer import MessageType
 from src.core.session import SessionManager, SessionType
+from src.models.db import Base
+from src.models.db import Session as _DbSession
 
 API_KEY = "test-api-key"
 
@@ -416,3 +424,225 @@ class TestSetSessionWorktree:
             json={"path": "/some/path"},
         )
         assert resp.status_code in (401, 403, 422)
+
+
+# ---------------------------------------------------------------------------
+# Fixtures — in-process SQLite DB for draft endpoint tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def draft_db(tmp_path):
+    """Temp SQLite DB with full schema and one pre-inserted session row.
+
+    Returns (db_file: Path, session_id: uuid.UUID).
+    """
+    db_file = tmp_path / "drafts.db"
+    sync_engine = _sync_create_engine(f"sqlite:///{db_file}")
+    Base.metadata.create_all(sync_engine)
+    session_id = _uuid_mod.uuid4()
+    with _OrmSession(sync_engine) as sess:
+        sess.add(
+            _DbSession(
+                id=session_id,
+                backend_id="test-backend",
+                created_at=datetime.now(UTC),
+                session_type="conversational",
+                status="active",
+                metadata_={},
+            )
+        )
+        sess.commit()
+    sync_engine.dispose()
+    return db_file, session_id
+
+
+@pytest.fixture
+def db_client(test_app: FastAPI, draft_db) -> TestClient:
+    """TestClient with a real SQLite db_session_factory wired up."""
+    db_file, _ = draft_db
+    engine = create_async_engine(
+        f"sqlite+aiosqlite:///{db_file}",
+        connect_args={"check_same_thread": False},
+    )
+    test_app.state.db_session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    yield TestClient(test_app)
+    test_app.state.db_session_factory = None
+
+
+# ---------------------------------------------------------------------------
+# Draft endpoint tests
+# ---------------------------------------------------------------------------
+
+
+class TestDraft:
+    # --- GET (no draft yet) ---
+
+    def test_get_returns_empty_when_no_draft(self, db_client: TestClient, draft_db) -> None:
+        _, session_id = draft_db
+        resp = db_client.get(f"/api/sessions/{session_id}/draft", headers=_auth_headers())
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["content"] == ""
+        assert "updated_at" in body
+
+    # --- PUT (create) ---
+
+    def test_put_returns_204(self, db_client: TestClient, draft_db) -> None:
+        _, session_id = draft_db
+        resp = db_client.put(
+            f"/api/sessions/{session_id}/draft",
+            json={"content": "hello draft"},
+            headers=_auth_headers(),
+        )
+        assert resp.status_code == 204
+        assert resp.content == b""
+
+    def test_put_then_get_returns_saved_content(self, db_client: TestClient, draft_db) -> None:
+        _, session_id = draft_db
+        db_client.put(
+            f"/api/sessions/{session_id}/draft",
+            json={"content": "my unsent message"},
+            headers=_auth_headers(),
+        )
+        resp = db_client.get(f"/api/sessions/{session_id}/draft", headers=_auth_headers())
+        assert resp.status_code == 200
+        assert resp.json()["content"] == "my unsent message"
+
+    # --- PUT (update) ---
+
+    def test_put_updates_existing_draft(self, db_client: TestClient, draft_db) -> None:
+        _, session_id = draft_db
+        db_client.put(
+            f"/api/sessions/{session_id}/draft",
+            json={"content": "first version"},
+            headers=_auth_headers(),
+        )
+        db_client.put(
+            f"/api/sessions/{session_id}/draft",
+            json={"content": "second version"},
+            headers=_auth_headers(),
+        )
+        resp = db_client.get(f"/api/sessions/{session_id}/draft", headers=_auth_headers())
+        assert resp.json()["content"] == "second version"
+
+    def test_put_empty_string_clears_draft(self, db_client: TestClient, draft_db) -> None:
+        _, session_id = draft_db
+        db_client.put(
+            f"/api/sessions/{session_id}/draft",
+            json={"content": "something"},
+            headers=_auth_headers(),
+        )
+        db_client.put(
+            f"/api/sessions/{session_id}/draft",
+            json={"content": ""},
+            headers=_auth_headers(),
+        )
+        resp = db_client.get(f"/api/sessions/{session_id}/draft", headers=_auth_headers())
+        assert resp.json()["content"] == ""
+
+    def test_updated_at_advances_on_second_put(self, db_client: TestClient, draft_db) -> None:
+        _, session_id = draft_db
+        db_client.put(
+            f"/api/sessions/{session_id}/draft",
+            json={"content": "v1"},
+            headers=_auth_headers(),
+        )
+        ts1 = db_client.get(f"/api/sessions/{session_id}/draft", headers=_auth_headers()).json()["updated_at"]
+
+        time.sleep(0.01)
+
+        db_client.put(
+            f"/api/sessions/{session_id}/draft",
+            json={"content": "v2"},
+            headers=_auth_headers(),
+        )
+        ts2 = db_client.get(f"/api/sessions/{session_id}/draft", headers=_auth_headers()).json()["updated_at"]
+
+        assert ts2 > ts1
+
+    def test_drafts_isolated_per_session(self, db_client: TestClient, draft_db) -> None:
+        """A draft for session A must not appear for session B."""
+        db_file, session_a = draft_db
+        # Insert second session into the same DB.
+        session_b = _uuid_mod.uuid4()
+        sync_engine = _sync_create_engine(f"sqlite:///{db_file}")
+        with _OrmSession(sync_engine) as sess:
+            sess.add(
+                _DbSession(
+                    id=session_b,
+                    backend_id="test-backend",
+                    created_at=datetime.now(UTC),
+                    session_type="conversational",
+                    status="active",
+                    metadata_={},
+                )
+            )
+            sess.commit()
+        sync_engine.dispose()
+
+        db_client.put(
+            f"/api/sessions/{session_a}/draft",
+            json={"content": "only for A"},
+            headers=_auth_headers(),
+        )
+
+        resp_b = db_client.get(f"/api/sessions/{session_b}/draft", headers=_auth_headers())
+        assert resp_b.json()["content"] == ""
+
+    # --- Error paths ---
+
+    def test_put_invalid_session_id_returns_400(self, db_client: TestClient) -> None:
+        resp = db_client.put(
+            "/api/sessions/not-a-uuid/draft",
+            json={"content": "x"},
+            headers=_auth_headers(),
+        )
+        assert resp.status_code == 400
+
+    def test_get_invalid_session_id_returns_400(self, db_client: TestClient) -> None:
+        resp = db_client.get("/api/sessions/not-a-uuid/draft", headers=_auth_headers())
+        assert resp.status_code == 400
+
+    def test_put_unknown_session_returns_404(self, db_client: TestClient) -> None:
+        unknown = _uuid_mod.uuid4()
+        resp = db_client.put(
+            f"/api/sessions/{unknown}/draft",
+            json={"content": "x"},
+            headers=_auth_headers(),
+        )
+        assert resp.status_code == 404
+
+    def test_get_unknown_session_returns_empty_not_404(self, db_client: TestClient) -> None:
+        """GET never returns 404 — unknown session UUID returns empty content."""
+        unknown = _uuid_mod.uuid4()
+        resp = db_client.get(f"/api/sessions/{unknown}/draft", headers=_auth_headers())
+        assert resp.status_code == 200
+        assert resp.json()["content"] == ""
+
+    def test_put_requires_auth(self, db_client: TestClient, draft_db) -> None:
+        _, session_id = draft_db
+        resp = db_client.put(f"/api/sessions/{session_id}/draft", json={"content": "x"})
+        assert resp.status_code in (401, 403, 422)
+
+    def test_get_requires_auth(self, db_client: TestClient, draft_db) -> None:
+        _, session_id = draft_db
+        resp = db_client.get(f"/api/sessions/{session_id}/draft")
+        assert resp.status_code in (401, 403, 422)
+
+    def test_put_no_db_returns_503(self, client: TestClient, session_manager: SessionManager) -> None:
+        session = session_manager.create_session(SessionType.ONE_SHOT)
+        resp = client.put(
+            f"/api/sessions/{session.id}/draft",
+            json={"content": "x"},
+            headers=_auth_headers(),
+        )
+        assert resp.status_code == 503
+
+    def test_get_no_db_returns_503(self, client: TestClient, session_manager: SessionManager) -> None:
+        session = session_manager.create_session(SessionType.ONE_SHOT)
+        resp = client.get(
+            f"/api/sessions/{session.id}/draft",
+            headers=_auth_headers(),
+        )
+        assert resp.status_code == 503
