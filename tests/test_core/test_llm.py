@@ -42,6 +42,8 @@ def _make_llm_client(provider: str, model: str) -> LLMClient:
     settings.TITLE_MODEL = ""
     settings.TASK_MODEL = ""
     settings.GLOBAL_PROMPT = ""
+    settings.CAVEMAN_MODE = False
+    settings.CAVEMAN_LEVEL = "full"
     settings.projects_dirs = []
 
     tool_registry = MagicMock()
@@ -52,8 +54,9 @@ def _make_llm_client(provider: str, model: str) -> LLMClient:
         patch("src.core.llm.anthropic.AsyncAnthropic"),
         patch("src.core.llm.anthropic.AsyncAnthropicBedrock"),
         patch("src.core.llm.openai.AsyncOpenAI"),
-        patch("src.core.llm.PromptBuilder"),
+        patch("src.core.llm.PromptBuilder") as mock_builder,
     ):
+        mock_builder.return_value.build.return_value = "BASE_SYSTEM_PROMPT"
         return LLMClient(settings, tool_registry)
 
 
