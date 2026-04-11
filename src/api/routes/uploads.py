@@ -51,9 +51,7 @@ async def upload_attachment(
     The returned ``attachment_id`` should be included in the ``attachments``
     list of the next WebSocket ``prompt`` message within 10 minutes.
     """
-    attachment_store: AttachmentStore | None = getattr(
-        request.app.state, "attachment_store", None
-    )
+    attachment_store: AttachmentStore | None = getattr(request.app.state, "attachment_store", None)
     if attachment_store is None:
         raise HTTPException(status_code=503, detail="Attachment store not available")
 
@@ -68,8 +66,7 @@ async def upload_attachment(
         raise HTTPException(
             status_code=415,
             detail=(
-                "Image attachments are not supported by the current model. "
-                "Only text and code files can be attached."
+                "Image attachments are not supported by the current model. Only text and code files can be attached."
             ),
         )
 

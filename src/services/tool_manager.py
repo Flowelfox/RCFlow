@@ -527,9 +527,7 @@ class ToolManager:
         )
 
     @staticmethod
-    async def _download_codex_binary(
-        install_dir: Path, binary_path: Path, tag: str, version: str, target: str
-    ) -> None:
+    async def _download_codex_binary(install_dir: Path, binary_path: Path, tag: str, version: str, target: str) -> None:
         """Download and place the codex binary for a specific target triple."""
         if sys.platform == "win32":
             asset_name = f"codex-{target}.exe"
@@ -792,9 +790,7 @@ class ToolManager:
                 musl_target = target.replace("-gnu", "-musl")
                 logger.warning("Codex gnu binary requires newer glibc, retrying with musl")
                 yield {"step": "installing", "message": "Incompatible glibc, downloading musl variant..."}
-                async for event in self._stream_codex_download(
-                    install_dir, binary_path, tag, version, musl_target
-                ):
+                async for event in self._stream_codex_download(install_dir, binary_path, tag, version, musl_target):
                     yield event
 
         self._write_version_file("codex", version)
@@ -1333,9 +1329,7 @@ async def _fetch_codex_checksums(client: httpx.AsyncClient, tag: str) -> dict[st
         return _parse_codex_checksums(resp.text)
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code == 404:
-            logger.warning(
-                "Codex checksums.txt not found for tag %s — skipping integrity check", tag
-            )
+            logger.warning("Codex checksums.txt not found for tag %s — skipping integrity check", tag)
             return {}
         raise
 
@@ -1363,15 +1357,11 @@ def _verify_codex_asset_checksum(content: bytes, asset_name: str, checksums: dic
         return
     expected = checksums.get(asset_name)
     if expected is None:
-        logger.warning(
-            "No checksum entry for %r in checksums.txt — skipping verification", asset_name
-        )
+        logger.warning("No checksum entry for %r in checksums.txt — skipping verification", asset_name)
         return
     actual = hashlib.sha256(content).hexdigest()
     if actual != expected:
-        raise ValueError(
-            f"Codex checksum mismatch for {asset_name!r}: expected {expected!r}, got {actual!r}"
-        )
+        raise ValueError(f"Codex checksum mismatch for {asset_name!r}: expected {expected!r}, got {actual!r}")
     logger.debug("Codex asset checksum verified: %s", asset_name)
 
 

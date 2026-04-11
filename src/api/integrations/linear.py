@@ -48,6 +48,7 @@ router = APIRouter(
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _issue_to_dict(issue: LinearIssueModel) -> dict[str, Any]:
     """Serialise a LinearIssue ORM row to a JSON-safe dict."""
     return {
@@ -153,6 +154,7 @@ async def _upsert_issues(
 # Request/response models
 # ---------------------------------------------------------------------------
 
+
 class TestLinearConnectionRequest(BaseModel):
     api_key: str
 
@@ -208,10 +210,7 @@ async def test_linear_connection(body: TestLinearConnectionRequest) -> dict[str,
 @router.get(
     "/teams",
     summary="List Linear teams",
-    description=(
-        "Returns all Linear teams accessible via the configured API key. "
-        "Requires LINEAR_API_KEY to be set."
-    ),
+    description=("Returns all Linear teams accessible via the configured API key. Requires LINEAR_API_KEY to be set."),
 )
 async def list_linear_teams(request: Request) -> dict[str, Any]:
     """List all teams accessible via the configured Linear API key."""
@@ -229,8 +228,7 @@ async def list_linear_teams(request: Request) -> dict[str, Any]:
     "/issues",
     summary="List cached Linear issues",
     description=(
-        "Returns all locally-cached Linear issues for this backend. "
-        "Use POST /sync to refresh from Linear first."
+        "Returns all locally-cached Linear issues for this backend. Use POST /sync to refresh from Linear first."
     ),
 )
 async def list_linear_issues(
@@ -244,9 +242,7 @@ async def list_linear_issues(
     db_factory = request.app.state.db_session_factory
 
     async with db_factory() as db:
-        stmt = select(LinearIssueModel).where(
-            LinearIssueModel.backend_id == settings.RCFLOW_BACKEND_ID
-        )
+        stmt = select(LinearIssueModel).where(LinearIssueModel.backend_id == settings.RCFLOW_BACKEND_ID)
         if state_type:
             stmt = stmt.where(LinearIssueModel.state_type == state_type)
         if priority is not None:
@@ -257,10 +253,7 @@ async def list_linear_issues(
 
     if q:
         ql = q.lower()
-        issues = [
-            i for i in issues
-            if ql in i["title"].lower() or ql in i["identifier"].lower()
-        ]
+        issues = [i for i in issues if ql in i["title"].lower() or ql in i["identifier"].lower()]
 
     issues.sort(key=lambda i: i["updated_at"], reverse=True)
     return {"issues": issues, "total": len(issues)}
@@ -360,10 +353,7 @@ async def create_linear_issue(
     if not team_id:
         raise HTTPException(
             status_code=422,
-            detail=(
-                "team_id is required when LINEAR_TEAM_ID is not configured. "
-                "Pass team_id in the request body."
-            ),
+            detail=("team_id is required when LINEAR_TEAM_ID is not configured. Pass team_id in the request body."),
         )
 
     svc = _get_linear_service(request)

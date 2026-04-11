@@ -59,9 +59,7 @@ class AttachmentStore:
             ValueError: If *data* exceeds the configured size limit.
         """
         if len(data) > self._max_size:
-            raise ValueError(
-                f"File size {len(data):,} bytes exceeds limit of {self._max_size:,} bytes"
-            )
+            raise ValueError(f"File size {len(data):,} bytes exceeds limit of {self._max_size:,} bytes")
         attachment_id = str(uuid.uuid4())
         attachment = AttachmentData(
             id=attachment_id,

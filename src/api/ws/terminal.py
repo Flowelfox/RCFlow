@@ -106,9 +106,7 @@ async def ws_terminal(
                     msg = json.loads(message["text"])
                 except json.JSONDecodeError:
                     async with send_lock:
-                        await websocket.send_json(
-                            {"type": "error", "message": "Invalid JSON"}
-                        )
+                        await websocket.send_json({"type": "error", "message": "Invalid JSON"})
                     continue
 
                 msg_type = msg.get("type")
@@ -148,13 +146,9 @@ async def ws_terminal(
                         )
                         connection_terminals.add(tid)
                         async with send_lock:
-                            await websocket.send_json(
-                                {"type": "created", "terminal_id": tid}
-                            )
+                            await websocket.send_json({"type": "created", "terminal_id": tid})
                     except Exception as e:
-                        logger.error(
-                            "Failed to create terminal %s: %s", terminal_id, e
-                        )
+                        logger.error("Failed to create terminal %s: %s", terminal_id, e)
                         async with send_lock:
                             await websocket.send_json(
                                 {

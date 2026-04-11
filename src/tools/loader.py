@@ -147,7 +147,10 @@ def load_tools_from_directory(tools_dir: Path) -> list[ToolDefinition]:
             if tool.os and CURRENT_OS not in tool.os:
                 logger.info(
                     "Skipping tool '%s' from %s (requires os=%s, current=%s)",
-                    tool.name, path.name, tool.os, CURRENT_OS,
+                    tool.name,
+                    path.name,
+                    tool.os,
+                    CURRENT_OS,
                 )
                 continue
             tools.append(tool)

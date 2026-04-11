@@ -246,8 +246,7 @@ class CodexExecutor(BaseExecutor):
                     self._stderr_task.cancel()
             stderr_hint = self._stderr_output.strip()
             raise RuntimeError(
-                "Failed to write prompt to Codex stdin (transport closed)"
-                + (f": {stderr_hint}" if stderr_hint else "")
+                "Failed to write prompt to Codex stdin (transport closed)" + (f": {stderr_hint}" if stderr_hint else "")
             ) from exc
 
         logger.debug("Sent prompt to Codex stdin and closed [thread=%s]", self._thread_id)

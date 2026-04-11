@@ -286,14 +286,8 @@ class OpenCodeAgentMixin:
                     error_msg = error
                 else:
                     # opencode wraps the message in data.message for UnknownError/APIError
-                    error_msg = (
-                        error.get("message")
-                        or (error.get("data") or {}).get("message")
-                        or "OpenCode error"
-                    )
-                logger.warning(
-                    "OpenCode error event (session=%s): %s", session.id, error_msg
-                )
+                    error_msg = error.get("message") or (error.get("data") or {}).get("message") or "OpenCode error"
+                logger.warning("OpenCode error event (session=%s): %s", session.id, error_msg)
                 session.buffer.push_text(
                     MessageType.ERROR,
                     {
@@ -430,9 +424,7 @@ class OpenCodeAgentMixin:
             },
         )
 
-        session._opencode_stream_task = asyncio.create_task(
-            self._restart_opencode_with_prompt(session, executor, text)
-        )
+        session._opencode_stream_task = asyncio.create_task(self._restart_opencode_with_prompt(session, executor, text))
 
     async def _restart_opencode_with_prompt(
         self,

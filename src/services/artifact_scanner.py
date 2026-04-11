@@ -23,12 +23,12 @@ logger = logging.getLogger(__name__)
 # Bare relative paths (e.g. src/file.md) are NOT matched; they are resolved
 # by applying the session's main_project_path prefix at resolution time.
 _FILE_PATH_RE = re.compile(
-    r"""(?:^|[\s"'`({\[,;:=])"""       # boundary before path
+    r"""(?:^|[\s"'`({\[,;:=])"""  # boundary before path
     r"""("""
-    r"""(?:[~]?/[\w.+\-]+(?:/[\w.+\-]+)*"""   # absolute or ~/ path
+    r"""(?:[~]?/[\w.+\-]+(?:/[\w.+\-]+)*"""  # absolute or ~/ path
     r"""|\.{1,2}/[\w.+\-]+(?:/[\w.+\-]+)*)"""  # relative ./ or ../ path
     r""")"""
-    r"""(?=[\s"'`)}:\],;!?]|$)""",      # boundary after path
+    r"""(?=[\s"'`)}:\],;!?]|$)""",  # boundary after path
     re.MULTILINE,
 )
 
@@ -228,15 +228,11 @@ class ArtifactScanner:
             # 1. Scan conversation_history (complete messages, not streaming chunks)
             session_row = await db.get(SessionModel, session_id)
             if session_row and session_row.conversation_history:
-                candidate_paths.update(
-                    self._extract_paths_from_conversation(session_row.conversation_history)
-                )
+                candidate_paths.update(self._extract_paths_from_conversation(session_row.conversation_history))
 
             # 2. Scan individual SessionMessage rows (tool outputs, metadata)
             msg_stmt = (
-                select(SessionMessage)
-                .where(SessionMessage.session_id == session_id)
-                .order_by(SessionMessage.sequence)
+                select(SessionMessage).where(SessionMessage.session_id == session_id).order_by(SessionMessage.sequence)
             )
             msg_result = await db.execute(msg_stmt)
             for msg in msg_result.scalars():
@@ -257,13 +253,13 @@ class ArtifactScanner:
             project_path: Path | None = None
             if session_row and session_row.main_project_path:
                 project_path = Path(session_row.main_project_path)
-            new_count, updated_count = await self._upsert_artifacts(
-                db, candidate_paths, session_id, project_path
-            )
+            new_count, updated_count = await self._upsert_artifacts(db, candidate_paths, session_id, project_path)
 
         logger.info(
             "Artifact extraction complete for session %s: %d new, %d updated",
-            session_id, new_count, updated_count,
+            session_id,
+            new_count,
+            updated_count,
         )
         return new_count
 
@@ -298,18 +294,19 @@ class ArtifactScanner:
 
         logger.debug(
             "Real-time text scan: %d candidate paths in session %s",
-            len(candidate_paths), session_id,
+            len(candidate_paths),
+            session_id,
         )
 
         async with self.db_session_factory() as db:
-            new_count, updated_count = await self._upsert_artifacts(
-                db, candidate_paths, session_id, project_path
-            )
+            new_count, updated_count = await self._upsert_artifacts(db, candidate_paths, session_id, project_path)
 
         if new_count > 0 or updated_count > 0:
             logger.info(
                 "Real-time text scan for session %s: %d new, %d updated",
-                session_id, new_count, updated_count,
+                session_id,
+                new_count,
+                updated_count,
             )
         return new_count, updated_count
 
@@ -342,17 +339,18 @@ class ArtifactScanner:
 
         logger.debug(
             "Real-time scan: %d candidate paths in session %s",
-            len(candidate_paths), session_id,
+            len(candidate_paths),
+            session_id,
         )
 
         async with self.db_session_factory() as db:
-            new_count, updated_count = await self._upsert_artifacts(
-                db, candidate_paths, session_id, project_path
-            )
+            new_count, updated_count = await self._upsert_artifacts(db, candidate_paths, session_id, project_path)
 
         if new_count > 0 or updated_count > 0:
             logger.info(
                 "Real-time scan for session %s: %d new, %d updated",
-                session_id, new_count, updated_count,
+                session_id,
+                new_count,
+                updated_count,
             )
         return new_count, updated_count
