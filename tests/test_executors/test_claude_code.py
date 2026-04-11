@@ -141,6 +141,12 @@ class TestBuildEnv:
             env = exec_with_undercover._build_env()
             assert env.get("CLAUDE_CODE_UNDERCOVER") == "1"
 
+    def test_undercover_absent_when_not_in_extra_env(self, executor: ClaudeCodeExecutor):
+        """CLAUDE_CODE_UNDERCOVER should not appear when extra_env does not include it."""
+        with patch.dict("os.environ", {"PATH": "/usr/bin"}, clear=True):
+            env = executor._build_env()
+            assert "CLAUDE_CODE_UNDERCOVER" not in env
+
 
 class TestExecuteStreaming:
     @pytest.mark.asyncio
