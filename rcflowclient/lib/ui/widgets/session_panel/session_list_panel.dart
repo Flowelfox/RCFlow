@@ -231,6 +231,9 @@ class _SessionListPanelState extends State<SessionListPanel>
                 _SidebarNotifications(
                   service: context.read<AppState>().notificationService,
                 ),
+                // Update banner (shown above the settings divider when an
+                // update is available and not yet dismissed).
+                _UpdateBanner(appState: context.read<AppState>()),
                 const Divider(height: 1),
                 // Bottom bar: Settings
                 Padding(
@@ -444,11 +447,10 @@ class _SessionListPanelState extends State<SessionListPanel>
     final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
 
     // Determine which bulk actions are applicable based on selected states.
-    final selectedSessions =
-        _selectedSessionIds
-            .map((id) => state.getSession(id))
-            .whereType<SessionInfo>()
-            .toList();
+    final selectedSessions = _selectedSessionIds
+        .map((id) => state.getSession(id))
+        .whereType<SessionInfo>()
+        .toList();
     final hasActive = selectedSessions.any(
       (s) => !isTerminalStatus(s.status) && s.status != 'paused',
     );
@@ -758,313 +760,314 @@ class _SessionListPanelState extends State<SessionListPanel>
             children: [
               // Search bar and status filter chips
               Padding(
-              padding: const EdgeInsets.fromLTRB(10, 8, 10, 4),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  SizedBox(
-                    height: 30,
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            controller: _workerSearchController,
-                            onChanged: (v) {
-                              setState(() => _workerSearchQuery = v);
-                              _saveFilters();
-                            },
-                            style: TextStyle(
-                              color: context.appColors.textPrimary,
-                              fontSize: 12,
-                            ),
-                            decoration: InputDecoration(
-                              hintText: 'Search workers & sessions...',
-                              hintStyle: TextStyle(
-                                color: context.appColors.textMuted,
+                padding: const EdgeInsets.fromLTRB(10, 8, 10, 4),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SizedBox(
+                      height: 30,
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: _workerSearchController,
+                              onChanged: (v) {
+                                setState(() => _workerSearchQuery = v);
+                                _saveFilters();
+                              },
+                              style: TextStyle(
+                                color: context.appColors.textPrimary,
                                 fontSize: 12,
                               ),
-                              prefixIcon: Padding(
-                                padding: const EdgeInsets.only(
-                                  left: 8,
-                                  right: 4,
-                                ),
-                                child: Icon(
-                                  Icons.search_rounded,
+                              decoration: InputDecoration(
+                                hintText: 'Search workers & sessions...',
+                                hintStyle: TextStyle(
                                   color: context.appColors.textMuted,
-                                  size: 16,
+                                  fontSize: 12,
                                 ),
-                              ),
-                              prefixIconConstraints: const BoxConstraints(
-                                maxWidth: 28,
-                                maxHeight: 30,
-                              ),
-                              suffixIcon: _workerSearchQuery.isNotEmpty
-                                  ? GestureDetector(
-                                      onTap: () {
-                                        _workerSearchController.clear();
-                                        setState(() => _workerSearchQuery = '');
-                                        _saveFilters();
-                                      },
-                                      child: Padding(
-                                        padding: const EdgeInsets.only(
-                                          right: 6,
-                                        ),
-                                        child: Icon(
-                                          Icons.close_rounded,
-                                          color: context.appColors.textMuted,
-                                          size: 14,
-                                        ),
-                                      ),
-                                    )
-                                  : null,
-                              suffixIconConstraints: const BoxConstraints(
-                                maxWidth: 24,
-                                maxHeight: 30,
-                              ),
-                              filled: true,
-                              fillColor: context.appColors.bgElevated,
-                              contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 0,
-                              ),
-                              border: OutlineInputBorder(
-                                borderSide: BorderSide.none,
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              enabledBorder: OutlineInputBorder(
-                                borderSide: BorderSide.none,
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              focusedBorder: OutlineInputBorder(
-                                borderSide: BorderSide(
-                                  color: context.appColors.accent,
-                                  width: 1,
-                                ),
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        SizedBox(
-                          width: 30,
-                          height: 30,
-                          child: IconButton(
-                            padding: EdgeInsets.zero,
-                            icon: Icon(
-                              Icons.folder_copy_outlined,
-                              color: _groupByProject
-                                  ? context.appColors.accent
-                                  : context.appColors.textSecondary,
-                              size: 16,
-                            ),
-                            tooltip: _groupByProject
-                                ? 'Grouping by project (tap to disable)'
-                                : 'Group by project',
-                            onPressed: () {
-                              setState(
-                                () => _groupByProject = !_groupByProject,
-                              );
-                              Provider.of<AppState>(
-                                    context,
-                                    listen: false,
-                                  ).settings.workersGroupByProject =
-                                  _groupByProject;
-                            },
-                          ),
-                        ),
-                        const SizedBox(width: 4),
-                        SizedBox(
-                          width: 30,
-                          height: 30,
-                          child: IconButton(
-                            padding: EdgeInsets.zero,
-                            icon: Icon(
-                              Icons.add_rounded,
-                              color: context.appColors.textSecondary,
-                              size: 18,
-                            ),
-                            tooltip: 'Add worker',
-                            onPressed: () async {
-                              final state = context.read<AppState>();
-                              final config = await showWorkerEditDialog(
-                                context,
-                                sortOrder: state.workerConfigs.length,
-                              );
-                              if (config != null && context.mounted) {
-                                state.addWorker(config);
-                              }
-                            },
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  SizedBox(
-                    height: 24,
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: ListView(
-                            scrollDirection: Axis.horizontal,
-                            children: [
-                              for (final status in _statusOrder)
-                                Padding(
-                                  padding: const EdgeInsets.only(right: 4),
-                                  child: _SessionStatusFilterChip(
-                                    label: _statusLabels[status]!,
-                                    color: _statusColors[status]!,
-                                    selected: _activeStatusFilters.contains(
-                                      status,
-                                    ),
-                                    onTap: () {
-                                      setState(() {
-                                        if (_activeStatusFilters.contains(
-                                          status,
-                                        )) {
-                                          _activeStatusFilters.remove(status);
-                                        } else {
-                                          _activeStatusFilters.add(status);
-                                        }
-                                      });
-                                      _saveFilters();
-                                    },
+                                prefixIcon: Padding(
+                                  padding: const EdgeInsets.only(
+                                    left: 8,
+                                    right: 4,
+                                  ),
+                                  child: Icon(
+                                    Icons.search_rounded,
+                                    color: context.appColors.textMuted,
+                                    size: 16,
                                   ),
                                 ),
-                            ],
+                                prefixIconConstraints: const BoxConstraints(
+                                  maxWidth: 28,
+                                  maxHeight: 30,
+                                ),
+                                suffixIcon: _workerSearchQuery.isNotEmpty
+                                    ? GestureDetector(
+                                        onTap: () {
+                                          _workerSearchController.clear();
+                                          setState(
+                                            () => _workerSearchQuery = '',
+                                          );
+                                          _saveFilters();
+                                        },
+                                        child: Padding(
+                                          padding: const EdgeInsets.only(
+                                            right: 6,
+                                          ),
+                                          child: Icon(
+                                            Icons.close_rounded,
+                                            color: context.appColors.textMuted,
+                                            size: 14,
+                                          ),
+                                        ),
+                                      )
+                                    : null,
+                                suffixIconConstraints: const BoxConstraints(
+                                  maxWidth: 24,
+                                  maxHeight: 30,
+                                ),
+                                filled: true,
+                                fillColor: context.appColors.bgElevated,
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 0,
+                                ),
+                                border: OutlineInputBorder(
+                                  borderSide: BorderSide.none,
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                enabledBorder: OutlineInputBorder(
+                                  borderSide: BorderSide.none,
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                focusedBorder: OutlineInputBorder(
+                                  borderSide: BorderSide(
+                                    color: context.appColors.accent,
+                                    width: 1,
+                                  ),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                              ),
+                            ),
                           ),
-                        ),
-                        if (_hasActiveFilters)
-                          GestureDetector(
-                            onTap: _clearFilters,
-                            child: Padding(
-                              padding: const EdgeInsets.only(left: 4),
-                              child: Icon(
-                                Icons.filter_alt_off_rounded,
-                                color: context.appColors.textMuted,
+                          const SizedBox(width: 6),
+                          SizedBox(
+                            width: 30,
+                            height: 30,
+                            child: IconButton(
+                              padding: EdgeInsets.zero,
+                              icon: Icon(
+                                Icons.folder_copy_outlined,
+                                color: _groupByProject
+                                    ? context.appColors.accent
+                                    : context.appColors.textSecondary,
                                 size: 16,
                               ),
+                              tooltip: _groupByProject
+                                  ? 'Grouping by project (tap to disable)'
+                                  : 'Group by project',
+                              onPressed: () {
+                                setState(
+                                  () => _groupByProject = !_groupByProject,
+                                );
+                                Provider.of<AppState>(
+                                      context,
+                                      listen: false,
+                                    ).settings.workersGroupByProject =
+                                    _groupByProject;
+                              },
                             ),
                           ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            if (_selectedSessionIds.isNotEmpty)
-              _buildSessionSelectionBar(context, state),
-            Expanded(
-              child: filteredConfigs.isEmpty && _hasActiveFilters
-                  ? Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.search_off_rounded,
-                            color: context.appColors.textMuted,
-                            size: 32,
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'No matching results',
-                            style: TextStyle(
-                              color: context.appColors.textSecondary,
-                              fontSize: 13,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          GestureDetector(
-                            onTap: _clearFilters,
-                            child: Text(
-                              'Clear filters',
-                              style: TextStyle(
-                                color: context.appColors.accent,
-                                fontSize: 12,
+                          const SizedBox(width: 4),
+                          SizedBox(
+                            width: 30,
+                            height: 30,
+                            child: IconButton(
+                              padding: EdgeInsets.zero,
+                              icon: Icon(
+                                Icons.add_rounded,
+                                color: context.appColors.textSecondary,
+                                size: 18,
                               ),
+                              tooltip: 'Add worker',
+                              onPressed: () async {
+                                final state = context.read<AppState>();
+                                final config = await showWorkerEditDialog(
+                                  context,
+                                  sortOrder: state.workerConfigs.length,
+                                );
+                                if (config != null && context.mounted) {
+                                  state.addWorker(config);
+                                }
+                              },
                             ),
                           ),
                         ],
                       ),
-                    )
-                  : ListView.builder(
-                      padding: const EdgeInsets.symmetric(vertical: 4),
-                      itemCount: filteredConfigs.length,
-                      itemBuilder: (context, index) {
-                        final config = filteredConfigs[index];
-                        final worker = state.getWorker(config.id);
-                        final sessions = filteredGrouped[config.id] ?? [];
-                        final terminals = terminalsByWorker[config.id] ?? [];
-                        final expanded = _expandedWorkers.contains(config.id);
-                        return WorkerGroup(
-                          config: config,
-                          worker: worker,
-                          sessions: sessions,
-                          terminals: terminals,
-                          expanded: expanded,
-                          groupByProject: _groupByProject,
-                          onToggleExpand: () {
-                            setState(() {
-                              if (expanded) {
-                                _expandedWorkers.remove(config.id);
-                              } else {
-                                _expandedWorkers.add(config.id);
-                              }
-                            });
-                            _saveExpanded();
-                          },
-                          onSessionTap: (sessionId) {
-                            state.ensureChatPane().switchSession(sessionId);
-                            widget.onSessionSelected?.call();
-                          },
-                          state: state,
-                          onSessionSelected: widget.onSessionSelected,
-                          selectedSessionIds: _selectedSessionIds,
-                          currentFlatList: _currentFlatSessionList,
-                          onSessionSelectTap: (sessionId, flatIndex) =>
-                              _handleSessionTap(
-                                context,
-                                sessionId,
-                                flatIndex,
-                                state,
-                              ),
-                          onBulkSecondaryTap: (sessionId, position) =>
-                              _showBulkSessionContextMenu(
-                                context,
-                                position,
-                                state,
-                              ),
-                          collapsedProjects:
-                              _collapsedWorkerProjects[config.id] ??
-                              const {},
-                          onProjectToggle: (collapseKey) {
-                            setState(() {
-                              final set = _collapsedWorkerProjects
-                                  .putIfAbsent(config.id, () => {});
-                              if (set.contains(collapseKey)) {
-                                set.remove(collapseKey);
-                              } else {
-                                set.add(collapseKey);
-                              }
-                            });
-                          },
-                          reorderEnabled:
-                              _workerSearchQuery.isEmpty &&
-                              _activeStatusFilters.isEmpty &&
-                              _selectedSessionIds.isEmpty,
-                          onReorder: (sessionId, afterSessionId) {
-                            worker?.reorderSession(
-                              sessionId,
-                              afterSessionId: afterSessionId,
-                            );
-                          },
-                        );
-                      },
                     ),
-            ),
-          ],
-        ),
+                    const SizedBox(height: 6),
+                    SizedBox(
+                      height: 24,
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: ListView(
+                              scrollDirection: Axis.horizontal,
+                              children: [
+                                for (final status in _statusOrder)
+                                  Padding(
+                                    padding: const EdgeInsets.only(right: 4),
+                                    child: _SessionStatusFilterChip(
+                                      label: _statusLabels[status]!,
+                                      color: _statusColors[status]!,
+                                      selected: _activeStatusFilters.contains(
+                                        status,
+                                      ),
+                                      onTap: () {
+                                        setState(() {
+                                          if (_activeStatusFilters.contains(
+                                            status,
+                                          )) {
+                                            _activeStatusFilters.remove(status);
+                                          } else {
+                                            _activeStatusFilters.add(status);
+                                          }
+                                        });
+                                        _saveFilters();
+                                      },
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                          if (_hasActiveFilters)
+                            GestureDetector(
+                              onTap: _clearFilters,
+                              child: Padding(
+                                padding: const EdgeInsets.only(left: 4),
+                                child: Icon(
+                                  Icons.filter_alt_off_rounded,
+                                  color: context.appColors.textMuted,
+                                  size: 16,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (_selectedSessionIds.isNotEmpty)
+                _buildSessionSelectionBar(context, state),
+              Expanded(
+                child: filteredConfigs.isEmpty && _hasActiveFilters
+                    ? Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.search_off_rounded,
+                              color: context.appColors.textMuted,
+                              size: 32,
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              'No matching results',
+                              style: TextStyle(
+                                color: context.appColors.textSecondary,
+                                fontSize: 13,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            GestureDetector(
+                              onTap: _clearFilters,
+                              child: Text(
+                                'Clear filters',
+                                style: TextStyle(
+                                  color: context.appColors.accent,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      )
+                    : ListView.builder(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        itemCount: filteredConfigs.length,
+                        itemBuilder: (context, index) {
+                          final config = filteredConfigs[index];
+                          final worker = state.getWorker(config.id);
+                          final sessions = filteredGrouped[config.id] ?? [];
+                          final terminals = terminalsByWorker[config.id] ?? [];
+                          final expanded = _expandedWorkers.contains(config.id);
+                          return WorkerGroup(
+                            config: config,
+                            worker: worker,
+                            sessions: sessions,
+                            terminals: terminals,
+                            expanded: expanded,
+                            groupByProject: _groupByProject,
+                            onToggleExpand: () {
+                              setState(() {
+                                if (expanded) {
+                                  _expandedWorkers.remove(config.id);
+                                } else {
+                                  _expandedWorkers.add(config.id);
+                                }
+                              });
+                              _saveExpanded();
+                            },
+                            onSessionTap: (sessionId) {
+                              state.ensureChatPane().switchSession(sessionId);
+                              widget.onSessionSelected?.call();
+                            },
+                            state: state,
+                            onSessionSelected: widget.onSessionSelected,
+                            selectedSessionIds: _selectedSessionIds,
+                            currentFlatList: _currentFlatSessionList,
+                            onSessionSelectTap: (sessionId, flatIndex) =>
+                                _handleSessionTap(
+                                  context,
+                                  sessionId,
+                                  flatIndex,
+                                  state,
+                                ),
+                            onBulkSecondaryTap: (sessionId, position) =>
+                                _showBulkSessionContextMenu(
+                                  context,
+                                  position,
+                                  state,
+                                ),
+                            collapsedProjects:
+                                _collapsedWorkerProjects[config.id] ?? const {},
+                            onProjectToggle: (collapseKey) {
+                              setState(() {
+                                final set = _collapsedWorkerProjects
+                                    .putIfAbsent(config.id, () => {});
+                                if (set.contains(collapseKey)) {
+                                  set.remove(collapseKey);
+                                } else {
+                                  set.add(collapseKey);
+                                }
+                              });
+                            },
+                            reorderEnabled:
+                                _workerSearchQuery.isEmpty &&
+                                _activeStatusFilters.isEmpty &&
+                                _selectedSessionIds.isEmpty,
+                            onReorder: (sessionId, afterSessionId) {
+                              worker?.reorderSession(
+                                sessionId,
+                                afterSessionId: afterSessionId,
+                              );
+                            },
+                          );
+                        },
+                      ),
+              ),
+            ],
+          ),
         );
       },
     );
@@ -1106,6 +1109,77 @@ class _SidebarNotifications extends StatelessWidget {
                       ),
                     ),
                 ],
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Update banner
+// ---------------------------------------------------------------------------
+
+/// Compact banner shown above the divider/settings row when a new client
+/// version is available. Tapping anywhere on the row opens Settings → About
+/// (where the user can trigger the download). The dismiss button hides the
+/// banner for this release.
+class _UpdateBanner extends StatelessWidget {
+  final AppState appState;
+
+  const _UpdateBanner({required this.appState});
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: appState.updateService,
+      builder: (ctx, _) {
+        final svc = appState.updateService;
+        if (!svc.showBanner) return const SizedBox.shrink();
+
+        final latest = svc.latestVersion!;
+
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Divider(height: 1),
+            InkWell(
+              onTap: () => showSettingsMenu(context),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.new_releases_outlined,
+                      size: 16,
+                      color: context.appColors.accent,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'v$latest available',
+                        style: TextStyle(
+                          color: context.appColors.accent,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                    GestureDetector(
+                      onTap: svc.dismissCurrentUpdate,
+                      child: Icon(
+                        Icons.close,
+                        size: 16,
+                        color: context.appColors.textMuted,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ],
