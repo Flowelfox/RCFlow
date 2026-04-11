@@ -1888,6 +1888,7 @@ Schema fields may include `"managed_only": true` — these are only exposed when
 | `default_permission_mode`  | select      | yes          | —                      | CLI --permission-mode: interactive (default, enables interactive prompts), bypassPermissions, allowEdits, plan |
 | `max_turns`                | string      | yes          | —                      | Maximum agentic turns per session (default 200)    |
 | `timeout`                  | string      | yes          | —                      | Process timeout in seconds (default 1800)          |
+| `undercover`               | boolean     | yes          | —                      | Strip AI attribution from commits and PRs (default false) |
 
 **Provider env sync:** When `provider` or any credential field is updated, `ToolSettingsManager` automatically rebuilds the `env` section of the Claude Code `settings.json`:
 

@@ -11,6 +11,7 @@ from sqlalchemy import func, select
 
 from src.api.deps import verify_http_api_key
 from src.core.buffer import MessageType
+from src.core.session import session_sort_key
 from src.models.db import Session as SessionModel
 from src.models.db import SessionMessage as SessionMessageModel
 
@@ -460,13 +461,7 @@ async def reorder_session(
             }
             for s in session_manager.list_all_sessions()
         ]
-        sort_order_max = 2**62
-        all_sessions.sort(
-            key=lambda x: (
-                x["sort_order"] if x["sort_order"] is not None else sort_order_max,
-                -(x["created_at"].replace(tzinfo=None).timestamp() if x["created_at"] else 0),
-            ),
-        )
+        all_sessions.sort(key=session_sort_key)
 
     # Find current index and remove target from list
     ordered_ids = [s["session_id"] for s in all_sessions]
