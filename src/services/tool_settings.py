@@ -21,25 +21,31 @@ from src.paths import get_managed_tools_dir
 logger = logging.getLogger(__name__)
 
 # Keys related to provider configuration (used for env sync detection).
-_PROVIDER_KEYS = frozenset({
-    "provider",
-    "anthropic_api_key",
-    "aws_region",
-    "aws_access_key_id",
-    "aws_secret_access_key",
-})
+_PROVIDER_KEYS = frozenset(
+    {
+        "provider",
+        "anthropic_api_key",
+        "aws_region",
+        "aws_access_key_id",
+        "aws_secret_access_key",
+    }
+)
 
 # Keys related to Codex provider configuration (used for env sync detection).
-_CODEX_PROVIDER_KEYS = frozenset({
-    "provider",
-    "codex_api_key",
-})
+_CODEX_PROVIDER_KEYS = frozenset(
+    {
+        "provider",
+        "codex_api_key",
+    }
+)
 
 # Keys related to OpenCode provider configuration (used for env sync detection).
-_OPENCODE_PROVIDER_KEYS = frozenset({
-    "provider",
-    "opencode_api_key",
-})
+_OPENCODE_PROVIDER_KEYS = frozenset(
+    {
+        "provider",
+        "opencode_api_key",
+    }
+)
 
 _MASK_CHAR = "*"
 _MASK_VISIBLE_CHARS = 4
@@ -180,6 +186,14 @@ CLAUDE_CODE_SETTINGS_SCHEMA: list[dict[str, Any]] = [
         "type": "string",
         "default": "",
         "description": "Process timeout in seconds (default 1800).",
+        "managed_only": True,
+    },
+    {
+        "key": "undercover",
+        "label": "Undercover mode",
+        "type": "boolean",
+        "default": False,
+        "description": "Strip AI attribution from commits and PRs created by Claude Code.",
         "managed_only": True,
     },
 ]

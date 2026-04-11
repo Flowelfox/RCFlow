@@ -45,6 +45,7 @@ class Session(Base):
     tool_input_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     tool_output_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     tool_cost_usd: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    sort_order: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     messages: Mapped[list["SessionMessage"]] = relationship(
         back_populates="session", order_by="SessionMessage.sequence"

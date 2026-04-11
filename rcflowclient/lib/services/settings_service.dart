@@ -61,6 +61,12 @@ class SettingsService {
   static const _artifactsExpandedProjectsKey =
       'rcflow_artifacts_expanded_projects';
 
+  // Auto-update keys
+  static const _currentVersionKey = 'rcflow_current_version';
+  static const _lastUpdateCheckKey = 'rcflow_last_update_check';
+  static const _cachedLatestVersionKey = 'rcflow_cached_latest_version';
+  static const _dismissedUpdateVersionKey = 'rcflow_dismissed_update_version';
+
   // Setup / onboarding keys
   static const _setupCompleteKey = 'rcflow_setup_complete';
   static const _onboardingCompleteKey = 'rcflow_onboarding_complete';
@@ -71,6 +77,56 @@ class SettingsService {
 
   Future<void> init() async {
     _prefs = await SharedPreferences.getInstance();
+  }
+
+  // --- Auto-update ---
+
+  /// The version string currently installed (e.g. "1.38.0"), persisted at
+  /// startup before [AppState] is created. Null until first launch after this
+  /// feature is deployed.
+  String? get currentVersion => _prefs.getString(_currentVersionKey);
+  set currentVersion(String? value) {
+    if (value == null) {
+      _prefs.remove(_currentVersionKey);
+    } else {
+      _prefs.setString(_currentVersionKey, value);
+    }
+  }
+
+  /// UTC timestamp of the last successful update check, stored as ISO-8601.
+  DateTime? get lastUpdateCheck {
+    final raw = _prefs.getString(_lastUpdateCheckKey);
+    if (raw == null) return null;
+    return DateTime.tryParse(raw);
+  }
+
+  set lastUpdateCheck(DateTime? value) {
+    if (value == null) {
+      _prefs.remove(_lastUpdateCheckKey);
+    } else {
+      _prefs.setString(_lastUpdateCheckKey, value.toUtc().toIso8601String());
+    }
+  }
+
+  /// Normalized latest version seen from the update server (e.g. "1.39.0").
+  String? get cachedLatestVersion => _prefs.getString(_cachedLatestVersionKey);
+  set cachedLatestVersion(String? value) {
+    if (value == null) {
+      _prefs.remove(_cachedLatestVersionKey);
+    } else {
+      _prefs.setString(_cachedLatestVersionKey, value);
+    }
+  }
+
+  /// Version the user has explicitly dismissed from the update banner.
+  String? get dismissedUpdateVersion =>
+      _prefs.getString(_dismissedUpdateVersionKey);
+  set dismissedUpdateVersion(String? value) {
+    if (value == null) {
+      _prefs.remove(_dismissedUpdateVersionKey);
+    } else {
+      _prefs.setString(_dismissedUpdateVersionKey, value);
+    }
   }
 
   // --- Setup / onboarding ---
