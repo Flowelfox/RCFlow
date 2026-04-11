@@ -57,6 +57,7 @@ async def list_sessions(
                 "tool_cost_usd": s.get("tool_cost_usd", 0.0),
                 "main_project_path": s.get("main_project_path"),
                 "agent_type": s.get("agent_type"),
+                "sort_order": s.get("sort_order"),
             }
             for s in all_sessions
         ]
@@ -78,6 +79,7 @@ async def list_sessions(
                 "tool_cost_usd": s.tool_cost_usd,
                 "main_project_path": s.main_project_path,
                 "agent_type": s.agent_type,
+                "sort_order": s.sort_order,
             }
             for s in session_manager.list_all_sessions()
         ]
@@ -387,6 +389,132 @@ async def restore_session(session_id: str, request: Request) -> dict[str, Any]:
     }
 
 
+class ReorderSessionRequest(BaseModel):
+    """Body for the reorder-session endpoint."""
+
+    after_session_id: str | None = None
+
+
+# Sparse ordering gap — new sessions get multiples of this value.
+_SORT_ORDER_GAP = 1000
+
+
+@router.patch(
+    "/sessions/{session_id}/reorder",
+    summary="Reorder a session",
+    description=(
+        "Move a session to a new position in the session list. "
+        "Set after_session_id to place it immediately after that session, "
+        "or null to move it to the top of the list."
+    ),
+    dependencies=[Depends(verify_http_api_key)],
+)
+async def reorder_session(
+    session_id: str,
+    body: ReorderSessionRequest,
+    request: Request,
+) -> dict[str, Any]:
+    session_manager: SessionManager = request.app.state.session_manager
+    db_session_factory = request.app.state.db_session_factory
+
+    # Validate the target session exists (in-memory or archived)
+    if session_manager.get_session(session_id) is None:
+        if db_session_factory is None:
+            raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+        try:
+            session_uuid = uuid.UUID(session_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid session ID: {session_id}") from None
+        async with db_session_factory() as db:
+            if await db.get(SessionModel, session_uuid) is None:
+                raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+
+    if body.after_session_id == session_id:
+        raise HTTPException(status_code=400, detail="Cannot place session after itself")
+
+    # Validate the anchor session if provided
+    if body.after_session_id is not None and session_manager.get_session(body.after_session_id) is None:
+        if db_session_factory is None:
+            raise HTTPException(status_code=404, detail=f"Anchor session not found: {body.after_session_id}")
+        try:
+            anchor_uuid = uuid.UUID(body.after_session_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid after_session_id: {body.after_session_id}") from None
+        async with db_session_factory() as db:
+            if await db.get(SessionModel, anchor_uuid) is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Anchor session not found: {body.after_session_id}",
+                )
+
+    # Build the current ordered list of all sessions (in-memory + archived)
+    if db_session_factory is not None:
+        async with db_session_factory() as db:
+            all_sessions = await session_manager.list_all_with_archived(db)
+    else:
+        all_sessions = [
+            {
+                "session_id": s.id,
+                "sort_order": s.sort_order,
+                "created_at": s.created_at,
+            }
+            for s in session_manager.list_all_sessions()
+        ]
+        sort_order_max = 2**62
+        all_sessions.sort(
+            key=lambda x: (
+                x["sort_order"] if x["sort_order"] is not None else sort_order_max,
+                -(x["created_at"].replace(tzinfo=None).timestamp() if x["created_at"] else 0),
+            ),
+        )
+
+    # Find current index and remove target from list
+    ordered_ids = [s["session_id"] for s in all_sessions]
+    if session_id not in ordered_ids:
+        ordered_ids.append(session_id)
+    ordered_ids.remove(session_id)
+
+    # Insert at the new position
+    if body.after_session_id is None:
+        # Move to the very top
+        ordered_ids.insert(0, session_id)
+    else:
+        try:
+            anchor_idx = ordered_ids.index(body.after_session_id)
+        except ValueError:
+            raise HTTPException(status_code=404, detail=f"Anchor session not found: {body.after_session_id}") from None
+        ordered_ids.insert(anchor_idx + 1, session_id)
+
+    # Compute sparse sort_order values for the new ordering
+    new_order_map: dict[str, int] = {}
+    for i, sid in enumerate(ordered_ids):
+        new_order_map[sid] = i * _SORT_ORDER_GAP
+
+    # Apply to in-memory sessions
+    for s in session_manager.list_all_sessions():
+        if s.id in new_order_map:
+            s.sort_order = new_order_map[s.id]
+
+    # Persist all sort_order values to DB
+    if db_session_factory is not None:
+        async with db_session_factory() as db:
+            for sid, order in new_order_map.items():
+                try:
+                    sid_uuid = uuid.UUID(sid)
+                except ValueError:
+                    continue
+                row = await db.get(SessionModel, sid_uuid)
+                if row is not None:
+                    row.sort_order = order
+            await db.commit()
+
+    # Broadcast lightweight reorder event
+    session_manager.broadcast_session_reorder(ordered_ids)
+
+    logger.info("Session %s reordered (after=%s) via HTTP API", session_id, body.after_session_id)
+    return {"session_id": session_id, "sort_order": new_order_map.get(session_id)}
+
+
 class RenameSessionRequest(BaseModel):
     """Body for the rename-session endpoint."""
 
@@ -519,7 +647,7 @@ async def set_session_worktree(
             {
                 "session_id": session.id,
                 "content": f"Worktree selection updated to `{path}`. "
-                           "This will take effect on the next Claude Code invocation.",
+                "This will take effect on the next Claude Code invocation.",
                 "role": "system",
             },
         )
@@ -533,7 +661,5 @@ async def set_session_worktree(
         async with db_session_factory() as db:
             await session_manager.persist_session_metadata(session, db)
 
-    logger.info(
-        "Session %s selected_worktree_path set to %r via HTTP API", session_id, path
-    )
+    logger.info("Session %s selected_worktree_path set to %r via HTTP API", session_id, path)
     return {"session_id": session_id, "selected_worktree_path": path}

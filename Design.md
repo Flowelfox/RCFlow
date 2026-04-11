@@ -721,13 +721,37 @@ Server responds with:
       "tool_cost_usd": 0.0,
       "worktree": null,
       "selected_worktree_path": null,
-      "main_project_path": null
+      "main_project_path": null,
+      "sort_order": 0
     }
   ]
 }
 ```
 
-Sessions are sorted by `created_at` descending (most recent first). The list includes both in-memory active sessions and archived sessions from the database. The `title` field is `null` until auto-generated after the first LLM response. The `worktree` field is `null` for sessions that have never used a worktree tool, or a dict with `repo_path`, `last_action`, `branch?`, and `base?` for sessions that have. The `selected_worktree_path` field is `null` by default and is set via `PATCH /api/sessions/{id}/worktree`; when non-null it overrides the agent working directory for Claude Code and Codex runs in that session. The `main_project_path` field is `null` until the user types `@ProjectName` in a message and the name resolves to a directory under `PROJECTS_DIR`; once set it persists across the session lifetime and is updated to reflect the latest `@` mention used. It is also included in `session_update` WebSocket broadcasts.
+Sessions are sorted by `sort_order` ascending (nulls last), then `created_at` descending as a tiebreaker. New sessions are automatically assigned a `sort_order` value that places them at the top of the list. The list includes both in-memory active sessions and archived sessions from the database. The `title` field is `null` until auto-generated after the first LLM response. The `worktree` field is `null` for sessions that have never used a worktree tool, or a dict with `repo_path`, `last_action`, `branch?`, and `base?` for sessions that have. The `selected_worktree_path` field is `null` by default and is set via `PATCH /api/sessions/{id}/worktree`; when non-null it overrides the agent working directory for Claude Code and Codex runs in that session. The `main_project_path` field is `null` until the user types `@ProjectName` in a message and the name resolves to a directory under `PROJECTS_DIR`; once set it persists across the session lifetime and is updated to reflect the latest `@` mention used. It is also included in `session_update` WebSocket broadcasts.
+
+### Session Reordering
+
+Sessions can be reordered via drag-and-drop in the client or keyboard shortcuts (Ctrl+Up/Down). The backend provides a move-based reorder endpoint:
+
+```
+PATCH /api/sessions/{session_id}/reorder
+Body: {"after_session_id": "uuid" | null}
+```
+
+- `after_session_id = null` moves the session to the top of the list.
+- `after_session_id = "uuid"` places it immediately after the specified session.
+
+The server computes sparse integer `sort_order` values (gaps of 1000) and re-normalizes all sessions when gaps collapse. After a successful reorder, a lightweight `session_reorder` event is broadcast to all connected WebSocket clients:
+
+```json
+{
+  "type": "session_reorder",
+  "order": ["uuid1", "uuid2", "uuid3"]
+}
+```
+
+When grouping by project is enabled, the client uses separate `ReorderableListView` widgets per project group, making cross-project drag structurally impossible. Reordering is disabled when search filters, status filters, or multi-select mode are active.
 
 ### Task Messages
 
@@ -1050,7 +1074,7 @@ Tasks carry a `plan_artifact_id` field (UUID string or `null`) in all API respon
 - **Interrupted sessions**: On an unexpected backend crash or SIGKILL, in-flight sessions that were still active in the DB are marked `INTERRUPTED` at next startup rather than `FAILED`. `INTERRUPTED` is a non-terminal status: `ended_at` is left unset, the session DB row retains its conversation history and metadata (including `selected_worktree_path`), and the client can restore the session via the normal restore flow. The `metadata_["restart_interrupted"]` flag is set so clients can show a visual indicator. Tasks attached to interrupted sessions remain in their current state until the session is resumed and ends normally.
 - **On graceful shutdown**: Active sessions are marked `COMPLETED` as before (state is preserved cleanly).
 - **On server crash/restart**: Sessions that were active at crash time are marked `INTERRUPTED` (not `FAILED`). Clients can restore them. Archived sessions remain queryable via `GET /api/sessions` and `GET /api/sessions/{session_id}/messages`.
-- **Session listing**: `GET /api/sessions` and the WebSocket `list_sessions` command both merge in-memory sessions with archived sessions from the database (excluding duplicates), sorted by `created_at` descending. Each session entry includes a `created_at` ISO 8601 timestamp and `title`. Archived sessions are filtered by `backend_id` so each backend instance only sees its own sessions.
+- **Session listing**: `GET /api/sessions` and the WebSocket `list_sessions` command both merge in-memory sessions with archived sessions from the database (excluding duplicates), sorted by `sort_order` ascending (nulls last) then `created_at` descending. Each session entry includes a `created_at` ISO 8601 timestamp, `title`, and `sort_order`. Archived sessions are filtered by `backend_id` so each backend instance only sees its own sessions.
 
 ### Session Todos
 
