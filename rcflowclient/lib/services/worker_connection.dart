@@ -231,6 +231,12 @@ class WorkerConnection extends ChangeNotifier {
       return;
     }
 
+    // session_reorder: apply new ordering from server
+    if (type == 'session_reorder') {
+      _handleSessionReorder(msg);
+      return;
+    }
+
     // task_list / task_update / task_deleted: forward to AppState with worker info
     if (type == 'task_list' ||
         type == 'task_update' ||
@@ -262,11 +268,7 @@ class WorkerConnection extends ChangeNotifier {
       }
       return parsed;
     }).toList();
-    sessions.sort((a, b) {
-      final aTime = a.createdAt ?? DateTime(2000);
-      final bTime = b.createdAt ?? DateTime(2000);
-      return bTime.compareTo(aTime);
-    });
+    _sortSessions();
     _cacheSessions();
     onSessionsChanged?.call();
   }
@@ -316,6 +318,10 @@ class WorkerConnection extends ChangeNotifier {
     final agentTypeProvided = msg.containsKey('agent_type');
     final newAgentType = msg['agent_type'] as String?;
 
+    // Parse sort order
+    final sortOrderProvided = msg.containsKey('sort_order');
+    final newSortOrder = (msg['sort_order'] as num?)?.toInt();
+
     final index = sessions.indexWhere((s) => s.sessionId == sessionId);
     if (index >= 0) {
       final existing = sessions[index];
@@ -347,6 +353,7 @@ class WorkerConnection extends ChangeNotifier {
             ? newMainProjectPath
             : existing.mainProjectPath,
         agentType: agentTypeProvided ? newAgentType : existing.agentType,
+        sortOrder: sortOrderProvided ? newSortOrder : existing.sortOrder,
       );
       // Fire callback when project path is attached or changes.
       if (newMainProjectPath != null &&
@@ -377,6 +384,7 @@ class WorkerConnection extends ChangeNotifier {
           selectedWorktreePath: newSelectedWorktreePath,
           mainProjectPath: newMainProjectPath,
           agentType: newAgentType,
+          sortOrder: sortOrderProvided ? newSortOrder : null,
         ),
       );
       // Fire callback for a brand-new session that already has a project.
@@ -404,6 +412,47 @@ class WorkerConnection extends ChangeNotifier {
         jsonEncode(sessions.map((s) => s.toJson()).toList()),
       );
     } catch (_) {}
+  }
+
+  /// Sort sessions by sort_order ascending (nulls last), then createdAt desc.
+  void _sortSessions() {
+    const maxOrder = 1 << 62;
+    sessions.sort((a, b) {
+      final aOrder = a.sortOrder ?? maxOrder;
+      final bOrder = b.sortOrder ?? maxOrder;
+      final cmp = aOrder.compareTo(bOrder);
+      if (cmp != 0) return cmp;
+      final aTime = a.createdAt ?? DateTime(2000);
+      final bTime = b.createdAt ?? DateTime(2000);
+      return bTime.compareTo(aTime);
+    });
+  }
+
+  /// Handle a lightweight session_reorder event from the server.
+  void _handleSessionReorder(Map<String, dynamic> msg) {
+    final order = msg['order'] as List<dynamic>?;
+    if (order == null) return;
+    final idOrder = <String, int>{};
+    for (var i = 0; i < order.length; i++) {
+      idOrder[order[i] as String] = i * 1000;
+    }
+    for (var i = 0; i < sessions.length; i++) {
+      final newOrder = idOrder[sessions[i].sessionId];
+      if (newOrder != null && sessions[i].sortOrder != newOrder) {
+        sessions[i] = sessions[i].copyWith(sortOrder: newOrder);
+      }
+    }
+    _sortSessions();
+    _cacheSessions();
+    onSessionsChanged?.call();
+  }
+
+  /// Reorder a session by moving it after another session (or to the top).
+  Future<void> reorderSession(
+    String sessionId, {
+    String? afterSessionId,
+  }) async {
+    await ws.reorderSession(sessionId, afterSessionId: afterSessionId);
   }
 
   void loadCachedSessions() {

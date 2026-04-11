@@ -16,6 +16,7 @@ import '../services/hotkey_service.dart';
 import '../services/notification_service.dart';
 import '../services/notification_sound_service.dart';
 import '../services/settings_service.dart';
+import '../services/update_service.dart';
 import '../services/websocket_service.dart';
 import '../services/worker_connection.dart';
 import '../ui/widgets/terminal_pane.dart';
@@ -27,6 +28,7 @@ class AppState extends ChangeNotifier implements PaneHost {
   late final NotificationSoundService _soundService;
   late final NotificationService _notificationService;
   late final HotkeyService _hotkeyService;
+  late final UpdateService _updateService;
 
   // Previous worker statuses for detecting transitions
   final Map<String, WorkerConnectionStatus> _prevWorkerStatuses = {};
@@ -848,6 +850,16 @@ class AppState extends ChangeNotifier implements PaneHost {
   NotificationSoundService get soundService => _soundService;
   NotificationService get notificationService => _notificationService;
   HotkeyService get hotkeyService => _hotkeyService;
+  UpdateService get updateService => _updateService;
+
+  /// Async initialisation that runs after the constructor but before [runApp].
+  ///
+  /// Fires the first update check (respecting the 24-hour TTL). The check
+  /// itself is launched without awaiting so startup is not blocked by the
+  /// network; [UpdateService] notifies listeners when it completes.
+  Future<void> initAsync() async {
+    _updateService.maybeCheck();
+  }
 
   // Backward-compat getters delegating to active pane
   String? get currentSessionId => hasNoPanes ? null : activePane.sessionId;
@@ -866,8 +878,13 @@ class AppState extends ChangeNotifier implements PaneHost {
     _soundService = NotificationSoundService(settings: _settings);
     _notificationService = NotificationService();
     _hotkeyService = HotkeyService(settings: _settings);
+    _updateService = UpdateService(settings: _settings);
     _panes['pane_0'] = PaneState(paneId: 'pane_0', host: this)
       ..addListener(_onPaneChanged);
+
+    // Restore cached update state synchronously so the first frame can
+    // already reflect a known-available update without waiting for the net.
+    _updateService.restoreCachedState();
 
     _workerConfigs = _settings.workers;
     _initWorkers();
