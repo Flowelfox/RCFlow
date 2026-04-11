@@ -853,6 +853,37 @@ class WebSocketService {
     }
   }
 
+  /// Reorder a session by placing it after another session (or at the top).
+  Future<void> reorderSession(
+    String sessionId, {
+    String? afterSessionId,
+  }) async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url = _serverUrl!.http('/api/sessions/$sessionId/reorder');
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.openUrl('PATCH', url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      request.headers.contentType = io.ContentType.json;
+      request.add(
+        utf8.encode(jsonEncode({'after_session_id': afterSessionId})),
+      );
+      final response = await request.close();
+      final body = await response
+          .transform(const io.SystemEncoding().decoder)
+          .join();
+      if (response.statusCode != 200) {
+        throw Exception(
+          response.statusCode == 404
+              ? 'Session not found'
+              : 'Server returned ${response.statusCode}: $body',
+        );
+      }
+    } finally {
+      client.close();
+    }
+  }
+
   Future<List<Map<String, dynamic>>> fetchConfig() async {
     if (_serverUrl == null) throw StateError('Not connected');
     final url = _serverUrl!.http('/api/config');

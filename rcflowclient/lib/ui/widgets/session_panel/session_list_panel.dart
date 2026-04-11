@@ -17,6 +17,18 @@ import 'helpers.dart';
 import 'task_list_panel.dart';
 import 'worker_group.dart';
 
+/// Compare sessions by sort_order ascending (nulls last), then createdAt desc.
+int compareBySortOrder(SessionInfo a, SessionInfo b) {
+  const maxOrder = 1 << 62;
+  final aOrder = a.sortOrder ?? maxOrder;
+  final bOrder = b.sortOrder ?? maxOrder;
+  final cmp = aOrder.compareTo(bOrder);
+  if (cmp != 0) return cmp;
+  final aTime = a.createdAt ?? DateTime(2000);
+  final bTime = b.createdAt ?? DateTime(2000);
+  return bTime.compareTo(aTime);
+}
+
 /// Computes the ordered flat list of *visible* sessions across all workers,
 /// respecting worker expansion and project sub-group collapse state.
 ///
@@ -35,13 +47,8 @@ List<SessionInfo> computeFlatVisibleSessionList({
     final sessions = groupedSessions[config.id] ?? [];
 
     if (!groupByProject) {
-      // Sort newest-first (matches WorkerGroup render order).
-      final sorted = [...sessions]
-        ..sort(
-          (a, b) => (b.createdAt ?? DateTime(2000)).compareTo(
-            a.createdAt ?? DateTime(2000),
-          ),
-        );
+      // Sort by sort_order ascending (nulls last), then newest-first.
+      final sorted = [...sessions]..sort(compareBySortOrder);
       result.addAll(sorted);
     } else {
       // Replicate the project grouping logic from WorkerGroup.
@@ -65,11 +72,7 @@ List<SessionInfo> computeFlatVisibleSessionList({
         final collapseKey = projectName ?? '\x00other';
         if (collapsedProjects.contains(collapseKey)) continue;
         final projectSessions = [...byProject[projectName]!]
-          ..sort(
-            (a, b) => (b.createdAt ?? DateTime(2000)).compareTo(
-              a.createdAt ?? DateTime(2000),
-            ),
-          );
+          ..sort(compareBySortOrder);
         result.addAll(projectSessions);
       }
     }
@@ -364,6 +367,39 @@ class _SessionListPanelState extends State<SessionListPanel>
       state.ensureChatPane().switchSession(sessionId);
       widget.onSessionSelected?.call();
     }
+  }
+
+  /// Move the single selected session up or down in the list via Ctrl+Arrow.
+  void _handleKeyboardReorder(AppState state, {required bool isUp}) {
+    if (_selectedSessionIds.length != 1) return;
+    final selectedId = _selectedSessionIds.first;
+
+    // Find the session in the flat list
+    final flatIdx = _currentFlatSessionList.indexWhere(
+      (s) => s.sessionId == selectedId,
+    );
+    if (flatIdx < 0) return;
+
+    final session = _currentFlatSessionList[flatIdx];
+    final worker = state.getWorker(session.workerId);
+    if (worker == null) return;
+
+    if (isUp && flatIdx == 0) return; // Already at top
+    if (!isUp && flatIdx >= _currentFlatSessionList.length - 1) return;
+
+    String? afterSessionId;
+    if (isUp) {
+      // Move before the item currently above. afterSessionId = item two above,
+      // or null if moving to position 0.
+      afterSessionId = flatIdx >= 2
+          ? _currentFlatSessionList[flatIdx - 2].sessionId
+          : null;
+    } else {
+      // Move after the item currently below.
+      afterSessionId = _currentFlatSessionList[flatIdx + 1].sessionId;
+    }
+
+    worker.reorderSession(selectedId, afterSessionId: afterSessionId);
   }
 
   /// The thin bar shown below the filter bar when sessions are selected.
@@ -697,6 +733,27 @@ class _SessionListPanelState extends State<SessionListPanel>
               setState(() => _selectedSessionIds.clear());
               return KeyEventResult.handled;
             }
+            // Ctrl+Up/Down to reorder the single selected session
+            if (event is KeyDownEvent &&
+                _selectedSessionIds.length == 1 &&
+                _workerSearchQuery.isEmpty &&
+                _activeStatusFilters.isEmpty &&
+                HardwareKeyboard.instance.logicalKeysPressed.any(
+                  (k) =>
+                      k == LogicalKeyboardKey.controlLeft ||
+                      k == LogicalKeyboardKey.controlRight ||
+                      k == LogicalKeyboardKey.metaLeft ||
+                      k == LogicalKeyboardKey.metaRight,
+                )) {
+              final isUp =
+                  event.logicalKey == LogicalKeyboardKey.arrowUp;
+              final isDown =
+                  event.logicalKey == LogicalKeyboardKey.arrowDown;
+              if (isUp || isDown) {
+                _handleKeyboardReorder(state, isUp: isUp);
+                return KeyEventResult.handled;
+              }
+            }
             return KeyEventResult.ignored;
           },
           child: Column(
@@ -994,6 +1051,16 @@ class _SessionListPanelState extends State<SessionListPanel>
                                   set.add(collapseKey);
                                 }
                               });
+                            },
+                            reorderEnabled:
+                                _workerSearchQuery.isEmpty &&
+                                _activeStatusFilters.isEmpty &&
+                                _selectedSessionIds.isEmpty,
+                            onReorder: (sessionId, afterSessionId) {
+                              worker?.reorderSession(
+                                sessionId,
+                                afterSessionId: afterSessionId,
+                              );
                             },
                           );
                         },
