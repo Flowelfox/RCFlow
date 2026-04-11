@@ -219,6 +219,57 @@ class TestProviderEnvSync:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Undercover setting
+# ---------------------------------------------------------------------------
+
+
+class TestUndercoverSetting:
+    def test_undercover_in_schema_when_managed(self, manager: ToolSettingsManager):
+        result = manager.get_settings_with_schema("claude_code", managed=True)
+        keys = {f["key"] for f in result["fields"]}
+        assert "undercover" in keys
+
+    def test_undercover_excluded_when_not_managed(self, manager: ToolSettingsManager):
+        result = manager.get_settings_with_schema("claude_code", managed=False)
+        keys = {f["key"] for f in result["fields"]}
+        assert "undercover" not in keys
+
+    def test_undercover_default_is_false(self, manager: ToolSettingsManager):
+        result = manager.get_settings_with_schema("claude_code", managed=True)
+        field = next(f for f in result["fields"] if f["key"] == "undercover")
+        assert field["value"] is False
+        assert field["default"] is False
+        assert field["type"] == "boolean"
+
+    def test_undercover_update_round_trip(self, manager: ToolSettingsManager):
+        manager.update_settings("claude_code", {"undercover": True})
+        settings = manager.get_settings("claude_code")
+        assert settings["undercover"] is True
+
+        result = manager.get_settings_with_schema("claude_code", managed=True)
+        field = next(f for f in result["fields"] if f["key"] == "undercover")
+        assert field["value"] is True
+
+    def test_undercover_toggle_off(self, manager: ToolSettingsManager):
+        """Enable then disable — value should revert to False."""
+        manager.update_settings("claude_code", {"undercover": True})
+        manager.update_settings("claude_code", {"undercover": False})
+        settings = manager.get_settings("claude_code")
+        assert settings["undercover"] is False
+
+    def test_undercover_does_not_affect_env_section(self, manager: ToolSettingsManager):
+        """Toggling undercover should not create or alter the env section."""
+        manager.update_settings("claude_code", {"undercover": True})
+        settings = manager.get_settings("claude_code")
+        assert "env" not in settings
+
+
+# ---------------------------------------------------------------------------
+# Secret masking
+# ---------------------------------------------------------------------------
+
+
 class TestSecretMasking:
     def test_mask_secret_long_value(self):
         assert _mask_secret("sk-ant-abcdefgh1234") == "***************1234"

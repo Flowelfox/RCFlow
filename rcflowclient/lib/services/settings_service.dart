@@ -61,6 +61,12 @@ class SettingsService {
   static const _artifactsExpandedProjectsKey =
       'rcflow_artifacts_expanded_projects';
 
+  // Auto-update keys
+  static const _currentVersionKey = 'rcflow_current_version';
+  static const _lastUpdateCheckKey = 'rcflow_last_update_check';
+  static const _cachedLatestVersionKey = 'rcflow_cached_latest_version';
+  static const _dismissedUpdateVersionKey = 'rcflow_dismissed_update_version';
+
   // Setup / onboarding keys
   static const _setupCompleteKey = 'rcflow_setup_complete';
   static const _onboardingCompleteKey = 'rcflow_onboarding_complete';
@@ -71,6 +77,56 @@ class SettingsService {
 
   Future<void> init() async {
     _prefs = await SharedPreferences.getInstance();
+  }
+
+  // --- Auto-update ---
+
+  /// The version string currently installed (e.g. "1.38.0"), persisted at
+  /// startup before [AppState] is created. Null until first launch after this
+  /// feature is deployed.
+  String? get currentVersion => _prefs.getString(_currentVersionKey);
+  set currentVersion(String? value) {
+    if (value == null) {
+      _prefs.remove(_currentVersionKey);
+    } else {
+      _prefs.setString(_currentVersionKey, value);
+    }
+  }
+
+  /// UTC timestamp of the last successful update check, stored as ISO-8601.
+  DateTime? get lastUpdateCheck {
+    final raw = _prefs.getString(_lastUpdateCheckKey);
+    if (raw == null) return null;
+    return DateTime.tryParse(raw);
+  }
+
+  set lastUpdateCheck(DateTime? value) {
+    if (value == null) {
+      _prefs.remove(_lastUpdateCheckKey);
+    } else {
+      _prefs.setString(_lastUpdateCheckKey, value.toUtc().toIso8601String());
+    }
+  }
+
+  /// Normalized latest version seen from the update server (e.g. "1.39.0").
+  String? get cachedLatestVersion => _prefs.getString(_cachedLatestVersionKey);
+  set cachedLatestVersion(String? value) {
+    if (value == null) {
+      _prefs.remove(_cachedLatestVersionKey);
+    } else {
+      _prefs.setString(_cachedLatestVersionKey, value);
+    }
+  }
+
+  /// Version the user has explicitly dismissed from the update banner.
+  String? get dismissedUpdateVersion =>
+      _prefs.getString(_dismissedUpdateVersionKey);
+  set dismissedUpdateVersion(String? value) {
+    if (value == null) {
+      _prefs.remove(_dismissedUpdateVersionKey);
+    } else {
+      _prefs.setString(_dismissedUpdateVersionKey, value);
+    }
   }
 
   // --- Setup / onboarding ---
@@ -323,6 +379,45 @@ class SettingsService {
       _prefs.getBool(_showCompletedTasksKey) ?? false;
   set showCompletedTasks(bool value) =>
       _prefs.setBool(_showCompletedTasksKey, value);
+
+  // --- Per-session draft cache ---
+  //
+  // Key scheme:
+  //   • Real session: "rcflow_draft_session_{sessionId}"
+  //   • New-session pane (no ID yet): "rcflow_draft_new_{workerId}"
+  //
+  // Each draft has a companion "_ts" key storing the write timestamp as
+  // milliseconds-since-epoch so the client can compare it to the backend's
+  // updated_at when deciding which copy to trust.
+
+  static const _draftPrefix = 'rcflow_draft_session_';
+
+  /// Read the cached draft for [key].
+  ///
+  /// Returns `(content: '', cachedAt: null)` when no draft exists.
+  ({String content, DateTime? cachedAt}) getDraft(String key) {
+    final content = _prefs.getString('$_draftPrefix$key') ?? '';
+    final tsMs = _prefs.getInt('$_draftPrefix${key}_ts');
+    final cachedAt = tsMs != null
+        ? DateTime.fromMillisecondsSinceEpoch(tsMs, isUtc: true)
+        : null;
+    return (content: content, cachedAt: cachedAt);
+  }
+
+  /// Persist [content] as the draft for [key] and record the current time.
+  void saveDraft(String key, String content) {
+    _prefs.setString('$_draftPrefix$key', content);
+    _prefs.setInt(
+      '$_draftPrefix${key}_ts',
+      DateTime.now().millisecondsSinceEpoch,
+    );
+  }
+
+  /// Remove the draft and its timestamp companion for [key].
+  void clearDraft(String key) {
+    _prefs.remove('$_draftPrefix$key');
+    _prefs.remove('$_draftPrefix${key}_ts');
+  }
 
   // --- Helpers for list persistence (avoids setStringList/getStringList
   //     which can lose type info on Windows after JSON round-trip) ---

@@ -134,9 +134,7 @@ class Settings(BaseSettings):
     )
 
     # Server
-    # Default to loopback — production deployments must set RCFLOW_HOST=0.0.0.0
-    # explicitly to listen on all interfaces (F7 remediation).
-    RCFLOW_HOST: str = "127.0.0.1"
+    RCFLOW_HOST: str = "0.0.0.0"
     RCFLOW_PORT: int = _DEFAULT_PORT
     RCFLOW_API_KEY: str = ""
     RCFLOW_BACKEND_ID: str = ""
@@ -149,7 +147,7 @@ class Settings(BaseSettings):
     WS_ALLOWED_ORIGINS: str = ""
 
     # SSL/TLS (WSS)
-    WSS_ENABLED: bool = False
+    WSS_ENABLED: bool = True
     SSL_CERTFILE: str = ""
     SSL_KEYFILE: str = ""
 
@@ -232,6 +230,38 @@ class Settings(BaseSettings):
         return [Path(p).expanduser().resolve() for p in parts]
 
 
+def _populate_missing_defaults(settings: Settings) -> None:
+    """Write any Settings fields absent from settings.json with their current values.
+
+    Called from :func:`get_settings` after security keys have been generated so
+    that a fresh install produces a fully-populated settings.json on first run.
+    Only keys that are not already present in the file are written; existing
+    values are never overwritten.
+    """
+    path = _get_settings_path()
+    existing: dict[str, Any] = {}
+    if path.exists():
+        try:
+            existing = json.loads(path.read_text(encoding="utf-8"))
+        except (PermissionError, json.JSONDecodeError):
+            return
+
+    missing: dict[str, str] = {}
+    for field_name in Settings.model_fields:
+        key = field_name.upper()
+        if key not in existing:
+            value = getattr(settings, field_name)
+            if isinstance(value, Path):
+                missing[key] = str(value)
+            elif isinstance(value, bool):
+                missing[key] = "true" if value else "false"
+            else:
+                missing[key] = str(value) if value is not None else ""
+
+    if missing:
+        update_settings_file(missing)
+
+
 def get_settings() -> Settings:
     logger = logging.getLogger(__name__)
     settings = Settings()
@@ -244,6 +274,7 @@ def get_settings() -> Settings:
         backend_id = str(uuid.uuid4())
         update_settings_file({"RCFLOW_BACKEND_ID": backend_id})
         settings.RCFLOW_BACKEND_ID = backend_id
+    _populate_missing_defaults(settings)
     return settings
 
 

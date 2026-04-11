@@ -119,7 +119,8 @@ The Flutter client (`rcflowclient/`) runs on Android and Windows desktop from a 
 - **Foreground service** (`flutter_foreground_task`): Android/iOS only. On desktop, `ForegroundServiceHelper.init()`, `.start()`, and `.stop()` are no-ops guarded by `Platform.isAndroid || Platform.isIOS`.
 - **Keyboard input**: On desktop, Enter sends a message and Shift+Enter inserts a newline. On mobile, `TextInputAction.send` + `onSubmitted` is used (standard mobile keyboard behavior).
 - **Responsive layout**: At `>700px` width, a persistent 280px session sidebar appears on the left. At narrower widths (mobile), sessions are shown via a modal bottom sheet.
-- **Settings**: Multi-section settings menu (`lib/ui/widgets/settings_menu.dart`). On desktop, shown as a two-column dialog (160px sidebar nav + content) via the sidebar's bottom "Settings" button. On mobile, shown as a `DraggableScrollableSheet` bottom sheet with all sections in a scrollable list. Sections: Workers (summary of connected/total count, "Manage Workers" button to open Workers screen), Appearance (theme mode, font size, compact mode), Notifications (toast notification toggles), About (version info). Settings persisted via `SharedPreferences` through `SettingsService`.
+- **Settings**: Multi-section settings menu (`lib/ui/widgets/settings_menu.dart`). On desktop, shown as a two-column dialog (160px sidebar nav + content) via the sidebar's bottom "Settings" button. On mobile, shown as a `DraggableScrollableSheet` bottom sheet with all sections in a scrollable list. Sections: Workers (summary of connected/total count, "Manage Workers" button to open Workers screen), Appearance (theme mode, font size, compact mode), Notifications (toast notification toggles), About (version info + update check UI). Settings persisted via `SharedPreferences` through `SettingsService`.
+- **Auto-update**: Client self-update discovery via `UpdateService` (`lib/services/update_service.dart`). Fetches the latest release from the GitHub Releases API (`https://api.github.com/repos/Flowelfox/RCFlow/releases/latest`) using `HttpUpdateFetcher` (`lib/services/update_fetcher.dart`). Version is normalized by stripping any leading `v` and `+build` suffix. The 24-hour cache TTL is enforced via `settings.lastUpdateCheck`; the cached latest version is stored in `settings.cachedLatestVersion`. On each cold start, `main.dart` persists `PackageInfo.version.split('+').first` to `settings.currentVersion`, then calls `appState.initAsync()` (which fires `maybeCheck()` without blocking startup). `AppState` exposes `updateService` as a getter; `restoreCachedState()` is called synchronously in the constructor so the first frame can reflect a known-available update. The **About** section in Settings (now a `StatelessWidget`) reads `settings.currentVersion` directly and wraps the update state area in a `ListenableBuilder` scoped to `updateService` — showing a spinner while checking, an "update available" row with a direct `url_launcher` link when a newer version is found, an error row with retry when the check fails, and an "Up to date / Check again" row otherwise. The session-list sidebar shows an `_UpdateBanner` widget above the settings divider when `updateService.showBanner` is true; tapping the banner opens Settings and a dismiss (✕) button calls `dismissCurrentUpdate()`, which persists the dismissed version to `settings.dismissedUpdateVersion` so the banner stays hidden unless a still-newer release appears.
 
 ### Split View (Desktop)
 
@@ -201,7 +202,23 @@ The client can connect to multiple RCFlow servers simultaneously. Each server co
 - `rcflow_workers`: JSON array of `WorkerConfig` objects.
 - `rcflow_last_session_per_worker`: JSON map `{workerId: sessionId}`.
 - `rcflow_cached_sessions_per_worker`: JSON map `{workerId: jsonEncodedSessionList}`.
+- `rcflow_draft_session_{key}` / `rcflow_draft_session_{key}_ts`: Per-session draft text and write timestamp (ms since epoch). Key is a session UUID for real sessions or `new_{workerId}` for the new-session pane. See **Draft persistence** below.
 - Legacy single-server keys (`rcflow_host`, `rcflow_api_key`, `rcflow_use_ssl`) kept for migration.
+- `rcflow_current_version`: installed version string (e.g. `"1.38.0"`), written at startup.
+- `rcflow_last_update_check`: ISO-8601 UTC timestamp of the last successful update check.
+- `rcflow_cached_latest_version`: latest version returned by the update server.
+- `rcflow_dismissed_update_version`: version the user has dismissed from the banner.
+
+**Draft persistence** (drafts per session):
+
+Each session pane maintains its own unsent message draft. Drafts survive session switches, app restarts, and multiple clients.
+
+- `PaneState._draftProvider`: A `String Function()` callback registered by `InputArea` in `initState` (unregistered in `dispose`). Allows `PaneState` to read the live `TextEditingController` text synchronously at switch time without owning the controller.
+- `PaneState._lastLoadedDraft`: The text last *loaded* (not typed) into the input. Guards against multi-pane overwrites: a pane that loaded a draft and never typed will not save back an unchanged snapshot, so a sibling pane's live draft is never clobbered.
+- Save triggers: `switchSession()`, `goHome()`, `startNewChat()` call `_saveDraftIfChanged()` synchronously before clearing state. `InputArea._onTextChanged()` starts an 800 ms debounce timer (`_draftTimer`) that calls `PaneState.triggerDraftSave()` when the user pauses.
+- Two-phase load on session switch: (1) local `SettingsService` cache — instant, no network; (2) backend `GET /sessions/{id}/draft` — authoritative, wins if `updated_at` is newer than local cache timestamp. Result delivered to `InputArea` via the existing `setPendingInputText` / `consumePendingInputText` mechanism.
+- New-session pane drafts are local-only (no session ID to write against the backend). Key: `new_{workerId}`. Cleared in `handleAck()` when the first prompt creates the real session.
+- Backend draft is cleared (set to `""`) when a session is deleted (CASCADE on `drafts.session_id → sessions.id`).
 
 **WorkerConnection** (`lib/services/worker_connection.dart`): Wraps one `WebSocketService` instance with per-worker lifecycle. Enum `WorkerConnectionStatus`: `disconnected`, `connecting`, `connected`, `reconnecting`. Manages its own session list (tagged with `workerId`), reconnection loop (3 retries, 10s delay), and session subscriptions. Routes `session_list` and `session_update` messages internally; forwards all other messages to AppState via callbacks.
 
@@ -245,6 +262,8 @@ The client can connect to multiple RCFlow servers simultaneously. Each server co
 | POST   | `/api/sessions/{session_id}/resume`     | Yes  | Resume a paused session. Client can subscribe to receive all buffered output. |
 | POST   | `/api/sessions/{session_id}/restore`    | Yes  | Restore an archived (completed/failed/cancelled) session back to active state. Rebuilds conversation history, buffer, and Claude Code executor state. |
 | PATCH  | `/api/sessions/{session_id}/title`      | Yes  | Set or clear a session title (max 200 chars). Body: `{"title": "..."}` or `{"title": null}`. |
+| PUT    | `/api/sessions/{session_id}/draft`      | Yes  | Save or update the unsent message draft for a session. Body: `{"content": "..."}`. Returns 204. |
+| GET    | `/api/sessions/{session_id}/draft`      | Yes  | Retrieve the unsent message draft. Returns `{"content": "...", "updated_at": "..."}`. Returns `content: ""` (never 404) when no draft exists. |
 | GET    | `/api/config`                           | Yes  | Get server configuration schema with current values. Secret values are masked. Options grouped by section. |
 | PATCH  | `/api/config`                           | Yes  | Update server configuration. Body: `{"updates": {"KEY": "value", ...}}`. Persists to `settings.json`, reloads settings, and hot-reloads LLM client. Returns updated schema. |
 | GET    | `/api/tools/status`                     | Yes  | Get installation status, versions, and update availability for managed CLI tools (Claude Code, Codex, OpenCode). |
@@ -721,13 +740,37 @@ Server responds with:
       "tool_cost_usd": 0.0,
       "worktree": null,
       "selected_worktree_path": null,
-      "main_project_path": null
+      "main_project_path": null,
+      "sort_order": 0
     }
   ]
 }
 ```
 
-Sessions are sorted by `created_at` descending (most recent first). The list includes both in-memory active sessions and archived sessions from the database. The `title` field is `null` until auto-generated after the first LLM response. The `worktree` field is `null` for sessions that have never used a worktree tool, or a dict with `repo_path`, `last_action`, `branch?`, and `base?` for sessions that have. The `selected_worktree_path` field is `null` by default and is set via `PATCH /api/sessions/{id}/worktree`; when non-null it overrides the agent working directory for Claude Code and Codex runs in that session. The `main_project_path` field is `null` until the user types `@ProjectName` in a message and the name resolves to a directory under `PROJECTS_DIR`; once set it persists across the session lifetime and is updated to reflect the latest `@` mention used. It is also included in `session_update` WebSocket broadcasts.
+Sessions are sorted by `sort_order` ascending (nulls last), then `created_at` descending as a tiebreaker. New sessions are automatically assigned a `sort_order` value that places them at the top of the list. The list includes both in-memory active sessions and archived sessions from the database. The `title` field is `null` until auto-generated after the first LLM response. The `worktree` field is `null` for sessions that have never used a worktree tool, or a dict with `repo_path`, `last_action`, `branch?`, and `base?` for sessions that have. The `selected_worktree_path` field is `null` by default and is set via `PATCH /api/sessions/{id}/worktree`; when non-null it overrides the agent working directory for Claude Code and Codex runs in that session. The `main_project_path` field is `null` until the user types `@ProjectName` in a message and the name resolves to a directory under `PROJECTS_DIR`; once set it persists across the session lifetime and is updated to reflect the latest `@` mention used. It is also included in `session_update` WebSocket broadcasts.
+
+### Session Reordering
+
+Sessions can be reordered via drag-and-drop in the client or keyboard shortcuts (Ctrl+Up/Down). The backend provides a move-based reorder endpoint:
+
+```
+PATCH /api/sessions/{session_id}/reorder
+Body: {"after_session_id": "uuid" | null}
+```
+
+- `after_session_id = null` moves the session to the top of the list.
+- `after_session_id = "uuid"` places it immediately after the specified session.
+
+The server computes sparse integer `sort_order` values (gaps of 1000) and re-normalizes all sessions when gaps collapse. After a successful reorder, a lightweight `session_reorder` event is broadcast to all connected WebSocket clients:
+
+```json
+{
+  "type": "session_reorder",
+  "order": ["uuid1", "uuid2", "uuid3"]
+}
+```
+
+When grouping by project is enabled, the client uses separate `ReorderableListView` widgets per project group, making cross-project drag structurally impossible. Reordering is disabled when search filters, status filters, or multi-select mode are active.
 
 ### Task Messages
 
@@ -1050,7 +1093,7 @@ Tasks carry a `plan_artifact_id` field (UUID string or `null`) in all API respon
 - **Interrupted sessions**: On an unexpected backend crash or SIGKILL, in-flight sessions that were still active in the DB are marked `INTERRUPTED` at next startup rather than `FAILED`. `INTERRUPTED` is a non-terminal status: `ended_at` is left unset, the session DB row retains its conversation history and metadata (including `selected_worktree_path`), and the client can restore the session via the normal restore flow. The `metadata_["restart_interrupted"]` flag is set so clients can show a visual indicator. Tasks attached to interrupted sessions remain in their current state until the session is resumed and ends normally.
 - **On graceful shutdown**: Active sessions are marked `COMPLETED` as before (state is preserved cleanly).
 - **On server crash/restart**: Sessions that were active at crash time are marked `INTERRUPTED` (not `FAILED`). Clients can restore them. Archived sessions remain queryable via `GET /api/sessions` and `GET /api/sessions/{session_id}/messages`.
-- **Session listing**: `GET /api/sessions` and the WebSocket `list_sessions` command both merge in-memory sessions with archived sessions from the database (excluding duplicates), sorted by `created_at` descending. Each session entry includes a `created_at` ISO 8601 timestamp and `title`. Archived sessions are filtered by `backend_id` so each backend instance only sees its own sessions.
+- **Session listing**: `GET /api/sessions` and the WebSocket `list_sessions` command both merge in-memory sessions with archived sessions from the database (excluding duplicates), sorted by `sort_order` ascending (nulls last) then `created_at` descending. Each session entry includes a `created_at` ISO 8601 timestamp, `title`, and `sort_order`. Archived sessions are filtered by `backend_id` so each backend instance only sees its own sessions.
 
 ### Session Todos
 
@@ -1886,6 +1929,7 @@ Schema fields may include `"managed_only": true` — these are only exposed when
 | `max_turns`                | string      | yes          | —                      | Maximum agentic turns per session (default 200)    |
 | `timeout`                  | string      | yes          | —                      | Process timeout in seconds (default 1800)          |
 | `caveman_mode`             | boolean     | yes          | —                      | Inject caveman terse-mode instruction via CLAUDE.md (new sessions only) |
+| `undercover`               | boolean     | yes          | —                      | Strip AI attribution from commits and PRs (default false) |
 
 **Provider env sync:** When `provider` or any credential field is updated, `ToolSettingsManager` automatically rebuilds the `env` section of the Claude Code `settings.json`:
 
@@ -2205,6 +2249,16 @@ CREATE TABLE telemetry_minutely (
     UNIQUE(backend_id, bucket, session_id)
 );
 CREATE INDEX idx_telemetry_minutely_lookup ON telemetry_minutely(backend_id, bucket, session_id);
+
+-- One unsent message draft per session.
+-- Automatically deleted when the parent session is deleted (CASCADE).
+CREATE TABLE drafts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    session_id UUID NOT NULL UNIQUE REFERENCES sessions(id) ON DELETE CASCADE,
+    content TEXT NOT NULL DEFAULT '',
+    updated_at TIMESTAMPTZ NOT NULL    -- set explicitly on every write (never relies on trigger)
+);
+CREATE INDEX ix_drafts_session_id ON drafts(session_id);
 ```
 
 ---

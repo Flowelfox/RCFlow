@@ -12,6 +12,7 @@ import '../terminal_pane.dart';
 import '../worker_stats_pane.dart';
 import 'helpers.dart';
 import 'session_leading_icon.dart';
+import 'session_list_panel.dart' show compareBySortOrder;
 import 'terminal_session_tile.dart';
 
 class WorkerGroup extends StatefulWidget {
@@ -51,6 +52,13 @@ class WorkerGroup extends StatefulWidget {
   /// Callback to toggle a project sub-group's collapsed state.
   final void Function(String collapseKey) onProjectToggle;
 
+  /// Whether reorder drag is enabled (disabled during search/filter/multi-select).
+  final bool reorderEnabled;
+
+  /// Callback when a session is reordered via drag. Receives the session ID
+  /// and the session ID it should be placed after (null = move to top).
+  final void Function(String sessionId, String? afterSessionId)? onReorder;
+
   const WorkerGroup({
     super.key,
     required this.config,
@@ -69,6 +77,8 @@ class WorkerGroup extends StatefulWidget {
     required this.onProjectToggle,
     this.onBulkSecondaryTap,
     this.groupByProject = false,
+    this.reorderEnabled = true,
+    this.onReorder,
   });
 
   @override
@@ -247,32 +257,36 @@ class _WorkerGroupState extends State<WorkerGroup> {
       return _buildProjectGroupedSessionList(context, isConnected);
     }
 
-    final entries = <({DateTime time, bool isTerminal, dynamic data})>[];
-    for (final s in sessions) {
-      entries.add((
-        time: s.createdAt ?? DateTime(2000),
-        isTerminal: false,
-        data: s,
-      ));
-    }
-    for (final t in terminals) {
-      entries.add((time: t.createdAt, isTerminal: true, data: t));
-    }
-    entries.sort((a, b) => b.time.compareTo(a.time));
+    final result = <Widget>[];
 
-    return entries.map((entry) {
-      if (entry.isTerminal) {
-        final t = entry.data as TerminalSessionInfo;
-        return TerminalSessionTile(
+    // Terminals first, sorted by date (not reorderable)
+    final sortedTerminals = [...terminals]
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    for (final t in sortedTerminals) {
+      result.add(
+        TerminalSessionTile(
           info: t,
           state: state,
           isConnected: isConnected,
           onSessionSelected: onSessionSelected,
-        );
+        ),
+      );
+    }
+
+    // Sessions — reorderable
+    final sortedSessions = [...sessions]..sort(compareBySortOrder);
+
+    if (widget.reorderEnabled && sortedSessions.length > 1) {
+      result.add(
+        _buildReorderableSessionList(context, sortedSessions, isConnected),
+      );
+    } else {
+      for (final s in sortedSessions) {
+        result.add(_buildSessionTile(context, s, isConnected));
       }
-      final s = entry.data as SessionInfo;
-      return _buildSessionTile(context, s, isConnected);
-    }).toList();
+    }
+
+    return result;
   }
 
   /// Builds session list grouped by project when [groupByProject] is true.
@@ -319,11 +333,7 @@ class _WorkerGroupState extends State<WorkerGroup> {
 
     for (final projectName in projectNames) {
       final projectSessions = byProject[projectName]!
-        ..sort(
-          (a, b) => (b.createdAt ?? DateTime(2000)).compareTo(
-            a.createdAt ?? DateTime(2000),
-          ),
-        );
+        ..sort(compareBySortOrder);
       final collapseKey = projectName ?? '\x00other';
       final collapsed = widget.collapsedProjects.contains(collapseKey);
 
@@ -338,15 +348,82 @@ class _WorkerGroupState extends State<WorkerGroup> {
       );
 
       if (!collapsed) {
-        for (final s in projectSessions) {
+        if (widget.reorderEnabled && projectSessions.length > 1) {
           result.add(
-            _buildSessionTile(context, s, isConnected, extraIndent: true),
+            _buildReorderableSessionList(
+              context,
+              projectSessions,
+              isConnected,
+              extraIndent: true,
+            ),
           );
+        } else {
+          for (final s in projectSessions) {
+            result.add(
+              _buildSessionTile(context, s, isConnected, extraIndent: true),
+            );
+          }
         }
       }
     }
 
     return result;
+  }
+
+  Widget _buildReorderableSessionList(
+    BuildContext context,
+    List<SessionInfo> sortedSessions,
+    bool isConnected, {
+    bool extraIndent = false,
+  }) {
+    return ReorderableListView.builder(
+      key: ValueKey('reorder-${config.id}-${sortedSessions.hashCode}'),
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      buildDefaultDragHandles: false,
+      proxyDecorator: (child, index, animation) {
+        return AnimatedBuilder(
+          animation: animation,
+          builder: (context, child) {
+            final elevation = Tween<double>(begin: 0, end: 4)
+                .animate(animation)
+                .value;
+            return Material(
+              color: context.appColors.bgElevated,
+              elevation: elevation,
+              borderRadius: BorderRadius.circular(8),
+              child: child,
+            );
+          },
+          child: child,
+        );
+      },
+      itemCount: sortedSessions.length,
+      itemBuilder: (context, index) {
+        final s = sortedSessions[index];
+        return _buildReorderableSessionTile(
+          context,
+          s,
+          isConnected,
+          index,
+          extraIndent: extraIndent,
+        );
+      },
+      onReorder: (oldIndex, newIndex) {
+        if (oldIndex < newIndex) newIndex -= 1;
+        if (oldIndex == newIndex) return;
+        final movedSession = sortedSessions[oldIndex];
+        // Determine which session it should be placed after.
+        // Build the list as it would look after removing the dragged item,
+        // then find the item at (newIndex - 1) to use as the anchor.
+        String? afterSessionId;
+        if (newIndex > 0) {
+          final remaining = [...sortedSessions]..removeAt(oldIndex);
+          afterSessionId = remaining[newIndex - 1].sessionId;
+        }
+        widget.onReorder?.call(movedSession.sessionId, afterSessionId);
+      },
+    );
   }
 
   Widget _buildProjectSubHeader(
@@ -591,7 +668,6 @@ class _WorkerGroupState extends State<WorkerGroup> {
                   final flatIdx = widget.currentFlatList.indexOf(s);
                   widget.onSessionSelectTap(s.sessionId, flatIdx);
                 },
-                onLongPress: () => _showRenameDialog(context, state, s),
               ),
             );
           },
@@ -600,51 +676,283 @@ class _WorkerGroupState extends State<WorkerGroup> {
     );
     return Draggable<SessionDragData>(
       data: dragData,
-      feedback: Material(
-        color: Colors.transparent,
-        child: Container(
-          padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          decoration: BoxDecoration(
-            color: context.appColors.bgElevated,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: context.appColors.accent.withAlpha(120)),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withAlpha(100),
-                blurRadius: 8,
-                offset: Offset(0, 2),
-              ),
-            ],
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                Icons.drag_indicator_rounded,
-                color: context.appColors.textSecondary,
-                size: 14,
-              ),
-              SizedBox(width: 6),
-              ConstrainedBox(
-                constraints: BoxConstraints(maxWidth: 180),
-                child: Text(
-                  dragData.label,
-                  style: TextStyle(
-                    color: context.appColors.textPrimary,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
-                    decoration: TextDecoration.none,
+      feedback: _buildDragFeedback(context, dragData.label),
+      childWhenDragging: Opacity(opacity: 0.4, child: tile),
+      child: tile,
+    );
+  }
+
+  /// Build the reorderable variant of a session tile. Wraps the tile content
+  /// with a [ReorderableDragStartListener] so long-press initiates reorder.
+  /// The pane-drop drag handle is a small grip icon on the leading side.
+  Widget _buildReorderableSessionTile(
+    BuildContext context,
+    SessionInfo s,
+    bool isConnected,
+    int index, {
+    bool extraIndent = false,
+  }) {
+    final isActiveSession =
+        !state.hasNoPanes && s.sessionId == state.activePane.sessionId;
+    final isViewedByAnyPane = state.isSessionViewed(s.sessionId);
+    final isSelected = widget.selectedSessionIds.contains(s.sessionId);
+    final dimmed = !isConnected;
+    final dragData = SessionDragData(
+      sessionId: s.sessionId,
+      workerId: config.id,
+      label: s.title ?? s.shortId,
+    );
+
+    return Semantics(
+      key: ValueKey(s.sessionId),
+      label: 'Session: ${s.title ?? s.shortId}',
+      child: ReorderableDragStartListener(
+        index: index,
+        child: GestureDetector(
+        onSecondaryTapUp: (details) {
+          if (widget.selectedSessionIds.isNotEmpty &&
+              widget.onBulkSecondaryTap != null) {
+            if (!widget.selectedSessionIds.contains(s.sessionId)) {
+              final flatIdx = widget.currentFlatList.indexOf(s);
+              widget.onSessionSelectTap(s.sessionId, flatIdx);
+            }
+            widget.onBulkSecondaryTap!(s.sessionId, details.globalPosition);
+          } else {
+            _showContextMenu(context, details.globalPosition, state, s);
+          }
+        },
+        child: Opacity(
+          opacity: dimmed ? 0.5 : 1.0,
+          child: Container(
+            decoration: BoxDecoration(
+              color: isSelected
+                  ? context.appColors.accent.withAlpha(35)
+                  : isActiveSession
+                  ? context.appColors.accent.withAlpha(25)
+                  : isViewedByAnyPane
+                  ? context.appColors.accent.withAlpha(12)
+                  : null,
+              border: isSelected
+                  ? Border(
+                      left: BorderSide(
+                        color: context.appColors.accent.withAlpha(160),
+                        width: 3,
+                      ),
+                    )
+                  : isActiveSession
+                  ? Border(
+                      left: BorderSide(
+                        color: context.appColors.accent,
+                        width: 3,
+                      ),
+                    )
+                  : isViewedByAnyPane
+                  ? Border(
+                      left: BorderSide(
+                        color: context.appColors.accent.withAlpha(80),
+                        width: 2,
+                      ),
+                    )
+                  : null,
+            ),
+            child: ListTile(
+              leading: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Pane-drop drag handle
+                  Draggable<SessionDragData>(
+                    data: dragData,
+                    feedback: _buildDragFeedback(
+                      context,
+                      dragData.label,
+                    ),
+                    childWhenDragging: Icon(
+                      Icons.drag_indicator_rounded,
+                      color: context.appColors.textMuted.withAlpha(80),
+                      size: 14,
+                    ),
+                    child: MouseRegion(
+                      cursor: SystemMouseCursors.grab,
+                      child: Icon(
+                        Icons.drag_indicator_rounded,
+                        color: context.appColors.textMuted,
+                        size: 14,
+                      ),
+                    ),
                   ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
+                  const SizedBox(width: 2),
+                  SessionLeadingIcon(session: s),
+                ],
               ),
-            ],
+              title: Text(
+                s.title ?? s.shortId,
+                style: TextStyle(
+                  color: isActiveSession
+                      ? context.appColors.accentLight
+                      : context.appColors.textPrimary,
+                  fontSize: 12,
+                  fontWeight: isActiveSession
+                      ? FontWeight.w600
+                      : FontWeight.w400,
+                  fontFamily: s.title != null ? null : 'monospace',
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              subtitle: _buildSubtitle(context, s),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (state.isSessionAttachedToTask(s.sessionId))
+                    Padding(
+                      padding: const EdgeInsets.only(right: 2),
+                      child: Icon(
+                        Icons.link_rounded,
+                        color: context.appColors.accent.withAlpha(120),
+                        size: 14,
+                      ),
+                    ),
+                  if (isTerminalStatus(s.status))
+                    SizedBox(
+                      width: 26,
+                      height: 26,
+                      child: IconButton(
+                        padding: EdgeInsets.zero,
+                        icon: Icon(
+                          Icons.restore_rounded,
+                          color: context.appColors.accentLight,
+                          size: 16,
+                        ),
+                        tooltip: 'Restore session',
+                        onPressed: dimmed
+                            ? null
+                            : () => state.restoreSessionDirect(
+                                s.sessionId,
+                                s.workerId,
+                              ),
+                      ),
+                    )
+                  else ...[
+                    if (s.status == 'paused')
+                      SizedBox(
+                        width: 26,
+                        height: 26,
+                        child: IconButton(
+                          padding: EdgeInsets.zero,
+                          icon: Icon(
+                            Icons.play_arrow_rounded,
+                            color: context.appColors.accentLight,
+                            size: 16,
+                          ),
+                          tooltip: 'Resume session',
+                          onPressed: dimmed
+                              ? null
+                              : () => state.resumeSessionDirect(
+                                  s.sessionId,
+                                  s.workerId,
+                                ),
+                        ),
+                      )
+                    else
+                      SizedBox(
+                        width: 26,
+                        height: 26,
+                        child: IconButton(
+                          padding: EdgeInsets.zero,
+                          icon: Icon(
+                            Icons.pause_rounded,
+                            color: context.appColors.textSecondary,
+                            size: 16,
+                          ),
+                          tooltip: 'Pause session',
+                          onPressed: dimmed
+                              ? null
+                              : () => state.pauseSessionDirect(
+                                  s.sessionId,
+                                  s.workerId,
+                                ),
+                        ),
+                      ),
+                    SizedBox(
+                      width: 26,
+                      height: 26,
+                      child: IconButton(
+                        padding: EdgeInsets.zero,
+                        icon: Icon(
+                          Icons.stop_circle_outlined,
+                          color: context.appColors.errorText,
+                          size: 16,
+                        ),
+                        tooltip: 'End session',
+                        onPressed: dimmed
+                            ? null
+                            : () => _confirmCancelSession(context, state, s),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+              dense: true,
+              visualDensity: const VisualDensity(vertical: -4),
+              contentPadding: EdgeInsets.only(
+                left: extraIndent ? 28 : 16,
+                right: 8,
+              ),
+              onTap: () {
+                final flatIdx = widget.currentFlatList.indexOf(s);
+                widget.onSessionSelectTap(s.sessionId, flatIdx);
+              },
+            ),
           ),
         ),
       ),
-      childWhenDragging: Opacity(opacity: 0.4, child: tile),
-      child: tile,
+      ),
+    );
+  }
+
+  Widget _buildDragFeedback(BuildContext context, String label) {
+    return Material(
+      color: Colors.transparent,
+      child: Container(
+        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: context.appColors.bgElevated,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: context.appColors.accent.withAlpha(120)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withAlpha(100),
+              blurRadius: 8,
+              offset: Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.drag_indicator_rounded,
+              color: context.appColors.textSecondary,
+              size: 14,
+            ),
+            SizedBox(width: 6),
+            ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: 180),
+              child: Text(
+                label,
+                style: TextStyle(
+                  color: context.appColors.textPrimary,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                  decoration: TextDecoration.none,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 

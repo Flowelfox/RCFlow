@@ -25,6 +25,19 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Sentinel used to push sessions with no sort_order to the end of the list.
+_SORT_ORDER_NULLS_LAST = 2**62
+
+
+def session_sort_key(item: dict[str, Any]) -> tuple[int, float]:
+    """Return a sort key for session dicts: sort_order ASC (nulls last), created_at DESC."""
+    sort_order = item.get("sort_order")
+    created_at = item.get("created_at")
+    return (
+        sort_order if sort_order is not None else _SORT_ORDER_NULLS_LAST,
+        -(created_at.replace(tzinfo=None).timestamp() if created_at else 0),
+    )
+
 
 class SessionStatus(StrEnum):
     CREATED = "created"
@@ -109,6 +122,9 @@ class ActiveSession:
         # Set from the project_name field in the WS prompt message.
         # None means the session is "Global" (no project attached yet).
         self.main_project_path: str | None = None
+        # Custom ordering position.  Lower values appear first.
+        # None means "use default createdAt ordering".
+        self.sort_order: int | None = None
         # Transient error set when the client sends an invalid project_name.
         # Cleared on the next successful project resolution. Not persisted to DB.
         self.project_name_error: str | None = None
@@ -323,6 +339,10 @@ class SessionManager:
     def create_session(self, session_type: SessionType = SessionType.ONE_SHOT) -> ActiveSession:
         session_id = str(uuid.uuid4())
         session = ActiveSession(session_id, session_type)
+        # Assign sort_order so new sessions appear at the top of the list.
+        # Use min(existing) - 1000, or 0 if no sessions exist yet.
+        existing_orders = [s.sort_order for s in self._sessions.values() if s.sort_order is not None]
+        session.sort_order = (min(existing_orders) - 1000) if existing_orders else 0
         session._on_update = lambda: self.broadcast_session_update(session)
         self._sessions[session_id] = session
         logger.info("Created session %s (type=%s)", session_id, session_type)
@@ -367,9 +387,16 @@ class SessionManager:
             "main_project_path": session.main_project_path,
             "project_name_error": session.project_name_error,
             "agent_type": session.agent_type,
+            "sort_order": session.sort_order,
         }
         for queue in self._update_subscribers.values():
             queue.put_nowait(update)
+
+    def broadcast_session_reorder(self, ordered_ids: list[str]) -> None:
+        """Broadcast a lightweight session reorder event to all connected clients."""
+        msg: dict[str, Any] = {"type": "session_reorder", "order": ordered_ids}
+        for queue in self._update_subscribers.values():
+            queue.put_nowait(msg)
 
     def broadcast_task_update(self, task_data: dict[str, Any]) -> None:
         """Broadcast a task update to all connected output clients."""
@@ -460,6 +487,7 @@ class SessionManager:
                     tool_input_tokens=session.tool_input_tokens,
                     tool_output_tokens=session.tool_output_tokens,
                     tool_cost_usd=session.tool_cost_usd,
+                    sort_order=session.sort_order,
                 )
             )
         else:
@@ -479,6 +507,7 @@ class SessionManager:
             existing.tool_input_tokens = session.tool_input_tokens
             existing.tool_output_tokens = session.tool_output_tokens
             existing.tool_cost_usd = session.tool_cost_usd
+            existing.sort_order = session.sort_order
         # Flush the parent row so the FK constraint
         # (session_messages.session_id → sessions.id) is satisfied when child
         # rows are flushed in the same transaction.  Using flush() instead of
@@ -567,6 +596,7 @@ class SessionManager:
         session.tool_input_tokens = row.tool_input_tokens or 0
         session.tool_output_tokens = row.tool_output_tokens or 0
         session.tool_cost_usd = row.tool_cost_usd or 0.0
+        session.sort_order = row.sort_order
 
         if row.conversation_history:
             session.conversation_history = list(row.conversation_history)
@@ -638,6 +668,7 @@ class SessionManager:
                     "selected_worktree_path": s.metadata.get("selected_worktree_path"),
                     "main_project_path": s.main_project_path,
                     "agent_type": s.agent_type,
+                    "sort_order": s.sort_order,
                 }
             )
 
@@ -671,13 +702,11 @@ class SessionManager:
                         "selected_worktree_path": archived_meta.get("selected_worktree_path"),
                         "main_project_path": row.main_project_path,
                         "agent_type": None,
+                        "sort_order": row.sort_order,
                     }
                 )
 
-        result.sort(
-            key=lambda x: x["created_at"].replace(tzinfo=None) if x["created_at"] else datetime.min,
-            reverse=True,
-        )
+        result.sort(key=session_sort_key)
         return result
 
     async def archive_all_completed(self, db: AsyncSession) -> None:

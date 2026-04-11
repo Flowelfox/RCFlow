@@ -333,6 +333,63 @@ class WebSocketService {
     }
   }
 
+  /// Fetch the unsent message draft for [sessionId] from the backend.
+  ///
+  /// Returns `(content: '', updatedAt: DateTime.now())` on any error so the
+  /// caller can always treat the result as a plain string without try/catch.
+  Future<({String content, DateTime updatedAt})> getSessionDraft(
+    String sessionId,
+  ) async {
+    if (_serverUrl == null) {
+      return (content: '', updatedAt: DateTime.now());
+    }
+    final url = _serverUrl!.http('/api/sessions/$sessionId/draft');
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.getUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      final response = await request.close();
+      final body = await response
+          .transform(const io.SystemEncoding().decoder)
+          .join();
+      if (response.statusCode != 200) {
+        return (content: '', updatedAt: DateTime.now());
+      }
+      final map = jsonDecode(body) as Map<String, dynamic>;
+      return (
+        content: map['content'] as String? ?? '',
+        updatedAt: DateTime.parse(map['updated_at'] as String),
+      );
+    } catch (_) {
+      return (content: '', updatedAt: DateTime.now());
+    } finally {
+      client.close();
+    }
+  }
+
+  /// Save [content] as the unsent message draft for [sessionId].
+  ///
+  /// Best-effort: errors are swallowed silently so a network blip never
+  /// disrupts the UX. The local SharedPreferences cache is always written
+  /// before this is called, so the draft is durable even if this fails.
+  Future<void> saveSessionDraft(String sessionId, String content) async {
+    if (_serverUrl == null) return;
+    final url = _serverUrl!.http('/api/sessions/$sessionId/draft');
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.putUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      request.headers.contentType = io.ContentType.json;
+      request.write(jsonEncode({'content': content}));
+      final response = await request.close();
+      await response.drain<void>();
+    } catch (_) {
+      // best-effort; local cache already written
+    } finally {
+      client.close();
+    }
+  }
+
   /// Ends a session.  Returns `true` if the session was ended (or was already
   /// ended), `false` should never happen (throws on real errors).
   Future<void> endSession(String sessionId) async {
@@ -837,6 +894,37 @@ class WebSocketService {
       request.headers.set('X-API-Key', _serverUrl!.apiKey);
       request.headers.contentType = io.ContentType.json;
       request.add(utf8.encode(jsonEncode({'title': title})));
+      final response = await request.close();
+      final body = await response
+          .transform(const io.SystemEncoding().decoder)
+          .join();
+      if (response.statusCode != 200) {
+        throw Exception(
+          response.statusCode == 404
+              ? 'Session not found'
+              : 'Server returned ${response.statusCode}: $body',
+        );
+      }
+    } finally {
+      client.close();
+    }
+  }
+
+  /// Reorder a session by placing it after another session (or at the top).
+  Future<void> reorderSession(
+    String sessionId, {
+    String? afterSessionId,
+  }) async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url = _serverUrl!.http('/api/sessions/$sessionId/reorder');
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.openUrl('PATCH', url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      request.headers.contentType = io.ContentType.json;
+      request.add(
+        utf8.encode(jsonEncode({'after_session_id': afterSessionId})),
+      );
       final response = await request.close();
       final body = await response
           .transform(const io.SystemEncoding().decoder)

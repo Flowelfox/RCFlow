@@ -1,6 +1,7 @@
 import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:provider/provider.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -83,6 +84,12 @@ void main() async {
   final settings = SettingsService();
   await settings.init();
 
+  // Persist the running version (strip build number after '+') so
+  // UpdateService can compare it against the latest release without an
+  // async PackageInfo call at runtime.
+  final packageInfo = await PackageInfo.fromPlatform();
+  settings.currentVersion = packageInfo.version.split('+').first;
+
   _migrateToWorkers(settings);
 
   // Existing users (who already have workers configured) should not see the
@@ -92,9 +99,14 @@ void main() async {
     settings.onboardingComplete = true;
   }
 
+  final appState = AppState(settings: settings);
+  // Fire the first update-check (non-blocking, fire-and-forget).
+  // ignore: unawaited_futures
+  appState.initAsync();
+
   runApp(
-    ChangeNotifierProvider(
-      create: (_) => AppState(settings: settings),
+    ChangeNotifierProvider<AppState>.value(
+      value: appState,
       child: const RCFlowApp(),
     ),
   );

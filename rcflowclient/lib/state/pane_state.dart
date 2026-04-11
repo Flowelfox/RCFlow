@@ -87,6 +87,16 @@ abstract class PaneHost {
   /// Returns the last agent mention name the user used for [workerId], or null.
   String? getLastAgentForWorker(String workerId);
 
+  /// Read the cached draft for [key] from local storage.
+  /// Key is a session ID or `"new_{workerId}"` for the new-session pane.
+  ({String content, DateTime? cachedAt}) getDraft(String key);
+
+  /// Persist [content] as the draft for [key] in local storage.
+  void saveDraft(String key, String content);
+
+  /// Remove the draft for [key] from local storage.
+  void clearDraft(String key);
+
   /// Validates that [projectName] exists on [workerId] and returns its full
   /// absolute path, or null if the project cannot be found or the worker is
   /// not connected.
@@ -272,6 +282,98 @@ class PaneState extends ChangeNotifier {
   /// Called by InputArea after it has applied the pending text.
   void consumePendingInputText() {
     _pendingInputText = null;
+  }
+
+  // --- Draft management ---
+  //
+  // _draftProvider: callback registered by InputArea so PaneState can read the
+  // live controller text synchronously at switch/goHome time without owning it.
+  //
+  // _lastLoadedDraft: the text that was in the input when the draft was last
+  // *loaded* (not typed). Used to detect whether the user actually modified the
+  // draft so we avoid clobbering a sibling pane's live draft with an unchanged
+  // snapshot (multi-pane same-session guard).
+
+  String Function()? _draftProvider;
+  String _lastLoadedDraft = '';
+
+  /// Register the callback that reads the current input controller text.
+  /// Called by InputArea in initState.
+  void registerDraftProvider(String Function() provider) {
+    _draftProvider = provider;
+  }
+
+  /// Unregister the draft provider. Called by InputArea in dispose.
+  void unregisterDraftProvider() {
+    _draftProvider = null;
+  }
+
+  /// Called by InputArea's debounce timer after the user pauses typing.
+  void triggerDraftSave() {
+    _saveDraftIfChanged();
+  }
+
+  /// Snapshot the current input text and persist it if it differs from what
+  /// was loaded. Synchronous entry point; async writes are fire-and-forget.
+  void _saveDraftIfChanged() {
+    final text = _draftProvider?.call() ?? '';
+    // Multi-pane guard: skip if this pane never changed the draft.
+    if (text == _lastLoadedDraft) return;
+
+    // Key: real session → session ID; new-session pane → "new_{workerId}".
+    final key = _sessionId ?? (_workerId != null ? 'new_$_workerId' : null);
+    if (key == null) return;
+
+    _host.saveDraft(key, text);
+
+    // Write backend only for real sessions (new-session pane has no ID yet).
+    if (_sessionId != null) {
+      final ws = _ws;
+      if (ws != null) {
+        // ignore: discarded_futures
+        ws.saveSessionDraft(_sessionId!, text);
+      }
+    }
+  }
+
+  /// Two-phase draft load for a real session:
+  ///   Phase 1 — local cache (fast path, no network, immediately populates input)
+  ///   Phase 2 — backend fetch (authoritative; overwrites local if newer)
+  Future<void> _loadDraftAsync(String sessionId) async {
+    final local = _host.getDraft(sessionId);
+    if (local.content.isNotEmpty) {
+      _lastLoadedDraft = local.content;
+      setPendingInputText(local.content);
+    }
+
+    final ws = _ws;
+    if (ws == null) return;
+    try {
+      final remote = await ws.getSessionDraft(sessionId);
+      // Backend wins if it has content and its timestamp is newer than the
+      // local cache (or the local cache has no timestamp, meaning it predates
+      // this feature or was never written by this client).
+      final useRemote = remote.content.isNotEmpty &&
+          (local.cachedAt == null ||
+              remote.updatedAt.isAfter(local.cachedAt!));
+      if (useRemote && remote.content != local.content) {
+        _lastLoadedDraft = remote.content;
+        _host.saveDraft(sessionId, remote.content);
+        setPendingInputText(remote.content);
+      }
+    } catch (_) {
+      // Network failure — local cache is sufficient.
+    }
+  }
+
+  /// Load the new-session pane draft from local storage (local-only; no
+  /// backend fetch since the new-session pane has no session ID yet).
+  Future<void> _loadNewSessionDraftAsync(String workerId) async {
+    final local = _host.getDraft('new_$workerId');
+    if (local.content.isNotEmpty) {
+      _lastLoadedDraft = local.content;
+      setPendingInputText(local.content);
+    }
   }
 
   // Message display
@@ -544,6 +646,10 @@ class PaneState extends ChangeNotifier {
   void switchSession(String sessionId, {bool recordHistory = true}) {
     if (sessionId == _sessionId) return;
 
+    // Snapshot and persist the current draft before clearing state.
+    // _sessionId still holds the OLD session ID here — that's intentional.
+    _saveDraftIfChanged();
+
     // Push current session to nav history for back-navigation
     if (recordHistory && _sessionId != null) {
       pushNavHistory(
@@ -626,9 +732,16 @@ class PaneState extends ChangeNotifier {
     _selectedToolMention = session?.agentType;
 
     notifyListeners();
+
+    // Kick off two-phase draft load for the new session.
+    // ignore: discarded_futures
+    _loadDraftAsync(sessionId);
   }
 
   void goHome() {
+    // Snapshot and persist the current session's draft before clearing state.
+    _saveDraftIfChanged();
+
     final oldSessionId = _sessionId;
     final oldWorkerId = _workerId;
 
@@ -657,9 +770,18 @@ class PaneState extends ChangeNotifier {
     }
 
     notifyListeners();
+
+    // Load the new-session pane draft for the current worker (local-only).
+    if (_workerId != null) {
+      // ignore: discarded_futures
+      _loadNewSessionDraftAsync(_workerId!);
+    }
   }
 
   void startNewChat() {
+    // Snapshot and persist the current session's draft before clearing state.
+    _saveDraftIfChanged();
+
     final oldSessionId = _sessionId;
     final oldWorkerId = _workerId;
 
@@ -697,6 +819,12 @@ class PaneState extends ChangeNotifier {
     }
 
     notifyListeners();
+
+    // Load the new-session pane draft for the target worker (local-only).
+    if (targetWorker != null) {
+      // ignore: discarded_futures
+      _loadNewSessionDraftAsync(targetWorker);
+    }
   }
 
   void refresh() => notifyListeners();
@@ -720,6 +848,9 @@ class PaneState extends ChangeNotifier {
     if (sessionId != _sessionId) {
       _addSystemMessage('[ACK] Session: $sessionId');
     }
+    // Record whether this ack created a brand-new session (vs. re-acking an
+    // existing one) so we can clear the new-session draft below.
+    final wasNewSession = _sessionId == null;
     _sessionId = sessionId;
     if (workerId != null) _workerId = workerId;
     _readyForNewChat = false;
@@ -728,6 +859,13 @@ class PaneState extends ChangeNotifier {
     if (_onNewSessionAck != null) {
       _onNewSessionAck!(sessionId);
       _onNewSessionAck = null;
+    }
+
+    // The user sent the new-session draft as a prompt — clear the local cache
+    // so the new-session pane starts blank next time.
+    if (wasNewSession && _workerId != null) {
+      _host.clearDraft('new_$_workerId');
+      _lastLoadedDraft = '';
     }
 
     _host.refreshSessions();
