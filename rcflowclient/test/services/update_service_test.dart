@@ -248,6 +248,161 @@ void main() {
   // dismissCurrentUpdate
   // -------------------------------------------------------------------------
 
+  group('checkForUpdates — null result', () {
+    test('no-op when fetcher returns null (no update found)', () async {
+      final settings = await _buildSettings(currentVersion: '1.37.2');
+      final fetcher = FakeUpdateFetcher(); // result is null by default
+      final svc = UpdateService(settings: settings, fetcher: fetcher);
+
+      await svc.checkForUpdates();
+
+      expect(svc.latestVersion, isNull);
+      expect(svc.updateAvailable, isFalse);
+      expect(svc.hasError, isFalse);
+      expect(settings.cachedLatestVersion, isNull);
+    });
+  });
+
+  group('checkForUpdates — concurrent guard', () {
+    test('second call while first is in-flight is a no-op', () async {
+      final settings = await _buildSettings(currentVersion: '1.37.2');
+      final fetcher = FakeUpdateFetcher(
+        result: UpdateInfo(
+          version: '1.38.0',
+          releaseUrl: 'https://example.com',
+        ),
+      );
+      final svc = UpdateService(settings: settings, fetcher: fetcher);
+
+      // Both calls are started without awaiting; the second hits the
+      // _isChecking guard that the first set synchronously.
+      final f1 = svc.checkForUpdates();
+      final f2 = svc.checkForUpdates();
+      await Future.wait([f1, f2]);
+
+      expect(fetcher.callCount, 1);
+    });
+  });
+
+  group('checkForUpdates — release URL / download URL', () {
+    test('populates latestReleaseUrl and latestDownloadUrl on success', () async {
+      final settings = await _buildSettings(currentVersion: '1.37.2');
+      final fetcher = FakeUpdateFetcher(
+        result: UpdateInfo(
+          version: '1.38.0',
+          releaseUrl:
+              'https://github.com/Flowelfox/RCFlow/releases/tag/v1.38.0',
+          downloadUrl: 'https://example.com/rcflow-v1.38.0-linux-client-amd64.deb',
+        ),
+      );
+      final svc = UpdateService(settings: settings, fetcher: fetcher);
+
+      await svc.checkForUpdates();
+
+      expect(
+        svc.latestReleaseUrl,
+        'https://github.com/Flowelfox/RCFlow/releases/tag/v1.38.0',
+      );
+      expect(
+        svc.latestDownloadUrl,
+        'https://example.com/rcflow-v1.38.0-linux-client-amd64.deb',
+      );
+    });
+  });
+
+  group('updateAvailable — null currentVersion', () {
+    test('returns false when currentVersion is null', () async {
+      final settings = await _buildSettings(); // no currentVersion
+      final fetcher = FakeUpdateFetcher(
+        result: UpdateInfo(
+          version: '1.38.0',
+          releaseUrl: 'https://example.com',
+        ),
+      );
+      final svc = UpdateService(settings: settings, fetcher: fetcher);
+
+      await svc.checkForUpdates();
+
+      expect(svc.latestVersion, '1.38.0');
+      expect(svc.updateAvailable, isFalse);
+    });
+  });
+
+  group('isDismissed', () {
+    test('false when dismissedVersion differs from latestVersion', () async {
+      final settings = await _buildSettings(
+        currentVersion: '1.37.2',
+        dismissedUpdateVersion: '1.37.0', // older, different version
+      );
+      final fetcher = FakeUpdateFetcher(
+        result: UpdateInfo(
+          version: '1.38.0',
+          releaseUrl: 'https://example.com',
+        ),
+      );
+      final svc = UpdateService(settings: settings, fetcher: fetcher);
+      await svc.checkForUpdates();
+
+      expect(svc.isDismissed, isFalse);
+      expect(svc.showBanner, isTrue);
+    });
+  });
+
+  group('dismissCurrentUpdate — null latestVersion', () {
+    test('no-op when no update has been fetched', () async {
+      final settings = await _buildSettings(currentVersion: '1.37.2');
+      final svc = UpdateService(
+        settings: settings,
+        fetcher: FakeUpdateFetcher(),
+      );
+
+      // Should not throw and must not write a dismissedUpdateVersion.
+      svc.dismissCurrentUpdate();
+
+      expect(settings.dismissedUpdateVersion, isNull);
+    });
+  });
+
+  group('maybeCheck — null lastUpdateCheck', () {
+    test('fetches when lastUpdateCheck has never been set', () async {
+      final settings = await _buildSettings(
+        currentVersion: '1.37.2',
+        // no lastUpdateCheck
+      );
+      final fetcher = FakeUpdateFetcher(
+        result: UpdateInfo(
+          version: '1.38.0',
+          releaseUrl: 'https://example.com',
+        ),
+      );
+      final svc = UpdateService(settings: settings, fetcher: fetcher);
+
+      await svc.maybeCheck();
+
+      expect(fetcher.callCount, 1);
+      expect(svc.latestVersion, '1.38.0');
+    });
+  });
+
+  group('restoreCachedState — null currentVersion', () {
+    test('sets latestVersion from cache when currentVersion is null', () async {
+      final settings = await _buildSettings(
+        cachedLatestVersion: '1.38.0',
+        // currentVersion intentionally omitted (null)
+      );
+      final svc = UpdateService(
+        settings: settings,
+        fetcher: FakeUpdateFetcher(),
+      );
+      svc.restoreCachedState();
+
+      // Cache is read; currentVersion null skips the stale-check guard.
+      expect(svc.latestVersion, '1.38.0');
+      // updateAvailable is still false because currentVersion is null.
+      expect(svc.updateAvailable, isFalse);
+    });
+  });
+
   group('dismissCurrentUpdate', () {
     test('hides banner after dismissal', () async {
       final settings = await _buildSettings(currentVersion: '1.37.2');

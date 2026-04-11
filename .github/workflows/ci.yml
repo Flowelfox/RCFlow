@@ -59,12 +59,21 @@ jobs:
 
       # RCFLOW_API_KEY is auto-generated at server startup; not needed here.
       - name: Run tests with coverage
-        run: uv run pytest tests/ -v --tb=short --cov --cov-report=term-missing --cov-report=xml
+        run: uv run pytest tests/ -v --tb=short --cov --cov-report=term-missing
 
-      - name: Upload coverage reports to Codecov
-        uses: codecov/codecov-action@v5
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
+      - name: Generate coverage badge
+        run: |
+          TOTAL=$(uv run coverage report --format=total)
+          uv run anybadge --label=coverage --value="${TOTAL}%" --file=docs/badges/coverage.svg --overwrite \
+            --color=$([ "$TOTAL" -ge 90 ] && echo brightgreen || [ "$TOTAL" -ge 75 ] && echo green || [ "$TOTAL" -ge 60 ] && echo yellow || echo red)
+
+      - name: Commit coverage badge
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/badges/coverage.svg
+          git diff --staged --quiet || git commit -m "chore: update coverage badge [skip ci]" && git push
 
   # ---------------------------------------------------------------------------
   # Flutter client — analyze · test
