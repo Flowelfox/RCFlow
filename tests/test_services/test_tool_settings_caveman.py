@@ -1,0 +1,115 @@
+"""Tests for caveman mode in ToolSettingsManager."""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+import pytest
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+from src.services.tool_settings import (
+    _CAVEMAN_CLAUDE_MD_TEXT,
+    ToolSettingsManager,
+    _sync_caveman_mode,
+)
+
+
+@pytest.fixture
+def manager(tmp_path: Path) -> ToolSettingsManager:
+    return ToolSettingsManager(base_dir=tmp_path)
+
+
+# ---------------------------------------------------------------------------
+# _sync_caveman_mode — Claude Code
+# ---------------------------------------------------------------------------
+
+
+class TestSyncCavemanClaudeCode:
+    def test_enable_writes_claude_md(self, tmp_path: Path) -> None:
+        config_dir = tmp_path / "claude-code" / "config"
+        config_dir.mkdir(parents=True)
+        _sync_caveman_mode("claude_code", {"caveman_mode": True}, config_dir)
+        target = config_dir / "CLAUDE.md"
+        assert target.is_file()
+        assert target.read_text(encoding="utf-8") == _CAVEMAN_CLAUDE_MD_TEXT
+
+    def test_disable_deletes_claude_md(self, tmp_path: Path) -> None:
+        config_dir = tmp_path / "claude-code" / "config"
+        config_dir.mkdir(parents=True)
+        target = config_dir / "CLAUDE.md"
+        target.write_text("old content")
+        _sync_caveman_mode("claude_code", {"caveman_mode": False}, config_dir)
+        assert not target.exists()
+
+    def test_disable_when_file_missing_is_noop(self, tmp_path: Path) -> None:
+        config_dir = tmp_path / "claude-code" / "config"
+        config_dir.mkdir(parents=True)
+        _sync_caveman_mode("claude_code", {"caveman_mode": False}, config_dir)
+        assert not (config_dir / "CLAUDE.md").exists()
+
+    def test_enable_creates_parent_dirs(self, tmp_path: Path) -> None:
+        config_dir = tmp_path / "new" / "nested" / "dir"
+        _sync_caveman_mode("claude_code", {"caveman_mode": True}, config_dir)
+        assert (config_dir / "CLAUDE.md").is_file()
+
+
+class TestSyncCavemanCodex:
+    def test_codex_enable_is_noop(self, tmp_path: Path) -> None:
+        """Codex caveman is unverified — _sync_caveman_mode should be a no-op."""
+        _sync_caveman_mode("codex", {"caveman_mode": True}, tmp_path)
+        # No files created
+        assert list(tmp_path.iterdir()) == []
+
+
+class TestSyncCavemanOpenCode:
+    def test_opencode_enable_is_noop(self, tmp_path: Path) -> None:
+        """OpenCode caveman is unverified — _sync_caveman_mode should be a no-op."""
+        _sync_caveman_mode("opencode", {"caveman_mode": True}, tmp_path)
+        assert list(tmp_path.iterdir()) == []
+
+
+# ---------------------------------------------------------------------------
+# ToolSettingsManager integration
+# ---------------------------------------------------------------------------
+
+
+class TestCavemanSettingsIntegration:
+    def test_caveman_mode_not_in_json_file(self, manager: ToolSettingsManager) -> None:
+        """caveman_mode must be stripped from the tool config JSON."""
+        manager.update_settings("claude_code", {"caveman_mode": True})
+        settings = manager.get_settings("claude_code")
+        assert "caveman_mode" not in settings
+
+    def test_caveman_mode_reflected_in_schema_output(self, manager: ToolSettingsManager) -> None:
+        """get_settings_with_schema should derive caveman_mode from CLAUDE.md."""
+        manager.update_settings("claude_code", {"caveman_mode": True})
+        result = manager.get_settings_with_schema("claude_code")
+        caveman_field = next(f for f in result["fields"] if f["key"] == "caveman_mode")
+        assert caveman_field["value"] is True
+
+    def test_disable_caveman_removes_file_and_reports_false(self, manager: ToolSettingsManager) -> None:
+        manager.update_settings("claude_code", {"caveman_mode": True})
+        manager.update_settings("claude_code", {"caveman_mode": False})
+        result = manager.get_settings_with_schema("claude_code")
+        caveman_field = next(f for f in result["fields"] if f["key"] == "caveman_mode")
+        assert caveman_field["value"] is False
+
+    def test_other_settings_preserved_after_caveman_toggle(self, manager: ToolSettingsManager) -> None:
+        """Enabling caveman should not interfere with other settings."""
+        manager.update_settings("claude_code", {"max_turns": "50"})
+        manager.update_settings("claude_code", {"caveman_mode": True})
+        settings = manager.get_settings("claude_code")
+        assert settings["max_turns"] == "50"
+        assert "caveman_mode" not in settings
+
+    def test_caveman_schema_field_present_for_all_tools(self, manager: ToolSettingsManager) -> None:
+        for tool in ("claude_code", "codex", "opencode"):
+            result = manager.get_settings_with_schema(tool)
+            keys = {f["key"] for f in result["fields"]}
+            assert "caveman_mode" in keys
+
+    def test_caveman_managed_only_rejected_when_external(self, manager: ToolSettingsManager) -> None:
+        with pytest.raises(ValueError, match="Cannot update managed-only"):
+            manager.update_settings("claude_code", {"caveman_mode": True}, managed=False)
