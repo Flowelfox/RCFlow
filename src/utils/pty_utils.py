@@ -42,10 +42,10 @@ logger = logging.getLogger(__name__)
 # DCS/APC/PM string sequences (ESC P/_ /^ ... ST), and two-char ESC sequences.
 _ANSI_RE = re.compile(
     r"\x1b(?:"
-    r"\[[0-?]*[ -/]*[@-~]"              # CSI: ESC [ ... final_byte
-    r"|\][^\x07\x1b]*(?:\x07|\x1b\\)"   # OSC: ESC ] ... (BEL | ST)
-    r"|[P_^][^\x1b]*\x1b\\"             # DCS / APC / PM: ESC P/_ /^ ... ST
-    r"|[@-Z\\-_]"                        # Two-char ESC sequences (must be last)
+    r"\[[0-?]*[ -/]*[@-~]"  # CSI: ESC [ ... final_byte
+    r"|\][^\x07\x1b]*(?:\x07|\x1b\\)"  # OSC: ESC ] ... (BEL | ST)
+    r"|[P_^][^\x1b]*\x1b\\"  # DCS / APC / PM: ESC P/_ /^ ... ST
+    r"|[@-Z\\-_]"  # Two-char ESC sequences (must be last)
     r")"
 )
 
@@ -91,13 +91,7 @@ def configure_raw(fd: int) -> None:
     # oflag — disable output post-processing (prevents NL → CRNL translation)
     attrs[1] &= ~termios.OPOST
     # lflag — disable echo, canonical mode, signal generation, extended processing
-    attrs[3] &= ~(
-        termios.ECHO
-        | termios.ECHONL
-        | termios.ICANON
-        | termios.ISIG
-        | termios.IEXTEN
-    )
+    attrs[3] &= ~(termios.ECHO | termios.ECHONL | termios.ICANON | termios.ISIG | termios.IEXTEN)
     # cflag — 8-bit characters, no parity
     attrs[2] &= ~(termios.CSIZE | termios.PARENB)
     attrs[2] |= termios.CS8

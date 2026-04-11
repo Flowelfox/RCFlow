@@ -189,6 +189,10 @@ class Settings(BaseSettings):
     # Global prompt (appended to system prompt for all sessions)
     GLOBAL_PROMPT: str = ""
 
+    # Caveman mode — terse output, ~65-75% fewer tokens
+    CAVEMAN_MODE: bool = False
+    CAVEMAN_LEVEL: str = "full"  # "lite" | "full" | "ultra"
+
     # Tool Management
     TOOL_AUTO_UPDATE: bool = True
     TOOL_UPDATE_INTERVAL_HOURS: float = 6.0
@@ -422,6 +426,33 @@ CONFIG_OPTIONS: list[dict[str, Any]] = [
         "required": False,
         "restart_required": False,
         "visible_when": {"key": "LLM_PROVIDER", "value_not": "none"},
+    },
+    {
+        "key": "CAVEMAN_MODE",
+        "label": "Caveman Mode",
+        "type": "boolean",
+        "group": "Prompt",
+        "description": (
+            "Compress LLM responses ~65-75% fewer tokens. Drops filler/articles/hedging; full technical accuracy kept."
+        ),
+        "required": False,
+        "restart_required": False,
+        "visible_when": {"key": "LLM_PROVIDER", "value_not": "none"},
+    },
+    {
+        "key": "CAVEMAN_LEVEL",
+        "label": "Caveman Level",
+        "type": "select",
+        "options": [
+            {"value": "lite", "label": "Lite — no filler, keeps articles"},
+            {"value": "full", "label": "Full — drops articles, fragments OK"},
+            {"value": "ultra", "label": "Ultra — max compression, abbreviations"},
+        ],
+        "group": "Prompt",
+        "description": "Compression intensity for caveman mode.",
+        "required": False,
+        "restart_required": False,
+        "visible_when": {"key": "CAVEMAN_MODE", "value": "true"},
     },
     # --- Codex ---
     {

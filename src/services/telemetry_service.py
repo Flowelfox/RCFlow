@@ -95,14 +95,16 @@ class TelemetryService:
             async with self._db_factory() as db:
                 existing = await db.get(SessionModel, session_uuid)
                 if existing is None:
-                    db.add(SessionModel(
-                        id=session_uuid,
-                        backend_id=self._backend_id,
-                        created_at=ts_now,
-                        session_type="conversational",
-                        status="active",
-                        metadata_={},
-                    ))
+                    db.add(
+                        SessionModel(
+                            id=session_uuid,
+                            backend_id=self._backend_id,
+                            created_at=ts_now,
+                            session_type="conversational",
+                            status="active",
+                            metadata_={},
+                        )
+                    )
                     await db.commit()
                     logger.debug(
                         "TelemetryService: created session stub for %s (will be "
@@ -110,9 +112,7 @@ class TelemetryService:
                         session_id,
                     )
         except Exception:
-            logger.exception(
-                "TelemetryService: failed to ensure session stub for %s", session_id
-            )
+            logger.exception("TelemetryService: failed to ensure session stub for %s", session_id)
 
     # ------------------------------------------------------------------
     # Turn tracking
@@ -282,9 +282,7 @@ class TelemetryService:
                     row.error_message = error
                     await db.commit()
         except Exception:
-            logger.exception(
-                "TelemetryService: failed to record tool end for tool_call %s", tool_call.id
-            )
+            logger.exception("TelemetryService: failed to record tool end for tool_call %s", tool_call.id)
 
     # ------------------------------------------------------------------
     # Minutely aggregation
@@ -453,15 +451,10 @@ class TelemetryService:
         try:
             async with self._db_factory() as db:
                 from sqlalchemy import delete  # noqa: PLC0415
-                await db.execute(
-                    delete(SessionTurn).where(SessionTurn.ts_start < cutoff)
-                )
-                await db.execute(
-                    delete(ToolCall).where(ToolCall.ts_start < cutoff)
-                )
-                await db.execute(
-                    delete(TelemetryMinutely).where(TelemetryMinutely.bucket < cutoff)
-                )
+
+                await db.execute(delete(SessionTurn).where(SessionTurn.ts_start < cutoff))
+                await db.execute(delete(ToolCall).where(ToolCall.ts_start < cutoff))
+                await db.execute(delete(TelemetryMinutely).where(TelemetryMinutely.bucket < cutoff))
                 await db.commit()
                 logger.info("TelemetryService: pruned records older than %s", cutoff.date())
         except Exception:

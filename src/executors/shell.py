@@ -35,9 +35,7 @@ def _quote_params_for_shell(
     """
     # Params that constitute the entire template value pass through unquoted
     # because they ARE the shell command, not an argument embedded in one.
-    raw_params: frozenset[str] = frozenset(
-        k for k in parameters if template.strip() == f"{{{k}}}"
-    )
+    raw_params: frozenset[str] = frozenset(k for k in parameters if template.strip() == f"{{{k}}}")
 
     quoted: dict[str, Any] = {}
     for k, v in parameters.items():

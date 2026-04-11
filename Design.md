@@ -1226,6 +1226,27 @@ The `os_name` variable is injected into the `<role>` tag so the LLM knows the ho
 
 If `GLOBAL_PROMPT` is set (via server configuration), it is appended to the base system prompt for all LLM calls. The `LLMClient._system_prompt` property dynamically composes the full prompt by joining the base template output with the global prompt text separated by a blank line. This allows users to set persistent behavioral guidelines, language preferences, or domain expertise that apply to every session.
 
+### Caveman Mode
+
+Caveman mode is a prompt-injection technique that makes LLMs respond in compressed, token-efficient prose (~65–75% output token reduction while retaining full technical accuracy). It works by appending terse-writing instructions to the system prompt.
+
+**Global toggle (outer LLM):** Two server settings control the feature:
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `CAVEMAN_MODE` | boolean | `false` | Enable terse caveman-style LLM responses |
+| `CAVEMAN_LEVEL` | select | `"full"` | Intensity: `lite` (drop filler only), `full` (drop articles, fragments OK), `ultra` (abbreviations, arrows) |
+
+Both are `restart_required: false`. When enabled, the caveman instruction block is inserted into `LLMClient._system_prompt` **after** the base system prompt and **before** `GLOBAL_PROMPT`, so user overrides always take final precedence. The order is: base → caveman → global_prompt. Changes take effect on the next LLM turn of any session (immediate).
+
+**Per-tool toggle (CLI agents):** Each tool settings schema (Claude Code, Codex, OpenCode) exposes a `caveman_mode` boolean (`managed_only: true`). The implementation varies by agent:
+
+- **Claude Code**: Writes a `CLAUDE.md` file containing the always-on caveman snippet to `CLAUDE_CONFIG_DIR`. Claude Code reads this at subprocess spawn time. Takes effect for **new sessions only**.
+- **Codex**: No-op pending verification that Codex reads `hooks.json` from `CODEX_HOME`.
+- **OpenCode**: No-op pending verification of the config injection mechanism.
+
+The `caveman_mode` key is stripped from the tool's JSON config file before writing (it is an RCFlow UI control, not a key CLI tools understand). The state is derived from the filesystem (presence of `CLAUDE.md`) when reading settings back.
+
 ### @Mention Project Context Injection
 
 When a user message contains `@ProjectName` tokens (e.g. `@RCFlow`), `PromptRouter.handle_prompt()` detects the mentions and resolves them against all configured project directories (`PROJECTS_DIR`). If a mentioned name matches an actual project directory, a context block is prepended to the user message content sent to the LLM:
@@ -1907,6 +1928,7 @@ Schema fields may include `"managed_only": true` — these are only exposed when
 | `default_permission_mode`  | select      | yes          | —                      | CLI --permission-mode: interactive (default, enables interactive prompts), bypassPermissions, allowEdits, plan |
 | `max_turns`                | string      | yes          | —                      | Maximum agentic turns per session (default 200)    |
 | `timeout`                  | string      | yes          | —                      | Process timeout in seconds (default 1800)          |
+| `caveman_mode`             | boolean     | yes          | —                      | Inject caveman terse-mode instruction via CLAUDE.md (new sessions only) |
 | `undercover`               | boolean     | yes          | —                      | Strip AI attribution from commits and PRs (default false) |
 
 **Provider env sync:** When `provider` or any credential field is updated, `ToolSettingsManager` automatically rebuilds the `env` section of the Claude Code `settings.json`:
@@ -1927,6 +1949,7 @@ When the tool has a non-empty `provider`, `PromptRouter._build_claude_code_extra
 | `model`          | string | no           | Model name for Codex sessions              |
 | `approval_mode`  | select | no           | Tool-call approval (full-auto / yolo)      |
 | `timeout`        | string | yes          | Process timeout in seconds (default 600)   |
+| `caveman_mode`   | boolean| yes          | Inject caveman terse-mode instruction (experimental — hook delivery unverified) |
 
 Provider sync behavior:
 - **OpenAI** (`provider=openai`): sets `env.CODEX_API_KEY` from `codex_api_key`. RCFlow injects this into the subprocess environment.
@@ -2267,6 +2290,8 @@ All configuration is via environment variables, loaded from a `settings.json` fi
 | `TITLE_MODEL`           | no       | _(main model)_  | Model for session title generation. When blank, falls back to the main model. |
 | `TASK_MODEL`            | no       | _(main model)_  | Model for task extraction and status evaluation. When blank, falls back to the main model. |
 | `GLOBAL_PROMPT`         | no       |                 | Custom instructions appended to the system prompt for every session |
+| `CAVEMAN_MODE`          | no       | `false`         | Enable terse caveman-style LLM responses (~65-75% fewer tokens) |
+| `CAVEMAN_LEVEL`         | no       | `full`          | Caveman intensity: `lite`, `full`, or `ultra` |
 | `SESSION_INPUT_TOKEN_LIMIT` | no   | `0` (unlimited) | Max total input tokens (LLM + tool) per session. `0` = no limit. |
 | `SESSION_OUTPUT_TOKEN_LIMIT`| no   | `0` (unlimited) | Max total output tokens (LLM + tool) per session. `0` = no limit. |
 | `ARTIFACT_INCLUDE_PATTERN` | no    | `*.md`          | Glob pattern for files to include in artifact extraction (case-insensitive) |

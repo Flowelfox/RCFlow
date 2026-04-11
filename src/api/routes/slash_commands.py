@@ -121,8 +121,10 @@ async def _fetch_from_claude(binary: str) -> list[dict[str, str]]:
             binary,
             "-p",
             "--no-session-persistence",
-            "--output-format", "text",
-            "--max-budget-usd", "0.05",
+            "--output-format",
+            "text",
+            "--max-budget-usd",
+            "0.05",
             prompt,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
@@ -153,11 +155,13 @@ async def _fetch_from_claude(binary: str) -> list[dict[str, str]]:
         commands: list[dict[str, str]] = []
         for name, desc in data.items():
             if isinstance(name, str) and isinstance(desc, str) and name.strip():
-                commands.append({
-                    "name": name.strip().lstrip("/"),
-                    "description": desc.strip(),
-                    "source": "claude_code_builtin",
-                })
+                commands.append(
+                    {
+                        "name": name.strip().lstrip("/"),
+                        "description": desc.strip(),
+                        "source": "claude_code_builtin",
+                    }
+                )
         return commands
     except (TimeoutError, Exception) as exc:
         logger.debug("cc_builtins: fetch failed — %s", exc)
@@ -264,11 +268,11 @@ def _parse_plugin_command(path: Path, plugin_name: str) -> dict[str, str] | None
             if end != -1:
                 frontmatter = text[3:end]
                 h = _hide_re.search(frontmatter)
-                if h and h.group(1).strip().strip('"\'').lower() == "true":
+                if h and h.group(1).strip().strip("\"'").lower() == "true":
                     return None
                 m = _description_re.search(frontmatter)
                 if m:
-                    description = m.group(1).strip().strip('"\'')
+                    description = m.group(1).strip().strip("\"'")
         return {
             "name": path.stem,
             "description": description,
@@ -375,6 +379,7 @@ def _get_rcflow_plugin_commands() -> list[dict[str, str]]:
 # User / project skill parsing
 # ---------------------------------------------------------------------------
 
+
 def _parse_cc_command(path: Path, source: str) -> dict[str, str] | None:
     """Parse a Claude Code skill .md file and return a command dict."""
     try:
@@ -395,6 +400,7 @@ def _parse_cc_command(path: Path, source: str) -> dict[str, str] | None:
 # ---------------------------------------------------------------------------
 # Endpoint
 # ---------------------------------------------------------------------------
+
 
 @router.get(
     "/slash-commands",
@@ -425,11 +431,11 @@ async def list_slash_commands(
 
     # --- RCFlow built-in commands ---
     rcflow_commands = [
-        {"name": "clear",   "description": "Clear chat messages in this pane",           "source": "rcflow"},
-        {"name": "new",     "description": "Start a new session",                        "source": "rcflow"},
-        {"name": "help",    "description": "Show RCFlow tips and help",                  "source": "rcflow"},
-        {"name": "pause",   "description": "Pause the current session",                  "source": "rcflow"},
-        {"name": "resume",  "description": "Resume the paused session",                  "source": "rcflow"},
+        {"name": "clear", "description": "Clear chat messages in this pane", "source": "rcflow"},
+        {"name": "new", "description": "Start a new session", "source": "rcflow"},
+        {"name": "help", "description": "Show RCFlow tips and help", "source": "rcflow"},
+        {"name": "pause", "description": "Pause the current session", "source": "rcflow"},
+        {"name": "resume", "description": "Resume the paused session", "source": "rcflow"},
         {"name": "plugins", "description": "Open plugin settings for the active coding agent", "source": "rcflow"},
     ]
     commands.extend(rcflow_commands)

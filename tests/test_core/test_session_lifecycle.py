@@ -232,9 +232,7 @@ class TestResumeSession:
         with pytest.raises(ValueError, match="not found"):
             await router.resume_session("nonexistent-id")
 
-    async def test_resume_reconstructs_claude_code_executor(
-        self, session_manager: SessionManager
-    ) -> None:
+    async def test_resume_reconstructs_claude_code_executor(self, session_manager: SessionManager) -> None:
         """Resuming a paused Claude Code session must restore the executor.
 
         pause_session() kills the subprocess and sets claude_code_executor=None,
@@ -261,9 +259,7 @@ class TestResumeSession:
             "claude_code_executor must be restored on resume so routing goes to Claude Code"
         )
 
-    async def test_resume_without_cc_metadata_leaves_executor_none(
-        self, session_manager: SessionManager
-    ) -> None:
+    async def test_resume_without_cc_metadata_leaves_executor_none(self, session_manager: SessionManager) -> None:
         """Resuming a plain (non-agent) session must not create a spurious executor."""
         router = _make_router(session_manager)
         session = session_manager.create_session(SessionType.CONVERSATIONAL)
@@ -276,9 +272,7 @@ class TestResumeSession:
         assert result.claude_code_executor is None
         assert result.codex_executor is None
 
-    async def test_resume_routes_to_claude_code_not_llm(
-        self, session_manager: SessionManager
-    ) -> None:
+    async def test_resume_routes_to_claude_code_not_llm(self, session_manager: SessionManager) -> None:
         """After pause+resume a Claude Code session, handle_prompt must forward to CC.
 
         This is the end-to-end regression test for the bug where resumed messages

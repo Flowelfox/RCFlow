@@ -265,9 +265,7 @@ class TestExecuteStreaming:
                 pass
 
     @pytest.mark.asyncio
-    async def test_starts_process_and_yields_events(
-        self, executor: OpenCodeExecutor, opencode_tool: ToolDefinition
-    ):
+    async def test_starts_process_and_yields_events(self, executor: OpenCodeExecutor, opencode_tool: ToolDefinition):
         finish_event = json.dumps({"type": "step_finish", "part": {"reason": "stop", "tokens": {}}})
         mock_proc = _make_mock_process([finish_event], returncode=0)
 
@@ -289,9 +287,7 @@ class TestRestartWithPrompt:
                 pass
 
     @pytest.mark.asyncio
-    async def test_raises_without_session_id(
-        self, executor: OpenCodeExecutor, opencode_tool: ToolDefinition
-    ):
+    async def test_raises_without_session_id(self, executor: OpenCodeExecutor, opencode_tool: ToolDefinition):
         executor._tool_def = opencode_tool
         executor._session_id = None
         with pytest.raises(RuntimeError, match="no session ID"):
@@ -299,9 +295,7 @@ class TestRestartWithPrompt:
                 pass
 
     @pytest.mark.asyncio
-    async def test_restarts_with_session_flag(
-        self, executor: OpenCodeExecutor, opencode_tool: ToolDefinition
-    ):
+    async def test_restarts_with_session_flag(self, executor: OpenCodeExecutor, opencode_tool: ToolDefinition):
         executor._tool_def = opencode_tool
         executor._session_id = "sess-xyz"
         executor._last_parameters = {"working_directory": "/tmp"}

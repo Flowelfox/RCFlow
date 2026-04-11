@@ -22,6 +22,38 @@ _OPENAI_REASONING_PREFIXES = ("o1", "o3", "o4")
 # Prevents runaway agentic loops that could exhaust memory or API budget.
 _MAX_AGENTIC_TURNS = 50
 
+# ---------------------------------------------------------------------------
+# Caveman mode — terse, token-efficient LLM output
+# ---------------------------------------------------------------------------
+
+_CAVEMAN_PROMPTS: dict[str, str] = {
+    "lite": (
+        "Respond terse like smart caveman. All technical substance stay. Only fluff die.\n"
+        "Lite mode: keep articles + full sentences. Drop filler and hedging only."
+    ),
+    "full": (
+        "Respond terse like smart caveman. All technical substance stay. Only fluff die.\n"
+        "Drop: articles (a/an/the), filler (just/really/basically), pleasantries, hedging. "
+        "Fragments OK. Short synonyms. Code unchanged."
+    ),
+    "ultra": (
+        "Respond terse like smart caveman. All technical substance stay. Only fluff die.\n"
+        "Ultra mode: abbreviate DB/auth/config/req/res/fn/impl. Arrows for causality (X → Y). "
+        "One word when one word enough. Strip conjunctions."
+    ),
+}
+
+_CAVEMAN_SUFFIX = (
+    '\n\nStop: "stop caveman" or "normal mode"\n'
+    "Auto-Clarity: drop caveman for security warnings, irreversible actions. Resume after.\n"
+    "Boundaries: code/commits/PRs written normal."
+)
+
+
+def _caveman_instruction(level: str) -> str:
+    """Return the caveman system-prompt block for the given intensity level."""
+    base = _CAVEMAN_PROMPTS.get(level, _CAVEMAN_PROMPTS["full"])
+    return base + _CAVEMAN_SUFFIX
 
 
 @dataclass
@@ -164,11 +196,20 @@ class LLMClient:
 
     @property
     def _system_prompt(self) -> str:
-        """Compose the full system prompt, appending global prompt if set."""
+        """Compose the full system prompt.
+
+        Order: base → caveman (if enabled) → global_prompt (if set).
+        Caveman is placed after the base so it follows RCFlow's core
+        instructions, and before GLOBAL_PROMPT so user overrides still
+        take final precedence.
+        """
+        parts = [self._base_system_prompt]
+        if self._settings.CAVEMAN_MODE:
+            parts.append(_caveman_instruction(self._settings.CAVEMAN_LEVEL))
         global_prompt = self._settings.GLOBAL_PROMPT.strip()
         if global_prompt:
-            return f"{self._base_system_prompt}\n\n{global_prompt}"
-        return self._base_system_prompt
+            parts.append(global_prompt)
+        return "\n\n".join(parts)
 
     # ------------------------------------------------------------------
     # Streaming turn dispatch
@@ -514,9 +555,7 @@ class LLMClient:
                 "Stopping to prevent runaway execution and API cost overrun.",
                 _MAX_AGENTIC_TURNS,
             )
-            yield TextChunk(
-                content=f"\n\n[Stopped: reached the maximum of {_MAX_AGENTIC_TURNS} agentic turns.]"
-            )
+            yield TextChunk(content=f"\n\n[Stopped: reached the maximum of {_MAX_AGENTIC_TURNS} agentic turns.]")
 
     # ------------------------------------------------------------------
     # Utility methods (title generation, summarization)
@@ -697,7 +736,11 @@ class LLMClient:
             return {"new_tasks": [], "attach_task_ids": []}
 
     async def evaluate_task_status(
-        self, task_title: str, task_description: str | None, current_status: str, session_result: str,
+        self,
+        task_title: str,
+        task_description: str | None,
+        current_status: str,
+        session_result: str,
     ) -> dict[str, str]:
         """Evaluate whether a task's status should change based on session results.
 

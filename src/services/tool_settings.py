@@ -189,6 +189,17 @@ CLAUDE_CODE_SETTINGS_SCHEMA: list[dict[str, Any]] = [
         "managed_only": True,
     },
     {
+        "key": "caveman_mode",
+        "label": "Caveman Mode",
+        "type": "boolean",
+        "default": False,
+        "description": (
+            "Inject caveman terse-mode instruction at session start"
+            " (~65-75% fewer output tokens). Takes effect for new sessions."
+        ),
+        "managed_only": True,
+    },
+    {
         "key": "undercover",
         "label": "Undercover mode",
         "type": "boolean",
@@ -253,6 +264,18 @@ CODEX_SETTINGS_SCHEMA: list[dict[str, Any]] = [
         "description": "Process timeout in seconds (default 600).",
         "managed_only": True,
     },
+    {
+        "key": "caveman_mode",
+        "label": "Caveman Mode",
+        "type": "boolean",
+        "default": False,
+        "description": (
+            "Inject caveman terse-mode instruction at session start"
+            " (~65-75% fewer output tokens). Takes effect for new sessions."
+            " Experimental — Codex hook delivery unverified."
+        ),
+        "managed_only": True,
+    },
 ]
 
 OPENCODE_SETTINGS_SCHEMA: list[dict[str, Any]] = [
@@ -314,6 +337,18 @@ OPENCODE_SETTINGS_SCHEMA: list[dict[str, Any]] = [
         "type": "string",
         "default": "",
         "description": "Process timeout in seconds (default 600).",
+        "managed_only": True,
+    },
+    {
+        "key": "caveman_mode",
+        "label": "Caveman Mode",
+        "type": "boolean",
+        "default": False,
+        "description": (
+            "Inject caveman terse-mode instruction at session start"
+            " (~65-75% fewer output tokens). Takes effect for new sessions."
+            " Experimental — OpenCode delivery mechanism unverified."
+        ),
         "managed_only": True,
     },
 ]
@@ -445,6 +480,54 @@ def _sync_codex_provider_env(settings: dict[str, Any]) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Caveman mode side-effects
+# ---------------------------------------------------------------------------
+
+_CAVEMAN_CLAUDE_MD_TEXT = """\
+## Caveman Mode
+
+Respond terse like smart caveman. All technical substance stay. Only fluff die.
+
+Rules:
+- Drop: articles (a/an/the), filler (just/really/basically), pleasantries, hedging
+- Fragments OK. Short synonyms. Technical terms exact. Code unchanged.
+- Pattern: [thing] [action] [reason]. [next step].
+
+Auto-Clarity: drop caveman for security warnings, irreversible actions. Resume after.
+Boundaries: code/commits/PRs written normal.
+"""
+
+
+def _sync_caveman_mode(tool_name: str, settings: dict[str, Any], config_dir: Path) -> None:
+    """Write or delete the caveman injection file for *tool_name*.
+
+    Dispatches per tool:
+    - claude_code: CLAUDE.md in config_dir
+    - codex: no-op (unverified hook delivery)
+    - opencode: no-op (unverified config mechanism)
+    """
+    enabled = bool(settings.get("caveman_mode"))
+
+    if tool_name == "claude_code":
+        target = config_dir / "CLAUDE.md"
+        if enabled:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            tmp = target.with_suffix(".tmp")
+            try:
+                tmp.write_text(_CAVEMAN_CLAUDE_MD_TEXT, encoding="utf-8")
+                tmp.rename(target)
+            except Exception:
+                tmp.unlink(missing_ok=True)
+                raise
+        else:
+            target.unlink(missing_ok=True)
+
+    # Codex and OpenCode: no-op until delivery mechanism is confirmed.
+    # The caveman_mode key is still exposed in the UI so users can
+    # pre-configure it; the side-effect will be wired in once verified.
+
+
+# ---------------------------------------------------------------------------
 # ToolSettingsManager
 # ---------------------------------------------------------------------------
 
@@ -481,6 +564,24 @@ class ToolSettingsManager:
             logger.warning("Failed to read settings for %s at %s", tool_name, settings_path)
             return {}
 
+    def _read_caveman_state(self, tool_name: str) -> bool:
+        """Derive caveman_mode from the filesystem (the JSON file doesn't store it).
+
+        Checks file content (not just existence) to avoid false positives when
+        the user has a manually-created CLAUDE.md with unrelated content.
+        """
+        config_dir = self.get_config_dir(tool_name)
+        if tool_name == "claude_code":
+            target = config_dir / "CLAUDE.md"
+            if not target.is_file():
+                return False
+            try:
+                return target.read_text(encoding="utf-8") == _CAVEMAN_CLAUDE_MD_TEXT
+            except OSError:
+                return False
+        # Codex/OpenCode: no-op — always report False until delivery is wired.
+        return False
+
     def get_settings_with_schema(self, tool_name: str, *, managed: bool = True) -> dict[str, Any]:
         """Return schema fields merged with current values for the UI.
 
@@ -490,6 +591,8 @@ class ToolSettingsManager:
         if schema is None:
             raise ValueError(f"Unknown tool: {tool_name}")
         current = self.get_settings(tool_name)
+        # caveman_mode is stored as a side-effect file, not in the JSON.
+        current["caveman_mode"] = self._read_caveman_state(tool_name)
 
         fields: list[dict[str, Any]] = []
         for field_def in schema:
@@ -599,6 +702,13 @@ class ToolSettingsManager:
             _sync_codex_provider_env(current)
         elif tool_name == "opencode" and _OPENCODE_PROVIDER_KEYS & set(updates.keys()):
             _sync_opencode_provider_env(current)
+
+        # Caveman mode side-effect: write/delete injection file, then strip
+        # the key so it doesn't pollute the tool's own config JSON.
+        if "caveman_mode" in updates:
+            config_dir = self.get_config_dir(tool_name)
+            _sync_caveman_mode(tool_name, current, config_dir)
+            current.pop("caveman_mode", None)
 
         rel = _TOOL_CONFIG_PATHS.get(tool_name)
         assert rel is not None
