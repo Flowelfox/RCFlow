@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:io' show Platform;
 
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -9,6 +8,7 @@ import 'package:provider/provider.dart';
 import '../../models/subprocess_info.dart';
 import '../../models/worker_config.dart';
 import '../../state/app_state.dart';
+import '../../state/input_area_view_model.dart';
 import '../../state/pane_state.dart';
 import '../../theme.dart';
 import '../../tips.dart';
@@ -16,53 +16,6 @@ import '../../tips.dart';
 bool get _isDesktop =>
     Platform.isWindows || Platform.isLinux || Platform.isMacOS;
 
-/// Extensions allowed when the model does not support image attachments.
-/// Images (jpg, png, gif, webp) and binary formats (pdf) are excluded.
-const List<String> _kTextOnlyExtensions = [
-  'txt',
-  'log',
-  'rst',
-  'md',
-  'html',
-  'htm',
-  'css',
-  'csv',
-  'json',
-  'yaml',
-  'yml',
-  'toml',
-  'xml',
-  'py',
-  'js',
-  'ts',
-  'jsx',
-  'tsx',
-  'dart',
-  'java',
-  'kt',
-  'swift',
-  'go',
-  'rs',
-  'rb',
-  'c',
-  'cpp',
-  'h',
-  'hpp',
-  'cs',
-  'php',
-  'scss',
-  'less',
-  'sh',
-  'bash',
-  'zsh',
-  'fish',
-  'ps1',
-  'sql',
-  'graphql',
-  'proto',
-  'gitignore',
-  'env',
-];
 
 enum _MentionType { project, tool, file, slash }
 
@@ -73,119 +26,22 @@ class InputArea extends StatefulWidget {
   State<InputArea> createState() => _InputAreaState();
 }
 
-/// A pending attachment selected by the user but not yet uploaded.
-class _PendingAttachment {
-  final String name;
-  final String mimeType;
-  final List<int> bytes;
-
-  _PendingAttachment({
-    required this.name,
-    required this.mimeType,
-    required this.bytes,
-  });
-}
-
 class _InputAreaState extends State<InputArea> {
+  late InputAreaViewModel _vm;
   final TextEditingController _controller = TextEditingController();
   final FocusNode _focusNode = FocusNode();
   final LayerLink _layerLink = LayerLink();
   bool _hasText = false;
 
-  // Pending attachments — files selected but not yet uploaded/sent
-  final List<_PendingAttachment> _pendingAttachments = [];
-  bool _uploadingAttachments = false;
-
-  // Pre-session worktree cache — fetched when a project is selected before
-  // any session exists. Keyed by projectPath so a project change triggers
-  // a re-fetch and prevents stale data from a previous project.
-  String? _worktreeCacheKey;
-  List<Map<String, dynamic>>? _preSessionWorktrees;
-  bool _loadingWorktrees = false;
-  // Set to true after a fetch failure so the build-time addPostFrameCallback
-  // does not retry on every rebuild.  Reset when the cache key changes (new
-  // project or worker) or when the user explicitly opens the dropdown.
-  bool _worktreeFetchFailed = false;
-  // Set to true when the server responds with "Not a git repository" — a
-  // permanent condition for this project.  Unlike _worktreeFetchFailed this
-  // flag suppresses the worktree chip entirely and is only reset when the
-  // cache key changes (i.e. the user selects a different project/worker).
-  bool _noGitRepo = false;
-
   // Tracks the active pane so the worktree cache can be invalidated when the
   // user switches to a different session pane (the widget may be reused).
   String? _lastPaneId;
 
-  /// Fetch the worktree list for [projectPath] using the given [workerId].
-  /// Results are cached per [projectPath]; a concurrent or redundant call
-  /// while loading is silently ignored.  Pass [force] to bypass the cache
-  /// and always fetch fresh data (e.g. when the user opens the dropdown).
   Future<void> _fetchWorktrees(
     String projectPath,
     String workerId, {
     bool force = false,
-  }) async {
-    final cacheKey = '$workerId:$projectPath';
-    // When the cache key changes, reset local flags and check the shared cache
-    // for a previously discovered no-git-repo state.
-    if (_worktreeCacheKey != cacheKey) {
-      _worktreeFetchFailed = false;
-      final cached = context.read<AppState>().getProjectDataCache(cacheKey);
-      _noGitRepo = cached?.noGitRepo ?? false;
-      if (_noGitRepo) {
-        // Update the key so subsequent calls hit the early-return below.
-        _worktreeCacheKey = cacheKey;
-        if (mounted) setState(() {});
-        return;
-      }
-    }
-    // Never retry for projects permanently marked as non-git repos, even with
-    // force — only a cache-key change (different project/worker) resets this.
-    if (_noGitRepo) return;
-    if (!force &&
-        _worktreeCacheKey == cacheKey &&
-        (_preSessionWorktrees != null || _worktreeFetchFailed)) {
-      return;
-    }
-    if (_loadingWorktrees) return;
-    if (!mounted) return;
-    setState(() {
-      _loadingWorktrees = true;
-      _worktreeFetchFailed = false;
-      if (_worktreeCacheKey != cacheKey) {
-        _preSessionWorktrees = null;
-        _worktreeCacheKey = cacheKey;
-      }
-    });
-    final appState = context.read<AppState>();
-    try {
-      final ws = appState.wsForWorker(workerId);
-      final result = await ws.listWorktrees(projectPath);
-      if (mounted && _worktreeCacheKey == cacheKey) {
-        setState(() {
-          _preSessionWorktrees = (result['worktrees'] as List<dynamic>? ?? [])
-              .cast<Map<String, dynamic>>();
-        });
-      }
-    } catch (e) {
-      final isNoGitRepo = e.toString().contains('Not a git repository');
-      if (isNoGitRepo) {
-        // Persist to the shared cache so project_panel also knows.
-        appState.setProjectDataCache(
-          cacheKey,
-          noGitRepo: true,
-        );
-      }
-      if (mounted) {
-        setState(() {
-          _worktreeFetchFailed = true;
-          _noGitRepo = isNoGitRepo;
-        });
-      }
-    } finally {
-      if (mounted) setState(() => _loadingWorktrees = false);
-    }
-  }
+  }) => _vm.fetchWorktrees(projectPath, workerId, force: force);
 
   /// Set or clear the worktree for an active session via the server API.
   Future<void> _setSessionWorktree(String sessionId, String? path) async {
@@ -232,6 +88,8 @@ class _InputAreaState extends State<InputArea> {
   @override
   void initState() {
     super.initState();
+    _vm = InputAreaViewModel(context.read<AppState>());
+    _vm.addListener(_onVmChanged);
     // Capture PaneState once while the element is active. All timer callbacks
     // reference _pane directly instead of calling context.read.
     _pane = context.read<PaneState>();
@@ -246,12 +104,16 @@ class _InputAreaState extends State<InputArea> {
     });
   }
 
+  void _onVmChanged() => setState(() {});
+
   void _onFocusRequest() {
     _focusNode.requestFocus();
   }
 
   @override
   void dispose() {
+    _vm.removeListener(_onVmChanged);
+    _vm.dispose();
     _pane.unregisterDraftProvider();
     _focusRequestNotifier.removeListener(_onFocusRequest);
     _debounceTimer?.cancel();
@@ -266,70 +128,10 @@ class _InputAreaState extends State<InputArea> {
     final supportsImages = context
         .read<AppState>()
         .workerSupportsImageAttachments(context.read<PaneState>().workerId);
-    final result = await FilePicker.platform.pickFiles(
-      allowMultiple: true,
-      withData: true,
-      type: supportsImages ? FileType.any : FileType.custom,
-      allowedExtensions: supportsImages ? null : _kTextOnlyExtensions,
-    );
-    if (result == null || result.files.isEmpty) return;
-    if (!mounted) return;
-    setState(() {
-      for (final f in result.files) {
-        final bytes = f.bytes;
-        if (bytes == null) continue;
-        final name = f.name;
-        final ext = f.extension?.toLowerCase() ?? '';
-        final mime = _mimeForExtension(ext);
-        _pendingAttachments.add(
-          _PendingAttachment(name: name, mimeType: mime, bytes: bytes),
-        );
-      }
-    });
+    await _vm.pickAttachments(supportsImages: supportsImages);
   }
 
-  void _removeAttachment(int index) {
-    setState(() => _pendingAttachments.removeAt(index));
-  }
-
-  static String _mimeForExtension(String ext) {
-    switch (ext) {
-      case 'jpg':
-      case 'jpeg':
-        return 'image/jpeg';
-      case 'png':
-        return 'image/png';
-      case 'gif':
-        return 'image/gif';
-      case 'webp':
-        return 'image/webp';
-      case 'pdf':
-        return 'application/pdf';
-      case 'txt':
-      case 'log':
-      case 'rst':
-        return 'text/plain';
-      case 'md':
-        return 'text/markdown';
-      case 'html':
-        return 'text/html';
-      case 'css':
-        return 'text/css';
-      case 'csv':
-        return 'text/csv';
-      case 'json':
-        return 'application/json';
-      case 'yaml':
-      case 'yml':
-        return 'application/yaml';
-      case 'toml':
-        return 'application/toml';
-      case 'xml':
-        return 'application/xml';
-      default:
-        return 'application/octet-stream';
-    }
-  }
+  void _removeAttachment(int index) => _vm.removeAttachment(index);
 
   void _onTextChanged() {
     final has = _controller.text.trim().isNotEmpty;
@@ -667,21 +469,17 @@ class _InputAreaState extends State<InputArea> {
 
   Future<void> _send() async {
     final text = _controller.text.trim();
-    if (text.isEmpty && _pendingAttachments.isEmpty) return;
+    if (text.isEmpty && _vm.pendingAttachments.isEmpty) return;
     if (text.isEmpty) return; // text is still required
-    if (_uploadingAttachments) return;
+    if (_vm.uploadingAttachments) return;
     // Intercept RCFlow built-in slash commands before sending to server.
     if (text.startsWith('/') && _tryHandleRCFlowCommand(text)) return;
     final pane = context.read<PaneState>();
     final state = context.read<AppState>();
     context.read<AppState>().setActivePane(pane.paneId);
 
-    // Snapshot and clear pending attachments immediately so the UI unblocks
-    final toUpload = List<_PendingAttachment>.from(_pendingAttachments);
-    setState(() {
-      _pendingAttachments.clear();
-      _uploadingAttachments = toUpload.isNotEmpty;
-    });
+    // Snapshot and clear pending attachments immediately so the UI unblocks.
+    final toUpload = _vm.takeAttachments();
     _controller.clear();
     _focusNode.requestFocus();
 
@@ -690,7 +488,7 @@ class _InputAreaState extends State<InputArea> {
       return;
     }
 
-    // Upload all files concurrently then send the prompt with the attachment IDs
+    // Upload all files concurrently then send the prompt with the attachment IDs.
     List<Map<String, dynamic>>? uploaded;
     try {
       final wid = pane.workerId ?? state.defaultWorkerId;
@@ -699,29 +497,11 @@ class _InputAreaState extends State<InputArea> {
         pane.sendPrompt(text); // fall back to text-only on no connection
         return;
       }
-      final results = await Future.wait(
-        toUpload.map(
-          (att) => ws.uploadAttachment(
-            bytes: att.bytes,
-            fileName: att.name,
-            mimeType: att.mimeType,
-          ),
-        ),
-      );
-      uploaded = [
-        for (int i = 0; i < results.length; i++)
-          {
-            'id': results[i]['attachment_id'] as String,
-            'name': toUpload[i].name,
-            'mime_type': toUpload[i].mimeType,
-          },
-      ];
+      uploaded = await _vm.uploadAttachments(toUpload, ws);
     } catch (e) {
       // Upload failed — send text-only and surface an error in the pane
       pane.addSystemMessage('Attachment upload failed: $e', isError: true);
       uploaded = null;
-    } finally {
-      if (mounted) setState(() => _uploadingAttachments = false);
     }
 
     pane.sendPrompt(text, attachments: uploaded);
@@ -1109,9 +889,7 @@ class _InputAreaState extends State<InputArea> {
     // instance may be reused across different panes by Flutter.
     final currentPaneId = context.select<PaneState, String>((s) => s.paneId);
     if (_lastPaneId != null && _lastPaneId != currentPaneId) {
-      _preSessionWorktrees = null;
-      _worktreeCacheKey = null;
-      _noGitRepo = false;
+      _vm.resetWorktreeCache();
     }
     _lastPaneId = currentPaneId;
 
@@ -1131,7 +909,7 @@ class _InputAreaState extends State<InputArea> {
       (s) => s.workerSupportsAttachments(paneWorkerId),
     );
     final canAttach =
-        canSend && !_uploadingAttachments && modelSupportsAttachments;
+        canSend && !_vm.uploadingAttachments && modelSupportsAttachments;
 
     // Worker selector chip for new chats
     final state = context.watch<AppState>();
@@ -1183,10 +961,14 @@ class _InputAreaState extends State<InputArea> {
     final currentCacheKey = worktreeProjectPath != null
         ? '$worktreeWorkerId:$worktreeProjectPath'
         : null;
-    if (currentCacheKey != null && currentCacheKey != _worktreeCacheKey) {
+    if (currentCacheKey != null &&
+        currentCacheKey != _vm.worktreeCacheKey) {
       final cached = state.getProjectDataCache(currentCacheKey);
-      _noGitRepo = cached?.noGitRepo ?? false;
-      _worktreeFetchFailed = false;
+      // Sync the VM from the shared project-data cache when the project
+      // changes. We need the flags synchronously here for chip visibility;
+      // the VM will re-evaluate on the next fetchWorktrees call.
+      _vm.noGitRepo = cached?.noGitRepo ?? false;
+      _vm.worktreeFetchFailed = false;
     }
 
     // Hide the worktree chip entirely when the project is known to have no
@@ -1195,17 +977,19 @@ class _InputAreaState extends State<InputArea> {
         sessionId == null &&
         selectedProject != null &&
         selectedProjectPath != null &&
-        !_noGitRepo;
+        !_vm.noGitRepo;
     final showActiveWorktreeChip =
         sessionId != null &&
         activeSessionProjectPath != null &&
-        !_noGitRepo;
+        !_vm.noGitRepo;
 
     // Eagerly pre-fetch worktrees as soon as a project path is known so the
     // chip dropdown is ready on the first click.  _fetchWorktrees is
     // idempotent (it returns immediately if already loaded, loading, or if
     // the project is known to have no git repository).
-    if (worktreeProjectPath != null && !_noGitRepo && !_worktreeFetchFailed) {
+    if (worktreeProjectPath != null &&
+        !_vm.noGitRepo &&
+        !_vm.worktreeFetchFailed) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _fetchWorktrees(worktreeProjectPath, worktreeWorkerId);
       });
@@ -1280,8 +1064,8 @@ class _InputAreaState extends State<InputArea> {
                 selectedTool != null ||
                 showWorktreeChip ||
                 showActiveWorktreeChip ||
-                _pendingAttachments.isNotEmpty ||
-                _uploadingAttachments)
+                _vm.pendingAttachments.isNotEmpty ||
+                _vm.uploadingAttachments)
               Padding(
                 padding: const EdgeInsets.only(left: 4, bottom: 6),
                 child: Wrap(
@@ -1318,8 +1102,8 @@ class _InputAreaState extends State<InputArea> {
                     if (showWorktreeChip)
                       _WorktreeChip(
                         selectedPath: pendingWorktreePath,
-                        getWorktrees: () => _preSessionWorktrees,
-                        loading: _loadingWorktrees,
+                        getWorktrees: () => _vm.preSessionWorktrees,
+                        loading: _vm.loadingWorktrees,
                         onOpen: () => _fetchWorktrees(
                           selectedProjectPath,
                           paneWorkerId ?? state.defaultWorkerId ?? '',
@@ -1335,8 +1119,8 @@ class _InputAreaState extends State<InputArea> {
                     if (showActiveWorktreeChip)
                       _WorktreeChip(
                         selectedPath: activeWorktreePath,
-                        getWorktrees: () => _preSessionWorktrees,
-                        loading: _loadingWorktrees,
+                        getWorktrees: () => _vm.preSessionWorktrees,
+                        loading: _vm.loadingWorktrees,
                         onOpen: () => _fetchWorktrees(
                           activeSessionProjectPath,
                           paneWorkerId ?? state.defaultWorkerId ?? '',
@@ -1346,13 +1130,13 @@ class _InputAreaState extends State<InputArea> {
                             _setSessionWorktree(sessionId, path),
                         onClear: () => _setSessionWorktree(sessionId, null),
                       ),
-                    for (int i = 0; i < _pendingAttachments.length; i++)
+                    for (int i = 0; i < _vm.pendingAttachments.length; i++)
                       _AttachmentChip(
-                        name: _pendingAttachments[i].name,
-                        mimeType: _pendingAttachments[i].mimeType,
+                        name: _vm.pendingAttachments[i].name,
+                        mimeType: _vm.pendingAttachments[i].mimeType,
                         onRemove: canAttach ? () => _removeAttachment(i) : null,
                       ),
-                    if (_uploadingAttachments)
+                    if (_vm.uploadingAttachments)
                       SizedBox(
                         width: 14,
                         height: 14,
@@ -1476,7 +1260,7 @@ class _InputAreaState extends State<InputArea> {
                     height: 46,
                     child: Material(
                       color:
-                          (_hasText || _pendingAttachments.isNotEmpty) &&
+                          (_hasText || _vm.pendingAttachments.isNotEmpty) &&
                               canSend
                           ? context.appColors.accent
                           : context.appColors.bgElevated,
@@ -1484,13 +1268,13 @@ class _InputAreaState extends State<InputArea> {
                       clipBehavior: Clip.antiAlias,
                       child: InkWell(
                         onTap:
-                            (_hasText || _pendingAttachments.isNotEmpty) &&
+                            (_hasText || _vm.pendingAttachments.isNotEmpty) &&
                                 canSend
                             ? () =>
                                   _send() // unawaited — intentional
                             : null,
                         child: Center(
-                          child: _uploadingAttachments
+                          child: _vm.uploadingAttachments
                               ? SizedBox(
                                   width: 18,
                                   height: 18,
@@ -1503,7 +1287,7 @@ class _InputAreaState extends State<InputArea> {
                                   Icons.arrow_upward_rounded,
                                   color:
                                       (_hasText ||
-                                              _pendingAttachments.isNotEmpty) &&
+                                              _vm.pendingAttachments.isNotEmpty) &&
                                           canSend
                                       ? Colors.white
                                       : context.appColors.textMuted,

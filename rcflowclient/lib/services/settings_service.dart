@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/worker_config.dart';
+import 'settings_config.dart';
 
 class SettingsService {
   // Legacy keys (kept for migration)
@@ -588,5 +589,67 @@ class SettingsService {
     } else {
       _setJsonStringList(_artifactsExpandedProjectsKey, value);
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Typed config accessors
+  // ---------------------------------------------------------------------------
+
+  AppearanceConfig get appearance => AppearanceConfig(
+    themeMode: themeMode,
+    fontSize: fontSize,
+    compactMode: compactMode,
+  );
+
+  set appearance(AppearanceConfig cfg) {
+    themeMode = cfg.themeMode;
+    fontSize = cfg.fontSize;
+    compactMode = cfg.compactMode;
+  }
+
+  SoundConfig get sound => SoundConfig(
+    enabled: soundEnabled,
+    soundOnComplete: soundOnCompleteEnabled,
+    vibrateEnabled: vibrateEnabled,
+    notificationSound: notificationSound,
+    customSoundPath: customSoundPath,
+  );
+
+  set sound(SoundConfig cfg) {
+    soundEnabled = cfg.enabled;
+    soundOnCompleteEnabled = cfg.soundOnComplete;
+    vibrateEnabled = cfg.vibrateEnabled;
+    notificationSound = cfg.notificationSound;
+    customSoundPath = cfg.customSoundPath;
+  }
+
+  ToastConfig get toast => ToastConfig(
+    enabled: toastEnabled,
+    backgroundSessions: toastBackgroundSessions,
+    tasks: toastTasks,
+    connections: toastConnections,
+  );
+
+  set toast(ToastConfig cfg) {
+    toastEnabled = cfg.enabled;
+    toastBackgroundSessions = cfg.backgroundSessions;
+    toastTasks = cfg.tasks;
+    toastConnections = cfg.connections;
+  }
+
+  TerminalConfig get terminal => TerminalConfig(
+    scrollback: terminalScrollback,
+    colorScheme: terminalColorScheme,
+    cursorStyle: terminalCursorStyle,
+    fontSize: terminalFontSize,
+    fontFamily: terminalFontFamily,
+  );
+
+  set terminal(TerminalConfig cfg) {
+    terminalScrollback = cfg.scrollback;
+    terminalColorScheme = cfg.colorScheme;
+    terminalCursorStyle = cfg.cursorStyle;
+    terminalFontSize = cfg.fontSize;
+    terminalFontFamily = cfg.fontFamily;
   }
 }

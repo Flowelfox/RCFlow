@@ -1,12 +1,8 @@
-import 'dart:async';
-import 'dart:io' as io;
-
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../../models/worker_config.dart';
-import '../../services/server_url.dart';
 import '../../state/app_state.dart';
+import '../../state/setup_wizard_view_model.dart';
 import '../../theme.dart';
 import '../screens/server_config_screen.dart';
 
@@ -35,52 +31,38 @@ class _SetupWizard extends StatefulWidget {
   State<_SetupWizard> createState() => _SetupWizardState();
 }
 
-enum _TestStatus { idle, testing, success, failure }
-
 class _SetupWizardState extends State<_SetupWizard> {
+  late SetupWizardViewModel _vm;
   final _pageController = PageController();
-  int _currentStep = 0;
 
-  // Step 1: Worker connection
+  // Text controllers — owned by State since they are widget-lifecycle objects.
   late final TextEditingController _nameCtrl;
   late final TextEditingController _hostCtrl;
   late final TextEditingController _portCtrl;
   late final TextEditingController _apiKeyCtrl;
-  bool _obscureKey = true;
-  bool _useSSL = false;
-  bool _allowSelfSigned = true;
-  bool _autoConnect = true;
-  bool _submitted = false;
-  _TestStatus _testStatus = _TestStatus.idle;
-  String _testMessage = '';
 
-  // Connection result
-  String? _createdWorkerId;
-  bool _connecting = false;
-  String? _connectError;
-
-  // Step 2: LLM config (embedded ServerConfigContent)
+  // GlobalKey for the embedded ServerConfigContent in step 2.
   final _serverConfigKey = GlobalKey<ServerConfigContentState>();
-
-  // Step 3: Agent selection
-  String? _defaultAgent;
-  Map<String, dynamic>? _tools;
-  bool _toolsLoading = false;
-  String? _toolsError;
 
   static const _totalSteps = 5;
 
   @override
   void initState() {
     super.initState();
+    _vm = SetupWizardViewModel(context.read<AppState>());
+    _vm.addListener(_onVmChanged);
     _nameCtrl = TextEditingController(text: 'My Server');
     _hostCtrl = TextEditingController();
     _portCtrl = TextEditingController(text: '53890');
     _apiKeyCtrl = TextEditingController();
   }
 
+  void _onVmChanged() => setState(() {});
+
   @override
   void dispose() {
+    _vm.removeListener(_onVmChanged);
+    _vm.dispose();
     _pageController.dispose();
     _nameCtrl.dispose();
     _hostCtrl.dispose();
@@ -90,7 +72,7 @@ class _SetupWizardState extends State<_SetupWizard> {
   }
 
   void _goTo(int step) {
-    setState(() => _currentStep = step);
+    _vm.goToStep(step);
     _pageController.animateToPage(
       step,
       duration: const Duration(milliseconds: 300),
@@ -99,207 +81,20 @@ class _SetupWizardState extends State<_SetupWizard> {
   }
 
   void _skip() {
-    final appState = context.read<AppState>();
-    appState.settings.setupComplete = true;
+    _vm.markComplete();
     Navigator.of(context).pop(true);
   }
 
   void _finish() {
-    final appState = context.read<AppState>();
-    appState.settings.setupComplete = true;
+    _vm.markComplete();
     Navigator.of(context).pop(true);
   }
 
   // --- Step 1: Worker connection helpers ---
 
   String? _fieldError(TextEditingController ctrl) {
-    if (!_submitted) return null;
+    if (!_vm.submitted) return null;
     return ctrl.text.trim().isEmpty ? 'Required' : null;
-  }
-
-  Future<void> _testConnection() async {
-    final host = _hostCtrl.text.trim();
-    final portStr = _portCtrl.text.trim();
-    final apiKey = _apiKeyCtrl.text.trim();
-    if (host.isEmpty || portStr.isEmpty || apiKey.isEmpty) {
-      setState(() {
-        _testStatus = _TestStatus.failure;
-        _testMessage = 'Host, Port, and API Key are required';
-      });
-      return;
-    }
-    final port = int.tryParse(portStr);
-    if (port == null || port < 1 || port > 65535) {
-      setState(() {
-        _testStatus = _TestStatus.failure;
-        _testMessage = 'Port must be between 1 and 65535';
-      });
-      return;
-    }
-
-    setState(() {
-      _testStatus = _TestStatus.testing;
-      _testMessage = '';
-    });
-
-    final url = ServerUrl(
-      rawHost: '$host:$port',
-      apiKey: apiKey,
-      secure: _useSSL,
-    );
-
-    try {
-      final httpClient = io.HttpClient();
-      if (_allowSelfSigned) {
-        httpClient.badCertificateCallback = (cert, host, port) => true;
-      }
-      httpClient.connectionTimeout = const Duration(seconds: 5);
-      final healthUri = url.http('/api/health');
-      final request = await httpClient.getUrl(healthUri);
-      final response = await request.close().timeout(
-        const Duration(seconds: 8),
-      );
-      final statusCode = response.statusCode;
-      await response.drain<void>();
-      httpClient.close(force: true);
-      if (statusCode != 200) {
-        _setFailure('Health check returned $statusCode');
-        return;
-      }
-
-      io.HttpClient? wsClient;
-      if (_useSSL && _allowSelfSigned) {
-        wsClient = io.HttpClient()
-          ..badCertificateCallback = (cert, host, port) => true;
-      }
-      final wsInput = await io.WebSocket.connect(
-        url.wsInputText().toString(),
-        customClient: wsClient,
-      ).timeout(const Duration(seconds: 8));
-      unawaited(wsInput.close());
-
-      io.HttpClient? wsClient2;
-      if (_useSSL && _allowSelfSigned) {
-        wsClient2 = io.HttpClient()
-          ..badCertificateCallback = (cert, host, port) => true;
-      }
-      final wsOutput = await io.WebSocket.connect(
-        url.wsOutputText().toString(),
-        customClient: wsClient2,
-      ).timeout(const Duration(seconds: 8));
-      unawaited(wsOutput.close());
-
-      if (!mounted) return;
-      setState(() {
-        _testStatus = _TestStatus.success;
-        _testMessage = 'All checks passed';
-      });
-    } on TimeoutException {
-      _setFailure('Connection timed out');
-    } on io.SocketException catch (e) {
-      _setFailure(e.message);
-    } catch (e) {
-      _setFailure(_shortenError(e.toString()));
-    }
-  }
-
-  void _setFailure(String message) {
-    if (!mounted) return;
-    setState(() {
-      _testStatus = _TestStatus.failure;
-      _testMessage = message;
-    });
-  }
-
-  static String _shortenError(String raw) {
-    var msg = raw
-        .replaceFirst('Exception: ', '')
-        .replaceFirst(RegExp(r'^.*?:\s*'), '');
-    if (msg.length > 120) msg = '${msg.substring(0, 117)}...';
-    return msg;
-  }
-
-  Future<void> _createAndConnect() async {
-    setState(() => _submitted = true);
-    final name = _nameCtrl.text.trim();
-    final host = _hostCtrl.text.trim();
-    final portStr = _portCtrl.text.trim();
-    final apiKey = _apiKeyCtrl.text.trim();
-    if (name.isEmpty || host.isEmpty || portStr.isEmpty || apiKey.isEmpty) {
-      return;
-    }
-    final port = int.tryParse(portStr);
-    if (port == null || port < 1 || port > 65535) return;
-
-    final config = WorkerConfig(
-      id: WorkerConfig.generateId(),
-      name: name,
-      host: host,
-      port: port,
-      apiKey: apiKey,
-      useSSL: _useSSL,
-      allowSelfSigned: _allowSelfSigned,
-      autoConnect: _autoConnect,
-      sortOrder: 0,
-    );
-
-    final appState = context.read<AppState>();
-
-    setState(() {
-      _connecting = true;
-      _connectError = null;
-    });
-
-    appState.addWorker(config);
-    _createdWorkerId = config.id;
-
-    try {
-      await appState.connectWorker(config.id);
-      if (!mounted) return;
-      final worker = appState.getWorker(config.id);
-      if (worker != null && worker.isConnected) {
-        setState(() => _connecting = false);
-        _goTo(2); // Advance to LLM config
-      } else {
-        setState(() {
-          _connecting = false;
-          _connectError = 'Connection failed. You can retry or skip.';
-        });
-      }
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _connecting = false;
-        _connectError = _shortenError(e.toString());
-      });
-    }
-  }
-
-  Future<void> _loadToolStatus() async {
-    final appState = context.read<AppState>();
-    if (_createdWorkerId == null) return;
-    final worker = appState.getWorker(_createdWorkerId!);
-    if (worker == null || !worker.isConnected) return;
-
-    setState(() {
-      _toolsLoading = true;
-      _toolsError = null;
-    });
-
-    try {
-      final result = await worker.ws.fetchToolStatus();
-      if (!mounted) return;
-      setState(() {
-        _tools = result['tools'] as Map<String, dynamic>?;
-        _toolsLoading = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _toolsError = _shortenError(e.toString());
-        _toolsLoading = false;
-      });
-    }
   }
 
   // --- Build ---
@@ -315,9 +110,7 @@ class _SetupWizardState extends State<_SetupWizard> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Progress indicator
             _buildStepIndicator(),
-            // Page content
             Expanded(
               child: PageView(
                 controller: _pageController,
@@ -331,7 +124,6 @@ class _SetupWizardState extends State<_SetupWizard> {
                 ],
               ),
             ),
-            // Bottom bar
             _buildBottomBar(),
           ],
         ),
@@ -344,8 +136,8 @@ class _SetupWizardState extends State<_SetupWizard> {
       padding: const EdgeInsets.fromLTRB(24, 20, 24, 0),
       child: Row(
         children: List.generate(_totalSteps, (i) {
-          final isActive = i == _currentStep;
-          final isDone = i < _currentStep;
+          final isActive = i == _vm.currentStep;
+          final isDone = i < _vm.currentStep;
           return Expanded(
             child: Padding(
               padding: EdgeInsets.only(right: i < _totalSteps - 1 ? 4 : 0),
@@ -372,8 +164,7 @@ class _SetupWizardState extends State<_SetupWizard> {
       padding: const EdgeInsets.fromLTRB(24, 8, 24, 20),
       child: Row(
         children: [
-          // Skip button (always visible except on summary)
-          if (_currentStep < _totalSteps - 1)
+          if (_vm.currentStep < _totalSteps - 1)
             TextButton(
               onPressed: _skip,
               child: Text(
@@ -382,17 +173,15 @@ class _SetupWizardState extends State<_SetupWizard> {
               ),
             ),
           const Spacer(),
-          // Back button
-          if (_currentStep > 0 && _currentStep < _totalSteps - 1)
+          if (_vm.currentStep > 0 && _vm.currentStep < _totalSteps - 1)
             TextButton(
-              onPressed: () => _goTo(_currentStep - 1),
+              onPressed: () => _goTo(_vm.currentStep - 1),
               child: Text(
                 'Back',
                 style: TextStyle(color: context.appColors.textSecondary),
               ),
             ),
-          if (_currentStep > 0) const SizedBox(width: 8),
-          // Forward / Finish button
+          if (_vm.currentStep > 0) const SizedBox(width: 8),
           _buildForwardButton(),
         ],
       ),
@@ -400,7 +189,7 @@ class _SetupWizardState extends State<_SetupWizard> {
   }
 
   Widget _buildForwardButton() {
-    switch (_currentStep) {
+    switch (_vm.currentStep) {
       case 0:
         return FilledButton(
           style: _accentButtonStyle(),
@@ -413,8 +202,18 @@ class _SetupWizardState extends State<_SetupWizard> {
       case 1:
         return FilledButton(
           style: _accentButtonStyle(),
-          onPressed: _connecting ? null : _createAndConnect,
-          child: _connecting
+          onPressed: _vm.connecting
+              ? null
+              : () async {
+                  final ok = await _vm.createAndConnect(
+                    name: _nameCtrl.text.trim(),
+                    host: _hostCtrl.text.trim(),
+                    portStr: _portCtrl.text.trim(),
+                    apiKey: _apiKeyCtrl.text.trim(),
+                  );
+                  if (ok && mounted) _goTo(2);
+                },
+          child: _vm.connecting
               ? const SizedBox(
                   width: 18,
                   height: 18,
@@ -432,9 +231,8 @@ class _SetupWizardState extends State<_SetupWizard> {
         return FilledButton(
           style: _accentButtonStyle(),
           onPressed: () async {
-            // Save any LLM config changes
             await _serverConfigKey.currentState?.saveAll();
-            _loadToolStatus();
+            unawaited(_vm.loadToolStatus());
             _goTo(3);
           },
           child: const Text('Next', style: TextStyle(color: Colors.white)),
@@ -443,17 +241,7 @@ class _SetupWizardState extends State<_SetupWizard> {
         return FilledButton(
           style: _accentButtonStyle(),
           onPressed: () {
-            // Save default agent to worker config
-            if (_createdWorkerId != null && _defaultAgent != null) {
-              final appState = context.read<AppState>();
-              final configs = appState.settings.workers;
-              final idx = configs.indexWhere((w) => w.id == _createdWorkerId);
-              if (idx >= 0) {
-                configs[idx].defaultAgent = _defaultAgent;
-                appState.settings.workers = configs;
-                appState.updateWorker(configs[idx]);
-              }
-            }
+            _vm.saveDefaultAgent();
             _goTo(4);
           },
           child: const Text('Next', style: TextStyle(color: Colors.white)),
@@ -555,7 +343,7 @@ class _SetupWizardState extends State<_SetupWizard> {
               error: _fieldError(_nameCtrl),
             ),
             onChanged: (_) {
-              if (_submitted) setState(() {});
+              if (_vm.submitted) setState(() {});
             },
           ),
           const SizedBox(height: 14),
@@ -581,7 +369,7 @@ class _SetupWizardState extends State<_SetupWizard> {
                         error: _fieldError(_hostCtrl),
                       ),
                       onChanged: (_) {
-                        if (_submitted) setState(() {});
+                        if (_vm.submitted) setState(() {});
                       },
                     ),
                   ],
@@ -606,7 +394,7 @@ class _SetupWizardState extends State<_SetupWizard> {
                         error: _fieldError(_portCtrl),
                       ),
                       onChanged: (_) {
-                        if (_submitted) setState(() {});
+                        if (_vm.submitted) setState(() {});
                       },
                     ),
                   ],
@@ -619,30 +407,29 @@ class _SetupWizardState extends State<_SetupWizard> {
           const SizedBox(height: 6),
           TextField(
             controller: _apiKeyCtrl,
-            obscureText: _obscureKey,
+            obscureText: _vm.obscureKey,
             style: TextStyle(
               color: context.appColors.textPrimary,
               fontSize: 15,
             ),
-            decoration:
-                _inputDecoration(
-                  hint: 'Enter API key',
-                  icon: Icons.key_outlined,
-                  error: _fieldError(_apiKeyCtrl),
-                ).copyWith(
-                  suffixIcon: IconButton(
-                    icon: Icon(
-                      _obscureKey
-                          ? Icons.visibility_off_outlined
-                          : Icons.visibility_outlined,
-                      color: context.appColors.textMuted,
-                      size: 20,
-                    ),
-                    onPressed: () => setState(() => _obscureKey = !_obscureKey),
-                  ),
+            decoration: _inputDecoration(
+              hint: 'Enter API key',
+              icon: Icons.key_outlined,
+              error: _fieldError(_apiKeyCtrl),
+            ).copyWith(
+              suffixIcon: IconButton(
+                icon: Icon(
+                  _vm.obscureKey
+                      ? Icons.visibility_off_outlined
+                      : Icons.visibility_outlined,
+                  color: context.appColors.textMuted,
+                  size: 20,
                 ),
+                onPressed: () => _vm.setObscureKey(!_vm.obscureKey),
+              ),
+            ),
             onChanged: (_) {
-              if (_submitted) setState(() {});
+              if (_vm.submitted) setState(() {});
             },
           ),
           const SizedBox(height: 12),
@@ -654,12 +441,12 @@ class _SetupWizardState extends State<_SetupWizard> {
                 fontSize: 14,
               ),
             ),
-            value: _useSSL,
+            value: _vm.useSSL,
             activeTrackColor: context.appColors.accent,
             contentPadding: EdgeInsets.zero,
-            onChanged: (v) => setState(() => _useSSL = v),
+            onChanged: _vm.setUseSSL,
           ),
-          if (_useSSL)
+          if (_vm.useSSL)
             SwitchListTile(
               title: Text(
                 'Allow self-signed certificate',
@@ -668,10 +455,10 @@ class _SetupWizardState extends State<_SetupWizard> {
                   fontSize: 14,
                 ),
               ),
-              value: _allowSelfSigned,
+              value: _vm.allowSelfSigned,
               activeTrackColor: context.appColors.accent,
               contentPadding: EdgeInsets.zero,
-              onChanged: (v) => setState(() => _allowSelfSigned = v),
+              onChanged: _vm.setAllowSelfSigned,
             ),
           SwitchListTile(
             title: Text(
@@ -681,19 +468,22 @@ class _SetupWizardState extends State<_SetupWizard> {
                 fontSize: 14,
               ),
             ),
-            value: _autoConnect,
+            value: _vm.autoConnect,
             activeTrackColor: context.appColors.accent,
             contentPadding: EdgeInsets.zero,
-            onChanged: (v) => setState(() => _autoConnect = v),
+            onChanged: _vm.setAutoConnect,
           ),
           const SizedBox(height: 8),
-          // Test connection
           Row(
             children: [
               OutlinedButton.icon(
-                onPressed: _testStatus == _TestStatus.testing
+                onPressed: _vm.testStatus == SetupTestStatus.testing
                     ? null
-                    : _testConnection,
+                    : () => _vm.testConnection(
+                          host: _hostCtrl.text.trim(),
+                          portStr: _portCtrl.text.trim(),
+                          apiKey: _apiKeyCtrl.text.trim(),
+                        ),
                 icon: const Icon(Icons.wifi_tethering_rounded, size: 18),
                 label: const Text('Test'),
                 style: OutlinedButton.styleFrom(
@@ -709,7 +499,7 @@ class _SetupWizardState extends State<_SetupWizard> {
                 ),
               ),
               const SizedBox(width: 12),
-              if (_testStatus == _TestStatus.testing)
+              if (_vm.testStatus == SetupTestStatus.testing)
                 SizedBox(
                   width: 18,
                   height: 18,
@@ -718,7 +508,7 @@ class _SetupWizardState extends State<_SetupWizard> {
                     color: context.appColors.accentLight,
                   ),
                 ),
-              if (_testStatus == _TestStatus.success) ...[
+              if (_vm.testStatus == SetupTestStatus.success) ...[
                 Icon(
                   Icons.check_circle_rounded,
                   color: context.appColors.successText,
@@ -727,7 +517,7 @@ class _SetupWizardState extends State<_SetupWizard> {
                 const SizedBox(width: 6),
                 Flexible(
                   child: Text(
-                    _testMessage,
+                    _vm.testMessage,
                     style: TextStyle(
                       color: context.appColors.successText,
                       fontSize: 13,
@@ -736,7 +526,7 @@ class _SetupWizardState extends State<_SetupWizard> {
                   ),
                 ),
               ],
-              if (_testStatus == _TestStatus.failure) ...[
+              if (_vm.testStatus == SetupTestStatus.failure) ...[
                 Icon(
                   Icons.cancel_rounded,
                   color: context.appColors.errorText,
@@ -745,7 +535,7 @@ class _SetupWizardState extends State<_SetupWizard> {
                 const SizedBox(width: 6),
                 Flexible(
                   child: Text(
-                    _testMessage,
+                    _vm.testMessage,
                     style: TextStyle(
                       color: context.appColors.errorText,
                       fontSize: 13,
@@ -757,10 +547,10 @@ class _SetupWizardState extends State<_SetupWizard> {
               ],
             ],
           ),
-          if (_connectError != null) ...[
+          if (_vm.connectError != null) ...[
             const SizedBox(height: 8),
             Text(
-              _connectError!,
+              _vm.connectError!,
               style: TextStyle(
                 color: context.appColors.errorText,
                 fontSize: 13,
@@ -778,8 +568,8 @@ class _SetupWizardState extends State<_SetupWizard> {
 
   Widget _buildLLMStep() {
     final appState = context.read<AppState>();
-    final worker = _createdWorkerId != null
-        ? appState.getWorker(_createdWorkerId!)
+    final worker = _vm.createdWorkerId != null
+        ? appState.getWorker(_vm.createdWorkerId!)
         : null;
 
     if (worker == null || !worker.isConnected) {
@@ -855,8 +645,7 @@ class _SetupWizardState extends State<_SetupWizard> {
             style: TextStyle(color: context.appColors.textMuted, fontSize: 13),
           ),
           const SizedBox(height: 20),
-          // Tool status cards
-          if (_toolsLoading)
+          if (_vm.toolsLoading)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 32),
               child: Center(
@@ -865,22 +654,22 @@ class _SetupWizardState extends State<_SetupWizard> {
                 ),
               ),
             )
-          else if (_toolsError != null)
+          else if (_vm.toolsError != null)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 16),
               child: Text(
-                'Could not load tool status: $_toolsError',
+                'Could not load tool status: ${_vm.toolsError}',
                 style: TextStyle(
                   color: context.appColors.errorText,
                   fontSize: 13,
                 ),
               ),
             )
-          else if (_tools != null)
-            ..._tools!.entries.map(
+          else if (_vm.tools != null)
+            ..._vm.tools!.entries.map(
               (e) => _buildToolCard(e.key, e.value as Map<String, dynamic>),
             ),
-          if (_tools == null && !_toolsLoading && _toolsError == null)
+          if (_vm.tools == null && !_vm.toolsLoading && _vm.toolsError == null)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 16),
               child: Text(
@@ -895,7 +684,7 @@ class _SetupWizardState extends State<_SetupWizard> {
           _label('Default agent'),
           const SizedBox(height: 6),
           DropdownButtonFormField<String?>(
-            initialValue: _defaultAgent,
+            initialValue: _vm.defaultAgent,
             dropdownColor: context.appColors.bgElevated,
             style: TextStyle(
               color: context.appColors.textPrimary,
@@ -914,7 +703,7 @@ class _SetupWizardState extends State<_SetupWizard> {
               DropdownMenuItem(value: 'codex', child: Text('Codex')),
               DropdownMenuItem(value: 'opencode', child: Text('OpenCode')),
             ],
-            onChanged: (v) => setState(() => _defaultAgent = v),
+            onChanged: _vm.setDefaultAgent,
           ),
         ],
       ),
@@ -940,7 +729,7 @@ class _SetupWizardState extends State<_SetupWizard> {
           color: context.appColors.bgElevated,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
-            color: _defaultAgent == toolKey
+            color: _vm.defaultAgent == toolKey
                 ? context.appColors.accent.withAlpha(120)
                 : context.appColors.divider,
           ),
@@ -1007,8 +796,8 @@ class _SetupWizardState extends State<_SetupWizard> {
       'codex': 'Codex',
       'opencode': 'OpenCode',
     };
-    final agentLabel = _defaultAgent != null
-        ? agentNames[_defaultAgent] ?? _defaultAgent!
+    final agentLabel = _vm.defaultAgent != null
+        ? agentNames[_vm.defaultAgent] ?? _vm.defaultAgent!
         : 'None';
 
     return Padding(
@@ -1044,7 +833,7 @@ class _SetupWizardState extends State<_SetupWizard> {
                 const SizedBox(height: 8),
                 _summaryRow('Address', '$host:$port'),
                 const SizedBox(height: 8),
-                _summaryRow('SSL', _useSSL ? 'Enabled' : 'Disabled'),
+                _summaryRow('SSL', _vm.useSSL ? 'Enabled' : 'Disabled'),
                 const SizedBox(height: 8),
                 _summaryRow('Default Agent', agentLabel),
               ],
@@ -1154,3 +943,6 @@ class _SetupWizardState extends State<_SetupWizard> {
     );
   }
 }
+
+// ignore_for_file: unawaited_futures
+void unawaited(Future<void> future) {}

@@ -10,6 +10,8 @@ import '../../../models/task_info.dart';
 import '../../../state/app_state.dart';
 import '../../../theme.dart';
 import '../../dialogs/task_create_dialog.dart';
+import '../collapsible_group_header.dart';
+import '../panel_search_bar.dart';
 import 'linear_issue_tile.dart';
 import 'task_tile.dart';
 
@@ -773,151 +775,80 @@ class _TaskListPanelState extends State<TaskListPanel> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(
-            height: 30,
-            child: Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _searchController,
-                    onChanged: (v) {
-                      setState(() => _searchQuery = v);
-                      _saveFilters();
-                    },
-                    style: TextStyle(
-                      color: context.appColors.textPrimary,
-                      fontSize: 12,
-                    ),
-                    decoration: InputDecoration(
-                      hintText: 'Search tasks...',
-                      hintStyle: TextStyle(
-                        color: context.appColors.textMuted,
-                        fontSize: 12,
-                      ),
-                      prefixIcon: Padding(
-                        padding: const EdgeInsets.only(left: 8, right: 4),
-                        child: Icon(
-                          Icons.search_rounded,
-                          color: context.appColors.textMuted,
-                          size: 16,
-                        ),
-                      ),
-                      prefixIconConstraints: const BoxConstraints(
-                        maxWidth: 28,
-                        maxHeight: 30,
-                      ),
-                      suffixIcon: _searchQuery.isNotEmpty
-                          ? GestureDetector(
-                              onTap: () {
-                                _searchController.clear();
-                                setState(() => _searchQuery = '');
-                                _saveFilters();
-                              },
-                              child: Padding(
-                                padding: const EdgeInsets.only(right: 6),
-                                child: Icon(
-                                  Icons.close_rounded,
-                                  color: context.appColors.textMuted,
-                                  size: 14,
-                                ),
-                              ),
-                            )
-                          : null,
-                      suffixIconConstraints: const BoxConstraints(
-                        maxWidth: 24,
-                        maxHeight: 30,
-                      ),
-                      filled: true,
-                      fillColor: context.appColors.bgElevated,
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 0,
-                      ),
-                      border: OutlineInputBorder(
-                        borderSide: BorderSide.none,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderSide: BorderSide.none,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderSide: BorderSide(
-                          color: context.appColors.accent,
-                          width: 1,
-                        ),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                    ),
+          PanelSearchBar(
+            controller: _searchController,
+            query: _searchQuery,
+            hint: 'Search tasks...',
+            onChanged: (v) {
+              setState(() => _searchQuery = v);
+              _saveFilters();
+            },
+            actions: [
+              SizedBox(
+                width: 30,
+                height: 30,
+                child: IconButton(
+                  padding: EdgeInsets.zero,
+                  icon: Icon(
+                    Icons.add_rounded,
+                    color: context.appColors.textSecondary,
+                    size: 18,
                   ),
+                  tooltip: 'New Task',
+                  onPressed: () => showTaskCreateDialog(context),
                 ),
-                const SizedBox(width: 6),
-                SizedBox(
-                  width: 30,
-                  height: 30,
-                  child: IconButton(
-                    padding: EdgeInsets.zero,
-                    icon: Icon(
-                      Icons.add_rounded,
-                      color: context.appColors.textSecondary,
-                      size: 18,
-                    ),
-                    tooltip: 'New Task',
-                    onPressed: () => showTaskCreateDialog(context),
+              ),
+              const SizedBox(width: 2),
+              SizedBox(
+                width: 30,
+                height: 30,
+                child: IconButton(
+                  padding: EdgeInsets.zero,
+                  icon: Icon(
+                    Icons.people_outlined,
+                    color: _groupByWorker
+                        ? context.appColors.accent
+                        : context.appColors.textSecondary,
+                    size: 18,
                   ),
+                  tooltip: _groupByWorker
+                      ? 'Grouping by worker (tap to group by status)'
+                      : 'Group by worker',
+                  onPressed: () {
+                    setState(() => _groupByWorker = !_groupByWorker);
+                    Provider.of<AppState>(
+                      context,
+                      listen: false,
+                    ).settings.tasksGroupByWorker = _groupByWorker;
+                  },
                 ),
+              ),
+              if (state.anyWorkerHasLinear) ...[
                 const SizedBox(width: 2),
                 SizedBox(
                   width: 30,
                   height: 30,
-                  child: IconButton(
-                    padding: EdgeInsets.zero,
-                    icon: Icon(
-                      Icons.people_outlined,
-                      color: _groupByWorker
-                          ? context.appColors.accent
-                          : context.appColors.textSecondary,
-                      size: 18,
-                    ),
-                    tooltip: _groupByWorker
-                        ? 'Grouping by worker (tap to group by status)'
-                        : 'Group by worker',
-                    onPressed: () {
-                      setState(() => _groupByWorker = !_groupByWorker);
-                      Provider.of<AppState>(
-                        context,
-                        listen: false,
-                      ).settings.tasksGroupByWorker = _groupByWorker;
-                    },
-                  ),
-                ),
-                if (state.anyWorkerHasLinear) ...[
-                  const SizedBox(width: 2),
-                  SizedBox(
-                    width: 30,
-                    height: 30,
-                    child: _syncing
-                        ? const Center(
-                            child: SizedBox(
-                              width: 14,
-                              height: 14,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            ),
-                          )
-                        : IconButton(
-                            padding: EdgeInsets.zero,
-                            icon: Icon(
-                              Icons.sync,
-                              color: context.appColors.textSecondary,
-                              size: 18,
-                            ),
-                            tooltip: 'Sync from Linear',
-                            onPressed: () => _sync(context, state),
+                  child: _syncing
+                      ? const Center(
+                          child: SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(strokeWidth: 2),
                           ),
-                  ),
-                ],
+                        )
+                      : IconButton(
+                          padding: EdgeInsets.zero,
+                          icon: Icon(
+                            Icons.sync,
+                            color: context.appColors.textSecondary,
+                            size: 18,
+                          ),
+                          tooltip: 'Sync from Linear',
+                          onPressed: () => _sync(context, state),
+                        ),
+                ),
               ],
-            ),
+            ],
           ),
           const SizedBox(height: 6),
           SizedBox(
@@ -1078,44 +1009,18 @@ class _TaskListPanelState extends State<TaskListPanel> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        InkWell(
-          onTap: () => setState(() {
+        CollapsibleGroupHeader(
+          label: workerName,
+          count: totalCount,
+          collapsed: collapsed,
+          icon: Icons.person_outline_rounded,
+          onToggle: () => setState(() {
             if (collapsed) {
               _collapsedWorkerGroups.remove(workerName);
             } else {
               _collapsedWorkerGroups.add(workerName);
             }
           }),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-            child: Row(
-              children: [
-                Icon(
-                  collapsed
-                      ? Icons.chevron_right_rounded
-                      : Icons.expand_more_rounded,
-                  color: context.appColors.textMuted,
-                  size: 18,
-                ),
-                const SizedBox(width: 4),
-                Icon(
-                  Icons.person_outline_rounded,
-                  color: context.appColors.textMuted,
-                  size: 13,
-                ),
-                const SizedBox(width: 4),
-                Text(
-                  '$workerName ($totalCount)',
-                  style: TextStyle(
-                    color: context.appColors.textSecondary,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: 0.5,
-                  ),
-                ),
-              ],
-            ),
-          ),
         ),
         if (!collapsed) ...[
           ...tasks.map((t) => _buildTaskTile(context, t, state)),
@@ -1165,8 +1070,11 @@ class _TaskListPanelState extends State<TaskListPanel> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        InkWell(
-          onTap: () {
+        CollapsibleGroupHeader(
+          label: label,
+          count: tasks.length,
+          collapsed: collapsed,
+          onToggle: () {
             setState(() {
               if (collapsed) {
                 _collapsedGroups.remove(status);
@@ -1176,30 +1084,6 @@ class _TaskListPanelState extends State<TaskListPanel> {
             });
             _saveCollapsedGroups();
           },
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-            child: Row(
-              children: [
-                Icon(
-                  collapsed
-                      ? Icons.chevron_right_rounded
-                      : Icons.expand_more_rounded,
-                  color: context.appColors.textMuted,
-                  size: 18,
-                ),
-                const SizedBox(width: 4),
-                Text(
-                  '$label (${tasks.length})',
-                  style: TextStyle(
-                    color: context.appColors.textSecondary,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: 0.5,
-                  ),
-                ),
-              ],
-            ),
-          ),
         ),
         if (!collapsed) ...tasks.map((t) => _buildTaskTile(context, t, state)),
       ],
@@ -1215,38 +1099,13 @@ class _TaskListPanelState extends State<TaskListPanel> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Divider(height: 1),
-        InkWell(
-          onTap: () => setState(() => _unlinkedCollapsed = !_unlinkedCollapsed),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-            child: Row(
-              children: [
-                Icon(
-                  _unlinkedCollapsed
-                      ? Icons.chevron_right_rounded
-                      : Icons.expand_more_rounded,
-                  color: context.appColors.textMuted,
-                  size: 18,
-                ),
-                const SizedBox(width: 4),
-                Icon(
-                  Icons.link_off_rounded,
-                  color: context.appColors.textMuted,
-                  size: 13,
-                ),
-                const SizedBox(width: 4),
-                Text(
-                  'Unlinked Issues (${issues.length})',
-                  style: TextStyle(
-                    color: context.appColors.textSecondary,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: 0.5,
-                  ),
-                ),
-              ],
-            ),
-          ),
+        CollapsibleGroupHeader(
+          label: 'Unlinked Issues',
+          count: issues.length,
+          collapsed: _unlinkedCollapsed,
+          icon: Icons.link_off_rounded,
+          onToggle: () =>
+              setState(() => _unlinkedCollapsed = !_unlinkedCollapsed),
         ),
         if (!_unlinkedCollapsed)
           ...issues.map(
