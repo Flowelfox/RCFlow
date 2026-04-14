@@ -13,6 +13,7 @@ library;
 
 import '../models/subprocess_info.dart';
 import '../models/todo_item.dart';
+import '../models/ws_message_type.dart';
 import '../models/ws_messages.dart';
 import 'pane_state.dart';
 
@@ -290,6 +291,34 @@ void handleSessionEnd(Map<String, dynamic> msg, PaneState pane) {
 
 /// Maps backend message type strings to per-pane handler functions.
 /// Note: `session_list` is handled at the AppState level, not here.
+/// Enum-keyed handler registry — preferred over [outputHandlerRegistry].
+/// Provides compile-time safety: the Dart compiler warns on missing enum cases
+/// and catches typos that raw string keys silently miss.
+final Map<WsOutputType, OutputHandler> typedOutputHandlerRegistry = {
+  WsOutputType.textChunk: handleTextChunk,
+  WsOutputType.toolStart: handleToolStart,
+  WsOutputType.toolOutput: handleToolOutput,
+  WsOutputType.error: handleError,
+  WsOutputType.summary: handleSummary,
+  WsOutputType.sessionEndAsk: handleSessionEndAsk,
+  WsOutputType.sessionEnd: handleSessionEnd,
+  WsOutputType.sessionPaused: handleSessionPaused,
+  WsOutputType.sessionResumed: handleSessionResumed,
+  WsOutputType.sessionRestored: handleSessionRestored,
+  WsOutputType.todoUpdate: handleTodoUpdate,
+  WsOutputType.thinking: handleThinking,
+  WsOutputType.agentSessionStart: handleAgentSessionStart,
+  WsOutputType.agentGroupStart: handleAgentGroupStart,
+  WsOutputType.agentGroupEnd: handleAgentGroupEnd,
+  WsOutputType.planModeAsk: handlePlanModeAsk,
+  WsOutputType.planReviewAsk: handlePlanReviewAsk,
+  WsOutputType.permissionRequest: handlePermissionRequest,
+  WsOutputType.subprocessStatus: handleSubprocessStatus,
+};
+
+/// Legacy string-keyed registry — kept for [PaneState._loadHistory] and
+/// tests that call handlers directly by string name. Prefer
+/// [typedOutputHandlerRegistry] for new code.
 final Map<String, OutputHandler> outputHandlerRegistry = {
   'text_chunk': handleTextChunk,
   'tool_start': handleToolStart,

@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 
 import '../models/session_info.dart';
 import '../models/worker_config.dart';
+import '../models/ws_message_type.dart';
 import 'settings_service.dart';
 import 'terminal_service.dart';
 import 'websocket_service.dart';
@@ -214,39 +215,24 @@ class WorkerConnection extends ChangeNotifier {
   }
 
   void _handleOutputMessage(Map<String, dynamic> msg) {
-    final type = msg['type'] as String?;
+    final wsType = WsOutputType.tryParse(msg['type'] as String?);
 
-    // session_list: update our own sessions
-    if (type == 'session_list') {
-      final list = msg['sessions'] as List<dynamic>?;
-      if (list != null) {
-        _updateSessionList(list);
-      }
-      return;
+    switch (wsType) {
+      // Worker-level messages: consumed here, never forwarded upstream.
+      case WsOutputType.sessionList:
+        final list = msg['sessions'] as List<dynamic>?;
+        if (list != null) _updateSessionList(list);
+        return;
+      case WsOutputType.sessionUpdate:
+        _handleSessionUpdate(msg);
+        return;
+      case WsOutputType.sessionReorder:
+        _handleSessionReorder(msg);
+        return;
+      // Everything else (including task/artifact/app-level) forwarded upstream.
+      default:
+        onOutputMessage?.call(msg, config.id);
     }
-
-    // session_update: patch our own sessions
-    if (type == 'session_update') {
-      _handleSessionUpdate(msg);
-      return;
-    }
-
-    // session_reorder: apply new ordering from server
-    if (type == 'session_reorder') {
-      _handleSessionReorder(msg);
-      return;
-    }
-
-    // task_list / task_update / task_deleted: forward to AppState with worker info
-    if (type == 'task_list' ||
-        type == 'task_update' ||
-        type == 'task_deleted') {
-      onOutputMessage?.call(msg, config.id);
-      return;
-    }
-
-    // Forward everything else to AppState
-    onOutputMessage?.call(msg, config.id);
   }
 
   void _updateSessionList(List<dynamic> list) {

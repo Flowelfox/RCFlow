@@ -17,11 +17,13 @@ import '../services/notification_service.dart';
 import '../services/notification_sound_service.dart';
 import '../services/settings_service.dart';
 import '../services/update_service.dart';
+import '../models/ws_message_type.dart';
 import '../services/websocket_service.dart';
 import '../services/worker_connection.dart';
 import '../ui/widgets/terminal_pane.dart';
 import 'output_handlers.dart';
 import 'pane_state.dart';
+import 'worker_registry.dart';
 
 class AppState extends ChangeNotifier implements PaneHost {
   final SettingsService _settings;
@@ -29,9 +31,6 @@ class AppState extends ChangeNotifier implements PaneHost {
   late final NotificationService _notificationService;
   late final HotkeyService _hotkeyService;
   late final UpdateService _updateService;
-
-  // Previous worker statuses for detecting transitions
-  final Map<String, WorkerConnectionStatus> _prevWorkerStatuses = {};
 
   // Sidebar visibility (toggled via hotkey)
   bool _sidebarVisible = true;
@@ -49,65 +48,39 @@ class AppState extends ChangeNotifier implements PaneHost {
     inputFocusRequest.value++;
   }
 
-  // --- Workers ---
-  final Map<String, WorkerConnection> _workers = {};
-  List<WorkerConfig> _workerConfigs = [];
-  List<WorkerConfig> get workerConfigs => List.unmodifiable(_workerConfigs);
-  String? _defaultWorkerId;
+  // --- Workers (delegated to WorkerRegistry) ---
+  late final WorkerRegistry _registry;
+
+  List<WorkerConfig> get workerConfigs => _registry.configs;
 
   @override
-  String? get defaultWorkerId {
-    // Return explicitly set default, or first connected worker
-    if (_defaultWorkerId != null &&
-        _workers[_defaultWorkerId]?.isConnected == true) {
-      return _defaultWorkerId;
-    }
-    for (final w in _workers.values) {
-      if (w.isConnected) return w.config.id;
-    }
-    return _workerConfigs.isNotEmpty ? _workerConfigs.first.id : null;
-  }
+  String? get defaultWorkerId => _registry.defaultWorkerId;
 
   set defaultWorkerId(String? id) {
-    _defaultWorkerId = id;
-    notifyListeners();
+    _registry.defaultWorkerId = id;
+    // notifyListeners() is triggered by registry listener
   }
 
   // Connection state (aggregated)
   @override
-  bool get connected => _workers.values.any((w) => w.isConnected);
-  bool get connecting => _workers.values.any((w) => w.isConnecting);
-  bool get allConnected {
-    final autoWorkers = _workers.values.where((w) => w.config.autoConnect);
-    return autoWorkers.isNotEmpty && autoWorkers.every((w) => w.isConnected);
-  }
+  bool get connected => _registry.connected;
+  bool get connecting => _registry.connecting;
+  bool get allConnected => _registry.allConnected;
 
-  int get connectedWorkerCount =>
-      _workers.values.where((w) => w.isConnected).length;
-  int get totalWorkerCount => _workers.length;
+  int get connectedWorkerCount => _registry.connectedCount;
+  int get totalWorkerCount => _registry.totalCount;
 
   /// True if at least one worker has a Linear API key configured.
-  bool get anyWorkerHasLinear => _workers.values.any((w) => w.hasLinear);
+  bool get anyWorkerHasLinear => _registry.anyHasLinear;
 
-  WorkerConnection? getWorker(String workerId) => _workers[workerId];
+  WorkerConnection? getWorker(String workerId) => _registry[workerId];
 
   // Sessions with temporarily muted sound (during history replay after switch)
   final Set<String> _soundMutedSessions = {};
 
   // Merged session list (all workers)
   @override
-  List<SessionInfo> get sessions {
-    final all = <SessionInfo>[];
-    for (final w in _workers.values) {
-      all.addAll(w.sessions);
-    }
-    all.sort((a, b) {
-      final aTime = a.createdAt ?? DateTime(2000);
-      final bTime = b.createdAt ?? DateTime(2000);
-      return bTime.compareTo(aTime);
-    });
-    return all;
-  }
+  List<SessionInfo> get sessions => _registry.sessions;
 
   // --- Appearance settings (need notifyListeners for reactive rebuild) ---
 
@@ -123,20 +96,14 @@ class AppState extends ChangeNotifier implements PaneHost {
   }
 
   /// Sessions grouped by workerId.
-  Map<String, List<SessionInfo>> get sessionsByWorker {
-    final map = <String, List<SessionInfo>>{};
-    for (final config in _workerConfigs) {
-      final worker = _workers[config.id];
-      map[config.id] = worker?.sessions ?? <SessionInfo>[];
-    }
-    return map;
-  }
+  Map<String, List<SessionInfo>> get sessionsByWorker =>
+      _registry.sessionsByWorker;
 
   // --- Session actions (routed by session's own workerId) ---
 
   /// Get the [WebSocketService] for a session's owning worker.
   WebSocketService? _wsForSession(String workerId) {
-    final worker = _workers[workerId];
+    final worker = _registry[workerId];
     if (worker == null || !worker.isConnected) return null;
     return worker.ws;
   }
@@ -279,7 +246,7 @@ class AppState extends ChangeNotifier implements PaneHost {
   /// Tasks grouped by workerId (for sidebar display).
   Map<String, List<TaskInfo>> get tasksByWorker {
     final map = <String, List<TaskInfo>>{};
-    for (final config in _workerConfigs) {
+    for (final config in _registry.configs) {
       map[config.id] = [];
     }
     for (final t in _tasks.values) {
@@ -296,7 +263,7 @@ class AppState extends ChangeNotifier implements PaneHost {
   /// Look up a [SessionInfo] by its ID across all connected workers.
   /// Returns null if the session is not currently known to any worker.
   SessionInfo? getSession(String sessionId) {
-    for (final worker in _workers.values) {
+    for (final worker in _registry.all) {
       for (final s in worker.sessions) {
         if (s.sessionId == sessionId) return s;
       }
@@ -318,12 +285,19 @@ class AppState extends ChangeNotifier implements PaneHost {
         .toList();
   }
 
+  /// Return the display name for the given workerId (falls back to first worker).
+  String _workerName(String workerId) {
+    final configs = _registry.configs;
+    if (configs.isEmpty) return workerId;
+    return configs
+        .firstWhere((c) => c.id == workerId, orElse: () => configs.first)
+        .name;
+  }
+
   void _handleTaskList(List<dynamic> list, String workerId) {
     // Remove existing tasks from this worker
     _tasks.removeWhere((_, t) => t.workerId == workerId);
-    final workerName = _workerConfigs
-        .firstWhere((w) => w.id == workerId, orElse: () => _workerConfigs.first)
-        .name;
+    final workerName = _workerName(workerId);
     for (final raw in list) {
       final t = TaskInfo.fromJson(
         raw as Map<String, dynamic>,
@@ -338,9 +312,7 @@ class AppState extends ChangeNotifier implements PaneHost {
   void _handleTaskUpdate(Map<String, dynamic> msg, String workerId) {
     final taskId = msg['task_id'] as String?;
     if (taskId == null) return;
-    final workerName = _workerConfigs
-        .firstWhere((w) => w.id == workerId, orElse: () => _workerConfigs.first)
-        .name;
+    final workerName = _workerName(workerId);
     final existing = _tasks[taskId];
     final updated = TaskInfo.fromJson(
       msg,
@@ -408,7 +380,7 @@ class AppState extends ChangeNotifier implements PaneHost {
 
   /// Load artifacts from all connected workers.
   void loadArtifacts() {
-    for (final worker in _workers.values) {
+    for (final worker in _registry.all) {
       if (worker.isConnected) {
         worker.ws.requestArtifacts();
       }
@@ -418,9 +390,7 @@ class AppState extends ChangeNotifier implements PaneHost {
   void _handleArtifactList(List<dynamic> list, String workerId) {
     // Remove existing artifacts from this worker
     _artifacts.removeWhere((_, a) => a.workerId == workerId);
-    final workerName = _workerConfigs
-        .firstWhere((w) => w.id == workerId, orElse: () => _workerConfigs.first)
-        .name;
+    final workerName = _workerName(workerId);
     for (final raw in list) {
       final a = ArtifactInfo.fromJson(
         raw as Map<String, dynamic>,
@@ -435,9 +405,7 @@ class AppState extends ChangeNotifier implements PaneHost {
   void _handleArtifactUpdate(Map<String, dynamic> msg, String workerId) {
     final artifactId = msg['artifact_id'] as String?;
     if (artifactId == null) return;
-    final workerName = _workerConfigs
-        .firstWhere((w) => w.id == workerId, orElse: () => _workerConfigs.first)
-        .name;
+    final workerName = _workerName(workerId);
     final updated = ArtifactInfo.fromJson(
       msg,
       workerId: workerId,
@@ -553,7 +521,7 @@ class AppState extends ChangeNotifier implements PaneHost {
   /// Linear issues grouped by workerId (for sidebar display).
   Map<String, List<LinearIssueInfo>> get linearIssuesByWorker {
     final map = <String, List<LinearIssueInfo>>{};
-    for (final config in _workerConfigs) {
+    for (final config in _registry.configs) {
       map[config.id] = [];
     }
     for (final i in _linearIssues.values) {
@@ -585,9 +553,7 @@ class AppState extends ChangeNotifier implements PaneHost {
 
   void _handleLinearIssueList(List<dynamic> list, String workerId) {
     _linearIssues.removeWhere((_, i) => i.workerId == workerId);
-    final workerName = _workerConfigs
-        .firstWhere((w) => w.id == workerId, orElse: () => _workerConfigs.first)
-        .name;
+    final workerName = _workerName(workerId);
     for (final raw in list) {
       final issue = LinearIssueInfo.fromJson(
         raw as Map<String, dynamic>,
@@ -602,9 +568,7 @@ class AppState extends ChangeNotifier implements PaneHost {
   void _handleLinearIssueUpdate(Map<String, dynamic> msg, String workerId) {
     final issueId = msg['id'] as String?;
     if (issueId == null) return;
-    final workerName = _workerConfigs
-        .firstWhere((w) => w.id == workerId, orElse: () => _workerConfigs.first)
-        .name;
+    final workerName = _workerName(workerId);
     final updated = LinearIssueInfo.fromJson(
       msg,
       workerId: workerId,
@@ -786,7 +750,7 @@ class AppState extends ChangeNotifier implements PaneHost {
 
     // After the new session is created (ack), attach it to the task.
     pane.setNewSessionCallback((sessionId) {
-      final worker = _workers[task.workerId];
+      final worker = _registry[task.workerId];
       if (worker != null && worker.isConnected) {
         worker.ws.attachSessionToTask(task.taskId, sessionId);
       }
@@ -815,7 +779,7 @@ class AppState extends ChangeNotifier implements PaneHost {
     final pane = _panes[paneId];
     if (pane == null) return;
 
-    final worker = _workers[task.workerId];
+    final worker = _registry[task.workerId];
     if (worker == null || !worker.isConnected) {
       addSystemMessage('Worker not connected', isError: true);
       return;
@@ -886,121 +850,43 @@ class AppState extends ChangeNotifier implements PaneHost {
     // already reflect a known-available update without waiting for the net.
     _updateService.restoreCachedState();
 
-    _workerConfigs = _settings.workers;
-    _initWorkers();
+    _registry = WorkerRegistry(
+      settings: _settings,
+      notifications: _notificationService,
+    );
+    _registry.onInputMessage = _handleInputMessage;
+    _registry.onOutputMessage = _handleOutputMessage;
+    _registry.onSessionsChanged = _onWorkerSessionsChanged;
+    _registry.onProjectPathAttached = (sessionId, path) {
+      for (final pane in _findPanesForSession(sessionId)) {
+        pane.syncProjectFromSession(path);
+      }
+    };
+    _registry.onProjectNameError = (sessionId, error) {
+      for (final pane in _findPanesForSession(sessionId)) {
+        pane.setProjectNameError(error);
+      }
+    };
+    _registry.onProjectNameErrorCleared = (sessionId) {
+      for (final pane in _findPanesForSession(sessionId)) {
+        pane.clearProjectError();
+      }
+    };
+    _registry.addListener(_onRegistryChanged);
+    _registry.init(_settings.workers);
     _connectAutoConnectWorkers();
   }
 
   void _onPaneChanged() => notifyListeners();
 
-  // --- Worker lifecycle ---
-
-  void _initWorkers() {
-    for (final config in _workerConfigs) {
-      _createWorkerConnection(config);
-    }
-  }
-
-  WorkerConnection _createWorkerConnection(WorkerConfig config) {
-    final ws = WebSocketService();
-    final worker = WorkerConnection(
-      config: config,
-      ws: ws,
-      settings: _settings,
-    );
-    worker.onInputMessage = _handleInputMessage;
-    worker.onOutputMessage = _handleOutputMessage;
-    worker.onSessionsChanged = _onWorkerSessionsChanged;
-    worker.onProjectPathAttached = (sessionId, path) {
-      for (final pane in _findPanesForSession(sessionId)) {
-        pane.syncProjectFromSession(path);
-      }
-    };
-    worker.onProjectNameError = (sessionId, error) {
-      for (final pane in _findPanesForSession(sessionId)) {
-        pane.setProjectNameError(error);
-      }
-    };
-    worker.onProjectNameErrorCleared = (sessionId) {
-      for (final pane in _findPanesForSession(sessionId)) {
-        pane.clearProjectError();
-      }
-    };
-    worker.addListener(_onWorkerChanged);
-    worker.loadCachedSessions();
-    _workers[config.id] = worker;
-    return worker;
-  }
-
-  void _onWorkerChanged() {
-    // Update foreground service: start when first connects, stop when last disconnects
+  void _onRegistryChanged() {
+    // Foreground service: run when any worker is connected.
     if (connected) {
       ForegroundServiceHelper.start();
     } else if (!connecting) {
       ForegroundServiceHelper.stop();
     }
-
-    // Detect worker connection transitions for toast notifications
-    if (_settings.toastEnabled && _settings.toastConnections) {
-      for (final worker in _workers.values) {
-        final prev = _prevWorkerStatuses[worker.config.id];
-        final curr = worker.status;
-        if (prev != null && prev != curr) {
-          _fireWorkerConnectionNotification(worker, prev, curr);
-        }
-        _prevWorkerStatuses[worker.config.id] = curr;
-      }
-    } else {
-      // Still track statuses even when disabled so we don't fire stale events
-      for (final worker in _workers.values) {
-        _prevWorkerStatuses[worker.config.id] = worker.status;
-      }
-    }
-
     notifyListeners();
-  }
-
-  void _fireWorkerConnectionNotification(
-    WorkerConnection worker,
-    WorkerConnectionStatus prev,
-    WorkerConnectionStatus curr,
-  ) {
-    final name = worker.config.name;
-
-    // N5: Lost connection (was connected, now disconnected or reconnecting)
-    if (prev == WorkerConnectionStatus.connected &&
-        (curr == WorkerConnectionStatus.disconnected ||
-            curr == WorkerConnectionStatus.reconnecting)) {
-      _notificationService.show(
-        level: NotificationLevel.error,
-        title: 'Lost Connection',
-        body: 'Disconnected from $name',
-      );
-      return;
-    }
-
-    // N6: Reconnected (was reconnecting, now connected)
-    if (prev == WorkerConnectionStatus.reconnecting &&
-        curr == WorkerConnectionStatus.connected) {
-      _notificationService.show(
-        level: NotificationLevel.info,
-        title: 'Reconnected',
-        body: 'Connection to $name restored',
-      );
-      return;
-    }
-
-    // N7: Reconnection failed (was reconnecting, now disconnected = retries exhausted)
-    if (prev == WorkerConnectionStatus.reconnecting &&
-        curr == WorkerConnectionStatus.disconnected) {
-      _notificationService.show(
-        level: NotificationLevel.error,
-        title: 'Reconnection Failed',
-        body:
-            'Could not reconnect to $name after ${WorkerConnection.maxRetries} attempts',
-      );
-      return;
-    }
   }
 
   // --- Toast notification helpers ---
@@ -1032,7 +918,7 @@ class AppState extends ChangeNotifier implements PaneHost {
   }
 
   String _sessionLabel(String sessionId) {
-    for (final w in _workers.values) {
+    for (final w in _registry.all) {
       for (final s in w.sessions) {
         if (s.sessionId == sessionId) {
           return s.title ?? sessionId.substring(0, 8);
@@ -1045,7 +931,7 @@ class AppState extends ChangeNotifier implements PaneHost {
   void _onWorkerSessionsChanged() {
     // Check pending auto-loads for all workers
     if (!hasNoPanes) {
-      for (final worker in _workers.values) {
+      for (final worker in _registry.all) {
         final pendingId = worker.pendingAutoLoadSessionId;
         if (pendingId != null) {
           worker.clearPendingAutoLoad();
@@ -1062,9 +948,9 @@ class AppState extends ChangeNotifier implements PaneHost {
   }
 
   Future<void> _connectAutoConnectWorkers() async {
-    for (final config in _workerConfigs) {
+    for (final config in _registry.configs) {
       if (config.autoConnect && config.apiKey.isNotEmpty) {
-        final worker = _workers[config.id];
+        final worker = _registry[config.id];
         if (worker != null && !worker.isConnected && !worker.isConnecting) {
           try {
             await worker.connect();
@@ -1086,79 +972,29 @@ class AppState extends ChangeNotifier implements PaneHost {
 
   // --- Worker CRUD ---
 
-  void addWorker(WorkerConfig config) {
-    _workerConfigs.add(config);
-    _settings.workers = _workerConfigs;
-    _createWorkerConnection(config);
-    notifyListeners();
-  }
+  void addWorker(WorkerConfig config) => _registry.add(config);
 
-  void updateWorker(WorkerConfig config) {
-    final idx = _workerConfigs.indexWhere((w) => w.id == config.id);
-    if (idx < 0) return;
+  void updateWorker(WorkerConfig config) => _registry.update(config);
 
-    final old = _workerConfigs[idx];
-    final needsReconnect =
-        old.host != config.host ||
-        old.port != config.port ||
-        old.apiKey != config.apiKey ||
-        old.useSSL != config.useSSL;
-
-    _workerConfigs[idx] = config;
-    _settings.workers = _workerConfigs;
-
-    final worker = _workers[config.id];
-    if (worker != null) {
-      worker.config = config;
-      if (needsReconnect && worker.isConnected) {
-        worker.disconnect();
-        worker.connect().catchError((_) {});
-      }
-    }
-    notifyListeners();
-  }
-
-  Future<void> removeWorker(String id) async {
-    _workerConfigs.removeWhere((w) => w.id == id);
-    _settings.workers = _workerConfigs;
-
-    final worker = _workers.remove(id);
-    if (worker != null) {
-      worker.removeListener(_onWorkerChanged);
-      worker.disconnect();
-      worker.dispose();
-    }
-
-    // Clear per-worker settings
-    _settings.setLastSessionId(id, null);
-    _settings.setCachedSessions(id, null);
-
-    if (_defaultWorkerId == id) _defaultWorkerId = null;
-    notifyListeners();
-  }
+  Future<void> removeWorker(String id) => _registry.remove(id);
 
   Future<void> connectWorker(String id) async {
-    final worker = _workers[id];
+    final worker = _registry[id];
     if (worker == null) return;
     try {
-      await worker.connect();
+      await _registry.connect(id);
       if (!hasNoPanes) {
         activePane.addSystemMessage('Connected to ${worker.config.name}');
       }
-    } catch (e) {
-      _showToast(
-        level: NotificationLevel.error,
-        title: 'Connection Failed',
-        body: 'Failed to connect to ${worker.config.name}: $e',
-        category: _ToastCategory.connection,
-      );
+    } catch (_) {
+      // Toast already shown by WorkerRegistry.connect()
     }
   }
 
   void disconnectWorker(String id) {
-    final worker = _workers[id];
+    final worker = _registry[id];
     if (worker == null) return;
-    worker.disconnect();
+    _registry.disconnect(id);
     if (!hasNoPanes) {
       activePane.addSystemMessage('Disconnected from ${worker.config.name}');
     }
@@ -1167,53 +1003,29 @@ class AppState extends ChangeNotifier implements PaneHost {
   // --- PaneHost interface ---
 
   @override
-  WebSocketService wsForWorker(String workerId) {
-    final worker = _workers[workerId];
-    if (worker == null) {
-      throw StateError('No worker with id $workerId');
-    }
-    return worker.ws;
-  }
+  WebSocketService wsForWorker(String workerId) => _registry.wsForWorker(workerId);
 
   @override
-  String? workerIdForSession(String sessionId) {
-    for (final worker in _workers.values) {
-      if (worker.sessions.any((s) => s.sessionId == sessionId)) {
-        return worker.config.id;
-      }
-    }
-    return null;
-  }
+  String? workerIdForSession(String sessionId) =>
+      _registry.workerIdForSession(sessionId);
 
   /// Get the [WorkerConnection] that owns the given session, if any.
-  WorkerConnection? workerForSession(String sessionId) {
-    for (final worker in _workers.values) {
-      if (worker.sessions.any((s) => s.sessionId == sessionId)) {
-        return worker;
-      }
-    }
-    return null;
-  }
+  WorkerConnection? workerForSession(String sessionId) =>
+      _registry.workerForSession(sessionId);
 
   @override
-  void refreshSessions() {
-    for (final worker in _workers.values) {
-      worker.refreshSessions();
-    }
-  }
+  void refreshSessions() => _registry.refreshSessions();
 
   @override
-  void markSubscribed(String sessionId, {required String workerId}) {
-    final worker = _workers[workerId];
-    worker?.subscribedSessions.add(sessionId);
-  }
+  void markSubscribed(String sessionId, {required String workerId}) =>
+      _registry.markSubscribed(sessionId, workerId: workerId);
 
   @override
   void requestUnsubscribe(String sessionId, String workerId) {
     // Only unsubscribe from the server if no other pane still views this session
     final stillViewed = _panes.values.any((p) => p.sessionId == sessionId);
     if (!stillViewed) {
-      _workers[workerId]?.unsubscribe(sessionId);
+      _registry[workerId]?.unsubscribe(sessionId);
     }
   }
 
@@ -1230,21 +1042,21 @@ class AppState extends ChangeNotifier implements PaneHost {
   bool workerSupportsAttachments(String? workerId) {
     final id = workerId ?? defaultWorkerId;
     if (id == null) return true;
-    return _workers[id]?.supportsAttachments ?? true;
+    return _registry[id]?.supportsAttachments ?? true;
   }
 
   @override
   bool workerSupportsImageAttachments(String? workerId) {
     final id = workerId ?? defaultWorkerId;
     if (id == null) return true;
-    return _workers[id]?.supportsImageAttachments ?? true;
+    return _registry[id]?.supportsImageAttachments ?? true;
   }
 
   @override
   String? defaultAgentForWorker(String? workerId) {
     if (workerId == null) return null;
     try {
-      final agent = _workerConfigs
+      final agent = _registry.configs
           .firstWhere((c) => c.id == workerId)
           .defaultAgent;
       if (agent == null) return null;
@@ -1696,7 +1508,7 @@ class AppState extends ChangeNotifier implements PaneHost {
 
     // Send close command to server if still connected
     if (info.connected && !info.ended) {
-      final worker = _workers[info.workerId];
+      final worker = _registry[info.workerId];
       if (worker != null) {
         final service = worker.terminalService;
         service.sendControl({'type': 'close', 'terminal_id': terminalId});
@@ -1712,7 +1524,7 @@ class AppState extends ChangeNotifier implements PaneHost {
       closePane(info.paneId!);
     }
 
-    final service = _workers[info.workerId]?.terminalService;
+    final service = _registry[info.workerId]?.terminalService;
     service?.unregisterTerminal(terminalId);
 
     notifyListeners();
@@ -1793,7 +1605,7 @@ class AppState extends ChangeNotifier implements PaneHost {
         final sessionId = msg['session_id'] as String;
         final pane = _findPaneWithPendingAck() ?? activePane;
         pane.handleAck(sessionId, workerId: workerId);
-        final worker = _workers[workerId];
+        final worker = _registry[workerId];
         if (worker != null && !worker.subscribedSessions.contains(sessionId)) {
           worker.subscribe(sessionId);
         }
@@ -1808,7 +1620,7 @@ class AppState extends ChangeNotifier implements PaneHost {
         if (agentName != null) {
           _settings.setLastAgentForWorker(workerId, agentName);
         }
-        _workers[workerId]?.refreshSessions();
+        _registry[workerId]?.refreshSessions();
         break;
       case 'error':
         activePane.finalizeStream();
@@ -1822,87 +1634,76 @@ class AppState extends ChangeNotifier implements PaneHost {
 
   // --- Output channel message handling ---
 
+  /// Message types that trigger the "completion" sound (session resolved).
   static const _completionSoundTypes = {
-    'summary',
-    'session_end_ask',
-    'plan_mode_ask',
-    'plan_review_ask',
+    WsOutputType.summary,
+    WsOutputType.sessionEndAsk,
+    WsOutputType.planModeAsk,
+    WsOutputType.planReviewAsk,
   };
 
+  /// Message types that trigger the generic "new message" sound.
   static const _messageSoundTypes = {
-    'summary',
-    'session_end_ask',
-    'error',
-    'plan_mode_ask',
-    'plan_review_ask',
+    WsOutputType.summary,
+    WsOutputType.sessionEndAsk,
+    WsOutputType.error,
+    WsOutputType.planModeAsk,
+    WsOutputType.planReviewAsk,
   };
 
-  // Message types that indicate a session is waiting for user input
+  /// Message types that indicate a session is waiting for user input.
   static const _awaitingInputTypes = {
-    'summary',
-    'session_end_ask',
-    'plan_mode_ask',
-    'plan_review_ask',
-    'permission_request',
+    WsOutputType.summary,
+    WsOutputType.sessionEndAsk,
+    WsOutputType.planModeAsk,
+    WsOutputType.planReviewAsk,
+    WsOutputType.permissionRequest,
   };
 
   void _handleOutputMessage(Map<String, dynamic> msg, String workerId) {
-    final type = msg['type'] as String?;
-    if (type == null) return;
+    final wsType = WsOutputType.tryParse(msg['type'] as String?);
 
-    // Task messages — handled here, not forwarded to panes
-    if (type == 'task_list') {
-      final list = msg['tasks'] as List<dynamic>? ?? [];
-      _handleTaskList(list, workerId);
-      return;
-    }
-    if (type == 'task_update') {
-      _handleTaskUpdate(msg, workerId);
-      return;
-    }
-    if (type == 'task_deleted') {
-      _handleTaskDeleted(msg);
-      return;
-    }
-
-    // Artifact messages — handled here, not forwarded to panes
-    if (type == 'artifact_list') {
-      final list = msg['artifacts'] as List<dynamic>? ?? [];
-      _handleArtifactList(list, workerId);
-      return;
-    }
-    if (type == 'artifact_update') {
-      _handleArtifactUpdate(msg, workerId);
-      return;
-    }
-    if (type == 'artifact_deleted') {
-      _handleArtifactDeleted(msg);
-      return;
-    }
-
-    // Linear issue messages — handled here, not forwarded to panes
-    if (type == 'linear_issue_list') {
-      final list = msg['issues'] as List<dynamic>? ?? [];
-      _handleLinearIssueList(list, workerId);
-      return;
-    }
-    if (type == 'linear_issue_update') {
-      _handleLinearIssueUpdate(msg, workerId);
-      return;
-    }
-    if (type == 'linear_issue_deleted') {
-      _handleLinearIssueDeleted(msg);
-      return;
+    // App-level messages — handled here, not forwarded to panes.
+    switch (wsType) {
+      case WsOutputType.taskList:
+        _handleTaskList(msg['tasks'] as List<dynamic>? ?? [], workerId);
+        return;
+      case WsOutputType.taskUpdate:
+        _handleTaskUpdate(msg, workerId);
+        return;
+      case WsOutputType.taskDeleted:
+        _handleTaskDeleted(msg);
+        return;
+      case WsOutputType.artifactList:
+        _handleArtifactList(msg['artifacts'] as List<dynamic>? ?? [], workerId);
+        return;
+      case WsOutputType.artifactUpdate:
+        _handleArtifactUpdate(msg, workerId);
+        return;
+      case WsOutputType.artifactDeleted:
+        _handleArtifactDeleted(msg);
+        return;
+      case WsOutputType.linearIssueList:
+        _handleLinearIssueList(msg['issues'] as List<dynamic>? ?? [], workerId);
+        return;
+      case WsOutputType.linearIssueUpdate:
+        _handleLinearIssueUpdate(msg, workerId);
+        return;
+      case WsOutputType.linearIssueDeleted:
+        _handleLinearIssueDeleted(msg);
+        return;
+      default:
+        break; // fall through to per-pane dispatch
     }
 
     final sessionId = msg['session_id'] as String?;
     final muted = sessionId != null && _soundMutedSessions.contains(sessionId);
-    if (!muted) {
+    if (!muted && wsType != null) {
       final playForComplete =
           _settings.soundOnCompleteEnabled &&
-          _completionSoundTypes.contains(type);
+          _completionSoundTypes.contains(wsType);
       final playForMessage =
-          _settings.soundEnabled && _messageSoundTypes.contains(type);
+          _settings.soundEnabled && _messageSoundTypes.contains(wsType);
       if (playForComplete || playForMessage) {
         _soundService.playNotificationSound();
       }
@@ -1914,7 +1715,7 @@ class AppState extends ChangeNotifier implements PaneHost {
 
       if (!sessionVisible) {
         // N4: Session awaiting input (not visible in any pane)
-        if (_awaitingInputTypes.contains(type)) {
+        if (wsType != null && _awaitingInputTypes.contains(wsType)) {
           final label = _sessionLabel(sessionId);
           _showToast(
             level: NotificationLevel.warning,
@@ -1926,7 +1727,7 @@ class AppState extends ChangeNotifier implements PaneHost {
         }
 
         // N11: Error in background session
-        if (type == 'error') {
+        if (wsType == WsOutputType.error) {
           final label = _sessionLabel(sessionId);
           final content = msg['content'] as String? ?? 'Unknown error';
           _showToast(
@@ -1939,7 +1740,7 @@ class AppState extends ChangeNotifier implements PaneHost {
         }
 
         // N12: Session completed (background)
-        if (type == 'session_end') {
+        if (wsType == WsOutputType.sessionEnd) {
           final label = _sessionLabel(sessionId);
           _showToast(
             level: NotificationLevel.info,
@@ -1952,7 +1753,7 @@ class AppState extends ChangeNotifier implements PaneHost {
       }
 
       // N10: Token limit reached (always show, even if visible)
-      if (type == 'error') {
+      if (wsType == WsOutputType.error) {
         final code = msg['code'] as String?;
         if (code == 'TOKEN_LIMIT_REACHED') {
           final label = _sessionLabel(sessionId);
@@ -1968,7 +1769,7 @@ class AppState extends ChangeNotifier implements PaneHost {
     }
 
     // Session status change notifications (N8, N9)
-    if (type == 'session_update' && sessionId != null) {
+    if (wsType == WsOutputType.sessionUpdate && sessionId != null) {
       final sessionVisible = _findPanesForSession(sessionId).isNotEmpty;
       if (!sessionVisible) {
         final status = msg['status'] as String?;
@@ -1982,7 +1783,6 @@ class AppState extends ChangeNotifier implements PaneHost {
             onAction: () => _navigateToSession(sessionId),
           );
         } else if (status == 'cancelled') {
-          // Skip if the user just ended this session (already notified).
           if (!_userEndedSessionIds.remove(sessionId)) {
             final label = _sessionLabel(sessionId);
             _showToast(
@@ -1997,7 +1797,7 @@ class AppState extends ChangeNotifier implements PaneHost {
       }
     }
 
-    final handler = outputHandlerRegistry[type];
+    final handler = wsType != null ? typedOutputHandlerRegistry[wsType] : null;
     if (handler == null) {
       activePane.addSystemMessage(msg.toString());
       return;
@@ -2198,11 +1998,8 @@ class AppState extends ChangeNotifier implements PaneHost {
 
   @override
   void dispose() {
-    for (final worker in _workers.values) {
-      worker.removeListener(_onWorkerChanged);
-      worker.dispose();
-    }
-    _workers.clear();
+    _registry.removeListener(_onRegistryChanged);
+    _registry.dispose();
     for (final pane in _panes.values) {
       pane.removeListener(_onPaneChanged);
       pane.dispose();
