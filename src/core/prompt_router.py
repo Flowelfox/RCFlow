@@ -37,6 +37,9 @@ from src.core.context import ContextMixin
 from src.core.llm import LLMClient, StreamDone, TextChunk, ToolCallRequest
 from src.core.session import ActiveSession, ActivityState, SessionManager, SessionStatus, SessionType
 from src.core.session_lifecycle import SessionLifecycleMixin
+from src.database.models import Session as SessionModel
+from src.database.models import Task as TaskModel
+from src.database.models import TaskSession as TaskSessionModel
 from src.executors.base import BaseExecutor, ExecutionChunk
 from src.executors.claude_code import ClaudeCodeExecutor
 from src.executors.codex import CodexExecutor
@@ -44,9 +47,6 @@ from src.executors.http import HttpExecutor
 from src.executors.opencode import OpenCodeExecutor
 from src.executors.shell import ShellExecutor
 from src.executors.worktree import WorktreeExecutor
-from src.models.db import Session as SessionModel
-from src.models.db import Task as TaskModel
-from src.models.db import TaskSession as TaskSessionModel
 from src.services.artifact_scanner import ArtifactScanner
 from src.services.telemetry_service import InFlightTurn, TelemetryService
 from src.services.tool_manager import ToolManager
@@ -636,11 +636,17 @@ class PromptRouter(
         project_name: str | None = None,
         selected_worktree_path: str | None = None,
         task_id: str | None = None,
+        display_text: str | None = None,
     ) -> str:
         """Handle a user prompt. Creates a new session or resumes an existing one.
 
         Args:
-            text: The user's plain-text prompt.
+            text: The routing prompt, may include prepended agent tags (e.g.
+                ``"#claude_code Are feature ready?"``).  Used for routing and
+                tool-mention extraction.  Never stored in the buffer directly.
+            display_text: The clean user message without agent-tag prefixes.
+                Stored in the session buffer and shown in chat history.  Falls
+                back to ``text`` when not provided (e.g. internal callers).
             session_id: Existing session UUID, or None to create a new session.
             attachments: Optional list of resolved file attachments whose content
                 will be included as multimodal content blocks sent to the LLM.

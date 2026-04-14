@@ -12,8 +12,8 @@ from sqlalchemy.orm import Session as _OrmSession
 
 from src.core.buffer import MessageType
 from src.core.session import SessionManager, SessionType
-from src.models.db import Base
-from src.models.db import Session as _DbSession
+from src.database.models import Base
+from src.database.models import Session as _DbSession
 
 API_KEY = "test-api-key"
 

@@ -9,9 +9,9 @@ from sqlalchemy.pool import StaticPool
 
 from src.core.buffer import MessageType
 from src.core.session import ActiveSession, SessionManager, SessionStatus, SessionType
-from src.models.db import Base
-from src.models.db import Session as SessionModel
-from src.models.db import SessionMessage as SessionMessageModel
+from src.database.models import Base
+from src.database.models import Session as SessionModel
+from src.database.models import SessionMessage as SessionMessageModel
 
 
 def _make_session_row(

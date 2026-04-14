@@ -89,7 +89,7 @@ def get_migrations_dir() -> Path:
     """Return the path to alembic migration scripts.
 
     When frozen, migrations are bundled in the install directory.
-    When running from source, they're at ``src/db/migrations``.
+    When running from source, they're at ``src/database/migrations``.
     """
     if is_frozen():
         return get_install_dir() / "migrations"

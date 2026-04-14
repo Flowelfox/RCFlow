@@ -219,16 +219,16 @@ def _cmd_gui(args: argparse.Namespace) -> None:
 
         _t(f"_cmd_gui() entered — frozen={getattr(sys, 'frozen', False)}")
         try:
-            from src.gui_macos import run_gui_macos  # noqa: PLC0415
+            from src.gui.macos import run_gui_macos  # noqa: PLC0415
 
-            _t("src.gui_macos imported OK")
+            _t("src.gui.macos imported OK")
         except Exception:
             _t(f"IMPORT FAILED:\n{_tb.format_exc()}")
             raise
 
         run_gui_macos()
     else:
-        from src.gui import run_gui  # noqa: PLC0415
+        from src.gui.windows import run_gui  # noqa: PLC0415
 
         run_gui()
 
@@ -237,11 +237,11 @@ def _cmd_tray(args: argparse.Namespace) -> None:
     """Run RCFlow as a system tray / menu bar application (delegates to GUI mode)."""
     _check_not_root()
     if sys.platform == "darwin":
-        from src.gui_macos import run_gui_macos  # noqa: PLC0415
+        from src.gui.macos import run_gui_macos  # noqa: PLC0415
 
         run_gui_macos()
     else:
-        from src.gui import run_gui  # noqa: PLC0415
+        from src.gui.windows import run_gui  # noqa: PLC0415
 
         run_gui()
 

@@ -21,11 +21,11 @@ from typing import TYPE_CHECKING, Any
 from sqlalchemy import select
 
 from src.core.buffer import MessageType
-from src.models.db import Artifact as ArtifactModel
-from src.models.db import LLMCall
-from src.models.db import Session as SessionModel
-from src.models.db import Task as TaskModel
-from src.models.db import TaskSession as TaskSessionModel
+from src.database.models import Artifact as ArtifactModel
+from src.database.models import LLMCall
+from src.database.models import Session as SessionModel
+from src.database.models import Task as TaskModel
+from src.database.models import TaskSession as TaskSessionModel
 
 if TYPE_CHECKING:
     from src.core.llm import TurnUsage

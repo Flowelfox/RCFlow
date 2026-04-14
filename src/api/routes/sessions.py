@@ -13,9 +13,9 @@ from sqlalchemy import func, select
 from src.api.deps import verify_http_api_key
 from src.core.buffer import MessageType
 from src.core.session import session_sort_key
-from src.models.db import Draft as DraftModel
-from src.models.db import Session as SessionModel
-from src.models.db import SessionMessage as SessionMessageModel
+from src.database.models import Draft as DraftModel
+from src.database.models import Session as SessionModel
+from src.database.models import SessionMessage as SessionMessageModel
 
 if TYPE_CHECKING:
     from src.core.prompt_router import PromptRouter

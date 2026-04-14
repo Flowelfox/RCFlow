@@ -16,19 +16,18 @@ import math
 import os
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFilter
-
+from PIL import Image, ImageDraw
 
 # --- Configuration ---
 RENDER_SIZE = 4096
 MASTER_SIZE = 1024
 
 # Colors
-BG_TOP = (15, 23, 42)        # slate-900
-BG_BOTTOM = (30, 41, 69)     # slate-800ish
-ACCENT_1 = (56, 189, 248)    # sky-400
-ACCENT_2 = (45, 212, 191)    # teal-400
-ACCENT_3 = (129, 140, 248)   # indigo-400
+BG_TOP = (15, 23, 42)  # slate-900
+BG_BOTTOM = (30, 41, 69)  # slate-800ish
+ACCENT_1 = (56, 189, 248)  # sky-400
+ACCENT_2 = (45, 212, 191)  # teal-400
+ACCENT_3 = (129, 140, 248)  # indigo-400
 GLOW_BLUE = (56, 189, 248)
 
 CORNER_RADIUS_RATIO = 0.22
@@ -41,7 +40,7 @@ def create_background(size: int) -> Image.Image:
     draw = ImageDraw.Draw(img)
     for y in range(size):
         t = y / size
-        t = t * 0.6 + (t ** 2) * 0.4  # Slightly curved
+        t = t * 0.6 + (t**2) * 0.4  # Slightly curved
         r = int(BG_BOTTOM[0] + (BG_TOP[0] - BG_BOTTOM[0]) * t)
         g = int(BG_BOTTOM[1] + (BG_TOP[1] - BG_BOTTOM[1]) * t)
         b = int(BG_BOTTOM[2] + (BG_TOP[2] - BG_BOTTOM[2]) * t)
@@ -57,8 +56,7 @@ def add_center_glow(img: Image.Image, size: int) -> Image.Image:
     max_r = int(size * 0.38)
     for r in range(max_r, 0, -3):
         alpha = int(15 * (r / max_r))
-        draw.ellipse([cx - r, cy - r, cx + r, cy + r],
-                     fill=(*GLOW_BLUE, alpha))
+        draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=(*GLOW_BLUE, alpha))
     return Image.alpha_composite(img, glow)
 
 
@@ -80,10 +78,8 @@ def bezier_point(p0, p1, p2, p3, t):
 def bezier_tangent(p0, p1, p2, p3, t):
     """Tangent of cubic Bezier at parameter t."""
     u = 1 - t
-    dx = (3 * u**2 * (p1[0] - p0[0]) + 6 * u * t * (p2[0] - p1[0])
-          + 3 * t**2 * (p3[0] - p2[0]))
-    dy = (3 * u**2 * (p1[1] - p0[1]) + 6 * u * t * (p2[1] - p1[1])
-          + 3 * t**2 * (p3[1] - p2[1]))
+    dx = 3 * u**2 * (p1[0] - p0[0]) + 6 * u * t * (p2[0] - p1[0]) + 3 * t**2 * (p3[0] - p2[0])
+    dy = 3 * u**2 * (p1[1] - p0[1]) + 6 * u * t * (p2[1] - p1[1]) + 3 * t**2 * (p3[1] - p2[1])
     return (dx, dy)
 
 
@@ -113,7 +109,7 @@ def draw_smooth_wave(
         t = i / num_samples
         pt = bezier_point(p0, p1, p2, p3, t)
         tang = bezier_tangent(p0, p1, p2, p3, t)
-        length = math.sqrt(tang[0]**2 + tang[1]**2)
+        length = math.sqrt(tang[0] ** 2 + tang[1] ** 2)
         if length < 1e-6:
             continue
         nx, ny = -tang[1] / length, tang[0] / length  # Normal
@@ -175,8 +171,7 @@ def draw_thick_arc(
     draw.arc(bbox, start=start_deg, end=end_deg, fill=color, width=width)
 
 
-def draw_letter_r(img: Image.Image, size: int, x: float, y: float,
-                  h: float, w: float, stroke: int) -> Image.Image:
+def draw_letter_r(img: Image.Image, size: int, x: float, y: float, h: float, w: float, stroke: int) -> Image.Image:
     """Draw a bold geometric R."""
     draw = ImageDraw.Draw(img)
     c = (*ACCENT_1, 255)
@@ -192,8 +187,10 @@ def draw_letter_r(img: Image.Image, size: int, x: float, y: float,
     bowl_h = h * 0.48
     bowl_w = w * 0.78
     bowl_bbox = [
-        x + w * 0.2, y - bowl_h * 0.02,
-        x + bowl_w, y + bowl_h * 1.02,
+        x + w * 0.2,
+        y - bowl_h * 0.02,
+        x + bowl_w,
+        y + bowl_h * 1.02,
     ]
     draw.arc(bowl_bbox, start=-90, end=90, fill=c, width=stroke)
 
@@ -212,18 +209,20 @@ def draw_letter_r(img: Image.Image, size: int, x: float, y: float,
     dy = leg_end_y - leg_start_y
     length = math.sqrt(dx**2 + dy**2)
     nx, ny = -dy / length * half_s, dx / length * half_s
-    draw.polygon([
-        (leg_start_x + nx, leg_start_y + ny),
-        (leg_start_x - nx, leg_start_y - ny),
-        (leg_end_x - nx, leg_end_y - ny),
-        (leg_end_x + nx, leg_end_y + ny),
-    ], fill=c)
+    draw.polygon(
+        [
+            (leg_start_x + nx, leg_start_y + ny),
+            (leg_start_x - nx, leg_start_y - ny),
+            (leg_end_x - nx, leg_end_y - ny),
+            (leg_end_x + nx, leg_end_y + ny),
+        ],
+        fill=c,
+    )
 
     return img
 
 
-def draw_letter_c(img: Image.Image, size: int, x: float, y: float,
-                  h: float, w: float, stroke: int) -> Image.Image:
+def draw_letter_c(img: Image.Image, size: int, x: float, y: float, h: float, w: float, stroke: int) -> Image.Image:
     """Draw a bold geometric C."""
     draw = ImageDraw.Draw(img)
     c = (*ACCENT_2, 255)
@@ -291,7 +290,6 @@ def generate_master_icon() -> Image.Image:
     ]
 
     for cfg in flow_configs:
-        mid_x = (flow_start_x + flow_end_x) / 2
         amp = cfg["amplitude"]
         yc = cfg["y_center"]
 
@@ -302,8 +300,11 @@ def generate_master_icon() -> Image.Image:
         p3 = (flow_end_x, yc)
 
         img = draw_smooth_wave(
-            img, cfg["color"], cfg["thickness"],
-            [p0, p1, p2, p3], cfg["alpha"],
+            img,
+            cfg["color"],
+            cfg["thickness"],
+            [p0, p1, p2, p3],
+            cfg["alpha"],
         )
 
         # Arrowhead at end
@@ -311,7 +312,9 @@ def generate_master_icon() -> Image.Image:
         angle = math.atan2(tang[1], tang[0])
         tip_pt = bezier_point(p0, p1, p2, p3, 0.92)
         img = draw_chevron(
-            img, tip_pt, angle,
+            img,
+            tip_pt,
+            angle,
             arm_len=cfg["thickness"] * 2.5,
             thickness=cfg["thickness"] * 0.65,
             color=cfg["color"],
@@ -386,15 +389,18 @@ def main():
     # Android
     print("\nAndroid:")
     res = client_root / "android" / "app" / "src" / "main" / "res"
-    for folder, sz in [("mipmap-mdpi", 48), ("mipmap-hdpi", 72),
-                       ("mipmap-xhdpi", 96), ("mipmap-xxhdpi", 144),
-                       ("mipmap-xxxhdpi", 192)]:
+    for folder, sz in [
+        ("mipmap-mdpi", 48),
+        ("mipmap-hdpi", 72),
+        ("mipmap-xhdpi", 96),
+        ("mipmap-xxhdpi", 144),
+        ("mipmap-xxxhdpi", 192),
+    ]:
         save_png(master, str(res / folder / "ic_launcher.png"), sz)
 
     # Windows ICO
     print("\nWindows:")
-    save_ico(master, str(client_root / "windows" / "runner" / "resources" / "app_icon.ico"),
-             [16, 32, 48, 64, 128, 256])
+    save_ico(master, str(client_root / "windows" / "runner" / "resources" / "app_icon.ico"), [16, 32, 48, 64, 128, 256])
 
     # macOS
     print("\nmacOS:")
@@ -404,8 +410,7 @@ def main():
 
     # Backend tray icon (used by system tray on Windows)
     print("\nBackend tray icon:")
-    save_ico(master, str(project_root / "assets" / "tray_icon.ico"),
-             [16, 32, 48, 64, 128, 256])
+    save_ico(master, str(project_root / "src" / "gui" / "assets" / "tray_icon.ico"), [16, 32, 48, 64, 128, 256])
 
     print("\nDone!")
 

@@ -65,6 +65,10 @@ void handleToolOutput(Map<String, dynamic> msg, PaneState pane) {
     msg['content'] as String? ?? '',
     isError: msg['is_error'] as bool? ?? false,
   );
+  final diff = msg['diff'] as String?;
+  if (diff != null && diff.isNotEmpty) {
+    pane.applyDiffToLastToolBlock(diff);
+  }
 }
 
 void handleError(Map<String, dynamic> msg, PaneState pane) {
@@ -98,6 +102,12 @@ void handleSummary(Map<String, dynamic> msg, PaneState pane) {
 void handleSessionEndAsk(Map<String, dynamic> msg, PaneState pane) {
   pane.finalizeStream();
   pane.stripSessionEndAskTag();
+  // Deduplicate: skip if there is already a pending (unresolved) end-ask.
+  if (pane.messages.any(
+    (m) => m.type == DisplayMessageType.sessionEndAsk && m.accepted == null,
+  )) {
+    return;
+  }
   pane.addDisplayMessage(
     DisplayMessage(
       type: DisplayMessageType.sessionEndAsk,
@@ -389,10 +399,15 @@ void buildToolOutputHistory(
   List<DisplayMessage> messages,
 ) {
   final content = msg['content'] as String? ?? '';
+  final metadata = msg['metadata'] as Map<String, dynamic>? ?? {};
+  final diff = metadata['diff'] as String?;
   if (messages.isNotEmpty &&
       messages.last.type == DisplayMessageType.toolBlock &&
       messages.last.sessionId == sessionId) {
     messages.last.content += content;
+    if (diff != null && diff.isNotEmpty) {
+      messages.last.fileDiff = diff;
+    }
   } else {
     messages.add(
       DisplayMessage(
@@ -401,6 +416,7 @@ void buildToolOutputHistory(
         toolName: 'output',
         content: content,
         finished: true,
+        fileDiff: diff?.isNotEmpty == true ? diff : null,
       ),
     );
   }

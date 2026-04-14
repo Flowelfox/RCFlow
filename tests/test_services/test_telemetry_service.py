@@ -16,7 +16,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from src.api.routes.telemetry import router as telemetry_router
-from src.db.engine import get_db_session
+from src.database.engine import get_db_session
 from src.services.telemetry_service import TelemetryService
 
 # ---------------------------------------------------------------------------
@@ -426,7 +426,7 @@ class TestEnsureSessionStub:
     @pytest.mark.asyncio
     async def test_inserts_stub_row_when_session_missing(self):
         """When no sessions row exists, a Session stub is added and committed."""
-        from src.models.db import Session as SessionModel  # noqa: PLC0415
+        from src.database.models import Session as SessionModel  # noqa: PLC0415
 
         db = _fresh_db(session_exists=False)
         service = TelemetryService(db_factory=_make_db_factory(db), backend_id="be-1")
@@ -473,8 +473,8 @@ class TestRecordTurnStartFKGuard:
     @pytest.mark.asyncio
     async def test_calls_ensure_stub_then_inserts_turn(self):
         """When session is missing, a stub is created and the SessionTurn row is inserted."""
-        from src.models.db import Session as SessionModel  # noqa: PLC0415
-        from src.models.db import SessionTurn  # noqa: PLC0415
+        from src.database.models import Session as SessionModel  # noqa: PLC0415
+        from src.database.models import SessionTurn  # noqa: PLC0415
 
         stub_db = _fresh_db(session_exists=False)  # for _ensure_session_stub
         turn_db = _fresh_db(session_exists=True)  # for the SessionTurn insert
@@ -517,7 +517,7 @@ class TestRecordTurnStartFKGuard:
     @pytest.mark.asyncio
     async def test_skips_stub_insert_when_session_already_exists(self):
         """When the session row already exists, only the turn is inserted (no stub write)."""
-        from src.models.db import Session as SessionModel  # noqa: PLC0415
+        from src.database.models import Session as SessionModel  # noqa: PLC0415
 
         stub_db = _fresh_db(session_exists=True)  # get() returns existing row
         turn_db = _fresh_db(session_exists=True)
@@ -548,8 +548,8 @@ class TestRecordToolStartFKGuard:
     @pytest.mark.asyncio
     async def test_creates_stub_when_session_missing(self):
         """When session is missing, a stub is created before the ToolCall insert."""
-        from src.models.db import Session as SessionModel  # noqa: PLC0415
-        from src.models.db import ToolCall  # noqa: PLC0415
+        from src.database.models import Session as SessionModel  # noqa: PLC0415
+        from src.database.models import ToolCall  # noqa: PLC0415
 
         stub_db = _fresh_db(session_exists=False)
         tool_db = _fresh_db(session_exists=True)

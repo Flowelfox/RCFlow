@@ -22,6 +22,7 @@ from src.core.permissions import (
     describe_tool_action,
     get_scope_options,
 )
+from src.exceptions import PermissionRequestNotFoundError
 
 # ---------------------------------------------------------------------------
 # classify_risk
@@ -359,7 +360,7 @@ class TestPermissionManagerWaitForResponse:
 
     async def test_raises_for_unknown_request(self) -> None:
         pm = PermissionManager()
-        with pytest.raises(ValueError, match="Unknown request"):
+        with pytest.raises(PermissionRequestNotFoundError, match="Unknown request"):
             await pm.wait_for_response("nonexistent-id")
 
 

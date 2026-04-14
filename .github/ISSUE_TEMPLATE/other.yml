@@ -1,0 +1,41 @@
+name: Other
+description: Questions, documentation gaps, performance issues, or anything that doesn't fit the other categories
+labels: ["triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this for anything that doesn't fit Bug, Crash, or Feature Request — questions, docs issues, performance, build problems, etc.
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Kind
+      options:
+        - Question
+        - Documentation
+        - Performance
+        - Build / Packaging
+        - Refactor / Technical Debt
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: Explain the issue or question clearly.
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: RCFlow Version (if applicable)
+      placeholder: "e.g. 0.38.0"
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional Context

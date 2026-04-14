@@ -1274,6 +1274,17 @@ class AppState extends ChangeNotifier implements PaneHost {
   void clearDraft(String key) => _settings.clearDraft(key);
 
   @override
+  Map<String, dynamic>? getDraftPlucks(String key) =>
+      _settings.getDraftPlucks(key);
+
+  @override
+  void saveDraftPlucks(String key, Map<String, dynamic> plucks) =>
+      _settings.saveDraftPlucks(key, plucks);
+
+  @override
+  void clearDraftPlucks(String key) => _settings.clearDraftPlucks(key);
+
+  @override
   Future<String?> resolveProjectOnWorker(
     String workerId,
     String projectName,
@@ -1285,6 +1296,28 @@ class AppState extends ChangeNotifier implements PaneHost {
         if (p['name'] == projectName) return p['path'];
       }
       return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
+  bool isWorkerCavemanActive(String? workerId) {
+    // Caveman mode is a server-side tool setting; the client can only infer it
+    // from the most-recent session badge list for the given worker.
+    final id = workerId ?? defaultWorkerId;
+    if (id == null) return false;
+    final workerSessions = sessions.where((s) => s.workerId == id);
+    for (final s in workerSessions) {
+      if (s.badges.any((b) => b.type == 'caveman')) return true;
+    }
+    return false;
+  }
+
+  @override
+  SessionInfo? sessionById(String sessionId) {
+    try {
+      return sessions.firstWhere((s) => s.sessionId == sessionId);
     } catch (_) {
       return null;
     }
@@ -1995,6 +2028,21 @@ class AppState extends ChangeNotifier implements PaneHost {
           }
         }
       }
+    }
+
+    // Cross-client draft sync: backend broadcasts whenever any client saves a
+    // draft. Update the local cache and apply to any pane viewing that session
+    // (unless the user in that pane has already typed something new).
+    if (type == 'draft_update') {
+      final draftSessionId = msg['session_id'] as String?;
+      if (draftSessionId != null) {
+        final content = msg['content'] as String? ?? '';
+        saveDraft(draftSessionId, content);
+        for (final pane in _panes.values) {
+          pane.applyRemoteDraft(draftSessionId, content);
+        }
+      }
+      return;
     }
 
     final handler = outputHandlerRegistry[type];

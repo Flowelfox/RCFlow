@@ -9,11 +9,11 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.buffer import BufferedMessage, MessageType, SessionBuffer
-from src.models.db import Artifact as ArtifactModel
-from src.models.db import Session as SessionModel
-from src.models.db import SessionMessage as SessionMessageModel
-from src.models.db import TaskSession as TaskSessionModel
-from src.models.db import ToolExecution as ToolExecutionModel
+from src.database.models import Artifact as ArtifactModel
+from src.database.models import Session as SessionModel
+from src.database.models import SessionMessage as SessionMessageModel
+from src.database.models import TaskSession as TaskSessionModel
+from src.database.models import ToolExecution as ToolExecutionModel
 
 if TYPE_CHECKING:
     from collections.abc import Callable

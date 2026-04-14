@@ -28,8 +28,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession  # noqa: TC002
 
-from src.db.engine import get_db_session
-from src.models.db import SessionTurn, TelemetryMinutely, ToolCall
+from src.database.engine import get_db_session
+from src.database.models import SessionTurn, TelemetryMinutely, ToolCall
 
 router = APIRouter(prefix="/telemetry", tags=["Telemetry"])
 

@@ -16,6 +16,8 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
+from src.exceptions import PermissionRequestNotFoundError
+
 logger = logging.getLogger(__name__)
 
 
@@ -304,7 +306,7 @@ class PermissionManager:
         """
         pending = self._pending.get(request_id)
         if pending is None:
-            raise ValueError(f"Unknown request: {request_id}")
+            raise PermissionRequestNotFoundError(f"Unknown request: {request_id}")
 
         effective_timeout = timeout or self.DEFAULT_TIMEOUT
         try:

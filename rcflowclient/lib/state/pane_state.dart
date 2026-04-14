@@ -15,6 +15,7 @@ import '../models/session_info.dart';
 import '../models/split_tree.dart';
 import '../models/subprocess_info.dart';
 import '../models/todo_item.dart';
+import '../models/worker_config.dart';
 import '../models/ws_messages.dart';
 import '../services/websocket_service.dart';
 import 'output_handlers.dart';
@@ -97,10 +98,27 @@ abstract class PaneHost {
   /// Remove the draft for [key] from local storage.
   void clearDraft(String key);
 
+  /// Read persisted pluck selections (agent, project, worktree) for [key].
+  /// Returns null when nothing has been saved for that key.
+  Map<String, dynamic>? getDraftPlucks(String key);
+
+  /// Persist pluck selections for [key].
+  void saveDraftPlucks(String key, Map<String, dynamic> plucks);
+
+  /// Remove the pluck selections for [key] from local storage.
+  void clearDraftPlucks(String key);
+
   /// Validates that [projectName] exists on [workerId] and returns its full
   /// absolute path, or null if the project cannot be found or the worker is
   /// not connected.
   Future<String?> resolveProjectOnWorker(String workerId, String projectName);
+
+  /// Returns true if the given worker's active tool has caveman mode enabled.
+  /// Used by [PaneState.isCavemanActive] for new-chat panes.
+  bool isWorkerCavemanActive(String? workerId);
+
+  /// Returns the [SessionInfo] for [sessionId], or null if not found.
+  SessionInfo? sessionById(String sessionId);
 }
 
 class PaneState extends ChangeNotifier {
@@ -326,6 +344,17 @@ class PaneState extends ChangeNotifier {
 
     _host.saveDraft(key, text);
 
+    // Persist current pluck chip state alongside the text draft so that the
+    // full input-area configuration (agent, project, worktree) round-trips.
+    final plucks = <String, dynamic>{
+      if (_selectedToolMention != null) 'agent': _selectedToolMention,
+      if (_selectedProjectName != null) 'project': _selectedProjectName,
+      if (_pendingWorktreePath != null) 'worktree': _pendingWorktreePath,
+    };
+    if (plucks.isNotEmpty) {
+      _host.saveDraftPlucks(key, plucks);
+    }
+
     // Write backend only for real sessions (new-session pane has no ID yet).
     if (_sessionId != null) {
       final ws = _ws;
@@ -339,11 +368,26 @@ class PaneState extends ChangeNotifier {
   /// Two-phase draft load for a real session:
   ///   Phase 1 — local cache (fast path, no network, immediately populates input)
   ///   Phase 2 — backend fetch (authoritative; overwrites local if newer)
+  ///
+  /// Always emits a [pendingInputText] value (even empty string) so that
+  /// InputArea resets its controller when switching to a session with no draft,
+  /// preventing the previous session's text from bleeding through.
   Future<void> _loadDraftAsync(String sessionId) async {
     final local = _host.getDraft(sessionId);
-    if (local.content.isNotEmpty) {
-      _lastLoadedDraft = local.content;
-      setPendingInputText(local.content);
+    // Always reset the input — empty string clears the field when no draft exists.
+    _lastLoadedDraft = local.content;
+    setPendingInputText(local.content);
+
+    // If the session didn't carry an agent type (e.g. archived sessions where
+    // the backend returns agentType=null), fall back to the agent saved in the
+    // session's draft pluck.  This keeps the chip populated after navigation.
+    if (_selectedToolMention == null) {
+      final savedAgent =
+          _host.getDraftPlucks(sessionId)?['agent'] as String?;
+      if (savedAgent != null) {
+        _selectedToolMention = savedAgent;
+        notifyListeners();
+      }
     }
 
     final ws = _ws;
@@ -368,12 +412,56 @@ class PaneState extends ChangeNotifier {
 
   /// Load the new-session pane draft from local storage (local-only; no
   /// backend fetch since the new-session pane has no session ID yet).
+  ///
+  /// Only sets [pendingInputText] when a non-empty draft exists; leaves it null
+  /// if there is nothing to restore.
+  ///
+  /// Also restores pluck chip selections (agent, project, worktree) saved
+  /// alongside the text.  Draft-pluck values take precedence over the async
+  /// worker-defaults applied by [_applyWorkerDefaults], since they represent
+  /// the explicit state the user left the pane in.
   Future<void> _loadNewSessionDraftAsync(String workerId) async {
     final local = _host.getDraft('new_$workerId');
-    if (local.content.isNotEmpty) {
-      _lastLoadedDraft = local.content;
-      setPendingInputText(local.content);
+    _lastLoadedDraft = local.content;
+    if (local.content.isNotEmpty) setPendingInputText(local.content);
+
+    final plucks = _host.getDraftPlucks('new_$workerId');
+    if (plucks != null) {
+      var changed = false;
+      final agent = plucks['agent'] as String?;
+      if (agent != null) {
+        _selectedToolMention = agent;
+        changed = true;
+      }
+      final project = plucks['project'] as String?;
+      if (project != null) {
+        _selectedProjectName = project;
+        // _selectedProjectPath is intentionally not restored: it requires
+        // server-side validation that happens via _applyWorkerDefaults.
+        changed = true;
+      }
+      final worktree = plucks['worktree'] as String?;
+      if (worktree != null) {
+        _pendingWorktreePath = worktree;
+        changed = true;
+      }
+      if (changed) notifyListeners();
     }
+  }
+
+  /// Apply a draft update pushed from the backend (cross-client sync).
+  ///
+  /// Only overwrites the input if the user has not typed anything since the
+  /// last load (i.e. the current controller text still matches
+  /// [_lastLoadedDraft]). This prevents clobbering an actively-typed draft.
+  void applyRemoteDraft(String sessionId, String content) {
+    if (_sessionId != sessionId) return;
+    // Multi-pane / active-edit guard: skip if the user has modified the input.
+    final currentText = _draftProvider?.call() ?? '';
+    if (currentText != _lastLoadedDraft) return;
+    _lastLoadedDraft = content;
+    _host.saveDraft(sessionId, content);
+    setPendingInputText(content);
   }
 
   // Message display
@@ -562,7 +650,10 @@ class PaneState extends ChangeNotifier {
           lastProject,
         );
         if (_disposed) return;
-        if (resolvedPath != null) {
+        // Only apply the worker's cached project default if the user has not
+        // already had a project restored via draft pluck hydration (which runs
+        // synchronously before this async continuation resumes).
+        if (resolvedPath != null && _selectedProjectName == null) {
           _selectedProjectName = lastProject;
           _selectedProjectPath = resolvedPath;
         }
@@ -575,6 +666,38 @@ class PaneState extends ChangeNotifier {
         notifyListeners();
       }
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Caveman mode — indicates the active tool has caveman mode enabled.
+  // The preview badge is dismissed per-pane until the next page load.
+  // ---------------------------------------------------------------------------
+
+  bool _cavemanDismissed = false;
+
+  /// True when the active session's tool has caveman mode enabled AND the user
+  /// has not dismissed the preview badge for this pane.
+  bool get isCavemanActive {
+    if (_cavemanDismissed) return false;
+    // Infer from the current session's badge list if available.
+    final sid = sessionId;
+    if (sid == null) {
+      // New-chat pane: check the default worker's caveman setting via host.
+      return _host.isWorkerCavemanActive(workerId ?? _host.defaultWorkerId);
+    }
+    final session = _host.sessionById(sid);
+    return session?.badges.any((b) => b.type == 'caveman') ?? false;
+  }
+
+  /// Dismiss the caveman preview badge for this pane session.
+  void setCavemanDisabled(bool dismissed) {
+    _cavemanDismissed = dismissed;
+    notifyListeners();
+  }
+
+  /// Reset caveman dismiss state (e.g. when a new session starts).
+  void _resetCavemanDismiss() {
+    _cavemanDismissed = false;
   }
 
   /// Set the target worker for new chats.  Clears any project/tool state that
@@ -639,8 +762,24 @@ class PaneState extends ChangeNotifier {
       projectName: _selectedProjectName,
       selectedWorktreePath: worktreeToSend,
       taskId: taskIdToSend,
+      displayText: toolMention != null ? text : null,
     );
     _clearPendingTaskId();
+
+    // Clear the draft now that the message has been sent.
+    // New-session panes: handleAck clears the new_{workerId} draft on ack.
+    // Existing sessions: clear immediately so stale draft doesn't persist.
+    if (_sessionId != null) {
+      _host.clearDraft(_sessionId!);
+      _host.clearDraftPlucks(_sessionId!);
+      final ws = _ws;
+      if (ws != null) {
+        // ignore: discarded_futures
+        ws.saveSessionDraft(_sessionId!, '');
+      }
+    }
+    // Reset guard so subsequent typing compares against empty string.
+    _lastLoadedDraft = '';
   }
 
   void switchSession(String sessionId, {bool recordHistory = true}) {
@@ -704,8 +843,6 @@ class PaneState extends ChangeNotifier {
         _host.markSubscribed(sessionId, workerId: _workerId!);
       }
     }
-
-    _host.refreshSessions();
 
     // Unsubscribe from the old session if no other pane still views it
     if (oldSessionId != null && oldWorkerId != null) {
@@ -854,6 +991,7 @@ class PaneState extends ChangeNotifier {
     _sessionId = sessionId;
     if (workerId != null) _workerId = workerId;
     _readyForNewChat = false;
+    if (wasNewSession) _resetCavemanDismiss();
 
     // Fire the new-session callback (e.g. to attach task after creation).
     if (_onNewSessionAck != null) {
@@ -865,7 +1003,15 @@ class PaneState extends ChangeNotifier {
     // so the new-session pane starts blank next time.
     if (wasNewSession && _workerId != null) {
       _host.clearDraft('new_$_workerId');
+      _host.clearDraftPlucks('new_$_workerId');
       _lastLoadedDraft = '';
+    }
+
+    // Persist the agent mention to the session's draft plucks.  This lets
+    // switchSession restore the chip for archived sessions where the backend
+    // returns agentType=null.
+    if (_selectedToolMention != null) {
+      _host.saveDraftPlucks(sessionId, {'agent': _selectedToolMention!});
     }
 
     _host.refreshSessions();
@@ -1084,10 +1230,13 @@ class PaneState extends ChangeNotifier {
     return _messages;
   }
 
-  /// The message that the streaming character queue is currently writing into.
+  /// The message that text is currently being written into.
+  /// Returns null when the list is empty or the last message is already finished.
   DisplayMessage? get _streamTarget {
     final list = _streamTargetList;
-    return list.isEmpty ? null : list.last;
+    if (list.isEmpty) return null;
+    final last = list.last;
+    return last.finished ? null : last;
   }
 
   /// The last message in the current stream target list (public, for handlers).
@@ -1103,7 +1252,17 @@ class PaneState extends ChangeNotifier {
     _inAgentMode = true;
     _agentToolName = name;
     _agentDisplayName = displayName;
-    // Don't create a message yet — wait for the first tool_start.
+    _messages.add(
+      DisplayMessage(
+        type: DisplayMessageType.agentGroup,
+        sessionId: _sessionId,
+        toolName: name,
+        displayName: displayName,
+        children: [],
+        expanded: true,
+      ),
+    );
+    _agentToolGroupIndex = _messages.length - 1;
     notifyListeners();
   }
 
@@ -1266,7 +1425,8 @@ class PaneState extends ChangeNotifier {
       _closeAgentToolGroup();
     }
     if (_messages.isEmpty ||
-        _messages.last.type != DisplayMessageType.assistant) {
+        _messages.last.type != DisplayMessageType.assistant ||
+        _messages.last.finished) {
       finalizeStream();
       _messages.add(
         DisplayMessage(
@@ -1320,13 +1480,26 @@ class PaneState extends ChangeNotifier {
     _enqueueText(text);
   }
 
-  void _enqueueText(String text) {
-    for (int i = 0; i < text.length; i++) {
-      _charQueue.add(text[i]);
+  void applyDiffToLastToolBlock(String diff) {
+    final list = _streamTargetList;
+    for (int i = list.length - 1; i >= 0; i--) {
+      if (list[i].type == DisplayMessageType.toolBlock) {
+        list[i].fileDiff = diff;
+        notifyListeners();
+        return;
+      }
     }
-    _streamingTimer ??= Timer.periodic(
+  }
+
+  void _enqueueText(String text) {
+    final target = _streamTarget;
+    if (target == null) return;
+    target.content += text;
+    // Debounce notifyListeners to avoid rebuilding the widget tree for every
+    // incoming chunk; the content is already written to state immediately.
+    _streamingTimer ??= Timer(
       const Duration(milliseconds: _tickMs),
-      (_) => _renderChars(),
+      _renderChars,
     );
   }
 
@@ -1338,32 +1511,21 @@ class PaneState extends ChangeNotifier {
   }
 
   void _renderChars() {
-    if (_charQueue.isEmpty) {
-      _streamingTimer?.cancel();
-      _streamingTimer = null;
-      return;
-    }
-    final target = _streamTarget;
-    if (target == null) return;
-
-    final count = _charsPerTick.clamp(1, _charQueue.length);
-    final batch = _charQueue.sublist(0, count).join();
-    _charQueue.removeRange(0, count);
-    target.content += batch;
+    _streamingTimer = null;
     notifyListeners();
   }
 
   void finalizeStream() {
-    final target = _streamTarget;
-    if (_charQueue.isNotEmpty && target != null) {
-      target.content += _charQueue.join();
-      _charQueue.clear();
-    }
     _streamingTimer?.cancel();
     _streamingTimer = null;
 
-    if (_activeToolName != null && target != null) {
-      if (target.type == DisplayMessageType.toolBlock && !target.isQuestion) {
+    final target = _streamTarget;
+    if (target != null) {
+      if (_activeToolName != null &&
+          target.type == DisplayMessageType.toolBlock &&
+          !target.isQuestion) {
+        target.finished = true;
+      } else if (target.type == DisplayMessageType.assistant) {
         target.finished = true;
       }
     }
@@ -1448,6 +1610,7 @@ class PaneState extends ChangeNotifier {
       DisplayMessage(
         type: isError ? DisplayMessageType.error : DisplayMessageType.system,
         content: text,
+        isError: isError,
       ),
     );
     notifyListeners();

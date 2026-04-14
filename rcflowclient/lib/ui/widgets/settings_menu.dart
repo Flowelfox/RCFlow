@@ -297,6 +297,38 @@ class _AndroidSettingsPage extends StatelessWidget {
   }
 }
 
+/// The scrollable body of the Android settings screen.
+///
+/// Exported so [AndroidShell] can embed it in its own [Scaffold] without
+/// duplicating the AppBar.  Identical content to [_AndroidSettingsPage.body].
+class AndroidSettingsBody extends StatelessWidget {
+  const AndroidSettingsBody({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+        left: 24,
+        right: 24,
+        top: 24,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _WorkersSection(onClose: () => Navigator.of(context).maybePop()),
+          _SectionDivider(),
+          _AppearanceSection(),
+          _SectionDivider(),
+          _NotificationsSection(),
+          _SectionDivider(),
+          _AboutSection(),
+        ],
+      ),
+    );
+  }
+}
+
 class _SectionDivider extends StatelessWidget {
   const _SectionDivider();
 

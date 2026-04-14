@@ -7,7 +7,7 @@ from sqlalchemy import select
 
 from src.api.deps import handle_ws_first_message_auth, verify_ws_api_key
 from src.core.attachment_store import AttachmentStore, ResolvedAttachment
-from src.models.db import LinearIssue as LinearIssueModel
+from src.database.models import LinearIssue as LinearIssueModel
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -342,6 +342,11 @@ async def ws_input_text(
             project_name: str | None = message.get("project_name") or None
             selected_worktree_path: str | None = message.get("selected_worktree_path") or None
             prompt_task_id: str | None = message.get("task_id") or None
+            # display_text is the clean user message without prepended agent tags.
+            # The client sends effectiveText (e.g. "#claude_code <msg>") as text
+            # for backend routing, but also sends display_text ("<msg>") for buffer
+            # storage and history display so agent-tag prefixes never appear in logs.
+            display_text: str | None = message.get("display_text") or None
 
             # Resolve optional attachments
             resolved_attachments: list[ResolvedAttachment] | None = None
@@ -385,6 +390,7 @@ async def ws_input_text(
                     project_name=project_name,
                     selected_worktree_path=selected_worktree_path,
                     task_id=prompt_task_id,
+                    display_text=display_text,
                 )
             )
             background_tasks.add(task)

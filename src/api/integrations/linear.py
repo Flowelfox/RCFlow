@@ -28,8 +28,8 @@ from pydantic import BaseModel
 from sqlalchemy import select
 
 from src.api.deps import verify_http_api_key
-from src.models.db import LinearIssue as LinearIssueModel
-from src.models.db import Task as TaskModel
+from src.database.models import LinearIssue as LinearIssueModel
+from src.database.models import Task as TaskModel
 from src.services.linear_service import LinearService, LinearServiceError
 
 if TYPE_CHECKING:

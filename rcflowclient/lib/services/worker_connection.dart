@@ -50,6 +50,11 @@ class WorkerConnection extends ChangeNotifier {
   List<SessionInfo> sessions = [];
   final Set<String> subscribedSessions = {};
 
+  /// Whether the server has more sessions beyond those currently loaded.
+  bool hasMoreSessions = false;
+
+  static const int _sessionPageSize = 30;
+
   /// Lazily-created terminal WebSocket service for this worker.
   TerminalService? _terminalService;
   TerminalService get terminalService {
@@ -140,7 +145,7 @@ class WorkerConnection extends ChangeNotifier {
       _status = WorkerConnectionStatus.connected;
       notifyListeners();
 
-      ws.listSessions();
+      ws.listSessions(offset: 0, limit: _sessionPageSize);
       ws.listTasks();
       ws.listLinearIssues();
       ws.requestArtifacts();
@@ -194,7 +199,18 @@ class WorkerConnection extends ChangeNotifier {
 
   void refreshSessions() {
     if (!isConnected) return;
-    ws.listSessions();
+    // Request at least as many sessions as currently loaded so that
+    // "load more" pages are preserved across refreshes.
+    final limit = sessions.length > _sessionPageSize
+        ? sessions.length
+        : _sessionPageSize;
+    ws.listSessions(offset: 0, limit: limit);
+  }
+
+  /// Load the next page of sessions. No-op if already at the end or disconnected.
+  void loadMoreSessions() {
+    if (!isConnected || !hasMoreSessions) return;
+    ws.listSessions(offset: sessions.length, limit: _sessionPageSize);
   }
 
   void subscribe(String sessionId) {
@@ -220,7 +236,9 @@ class WorkerConnection extends ChangeNotifier {
     if (type == 'session_list') {
       final list = msg['sessions'] as List<dynamic>?;
       if (list != null) {
-        _updateSessionList(list);
+        final offset = (msg['offset'] as num?)?.toInt() ?? 0;
+        final hasMore = msg['has_more'] as bool? ?? false;
+        _updateSessionList(list, offset: offset, hasMore: hasMore);
       }
       return;
     }
@@ -249,13 +267,17 @@ class WorkerConnection extends ChangeNotifier {
     onOutputMessage?.call(msg, config.id);
   }
 
-  void _updateSessionList(List<dynamic> list) {
+  void _updateSessionList(
+    List<dynamic> list, {
+    int offset = 0,
+    bool hasMore = false,
+  }) {
     // Build a lookup of existing sessions so we can preserve worktreeInfo when
     // the server omits or sends null for it (e.g. for archived sessions whose
     // metadata hasn't been re-hydrated yet).
     final existingById = {for (final s in sessions) s.sessionId: s};
 
-    sessions = list.map((s) {
+    final incoming = list.map((s) {
       final json = s as Map<String, dynamic>;
       final parsed = SessionInfo.fromJson(json, workerId: config.id);
       // If the server didn't include worktree context, fall back to whatever
@@ -268,6 +290,19 @@ class WorkerConnection extends ChangeNotifier {
       }
       return parsed;
     }).toList();
+
+    if (offset == 0) {
+      // Full refresh — replace the list.
+      sessions = incoming;
+    } else {
+      // Subsequent page — append, avoiding duplicates from real-time updates.
+      final existingIds = {for (final s in sessions) s.sessionId};
+      sessions = [
+        ...sessions,
+        ...incoming.where((s) => !existingIds.contains(s.sessionId)),
+      ];
+    }
+    hasMoreSessions = hasMore;
     _sortSessions();
     _cacheSessions();
     onSessionsChanged?.call();
@@ -582,7 +617,7 @@ class WorkerConnection extends ChangeNotifier {
         _retryCount = 0;
         notifyListeners();
 
-        ws.listSessions();
+        ws.listSessions(offset: 0, limit: _sessionPageSize);
         ws.listTasks();
         ws.listLinearIssues();
         _fetchServerInfo();

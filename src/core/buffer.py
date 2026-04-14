@@ -32,6 +32,7 @@ class MessageType(StrEnum):
     SESSION_RESTORED = "session_restored"
     TODO_UPDATE = "todo_update"
     THINKING = "thinking"
+    AGENT_LOG = "agent_log"
     SESSION_UPDATE = "session_update"  # For broadcasting session metadata updates
     SUBPROCESS_STATUS = "subprocess_status"  # Ephemeral — not archived to DB
 

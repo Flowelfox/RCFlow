@@ -14,6 +14,6 @@ def run_tray() -> None:
     This is a thin wrapper around ``src.gui.run_gui()`` for backwards
     compatibility. New code should use ``rcflow gui`` directly.
     """
-    from src.gui import run_gui  # noqa: PLC0415
+    from src.gui.windows import run_gui  # noqa: PLC0415
 
     run_gui()

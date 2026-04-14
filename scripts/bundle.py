@@ -207,14 +207,14 @@ def run_pyinstaller(target_platform: str, *, windowed: bool = False) -> Path:
         "src.core.permissions",
         "src.core.prompt_router",
         "src.core.session",
-        "src.db",
-        "src.db.engine",
+        "src.database",
+        "src.database.engine",
         "src.executors",
         "src.executors.claude_code",
         "src.executors.codex",
         "src.logs",
         "src.models",
-        "src.models.db",
+        "src.database.models",
         "src.prompts",
         "src.prompts.builder",
         "src.services",
@@ -291,7 +291,7 @@ def run_pyinstaller(target_platform: str, *, windowed: bool = False) -> Path:
     if target_platform == "windows":
         if windowed:
             cmd.append("--windowed")
-        icon_path = PROJECT_ROOT / "assets" / "tray_icon.ico"
+        icon_path = PROJECT_ROOT / "src" / "gui" / "assets" / "tray_icon.ico"
         if icon_path.exists():
             cmd.extend(["--icon", str(icon_path)])
 
@@ -299,7 +299,7 @@ def run_pyinstaller(target_platform: str, *, windowed: bool = False) -> Path:
     if target_platform == "macos":
         cmd.append("--windowed")
         cmd.extend(["--osx-bundle-identifier", "com.rcflow.worker"])
-        icns_path = PROJECT_ROOT / "assets" / "tray_icon.icns"
+        icns_path = PROJECT_ROOT / "src" / "gui" / "assets" / "tray_icon.icns"
         if icns_path.exists():
             # --icon copies tray_icon.icns to Contents/Resources/ automatically;
             # do NOT also add it via --add-data or PyInstaller will try to create
@@ -413,7 +413,7 @@ def assemble_bundle(pyinstaller_dir: Path, target_platform: str, version: str, a
 
     # 10. Copy tray icon (Windows)
     if target_platform == "windows":
-        tray_icon_src = PROJECT_ROOT / "assets" / "tray_icon.ico"
+        tray_icon_src = PROJECT_ROOT / "src" / "gui" / "assets" / "tray_icon.ico"
         if tray_icon_src.exists():
             shutil.copy2(tray_icon_src, bundle_dir / "tray_icon.ico")
             print("Copied tray_icon.ico")
@@ -954,7 +954,7 @@ def assemble_macos_app(pyinstaller_app: Path, version: str, arch: str) -> Path:
     contents_resources.mkdir(parents=True, exist_ok=True)
 
     # 1. Copy tray_icon.icns to Contents/Resources/ (standard .app location)
-    icns_src = PROJECT_ROOT / "assets" / "tray_icon.icns"
+    icns_src = PROJECT_ROOT / "src" / "gui" / "assets" / "tray_icon.icns"
     if icns_src.exists():
         shutil.copy2(icns_src, contents_resources / "tray_icon.icns")
         print("Copied tray_icon.icns → Contents/Resources/")
@@ -962,7 +962,7 @@ def assemble_macos_app(pyinstaller_app: Path, version: str, arch: str) -> Path:
     # 2. Copy tool definitions, migrations, alembic.ini next to the executable
     for src_rel, dest_name in (
         ("tools", "tools"),
-        ("src/db/migrations", "migrations"),
+        ("src/database/migrations", "migrations"),
     ):
         src = PROJECT_ROOT / src_rel
         if src.exists():
@@ -1158,7 +1158,7 @@ def build_macos_dmg(app_path: Path, version: str, arch: str) -> Path | None:
 
     # ── Generate background image ────────────────────────────────────
     bg_png = PROJECT_ROOT / "build" / "dmg_background.png"
-    icns_src = PROJECT_ROOT / "assets" / "tray_icon.icns"
+    icns_src = PROJECT_ROOT / "src" / "gui" / "assets" / "tray_icon.icns"
     _make_dmg_background(icns_src, bg_png)
 
     # ── Create a blank read-write DMG ────────────────────────────────

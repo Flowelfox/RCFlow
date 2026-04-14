@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import difflib
 import json
 import logging
 import os
@@ -43,6 +44,75 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _MAX_TOOL_OUTPUT_CHARS = 100_000
+_MAX_SNAPSHOT_BYTES = 1_000_000  # 1 MB limit for pre/post file snapshots
+_MAX_DIFF_LINES = 200
+_TOOL_OUTPUT_CHUNK_SIZE = 8_192
+
+
+async def _read_file_snapshot(path: Path) -> str | None:
+    """Read a file for pre/post diff comparison.
+
+    Returns:
+    - ``""`` if the file does not exist.
+    - ``None`` if the file is binary or exceeds *_MAX_SNAPSHOT_BYTES*.
+    - The file contents as a string otherwise.
+    """
+    if not path.exists():
+        return ""
+    try:
+        if path.stat().st_size > _MAX_SNAPSHOT_BYTES:
+            return None
+        return path.read_text(encoding="utf-8")
+    except (UnicodeDecodeError, OSError):
+        return None
+
+
+def _compute_diff(before: str, after: str, filename: str) -> str | None:
+    """Compute a unified diff between two file snapshots.
+
+    Returns ``None`` when the contents are identical. Otherwise returns a
+    unified-diff string truncated to at most *_MAX_DIFF_LINES* payload lines
+    (plus one truncation notice line when the diff exceeds the limit).
+    """
+    if before == after:
+        return None
+    diff_lines = list(
+        difflib.unified_diff(
+            before.splitlines(keepends=False),
+            after.splitlines(keepends=False),
+            fromfile=filename,
+            tofile=filename,
+            lineterm="",
+        )
+    )
+    if not diff_lines:
+        return None
+    if len(diff_lines) > _MAX_DIFF_LINES:
+        total = len(diff_lines)
+        diff_lines = [*diff_lines[:_MAX_DIFF_LINES], f"... diff truncated ({total} total lines)"]
+    return "\n".join(diff_lines)
+
+
+def _split_into_chunks(content: str, chunk_size: int) -> list[str]:
+    """Split *content* into chunks of at most *chunk_size* characters.
+
+    Splits preferentially at newline boundaries; falls back to a hard split
+    when no newline exists within the window.
+    """
+    if len(content) <= chunk_size:
+        return [content]
+    chunks: list[str] = []
+    remaining = content
+    while len(remaining) > chunk_size:
+        split_pos = remaining.rfind("\n", 0, chunk_size)
+        if split_pos <= 0:
+            split_pos = chunk_size
+        else:
+            split_pos += 1  # include the newline in the preceding chunk
+        chunks.append(remaining[:split_pos])
+        remaining = remaining[split_pos:]
+    chunks.append(remaining)
+    return chunks
 
 
 def _truncate_tool_output(content: str) -> str:
@@ -267,6 +337,12 @@ class ClaudeCodeAgentMixin:
         in ``assistant`` events are intercepted for permission approval before
         execution proceeds.
         """
+        # Stack of pre-snapshots for Edit/Write diff computation.
+        # Each tool_use pushes an entry (tuple or None sentinel);
+        # the matching tool_result pops it.
+        if not hasattr(session, "_pending_snapshots"):
+            session._pending_snapshots = []  # type: ignore[attr-defined]
+
         async for chunk in stream:
             line = chunk.content.strip()
             if not line:
@@ -403,6 +479,18 @@ class ClaudeCodeAgentMixin:
                                     "tool_input": tool_input,
                                 },
                             )
+                            # Snapshot file before Edit/Write so we can compute
+                            # a diff once the tool_result arrives.
+                            if tool_name in ("Edit", "Write") and isinstance(tool_input.get("file_path"), str):
+                                fp = Path(tool_input["file_path"])
+                                if not fp.is_absolute() and session.subprocess_working_directory:
+                                    fp = Path(session.subprocess_working_directory) / fp
+                                snapshot = await _read_file_snapshot(fp)
+                                session._pending_snapshots.append((str(fp), snapshot))  # type: ignore[attr-defined]
+                            else:
+                                # Non-file tool — push sentinel so stack stays aligned
+                                # with 1:1 tool_use/tool_result pairing.
+                                session._pending_snapshots.append(None)  # type: ignore[attr-defined]
                             # Update subprocess current_tool tracking
                             session.subprocess_current_tool = tool_name
                             if session.subprocess_started_at is not None:
@@ -438,16 +526,53 @@ class ClaudeCodeAgentMixin:
                     content = str(raw_content)
 
                 content = _truncate_tool_output(content)
+
+                # Compute unified diff for Edit/Write tools if we have a
+                # pre-snapshot of the file.
+                diff: str | None = None
+                snapshots: list = getattr(session, "_pending_snapshots", [])
+                if snapshots:
+                    pending = snapshots.pop(0)
+                    if pending is not None:
+                        filepath_str, before_text = pending
+                        if before_text is not None:
+                            after_text = await _read_file_snapshot(Path(filepath_str))
+                            if after_text is not None:
+                                diff = _compute_diff(before_text, after_text, filepath_str)
+
                 if content:
                     is_error = event.get("is_error", False)
-                    session.buffer.push_text(
-                        MessageType.TOOL_OUTPUT,
-                        {
+
+                    # Split large outputs into multiple chunks
+                    chunks = _split_into_chunks(content, _TOOL_OUTPUT_CHUNK_SIZE)
+                    if len(chunks) == 1:
+                        tool_output_data: dict[str, Any] = {
                             "session_id": session.id,
-                            "content": content,
+                            "content": chunks[0],
                             "is_error": is_error,
-                        },
-                    )
+                        }
+                        if diff:
+                            tool_output_data["diff"] = diff
+                        session.buffer.push_text(
+                            MessageType.TOOL_OUTPUT,
+                            tool_output_data,
+                        )
+                    else:
+                        for i, chunk in enumerate(chunks):
+                            chunk_data: dict[str, Any] = {
+                                "session_id": session.id,
+                                "content": chunk,
+                                "is_error": is_error,
+                                "chunk_index": i,
+                                "total_chunks": len(chunks),
+                            }
+                            # Attach diff to the last chunk only
+                            if diff and i == len(chunks) - 1:
+                                chunk_data["diff"] = diff
+                            session.buffer.push_text(
+                                MessageType.TOOL_OUTPUT,
+                                chunk_data,
+                            )
                     # Fire artifact scan for this tool result
                     self._fire_text_artifact_scan(session, [content])  # ty:ignore[unresolved-attribute]
 

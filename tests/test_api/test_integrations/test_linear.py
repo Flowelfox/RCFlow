@@ -23,8 +23,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from src.config import Settings
-from src.models.db import LinearIssue as LinearIssueModel
-from src.models.db import Task as TaskModel
+from src.database.models import LinearIssue as LinearIssueModel
+from src.database.models import Task as TaskModel
 from src.services.linear_service import LinearServiceError
 
 if TYPE_CHECKING:

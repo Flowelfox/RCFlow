@@ -50,12 +50,12 @@ def _make_gui(tmp_path: Path) -> RCFlowGUI:  # type: ignore[name-defined]  # noq
         # Keep the real config module but redirect settings.json to tmp_path
         patch("src.paths.get_install_dir", return_value=tmp_path),
         # Prevent auto-start side effects
-        patch("src.gui.RCFlowGUI._setup_tray", return_value=False),
-        patch("src.gui.RCFlowGUI._start_server"),
-        patch("src.gui.RCFlowGUI._set_window_icon"),
+        patch("src.gui.windows.RCFlowGUI._setup_tray", return_value=False),
+        patch("src.gui.windows.RCFlowGUI._start_server"),
+        patch("src.gui.windows.RCFlowGUI._set_window_icon"),
     ):
-        from src.gui import RCFlowGUI  # noqa: PLC0415
-        from src.gui_core import LogBuffer, ServerManager  # noqa: PLC0415
+        from src.gui.core import LogBuffer, ServerManager  # noqa: PLC0415
+        from src.gui.windows import RCFlowGUI  # noqa: PLC0415
 
         gui = RCFlowGUI.__new__(RCFlowGUI)
         # Manually initialise only the attributes touched by _start_server
@@ -108,9 +108,9 @@ def test_start_server_persists_host_and_port(tmp_path: Path) -> None:
     # Patch socket.socket so the port-availability check always passes,
     # and subprocess so no real server is spawned.
     with (
-        patch("src.gui_core.socket.socket") as mock_sock,
-        patch("src.gui_core.subprocess.Popen") as mock_popen,
-        patch("src.gui_core.subprocess.run") as mock_run,
+        patch("src.gui.core.socket.socket") as mock_sock,
+        patch("src.gui.core.subprocess.Popen") as mock_popen,
+        patch("src.gui.core.subprocess.run") as mock_run,
         patch("src.paths.get_install_dir", return_value=tmp_path),
         patch("src.config._get_settings_path", return_value=settings_path),
     ):
@@ -121,7 +121,7 @@ def test_start_server_persists_host_and_port(tmp_path: Path) -> None:
         mock_run.return_value = MagicMock(returncode=0, stderr="")
 
         # Temporarily restore the real _start_server (it was stubbed during __new__)
-        import src.gui as gui_mod  # noqa: PLC0415
+        import src.gui.windows as gui_mod  # noqa: PLC0415
 
         gui._start_server = gui_mod.RCFlowGUI._start_server.__get__(gui)
         gui._start_server()
@@ -140,9 +140,9 @@ def test_start_server_persists_default_host_and_port(tmp_path: Path) -> None:
     # Leave defaults: 0.0.0.0 / 53890
 
     with (
-        patch("src.gui_core.socket.socket") as mock_sock,
-        patch("src.gui_core.subprocess.Popen") as mock_popen,
-        patch("src.gui_core.subprocess.run") as mock_run,
+        patch("src.gui.core.socket.socket") as mock_sock,
+        patch("src.gui.core.subprocess.Popen") as mock_popen,
+        patch("src.gui.core.subprocess.run") as mock_run,
         patch("src.config._get_settings_path", return_value=settings_path),
     ):
         mock_sock.return_value.bind = MagicMock()
@@ -151,7 +151,7 @@ def test_start_server_persists_default_host_and_port(tmp_path: Path) -> None:
         mock_popen.return_value.poll.return_value = None
         mock_run.return_value = MagicMock(returncode=0, stderr="")
 
-        import src.gui as gui_mod  # noqa: PLC0415
+        import src.gui.windows as gui_mod  # noqa: PLC0415
 
         gui._start_server = gui_mod.RCFlowGUI._start_server.__get__(gui)
         gui._start_server()

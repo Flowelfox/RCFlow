@@ -140,6 +140,7 @@ class WebSocketService {
     String? projectName,
     String? selectedWorktreePath,
     String? taskId,
+    String? displayText,
   }) {
     if (_inputChannel == null) return;
     final msg = <String, dynamic>{
@@ -151,6 +152,7 @@ class WebSocketService {
       'project_name': ?projectName,
       'selected_worktree_path': ?selectedWorktreePath,
       'task_id': ?taskId,
+      'display_text': ?displayText,
     };
     _inputChannel!.sink.add(jsonEncode(msg));
   }
@@ -293,9 +295,11 @@ class WebSocketService {
     _inputChannel!.sink.add(jsonEncode(msg));
   }
 
-  void listSessions() {
+  void listSessions({int offset = 0, int limit = 30}) {
     if (_outputChannel == null) return;
-    _outputChannel!.sink.add(jsonEncode({'type': 'list_sessions'}));
+    _outputChannel!.sink.add(
+      jsonEncode({'type': 'list_sessions', 'offset': offset, 'limit': limit}),
+    );
   }
 
   void listTasks() {

@@ -1,3 +1,5 @@
+import 'badge_spec.dart';
+
 /// Worktree context attached to a session after a worktree tool call succeeds.
 class WorktreeInfo {
   final String repoPath;
@@ -72,6 +74,11 @@ class SessionInfo {
   /// Null means "use default createdAt ordering".
   final int? sortOrder;
 
+  /// Session badge list from the server's unified badge system.
+  /// Empty for sessions from servers that pre-date the badge system (< 0.39.0);
+  /// those sessions use [LegacyBadgeAdapter] at the WorkerConnection layer.
+  final List<BadgeSpec> badges;
+
   SessionInfo({
     required this.sessionId,
     required this.sessionType,
@@ -93,6 +100,7 @@ class SessionInfo {
     this.mainProjectPath,
     this.agentType,
     this.sortOrder,
+    this.badges = const [],
   });
 
   bool get isProcessing {
@@ -136,6 +144,7 @@ class SessionInfo {
       mainProjectPath: json['main_project_path'] as String?,
       agentType: json['agent_type'] as String?,
       sortOrder: (json['sort_order'] as num?)?.toInt(),
+      badges: BadgeSpec.listFromJson(json['badges'] as List<dynamic>?),
     );
   }
 

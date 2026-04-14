@@ -15,8 +15,8 @@ from typing import TYPE_CHECKING
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from src.models.db import Session as SessionModel
-from src.models.db import SessionTurn, TelemetryMinutely, ToolCall
+from src.database.models import Session as SessionModel
+from src.database.models import SessionTurn, TelemetryMinutely, ToolCall
 
 if TYPE_CHECKING:
     from src.core.llm import TurnUsage

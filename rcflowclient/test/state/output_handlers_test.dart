@@ -82,6 +82,21 @@ class _FakePaneHost implements PaneHost {
 
   @override
   void clearDraft(String key) {}
+
+  @override
+  Map<String, dynamic>? getDraftPlucks(String key) => null;
+
+  @override
+  void saveDraftPlucks(String key, Map<String, dynamic> plucks) {}
+
+  @override
+  void clearDraftPlucks(String key) {}
+
+  @override
+  bool isWorkerCavemanActive(String? workerId) => false;
+
+  @override
+  SessionInfo? sessionById(String sessionId) => null;
 }
 
 void main() {
@@ -504,6 +519,124 @@ void main() {
       );
 
       expect(messages.first.content, '');
+    });
+  });
+
+  group('handleAgentSessionStart', () {
+    late PaneState pane;
+
+    setUp(() {
+      pane = PaneState(paneId: 'test', host: _FakePaneHost());
+    });
+
+    test('stores agent_type as toolName for system name display', () {
+      handleAgentSessionStart({
+        'session_id': 'sess1',
+        'agent_type': 'claude_code',
+        'display_name': 'Claude Code',
+        'prompt': 'do something',
+      }, pane);
+
+      final msg = pane.messages.last;
+      expect(msg.type, DisplayMessageType.agentSessionStart);
+      expect(msg.toolName, 'claude_code');
+      expect(msg.displayName, 'Claude Code');
+      expect(msg.content, 'do something');
+    });
+
+    test('toolName is null when agent_type missing', () {
+      handleAgentSessionStart({
+        'session_id': 'sess1',
+        'display_name': 'Claude Code',
+        'prompt': '',
+      }, pane);
+
+      final msg = pane.messages.last;
+      expect(msg.toolName, isNull);
+      expect(msg.displayName, 'Claude Code');
+    });
+  });
+
+  group('handleSessionEndAsk', () {
+    late PaneState pane;
+
+    setUp(() {
+      pane = PaneState(paneId: 'test', host: _FakePaneHost());
+    });
+
+    test('adds sessionEndAsk message', () {
+      handleSessionEndAsk({'session_id': 'sess1'}, pane);
+      expect(pane.messages.length, 1);
+      expect(pane.messages.last.type, DisplayMessageType.sessionEndAsk);
+      expect(pane.messages.last.accepted, isNull);
+    });
+
+    test('deduplicates pending sessionEndAsk', () {
+      // First end-ask
+      handleSessionEndAsk({'session_id': 'sess1'}, pane);
+      expect(pane.messages.length, 1);
+
+      // Duplicate end-ask should be ignored (first is still unresolved)
+      handleSessionEndAsk({'session_id': 'sess1'}, pane);
+      expect(pane.messages.length, 1, reason: 'duplicate pending end-ask must be suppressed');
+    });
+
+    test('allows new sessionEndAsk after previous resolved', () {
+      handleSessionEndAsk({'session_id': 'sess1'}, pane);
+      pane.messages.last.accepted = true; // Resolve the first one
+
+      handleSessionEndAsk({'session_id': 'sess1'}, pane);
+      expect(pane.messages.length, 2,
+          reason: 'new end-ask allowed after previous was resolved');
+    });
+  });
+
+  group('handleAgentGroupStart — display name propagation', () {
+    late PaneState pane;
+
+    setUp(() {
+      pane = PaneState(paneId: 'test', host: _FakePaneHost());
+    });
+
+    test('agent group stores display_name from server message', () {
+      handleAgentGroupStart({
+        'tool_name': 'claude_code',
+        'display_name': 'ClaudeCode',
+        'tool_input': null,
+      }, pane);
+
+      // Trigger tool_start so _ensureAgentToolGroup creates the message
+      handleToolStart({
+        'tool_name': 'Read',
+        'tool_input': {'path': '/tmp/test'},
+        'session_id': 's1',
+      }, pane);
+
+      expect(pane.messages.length, 1);
+      final group = pane.messages.first;
+      expect(group.type, DisplayMessageType.agentGroup);
+      expect(group.displayName, 'ClaudeCode',
+          reason: 'agent group must carry display_name from server');
+      expect(group.toolName, 'claude_code',
+          reason: 'agent group must carry raw tool_name for identification');
+    });
+
+    test('agent group falls back to tool_name when display_name absent', () {
+      handleAgentGroupStart({
+        'tool_name': 'claude_code',
+        'tool_input': null,
+      }, pane);
+
+      handleToolStart({
+        'tool_name': 'Read',
+        'tool_input': {'path': '/tmp/test'},
+        'session_id': 's1',
+      }, pane);
+
+      expect(pane.messages.length, 1);
+      final group = pane.messages.first;
+      expect(group.displayName, isNull);
+      expect(group.toolName, 'claude_code');
     });
   });
 }

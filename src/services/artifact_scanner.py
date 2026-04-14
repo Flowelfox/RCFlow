@@ -12,8 +12,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from src.config import Settings
-from src.models.db import Artifact, SessionMessage
-from src.models.db import Session as SessionModel
+from src.database.models import Artifact, SessionMessage
+from src.database.models import Session as SessionModel
 
 logger = logging.getLogger(__name__)
 

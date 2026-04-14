@@ -12,7 +12,7 @@ from sqlalchemy import select
 
 from src.api.deps import verify_http_api_key
 from src.config import Settings, update_settings_file
-from src.models.db import Artifact as ArtifactModel
+from src.database.models import Artifact as ArtifactModel
 
 if TYPE_CHECKING:
     from src.core.session import SessionManager

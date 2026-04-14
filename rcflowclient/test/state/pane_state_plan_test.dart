@@ -91,6 +91,21 @@ class _StubPaneHost implements PaneHost {
 
   @override
   void clearDraft(String key) {}
+
+  @override
+  Map<String, dynamic>? getDraftPlucks(String key) => null;
+
+  @override
+  void saveDraftPlucks(String key, Map<String, dynamic> plucks) {}
+
+  @override
+  void clearDraftPlucks(String key) {}
+
+  @override
+  bool isWorkerCavemanActive(String? workerId) => false;
+
+  @override
+  SessionInfo? sessionById(String sessionId) => null;
 }
 
 // ---------------------------------------------------------------------------

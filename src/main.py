@@ -15,7 +15,7 @@ from src.core.attachment_store import AttachmentStore
 from src.core.llm import LLMClient
 from src.core.prompt_router import PromptRouter
 from src.core.session import SessionManager
-from src.db.engine import check_connection, dispose_engine, get_session_factory, init_engine
+from src.database.engine import check_connection, dispose_engine, get_session_factory, init_engine
 from src.logs import setup_logging
 from src.services.artifact_scanner import ArtifactScanner
 from src.services.telemetry_service import TelemetryService
@@ -87,7 +87,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     from sqlalchemy import select as _select  # noqa: PLC0415
 
-    from src.models.db import Artifact as _ArtifactModel  # noqa: PLC0415
+    from src.database.models import Artifact as _ArtifactModel  # noqa: PLC0415
 
     async with db_session_factory() as db:
         result = await db.execute(

@@ -25,8 +25,8 @@ from sqlalchemy import func, select
 
 from src.core.buffer import MessageType
 from src.core.session import ActiveSession, ActivityState
-from src.models.db import Artifact as ArtifactModel
-from src.models.db import Task as TaskModel
+from src.database.models import Artifact as ArtifactModel
+from src.database.models import Task as TaskModel
 
 if TYPE_CHECKING:
     from src.tools.loader import ToolDefinition

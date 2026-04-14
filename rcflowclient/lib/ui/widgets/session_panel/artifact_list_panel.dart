@@ -495,6 +495,62 @@ class _ArtifactListPanelState extends State<ArtifactListPanel> {
   }
 }
 
+/// Pure helper: builds the ordered flat list of visible [ArtifactInfo] items
+/// given the current expansion/grouping state. Used by [ArtifactListPanel] for
+/// Shift+click range selection.
+///
+/// When [hasMultipleWorkers] is false the [expandedWorkers] set is ignored and
+/// all workers are treated as expanded.
+List<ArtifactInfo> computeFlatVisibleArtifactList({
+  required List<ArtifactInfo> filteredArtifacts,
+  required Map<String, Map<String?, List<ArtifactInfo>>> grouped,
+  required List<String> workerOrder,
+  required bool hasMultipleWorkers,
+  required Set<String> expandedWorkers,
+  required bool groupByProject,
+  required Set<String> expandedProjects,
+  required String Function(String workerId, String? projectName) projectKey,
+}) {
+  if (filteredArtifacts.isEmpty) return const [];
+
+  final result = <ArtifactInfo>[];
+
+  // Follow worker order so the flat list matches visual render order.
+  for (final workerId in workerOrder) {
+    final projectMap = grouped[workerId];
+    if (projectMap == null) continue;
+
+    if (hasMultipleWorkers && !expandedWorkers.contains(workerId)) continue;
+
+    if (groupByProject) {
+      // Alphabetical project names, null ("Other") last — mirrors _buildGroupedList.
+      final projectNames = projectMap.keys.toList()
+        ..sort((a, b) {
+          if (a == null && b == null) return 0;
+          if (a == null) return 1;
+          if (b == null) return -1;
+          return a.toLowerCase().compareTo(b.toLowerCase());
+        });
+
+      for (final pName in projectNames) {
+        final pKey = projectKey(workerId, pName);
+        if (!expandedProjects.contains(pKey)) continue;
+        result.addAll(projectMap[pName]!);
+      }
+    } else {
+      // Flat mode: all artifacts sorted by discoveredAt descending.
+      final all = projectMap.values.expand((list) => list).toList()
+        ..sort(
+          (a, b) => (b.discoveredAt ?? DateTime(2000))
+              .compareTo(a.discoveredAt ?? DateTime(2000)),
+        );
+      result.addAll(all);
+    }
+  }
+
+  return result;
+}
+
 /// Collapsible header for a worker group.
 class _WorkerHeader extends StatelessWidget {
   final String workerName;

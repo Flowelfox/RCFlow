@@ -8,11 +8,11 @@ from sqlalchemy import select
 
 from src.api.deps import handle_ws_first_message_auth, verify_ws_api_key
 from src.core.prompt_router import PromptRouter
-from src.models.db import Artifact as ArtifactModel
-from src.models.db import LinearIssue as LinearIssueModel
-from src.models.db import Session as SessionModel
-from src.models.db import Task as TaskModel
-from src.models.db import TaskSession as TaskSessionModel
+from src.database.models import Artifact as ArtifactModel
+from src.database.models import LinearIssue as LinearIssueModel
+from src.database.models import Session as SessionModel
+from src.database.models import Task as TaskModel
+from src.database.models import TaskSession as TaskSessionModel
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

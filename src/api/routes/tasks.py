@@ -11,9 +11,9 @@ from pydantic import BaseModel
 from sqlalchemy import select
 
 from src.api.deps import verify_http_api_key
-from src.models.db import Session as SessionModel
-from src.models.db import Task as TaskModel
-from src.models.db import TaskSession as TaskSessionModel
+from src.database.models import Session as SessionModel
+from src.database.models import Task as TaskModel
+from src.database.models import TaskSession as TaskSessionModel
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession

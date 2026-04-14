@@ -1,0 +1,76 @@
+name: Crash Report
+description: Report a hard crash, panic, segfault, or unrecoverable error
+labels: ["bug", "crash"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template for hard crashes — process exits, panics, segfaults, or unhandled exceptions that kill the app or backend.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What crashed?
+      description: Describe what you were doing when the crash occurred.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: textarea
+    id: traceback
+    attributes:
+      label: Stack Trace / Error Output
+      description: Full traceback, panic message, or crash log. Do not truncate.
+      render: shell
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: RCFlow Version
+      placeholder: "e.g. 0.38.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      multiple: true
+      options:
+        - Linux
+        - macOS
+        - Windows
+        - Android
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Which part crashed?
+      options:
+        - Backend (Python / FastAPI)
+        - Client (Flutter)
+        - Both
+        - Unknown
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional Context
+      description: Active agents, session state, config flags, or anything else that might be relevant.

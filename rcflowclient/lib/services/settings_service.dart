@@ -62,6 +62,7 @@ class SettingsService {
       'rcflow_artifacts_expanded_projects';
 
   // Auto-update keys
+  static const _autoUpdateEnabledKey = 'rcflow_auto_update_enabled';
   static const _currentVersionKey = 'rcflow_current_version';
   static const _lastUpdateCheckKey = 'rcflow_last_update_check';
   static const _cachedLatestVersionKey = 'rcflow_cached_latest_version';
@@ -80,6 +81,13 @@ class SettingsService {
   }
 
   // --- Auto-update ---
+
+  /// Whether the client should automatically check for updates on startup.
+  /// Defaults to true when not explicitly set.
+  bool get autoUpdateEnabled =>
+      _prefs.getBool(_autoUpdateEnabledKey) ?? true;
+  set autoUpdateEnabled(bool value) =>
+      _prefs.setBool(_autoUpdateEnabledKey, value);
 
   /// The version string currently installed (e.g. "1.38.0"), persisted at
   /// startup before [AppState] is created. Null until first launch after this
@@ -417,6 +425,39 @@ class SettingsService {
   void clearDraft(String key) {
     _prefs.remove('$_draftPrefix$key');
     _prefs.remove('$_draftPrefix${key}_ts');
+  }
+
+  // --- Per-draft pluck selections ---
+  //
+  // Stores pluck chip state (agent, project, worktree) alongside each draft so
+  // that the input area can be fully restored when the user returns to a pane.
+  //
+  // Key scheme mirrors the draft: real session → session ID, new-session pane
+  // → "new_{workerId}".
+
+  static const _draftPlucksPrefix = 'rcflow_draft_plucks_';
+
+  /// Read persisted pluck selections for [key].
+  ///
+  /// Returns null when nothing has been saved.
+  Map<String, dynamic>? getDraftPlucks(String key) {
+    final raw = _prefs.getString('$_draftPlucksPrefix$key');
+    if (raw == null || raw.isEmpty) return null;
+    try {
+      return jsonDecode(raw) as Map<String, dynamic>;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Persist [plucks] for [key]. [plucks] should contain only JSON-safe values.
+  void saveDraftPlucks(String key, Map<String, dynamic> plucks) {
+    _prefs.setString('$_draftPlucksPrefix$key', jsonEncode(plucks));
+  }
+
+  /// Remove the pluck selections for [key].
+  void clearDraftPlucks(String key) {
+    _prefs.remove('$_draftPlucksPrefix$key');
   }
 
   // --- Helpers for list persistence (avoids setStringList/getStringList

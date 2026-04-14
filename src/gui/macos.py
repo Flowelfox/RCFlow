@@ -28,8 +28,8 @@ from pathlib import Path
 
 import customtkinter as ctk  # ty:ignore[unresolved-import]
 
-from src import theme
-from src.gui_core import (
+from src.gui import theme
+from src.gui.core import (
     MAX_LOG_LINES,
     POLL_MS,
     LogBuffer,
@@ -578,7 +578,7 @@ class RCFlowMacOSGUI:
         if is_frozen():
             # PyInstaller --icon places the .icns at Contents/Resources/
             return Path(sys.executable).resolve().parent.parent / "Resources" / "tray_icon.icns"
-        return Path(__file__).resolve().parent.parent / "assets" / "tray_icon.icns"
+        return Path(__file__).resolve().parent / "assets" / "tray_icon.icns"
 
     def _update_tray_status(self) -> None:
         running = self._server.is_running()

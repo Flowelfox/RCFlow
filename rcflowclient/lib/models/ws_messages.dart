@@ -49,6 +49,10 @@ class DisplayMessage {
   /// May also include ``size`` (int) and ``attachment_id`` (String).
   List<Map<String, dynamic>>? attachments;
 
+  /// Unified diff string attached to a toolBlock message (e.g. Write/Edit tool).
+  /// Null when no diff was included in the server message.
+  String? fileDiff;
+
   DisplayMessage({
     required this.type,
     this.content = '',
@@ -63,6 +67,7 @@ class DisplayMessage {
     this.children,
     this.pendingLocalEcho = false,
     this.attachments,
+    this.fileDiff,
   });
 
   bool get isQuestion => toolName == 'AskUserQuestion';

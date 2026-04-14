@@ -22,8 +22,8 @@ from typing import Protocol
 
 import customtkinter as ctk  # ty:ignore[unresolved-import]
 
-from src import theme
-from src.gui_core import (
+from src.gui import theme
+from src.gui.core import (
     MAX_LOG_LINES,
     POLL_MS,
     LogBuffer,
@@ -71,7 +71,7 @@ class RCFlowGUI:
         icon_path = (
             get_install_dir() / "tray_icon.ico"
             if is_frozen()
-            else Path(__file__).resolve().parent.parent / "assets" / "tray_icon.ico"
+            else Path(__file__).resolve().parent / "assets" / "tray_icon.ico"
         )
         if icon_path.exists():
             with contextlib.suppress(tk.TclError):
@@ -421,7 +421,7 @@ class RCFlowGUI:
         icon_path = (
             get_install_dir() / "tray_icon.ico"
             if is_frozen()
-            else Path(__file__).resolve().parent.parent / "assets" / "tray_icon.ico"
+            else Path(__file__).resolve().parent / "assets" / "tray_icon.ico"
         )
         if icon_path.exists():
             return Image.open(str(icon_path))  # ty:ignore[unresolved-attribute]
