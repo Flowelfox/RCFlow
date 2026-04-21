@@ -25,6 +25,7 @@ jobs:
   backend:
     name: Backend (lint / typecheck / test)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - uses: actions/checkout@v5
@@ -87,6 +88,7 @@ jobs:
   flutter:
     name: Flutter client (analyze / test)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - uses: actions/checkout@v5

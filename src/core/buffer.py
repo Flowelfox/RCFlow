@@ -57,6 +57,7 @@ class SessionBuffer:
         self._text_messages: deque[BufferedMessage] = deque(maxlen=_MAX_BUFFER_MESSAGES)
         self._text_sequence: int = 0
         self._text_subscribers: dict[str, asyncio.Queue[BufferedMessage | None]] = {}
+        self._closed: bool = False
 
     @property
     def text_history(self) -> list[BufferedMessage]:
@@ -97,7 +98,12 @@ class SessionBuffer:
         for msg in self._text_messages:
             queue.put_nowait(msg)
 
-        self._text_subscribers[subscriber_id] = queue
+        if self._closed:
+            # Session already ended — put sentinel so stream_session exits cleanly
+            # instead of blocking on queue.get() forever.
+            queue.put_nowait(None)
+        else:
+            self._text_subscribers[subscriber_id] = queue
         return queue
 
     def unsubscribe_text(self, subscriber_id: str) -> None:
@@ -107,6 +113,7 @@ class SessionBuffer:
 
     def close(self) -> None:
         """Signal all subscribers that the session is done."""
+        self._closed = True
         for queue in self._text_subscribers.values():
             queue.put_nowait(None)
         self._text_subscribers.clear()

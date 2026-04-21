@@ -63,6 +63,7 @@ packages = ["src"]
 testpaths = ["tests"]
 asyncio_mode = "auto"
 pythonpath = ["."]
+timeout = 60
 
 [tool.coverage.run]
 source = ["src"]
@@ -107,4 +108,5 @@ dev = [
     "anybadge>=1.16.0",
     "pytest>=9.0.2",
     "pytest-asyncio>=1.3.0",
+    "pytest-timeout>=2.3.0",
 ]
