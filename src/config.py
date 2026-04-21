@@ -66,6 +66,25 @@ def _get_settings_path() -> Path:
     return get_data_dir() / "settings.json"
 
 
+def read_token_from_file() -> str:
+    """Read RCFLOW_API_KEY directly from settings.json.
+
+    Unlike ``Settings().RCFLOW_API_KEY``, this bypasses ``os.environ`` so it
+    always reflects the value written by the server subprocess, even when the
+    GUI process environment was initialised before the server generated the
+    token.  Returns an empty string if the file does not exist or the key is
+    absent.
+    """
+    cfg_path = _get_settings_path()
+    if not cfg_path.exists():
+        return ""
+    try:
+        data = json.loads(cfg_path.read_text(encoding="utf-8"))
+        return str(data.get("RCFLOW_API_KEY", ""))
+    except Exception:
+        return ""
+
+
 def _load_settings_into_env() -> None:
     """Read settings.json and inject values into os.environ (if not already set).
 

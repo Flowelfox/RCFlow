@@ -126,6 +126,8 @@ void main() {
       expect(find.textContaining("+  print('world');"), findsOneWidget);
       // Deletion line rendered
       expect(find.textContaining("-  print('hello');"), findsOneWidget);
+      // Hunk header gutters show the starting line number (both old and new = 1)
+      expect(find.text('1'), findsWidgets);
     });
 
     testWidgets('output text still renders alongside diff when expanded',
@@ -174,6 +176,44 @@ void main() {
     });
   });
 
+  group('ToolBlock — diff stats badge', () {
+    testWidgets('shows +N -N stats in header when diff present',
+        (tester) async {
+      final (_, paneState) = await _setupStates();
+      final msg = DisplayMessage(
+        type: DisplayMessageType.toolBlock,
+        toolName: 'Edit',
+        toolInput: {'file_path': 'lib/foo.dart'},
+        finished: true,
+        content: '',
+        fileDiff: _sampleDiff,
+        expanded: false,
+      );
+
+      await tester.pumpWidget(_buildBlock(paneState, msg));
+      await tester.pump();
+
+      // _sampleDiff has 2 additions and 1 deletion
+      expect(find.text('+2 -1'), findsOneWidget);
+    });
+
+    testWidgets('no stats badge when no diff', (tester) async {
+      final (_, paneState) = await _setupStates();
+      final msg = DisplayMessage(
+        type: DisplayMessageType.toolBlock,
+        toolName: 'Edit',
+        toolInput: {'file_path': 'lib/foo.dart'},
+        finished: true,
+        content: '',
+      );
+
+      await tester.pumpWidget(_buildBlock(paneState, msg));
+      await tester.pump();
+
+      expect(find.text('+2 -1'), findsNothing);
+    });
+  });
+
   group('PaneState.applyDiffToLastToolBlock', () {
     test('sets fileDiff on last tool block', () async {
       final (appState, paneState) = await _setupStates();
@@ -188,6 +228,48 @@ void main() {
           .toList();
       expect(toolBlocks, isNotEmpty);
       expect(toolBlocks.last.fileDiff, equals(_sampleDiff));
+    });
+
+    test('auto-expands Edit tool block when diff applied', () async {
+      final (appState, paneState) = await _setupStates();
+      appState.toString();
+
+      paneState.startToolBlock('Edit', {'file_path': 'lib/foo.dart'});
+
+      // Starts collapsed
+      final toolBlock = paneState.messages
+          .where((m) => m.type == DisplayMessageType.toolBlock)
+          .last;
+      expect(toolBlock.expanded, isFalse);
+
+      paneState.applyDiffToLastToolBlock(_sampleDiff);
+      expect(toolBlock.expanded, isTrue);
+    });
+
+    test('auto-expands Write tool block when diff applied', () async {
+      final (appState, paneState) = await _setupStates();
+      appState.toString();
+
+      paneState.startToolBlock('Write', {'file_path': 'lib/foo.dart'});
+      paneState.applyDiffToLastToolBlock(_sampleDiff);
+
+      final toolBlock = paneState.messages
+          .where((m) => m.type == DisplayMessageType.toolBlock)
+          .last;
+      expect(toolBlock.expanded, isTrue);
+    });
+
+    test('does not auto-expand non-Edit/Write tool blocks', () async {
+      final (appState, paneState) = await _setupStates();
+      appState.toString();
+
+      paneState.startToolBlock('Bash', {'command': 'ls'});
+      paneState.applyDiffToLastToolBlock(_sampleDiff);
+
+      final toolBlock = paneState.messages
+          .where((m) => m.type == DisplayMessageType.toolBlock)
+          .last;
+      expect(toolBlock.expanded, isFalse);
     });
 
     test('no-ops silently when no tool block present', () async {
@@ -250,6 +332,39 @@ void main() {
 
       expect(messages.last.fileDiff, equals(_sampleDiff));
       expect(messages.last.content, equals('ok'));
+    });
+
+    test('auto-expands Edit tool block when diff present in history', () {
+      final messages = <DisplayMessage>[
+        DisplayMessage(
+          type: DisplayMessageType.toolBlock,
+          sessionId: 'sess1',
+          toolName: 'Edit',
+          finished: false,
+        ),
+      ];
+
+      final msg = {
+        'content': 'ok',
+        'metadata': {'diff': _sampleDiff},
+      };
+
+      final content = msg['content'] as String? ?? '';
+      final metadata = msg['metadata'] as Map<String, dynamic>? ?? {};
+      final diff = metadata['diff'] as String?;
+      if (messages.isNotEmpty &&
+          messages.last.type == DisplayMessageType.toolBlock) {
+        messages.last.content += content;
+        if (diff != null && diff.isNotEmpty) {
+          messages.last.fileDiff = diff;
+          final tn = messages.last.toolName?.toLowerCase();
+          if (tn == 'edit' || tn == 'write') {
+            messages.last.expanded = true;
+          }
+        }
+      }
+
+      expect(messages.last.expanded, isTrue);
     });
 
     test('no diff key in metadata leaves fileDiff null', () {

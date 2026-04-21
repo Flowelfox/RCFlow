@@ -3,6 +3,8 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 
+import '../models/badge_spec.dart';
+import '../models/legacy_badge_adapter.dart';
 import '../models/session_info.dart';
 import '../models/worker_config.dart';
 import '../models/ws_message_type.dart';
@@ -267,14 +269,39 @@ class WorkerConnection extends ChangeNotifier {
 
     final incoming = list.map((s) {
       final json = s as Map<String, dynamic>;
-      final parsed = SessionInfo.fromJson(json, workerId: config.id);
+      var parsed = SessionInfo.fromJson(json, workerId: config.id);
+      final existing = existingById[parsed.sessionId];
       // If the server didn't include worktree context, fall back to whatever
       // we already have in memory for that session.
-      if (parsed.worktreeInfo == null) {
-        final existing = existingById[parsed.sessionId];
-        if (existing?.worktreeInfo != null) {
-          return parsed.copyWith(worktreeInfo: existing!.worktreeInfo);
-        }
+      if (parsed.worktreeInfo == null && existing?.worktreeInfo != null) {
+        parsed = parsed.copyWith(worktreeInfo: existing!.worktreeInfo);
+      }
+      // Preserve the existing badge list when the server list response omits
+      // badges (list responses don't always include the full badge set).
+      // Badges are overwritten by individual session_update messages that
+      // always carry the authoritative badge list.
+      if (parsed.badges.isEmpty && existing != null && existing.badges.isNotEmpty) {
+        parsed = parsed.copyWith(badges: existing.badges);
+      }
+      // Server worker badge carries backend_id as label. Replace with the
+      // user-configured worker name — same replacement that session_update
+      // applies. Archived sessions never receive a session_update, so this
+      // is the only place where their worker badge label gets the friendly name.
+      if (config.name.isNotEmpty && parsed.badges.isNotEmpty) {
+        final replaced = parsed.badges.map((b) {
+          if (b.type == 'worker') {
+            return BadgeSpec(
+              type: b.type,
+              label: config.name,
+              priority: b.priority,
+              visible: b.visible,
+              interactive: b.interactive,
+              payload: b.payload,
+            );
+          }
+          return b;
+        }).toList();
+        parsed = parsed.copyWith(badges: replaced);
       }
       return parsed;
     }).toList();
@@ -345,6 +372,31 @@ class WorkerConnection extends ChangeNotifier {
     final sortOrderProvided = msg.containsKey('sort_order');
     final newSortOrder = (msg['sort_order'] as num?)?.toInt();
 
+    // Parse badges — use server-provided list when present; fall back to
+    // LegacyBadgeAdapter for servers that pre-date the badge system (<0.39.0).
+    final badgesProvided = msg.containsKey('badges');
+    var badges = badgesProvided
+        ? BadgeSpec.listFromJson(msg['badges'] as List<dynamic>?)
+        : LegacyBadgeAdapter.adapt(msg, workerLabel: config.name);
+    // Server worker badge carries backend_id as label (internal identifier).
+    // Replace it with the user-configured worker name so the UI shows the
+    // friendly name the user gave this connection.
+    if (badgesProvided && config.name.isNotEmpty) {
+      badges = badges.map((b) {
+        if (b.type == 'worker') {
+          return BadgeSpec(
+            type: b.type,
+            label: config.name,
+            priority: b.priority,
+            visible: b.visible,
+            interactive: b.interactive,
+            payload: b.payload,
+          );
+        }
+        return b;
+      }).toList();
+    }
+
     final index = sessions.indexWhere((s) => s.sessionId == sessionId);
     if (index >= 0) {
       final existing = sessions[index];
@@ -377,6 +429,7 @@ class WorkerConnection extends ChangeNotifier {
             : existing.mainProjectPath,
         agentType: agentTypeProvided ? newAgentType : existing.agentType,
         sortOrder: sortOrderProvided ? newSortOrder : existing.sortOrder,
+        badges: badges,
       );
       // Fire callback when project path is attached or changes.
       if (newMainProjectPath != null &&
@@ -408,6 +461,7 @@ class WorkerConnection extends ChangeNotifier {
           mainProjectPath: newMainProjectPath,
           agentType: newAgentType,
           sortOrder: sortOrderProvided ? newSortOrder : null,
+          badges: badges,
         ),
       );
       // Fire callback for a brand-new session that already has a project.

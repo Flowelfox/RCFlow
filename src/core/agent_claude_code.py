@@ -49,6 +49,21 @@ _MAX_DIFF_LINES = 200
 _TOOL_OUTPUT_CHUNK_SIZE = 8_192
 
 
+def _classify_log_level(line: str) -> str:
+    """Classify a non-JSON Claude Code stdout line into a log level.
+
+    Returns one of ``"debug"``, ``"info"``, ``"warn"``, or ``"error"``.
+    """
+    lower = line.lower()
+    if any(kw in lower for kw in ("error:", "exception:", "failed:", "failure:")):
+        return "error"
+    if any(kw in lower for kw in ("warn:", "warning:")):
+        return "warn"
+    if any(kw in lower for kw in ("[debug]", "debug:")):
+        return "debug"
+    return "info"
+
+
 async def _read_file_snapshot(path: Path) -> str | None:
     """Read a file for pre/post diff comparison.
 
@@ -227,6 +242,10 @@ class ClaudeCodeAgentMixin:
         if effective_config.get("default_permission_mode") == "interactive":
             session.permission_manager = PermissionManager()
 
+        # Stamp caveman mode so the badge system reflects the tool's current state.
+        if self._tool_settings and self._tool_settings.is_caveman_active("claude_code"):  # ty:ignore[unresolved-attribute]
+            session.metadata["caveman_mode"] = True
+
         # Store CC metadata for potential session restore
         session.metadata["claude_code_session_id"] = executor.session_id
         session.metadata["claude_code_working_directory"] = str(working_path)
@@ -351,13 +370,18 @@ class ClaudeCodeAgentMixin:
             try:
                 event = json.loads(line)
             except json.JSONDecodeError:
-                # Non-JSON output (e.g. stderr leaking to stdout) — relay as text
+                # Non-JSON output (e.g. startup banners, debug lines leaking to stdout).
+                # Route to AGENT_LOG so it does NOT contaminate the TEXT_CHUNK stream —
+                # a TEXT_CHUNK here would close the active agent tool group in the client,
+                # causing subsequent TOOL_OUTPUT diffs to be applied to an orphaned block
+                # instead of the correct Edit/Write tool block.
                 session.buffer.push_text(
-                    MessageType.TEXT_CHUNK,
+                    MessageType.AGENT_LOG,
                     {
                         "session_id": session.id,
                         "content": line,
-                        "finished": False,
+                        "source": "stdout",
+                        "level": _classify_log_level(line),
                     },
                 )
                 continue
@@ -540,11 +564,11 @@ class ClaudeCodeAgentMixin:
                             if after_text is not None:
                                 diff = _compute_diff(before_text, after_text, filepath_str)
 
-                if content:
+                if content or diff:
                     is_error = event.get("is_error", False)
 
                     # Split large outputs into multiple chunks
-                    chunks = _split_into_chunks(content, _TOOL_OUTPUT_CHUNK_SIZE)
+                    chunks = _split_into_chunks(content, _TOOL_OUTPUT_CHUNK_SIZE) if content else [""]
                     if len(chunks) == 1:
                         tool_output_data: dict[str, Any] = {
                             "session_id": session.id,
@@ -574,7 +598,8 @@ class ClaudeCodeAgentMixin:
                                 chunk_data,
                             )
                     # Fire artifact scan for this tool result
-                    self._fire_text_artifact_scan(session, [content])  # ty:ignore[unresolved-attribute]
+                    if content:
+                        self._fire_text_artifact_scan(session, [content])  # ty:ignore[unresolved-attribute]
 
                 # Clear current_tool after the result
                 session.subprocess_current_tool = None

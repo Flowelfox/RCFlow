@@ -639,4 +639,51 @@ void main() {
       expect(group.toolName, 'claude_code');
     });
   });
+
+  group('handleAgentLog — does not contaminate message stream', () {
+    late PaneState pane;
+
+    setUp(() {
+      pane = PaneState(paneId: 'test', host: _FakePaneHost());
+    });
+
+    test('agent_log adds no messages', () {
+      handleAgentLog({
+        'session_id': 's1',
+        'content': 'Claude Code v1.0 starting…',
+        'source': 'stdout',
+        'level': 'info',
+      }, pane);
+
+      expect(pane.messages, isEmpty);
+    });
+
+    test('agent_log between TOOL_START and TOOL_OUTPUT does not break diff routing', () {
+      // Simulate: tool starts → non-JSON stdout leaks → tool result arrives
+      pane.startAgentGroup('claude_code', null);
+      pane.startToolBlock('Edit', {'file_path': '/tmp/foo.py'});
+
+      // A stray non-JSON line from Claude Code should not close the agent group
+      handleAgentLog({
+        'session_id': 's1',
+        'content': 'startup banner',
+        'source': 'stdout',
+        'level': 'info',
+      }, pane);
+
+      // Diff still goes to the Edit block, not an orphaned 'output' block
+      pane.appendToolOutput('File edited.');
+      pane.applyDiffToLastToolBlock('--- a\n+++ b\n@@ -1 +1 @@\n-old\n+new');
+
+      final group = pane.messages
+          .where((m) => m.type == DisplayMessageType.agentGroup)
+          .first;
+      final editBlock = group.children!
+          .where((c) => c.type == DisplayMessageType.toolBlock)
+          .first;
+
+      expect(editBlock.toolName, 'Edit');
+      expect(editBlock.fileDiff, isNotNull);
+    });
+  });
 }

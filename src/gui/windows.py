@@ -53,6 +53,11 @@ class RCFlowGUI:
         self._server = ServerManager(self._log_buffer)
         self._quitting = False
         self._tray_icon: _TrayIconProtocol | None = None
+        # monotonic expiry for transient status messages (copy-token feedback).
+        # _update_ui will not overwrite the status pill while this is in the
+        # future, so the message is visible for ~3 seconds regardless of the
+        # 300 ms _update_ui polling rate.
+        self._status_sticky_until: float = 0.0
 
         self._root = ctk.CTk()
         self._root.title("RCFlow Worker")
@@ -176,13 +181,14 @@ class RCFlowGUI:
             dc,
             text="Instance Details",
             font=ctk.CTkFont(size=theme.FONT_SIZE_SMALL, weight="bold"),
-        ).grid(row=0, column=0, columnspan=8, sticky="w", padx=g, pady=(g, s))
+        ).grid(row=0, column=0, columnspan=10, sticky="w", padx=g, pady=(g, s))
 
         detail_info = [
             ("Bound Address", "_bound_addr_var"),
             ("Uptime", "_uptime_var"),
             ("Active Sessions", "_sessions_var"),
             ("Backend ID", "_backend_id_var"),
+            ("Version", "_version_var"),
         ]
         for col, (label, var_name) in enumerate(detail_info):
             ctk.CTkLabel(
@@ -240,18 +246,18 @@ class RCFlowGUI:
 
     def _on_copy_token(self) -> None:
         try:
-            from src.config import Settings  # noqa: PLC0415
+            from src.config import read_token_from_file  # noqa: PLC0415
 
-            api_key = Settings().RCFLOW_API_KEY
+            api_key = read_token_from_file()
             if not api_key:
-                self._set_status("No API token configured", error=True)
+                self._set_status("No API token configured", error=True, sticky=True)
                 return
             self._root.clipboard_clear()
             self._root.clipboard_append(api_key)
             self._root.update()  # Required on Windows for clipboard to persist
-            self._set_status("Token copied to clipboard")
+            self._set_status("Token copied to clipboard", sticky=True)
         except Exception as exc:
-            self._set_status(f"Failed to copy token: {exc}", error=True)
+            self._set_status(f"Failed to copy token: {exc}", error=True, sticky=True)
 
     # ── Server controls ───────────────────────────────────────────────────
 
@@ -294,6 +300,23 @@ class RCFlowGUI:
         self._set_status("Stopping...")
         self._server.stop()
 
+    def _on_adopted_server(self) -> None:
+        """Reflect an adopted running server in the UI.
+
+        Mirrors the state transitions ``_start_server`` makes after a
+        successful launch (disable settings, flip toggle to Stop, update
+        status pill and tray), but without spawning a new subprocess.
+        """
+        self._ip_entry.configure(state="disabled")
+        self._port_entry.configure(state="disabled")
+        self._wss_check.configure(state="disabled")
+        self._toggle_btn.configure(
+            text="Stop", fg_color=theme.BTN_STOP_FG, hover_color=theme.BTN_STOP_HOVER, text_color=theme.BTN_STOP_TEXT
+        )
+        protocol = "WSS" if self._wss_var.get() else "WS"
+        self._set_status(f"Running ({protocol}) — recovered", sticky=True)
+        self._update_tray_status()
+
     # ── Log display ───────────────────────────────────────────────────────
 
     def _drain_log_queue(self) -> None:
@@ -323,7 +346,7 @@ class RCFlowGUI:
 
     # ── Status & details ──────────────────────────────────────────────────
 
-    def _set_status(self, text: str, *, error: bool = False) -> None:
+    def _set_status(self, text: str, *, error: bool = False, sticky: bool = False) -> None:
         tl = text.lower()
         if error:
             color = theme.STATUS_ERROR
@@ -333,6 +356,8 @@ class RCFlowGUI:
             color = theme.STATUS_STARTING
         else:
             color = theme.STATUS_RUNNING
+        if sticky:
+            self._status_sticky_until = time.monotonic() + 3.0
         self._status_label.configure(text=f"  {text}  ", fg_color=color)
 
     def _update_ui(self) -> None:
@@ -345,7 +370,8 @@ class RCFlowGUI:
 
         if running:
             protocol = "WSS" if self._wss_var.get() else "WS"
-            self._set_status(f"Running ({protocol})")
+            if time.monotonic() >= self._status_sticky_until:
+                self._set_status(f"Running ({protocol})")
             t = self._server.start_time
             if t is not None:
                 h, rem = divmod(int(time.monotonic() - t), 3600)
@@ -376,6 +402,7 @@ class RCFlowGUI:
                 self._bound_addr_var.set("\u2014")  # ty:ignore[unresolved-attribute]
                 self._sessions_var.set("\u2014")  # ty:ignore[unresolved-attribute]
                 self._backend_id_var.set("\u2014")  # ty:ignore[unresolved-attribute]
+                self._version_var.set("\u2014")  # ty:ignore[unresolved-attribute]
                 self._update_tray_status()
 
         self._root.after(POLL_MS, self._update_ui)
@@ -470,7 +497,15 @@ class RCFlowGUI:
     def run(self) -> None:
         """Start the GUI event loop."""
         self._setup_tray()
-        self._start_server()
+        # If a previous GUI crashed, the server subprocess it spawned may
+        # still be running (reparented to the init process).  Adopt it so
+        # the user can stop it from this new GUI instead of leaving it
+        # orphaned with the port bound.
+        adopted_pid = self._server.adopt_if_running()
+        if adopted_pid is None:
+            self._start_server()
+        else:
+            self._on_adopted_server()
         self._root.after(POLL_MS, self._update_ui)
 
         def _status_loop() -> None:
@@ -486,11 +521,19 @@ class RCFlowGUI:
         self._root.after(3000, _status_loop)  # First check after 3 s to let server start
         self._root.mainloop()
 
-    def _on_status_result(self, sessions: int | None, backend_id: str | None) -> None:
-        if sessions is not None:
-            self._sessions_var.set(str(sessions))  # ty:ignore[unresolved-attribute]
-        if backend_id:
-            self._backend_id_var.set(backend_id)  # ty:ignore[unresolved-attribute]
+    def _on_status_result(self, sessions: int | None, backend_id: str | None, version: str | None) -> None:
+        # poll_server_status calls this from a daemon thread.  All StringVar
+        # mutations must happen on the Tk main thread to avoid races between
+        # the background poller and the Tk event loop.
+        def _apply() -> None:
+            if sessions is not None:
+                self._sessions_var.set(str(sessions))  # ty:ignore[unresolved-attribute]
+            if backend_id:
+                self._backend_id_var.set(backend_id)  # ty:ignore[unresolved-attribute]
+            if version:
+                self._version_var.set(version)  # ty:ignore[unresolved-attribute]
+
+        self._root.after(0, _apply)
 
 
 # ── Windows autostart helpers ─────────────────────────────────────────────────

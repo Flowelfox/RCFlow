@@ -211,6 +211,54 @@ class TestDiffIntegration:
         assert "+new_content" in msg_data["diff"]
 
     @pytest.mark.asyncio
+    async def test_edit_tool_empty_content_still_sends_diff(self, tmp_path: Path) -> None:
+        """Edit tool with empty tool_result content must still emit TOOL_OUTPUT with diff."""
+        target = tmp_path / "empty.py"
+        target.write_text("old\n", encoding="utf-8")
+
+        events = [
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "tu_empty",
+                            "name": "Edit",
+                            "input": {"file_path": str(target)},
+                        }
+                    ]
+                },
+            },
+            {
+                "type": "tool_result",
+                "tool_use_id": "tu_empty",
+                "content": "",
+                "is_error": False,
+            },
+        ]
+
+        session = _make_session(tmp_path)
+        mixin = _make_mixin()
+
+        call_count = 0
+
+        async def _mock_read(path: Path) -> str | None:
+            nonlocal call_count
+            call_count += 1
+            return "old\n" if call_count == 1 else "new\n"
+
+        with patch("src.core.agent_claude_code._read_file_snapshot", _mock_read):
+            await mixin._relay_claude_code_stream(session, _make_executor_chunks(events))
+
+        calls = session.buffer.push_text.call_args_list
+        tool_output_calls = [c for c in calls if c[0][0].name == "TOOL_OUTPUT"]
+        assert len(tool_output_calls) == 1
+        msg_data = tool_output_calls[0][0][1]
+        assert "diff" in msg_data
+        assert "+new" in msg_data["diff"]
+
+    @pytest.mark.asyncio
     async def test_bash_tool_produces_no_diff(self, tmp_path: Path) -> None:
         """Bash tool_use + tool_result → TOOL_OUTPUT has no 'diff' key."""
         events = [

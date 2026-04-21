@@ -1,7 +1,7 @@
 import asyncio
 import json
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -1458,6 +1458,122 @@ async def test_handle_prompt_no_worktree_path_leaves_metadata_empty(
     session = session_manager.get_session(session_id)
     assert session is not None
     assert "selected_worktree_path" not in session.metadata
+
+
+# ---------------------------------------------------------------------------
+# handle_prompt — display text / #mention stripping
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_handle_prompt_strips_tool_mention_from_buffer_when_no_display_text(
+    session_manager: SessionManager,
+) -> None:
+    """When display_text is absent, #tool routing tags must be stripped from the user buffer entry.
+
+    Regression test for the bug where users who typed '#ClaudeCode <task>' directly
+    (without using the chip) saw the literal '#ClaudeCode' prefix in rendered chat.
+    """
+    router = _make_router(session_manager)
+    session = session_manager.create_session(SessionType.LONG_RUNNING)
+    session.set_active()
+
+    # Attach a mock executor so handle_prompt takes the fast forward-to-executor path.
+    mock_executor = AsyncMock()
+    session.claude_code_executor = mock_executor
+    with patch.object(router, "_forward_to_claude_code", new=AsyncMock()):
+        await router.handle_prompt(
+            "#ClaudeCode fix the login bug",
+            session_id=session.id,
+        )
+
+    user_msgs = [
+        m
+        for m in session.buffer.text_history
+        if m.message_type == MessageType.TEXT_CHUNK and m.data.get("role") == "user"
+    ]
+    assert len(user_msgs) == 1
+    assert user_msgs[0].data["content"] == "fix the login bug"
+
+
+@pytest.mark.asyncio
+async def test_handle_prompt_explicit_display_text_used_verbatim(
+    session_manager: SessionManager,
+) -> None:
+    """When display_text is provided it is stored as-is — no extra stripping."""
+    router = _make_router(session_manager)
+    session = session_manager.create_session(SessionType.LONG_RUNNING)
+    session.set_active()
+
+    mock_executor = AsyncMock()
+    session.claude_code_executor = mock_executor
+    with patch.object(router, "_forward_to_claude_code", new=AsyncMock()):
+        await router.handle_prompt(
+            "#ClaudeCode fix the login bug",
+            session_id=session.id,
+            display_text="fix the login bug",
+        )
+
+    user_msgs = [
+        m
+        for m in session.buffer.text_history
+        if m.message_type == MessageType.TEXT_CHUNK and m.data.get("role") == "user"
+    ]
+    assert len(user_msgs) == 1
+    assert user_msgs[0].data["content"] == "fix the login bug"
+
+
+@pytest.mark.asyncio
+async def test_handle_prompt_empty_display_text_preserved(
+    session_manager: SessionManager,
+) -> None:
+    """An explicit empty display_text (chip + empty input) must be kept as '', not replaced by text."""
+    router = _make_router(session_manager)
+    session = session_manager.create_session(SessionType.LONG_RUNNING)
+    session.set_active()
+
+    mock_executor = AsyncMock()
+    session.claude_code_executor = mock_executor
+    with patch.object(router, "_forward_to_claude_code", new=AsyncMock()):
+        await router.handle_prompt(
+            "#ClaudeCode",
+            session_id=session.id,
+            display_text="",
+        )
+
+    user_msgs = [
+        m
+        for m in session.buffer.text_history
+        if m.message_type == MessageType.TEXT_CHUNK and m.data.get("role") == "user"
+    ]
+    assert len(user_msgs) == 1
+    assert user_msgs[0].data["content"] == ""
+
+
+@pytest.mark.asyncio
+async def test_handle_prompt_inline_mention_stripped_mid_message(
+    session_manager: SessionManager,
+) -> None:
+    """#mention anywhere in the text (not just prefix) is stripped from display."""
+    router = _make_router(session_manager)
+    session = session_manager.create_session(SessionType.LONG_RUNNING)
+    session.set_active()
+
+    mock_executor = AsyncMock()
+    session.claude_code_executor = mock_executor
+    with patch.object(router, "_forward_to_claude_code", new=AsyncMock()):
+        await router.handle_prompt(
+            "fix the login bug #ClaudeCode",
+            session_id=session.id,
+        )
+
+    user_msgs = [
+        m
+        for m in session.buffer.text_history
+        if m.message_type == MessageType.TEXT_CHUNK and m.data.get("role") == "user"
+    ]
+    assert len(user_msgs) == 1
+    assert user_msgs[0].data["content"] == "fix the login bug"
 
 
 # ---------------------------------------------------------------------------

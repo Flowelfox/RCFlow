@@ -245,6 +245,14 @@ void handleAgentGroupEnd(Map<String, dynamic> msg, PaneState pane) {
   pane.endAgentGroup();
 }
 
+/// Diagnostic log line from a Claude Code subprocess (startup banners, debug
+/// output). Silently consumed so it does not contaminate the assistant stream.
+void handleAgentLog(Map<String, dynamic> msg, PaneState pane) {
+  // Intentionally no-op: agent_log messages carry subprocess stdout noise
+  // (e.g. Claude Code startup banners). They must not trigger appendAssistantChunk
+  // which would close the active agent group and misroute subsequent TOOL_OUTPUT.
+}
+
 void handleSubprocessStatus(Map<String, dynamic> msg, PaneState pane) {
   final subprocessType = msg['subprocess_type'] as String?;
   if (subprocessType == null) {
@@ -324,6 +332,7 @@ final Map<WsOutputType, OutputHandler> typedOutputHandlerRegistry = {
   WsOutputType.planReviewAsk: handlePlanReviewAsk,
   WsOutputType.permissionRequest: handlePermissionRequest,
   WsOutputType.subprocessStatus: handleSubprocessStatus,
+  WsOutputType.agentLog: handleAgentLog,
 };
 
 /// Legacy string-keyed registry — kept for [PaneState._loadHistory] and
@@ -349,6 +358,7 @@ final Map<String, OutputHandler> outputHandlerRegistry = {
   'plan_review_ask': handlePlanReviewAsk,
   'permission_request': handlePermissionRequest,
   'subprocess_status': handleSubprocessStatus,
+  'agent_log': handleAgentLog,
 };
 
 // ---------------------------------------------------------------------------
@@ -436,6 +446,10 @@ void buildToolOutputHistory(
     messages.last.content += content;
     if (diff != null && diff.isNotEmpty) {
       messages.last.fileDiff = diff;
+      final tn = messages.last.toolName?.toLowerCase();
+      if (tn == 'edit' || tn == 'write') {
+        messages.last.expanded = true;
+      }
     }
   } else {
     messages.add(

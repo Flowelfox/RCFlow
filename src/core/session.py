@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.badges import BadgeState
 from src.core.buffer import BufferedMessage, MessageType, SessionBuffer
 from src.database.models import Artifact as ArtifactModel
 from src.database.models import Session as SessionModel
@@ -333,6 +334,7 @@ class SessionManager:
 
     def __init__(self, backend_id: str) -> None:
         self._backend_id = backend_id
+        self._badge_state = BadgeState()
         self._sessions: dict[str, ActiveSession] = {}
         self._update_subscribers: dict[str, asyncio.Queue[dict[str, Any] | None]] = {}
 
@@ -366,6 +368,7 @@ class SessionManager:
 
     def broadcast_session_update(self, session: ActiveSession) -> None:
         """Broadcast a session metadata update to all connected output clients."""
+        badges = self._badge_state.compute(session, worker_id=self._backend_id)
         update: dict[str, Any] = {
             "type": "session_update",
             "session_id": session.id,
@@ -388,6 +391,10 @@ class SessionManager:
             "project_name_error": session.project_name_error,
             "agent_type": session.agent_type,
             "sort_order": session.sort_order,
+            # caveman_mode kept as flat field for clients using LegacyBadgeAdapter (< 0.39.0)
+            "caveman_mode": session.metadata.get("caveman_mode", False),
+            # Unified badge list — authoritative for clients >= 0.39.0
+            "badges": [b.to_dict() for b in badges],
         }
         for queue in self._update_subscribers.values():
             queue.put_nowait(update)
@@ -449,6 +456,10 @@ class SessionManager:
 
     def list_all_sessions(self) -> list[ActiveSession]:
         return list(self._sessions.values())
+
+    def compute_session_badges(self, session: ActiveSession) -> list[dict[str, Any]]:
+        """Return serialised badges for *session* using the shared BadgeState."""
+        return [b.to_dict() for b in self._badge_state.compute(session, worker_id=self._backend_id)]
 
     async def archive_session(self, session_id: str, db: AsyncSession) -> None:
         """Archive a completed session to PostgreSQL and remove from memory."""
@@ -669,6 +680,8 @@ class SessionManager:
                     "main_project_path": s.main_project_path,
                     "agent_type": s.agent_type,
                     "sort_order": s.sort_order,
+                    "caveman_mode": s.metadata.get("caveman_mode", False),
+                    "badges": [b.to_dict() for b in self._badge_state.compute(s, worker_id=self._backend_id)],
                 }
             )
 
@@ -683,6 +696,12 @@ class SessionManager:
             sid = str(row.id)
             if sid not in in_memory_ids:
                 archived_meta: dict[str, Any] = dict(row.metadata_) if row.metadata_ else {}
+                archived_badges = self._badge_state.compute_archived(
+                    row.status,
+                    worker_id=self._backend_id,
+                    caveman_mode=archived_meta.get("caveman_mode", False),
+                    caveman_level=archived_meta.get("caveman_level", "full"),
+                )
                 result.append(
                     {
                         "session_id": sid,
@@ -703,6 +722,8 @@ class SessionManager:
                         "main_project_path": row.main_project_path,
                         "agent_type": None,
                         "sort_order": row.sort_order,
+                        "caveman_mode": archived_meta.get("caveman_mode", False),
+                        "badges": [b.to_dict() for b in archived_badges],
                     }
                 )
 
@@ -832,6 +853,7 @@ class SessionManager:
                 session._activity_state = ActivityState.IDLE
 
                 session._title = row.title
+                session.sort_order = row.sort_order
                 session.main_project_path = row.main_project_path
 
                 meta = dict(row.metadata_) if row.metadata_ else {}
@@ -886,6 +908,27 @@ class SessionManager:
                     )
                     session.buffer._text_messages.append(buffered)
                     session.buffer._text_sequence = max(session.buffer._text_sequence, msg_row.sequence)
+
+                # Dead stub detection: a session with no title, no conversation
+                # history, and no buffered messages was never given any LLM
+                # content — the backend crashed before the first response
+                # completed.  Restoring it would produce a ghost session in the
+                # UI (active, no title, no history).  Delete the stub and skip.
+                if row.title is None and not row.conversation_history and not msg_rows:
+                    logger.info(
+                        "Discarding empty stub session %s — no title, history, or messages",
+                        session_id,
+                    )
+                    # Child tables without ON DELETE CASCADE must be cleared
+                    # explicitly; otherwise the SessionModel delete fails with
+                    # a FOREIGN KEY constraint error (e.g. pre-prompt artifact
+                    # scans can leave artifact rows on a crashed stub).
+                    await db.execute(delete(SessionMessageModel).where(SessionMessageModel.session_id == session_uuid))
+                    await db.execute(delete(ToolExecutionModel).where(ToolExecutionModel.session_id == session_uuid))
+                    await db.execute(delete(ArtifactModel).where(ArtifactModel.session_id == session_uuid))
+                    await db.execute(delete(SessionModel).where(SessionModel.id == session_uuid))
+                    await db.commit()
+                    continue
 
                 # Register in memory and remove from DB so the session is fully live
                 session._on_update = lambda s=session: self.broadcast_session_update(s)
@@ -974,6 +1017,7 @@ class SessionManager:
                             tool_output_tokens=session.tool_output_tokens,
                             tool_cost_usd=session.tool_cost_usd,
                             conversation_history=session.conversation_history or None,
+                            sort_order=session.sort_order,
                         )
                     )
                 else:
@@ -993,6 +1037,7 @@ class SessionManager:
                     existing.tool_output_tokens = session.tool_output_tokens
                     existing.tool_cost_usd = session.tool_cost_usd
                     existing.conversation_history = session.conversation_history or None
+                    existing.sort_order = session.sort_order
 
                 # Flush the session row before inserting child session_messages so
                 # the FK constraint (session_messages.session_id → sessions.id) is

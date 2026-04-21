@@ -179,6 +179,8 @@ async def ws_output_text(
                             "main_project_path": s.get("main_project_path"),
                             "selected_worktree_path": s.get("selected_worktree_path"),
                             "sort_order": s.get("sort_order"),
+                            "agent_type": s.get("agent_type"),
+                            "badges": s.get("badges", []),
                         }
                         for s in all_sessions
                     ]
@@ -202,6 +204,9 @@ async def ws_output_text(
                             "main_project_path": s.main_project_path,
                             "selected_worktree_path": s.metadata.get("selected_worktree_path"),
                             "sort_order": s.sort_order,
+                            "caveman_mode": s.metadata.get("caveman_mode", False),
+                            "agent_type": s.agent_type,
+                            "badges": session_manager.compute_session_badges(s),
                         }
                         for s in session_manager.list_all_sessions()
                     ]

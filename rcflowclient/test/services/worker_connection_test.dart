@@ -5,6 +5,7 @@ library;
 import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rcflowclient/models/badge_spec.dart';
 import 'package:rcflowclient/models/session_info.dart';
 import 'package:rcflowclient/models/worker_config.dart';
 import 'package:rcflowclient/services/settings_service.dart';
@@ -69,7 +70,7 @@ class FakeWebSocketService extends WebSocketService {
   }
 
   @override
-  void listSessions() => listSessionsCallCount++;
+  void listSessions({int offset = 0, int limit = 30}) => listSessionsCallCount++;
 
   @override
   void listTasks() => listTasksCallCount++;
@@ -173,6 +174,25 @@ Map<String, dynamic> _sessionUpdate(
   if (sortOrder != null) msg['sort_order'] = sortOrder;
   return msg;
 }
+
+Map<String, dynamic> _sessionUpdateWithBadges(
+  String id, {
+  required List<Map<String, dynamic>> badges,
+}) => {
+  'type': 'session_update',
+  'session_id': id,
+  'status': 'active',
+  'badges': badges,
+};
+
+Map<String, dynamic> _badgeJson(String type, String label) => {
+  'type': type,
+  'label': label,
+  'priority': 0,
+  'visible': true,
+  'interactive': false,
+  'payload': <String, dynamic>{},
+};
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -320,6 +340,62 @@ void main() {
       await Future.microtask(() {});
       expect(conn.sessions.first.worktreeInfo, isNull);
     });
+
+    test('replaces worker badge backend_id label with config name', () async {
+      // Server sends session_list with a worker badge whose label is the
+      // internal backend_id ("my-backend"), not the user-facing name.
+      // _updateSessionList must replace it with the config name ("Worker 1").
+      ws.injectOutput(
+        _sessionList([
+          {
+            ..._sessionJson('s1'),
+            'badges': [
+              _badgeJson('status', 'active'),
+              _badgeJson('worker', 'my-backend'), // raw backend_id label
+            ],
+          },
+        ]),
+      );
+      await Future.microtask(() {});
+
+      final session = conn.sessions.firstWhere((s) => s.sessionId == 's1');
+      final workerBadge = session.badges.where((b) => b.type == 'worker').firstOrNull;
+      expect(workerBadge, isNotNull);
+      expect(workerBadge!.label, 'Worker 1'); // replaced with config.name
+    });
+
+    test('preserves existing badges when server sends empty badge list', () async {
+      // Seed a session with a known badge via session_update.
+      ws.injectOutput(
+        _sessionUpdateWithBadges('s1', badges: [_badgeJson('caveman', 'Caveman')]),
+      );
+      await Future.microtask(() {});
+
+      // Now session_list arrives with no badges for s1 — existing must be kept.
+      ws.injectOutput(_sessionList([_sessionJson('s1')]));
+      await Future.microtask(() {});
+
+      final session = conn.sessions.firstWhere((s) => s.sessionId == 's1');
+      expect(session.badges.any((b) => b.type == 'caveman'), isTrue);
+    });
+
+    test('worker badge label from session_list persists across session switch', () async {
+      // Simulates the switch-back scenario: session is in the list with correct
+      // worker badge label after _updateSessionList replacement.
+      ws.injectOutput(
+        _sessionList([
+          {
+            ..._sessionJson('s1'),
+            'badges': [_badgeJson('worker', 'raw-backend-id')],
+          },
+        ]),
+      );
+      await Future.microtask(() {});
+
+      final session = conn.sessions.firstWhere((s) => s.sessionId == 's1');
+      final wb = session.badges.where((b) => b.type == 'worker').firstOrNull;
+      expect(wb?.label, 'Worker 1'); // friendly name, not raw-backend-id
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -424,6 +500,57 @@ void main() {
       ws.injectOutput(_sessionUpdate('s1', status: 'running'));
       await Future.microtask(() {});
       expect(count, 1);
+    });
+
+    test('populates badges from server badges array', () async {
+      ws.injectOutput(
+        _sessionUpdateWithBadges('s1', badges: [
+          _badgeJson('caveman', 'Caveman'),
+          _badgeJson('worker', 'HomeServer'),
+        ]),
+      );
+      await Future.microtask(() {});
+      final session = conn.sessions.firstWhere((s) => s.sessionId == 's1');
+      expect(session.badges.map((b) => b.type), containsAll(['caveman', 'worker']));
+    });
+
+    test('falls back to legacy adapter when badges key absent', () async {
+      // Legacy message: no 'badges' key, but has caveman_mode flat field
+      ws.injectOutput({
+        'type': 'session_update',
+        'session_id': 's1',
+        'status': 'active',
+        'caveman_mode': true,
+        'activity_state': 'idle',
+      });
+      await Future.microtask(() {});
+      final session = conn.sessions.firstWhere((s) => s.sessionId == 's1');
+      expect(session.badges.any((b) => b.type == 'caveman'), isTrue);
+    });
+
+    test('legacy adapter includes worker badge from config name', () async {
+      ws.injectOutput({
+        'type': 'session_update',
+        'session_id': 's1',
+        'status': 'active',
+        'activity_state': 'idle',
+      });
+      await Future.microtask(() {});
+      final session = conn.sessions.firstWhere((s) => s.sessionId == 's1');
+      final workerBadge = session.badges.where((b) => b.type == 'worker').firstOrNull;
+      expect(workerBadge, isNotNull);
+      expect(workerBadge!.label, 'Worker 1'); // matches _makeConfig name
+    });
+
+    test('badges populated for newly inserted session', () async {
+      ws.injectOutput(
+        _sessionUpdateWithBadges('s_new', badges: [
+          _badgeJson('caveman', 'Caveman'),
+        ]),
+      );
+      await Future.microtask(() {});
+      final session = conn.sessions.firstWhere((s) => s.sessionId == 's_new');
+      expect(session.badges.any((b) => b.type == 'caveman'), isTrue);
     });
   });
 

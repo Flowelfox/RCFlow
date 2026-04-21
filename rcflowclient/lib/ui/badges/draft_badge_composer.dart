@@ -9,13 +9,23 @@ import '../../models/worker_config.dart';
 class DraftBadgeComposer {
   const DraftBadgeComposer();
 
+  /// Map internal agent_type identifiers to user-facing badge labels.
+  /// Mirrors the server-side ``_AGENT_DISPLAY_LABELS`` in ``badges.py``.
+  static const _agentDisplayLabels = {
+    'claude_code': 'ClaudeCode',
+    'codex': 'Codex',
+    'opencode': 'OpenCode',
+  };
+
   /// Return draft badges for the given selections.
   ///
   /// - [worker]: The [WorkerConfig] the new session will be sent to.
+  /// - [agentType]: Internal agent tool name (e.g. ``"claude_code"``).
   /// - [projectPath]: Absolute path of the pre-selected project, if any.
   /// - [worktreePath]: Absolute path of the pre-selected worktree, if any.
   List<BadgeSpec> compose({
     WorkerConfig? worker,
+    String? agentType,
     String? projectPath,
     String? worktreePath,
   }) {
@@ -30,6 +40,17 @@ class DraftBadgeComposer {
         // Interactive in draft context — tapping opens the worker picker.
         interactive: true,
         payload: {'worker_id': worker.id},
+      ));
+    }
+
+    if (agentType != null) {
+      badges.add(BadgeSpec(
+        type: 'agent',
+        label: _agentDisplayLabels[agentType] ?? agentType,
+        priority: BadgePriority.agent,
+        visible: true,
+        interactive: false,
+        payload: {'agent_type': agentType},
       ));
     }
 

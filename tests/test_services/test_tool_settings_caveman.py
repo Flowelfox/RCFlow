@@ -126,6 +126,31 @@ class TestCavemanSettingsIntegration:
 
 
 # ---------------------------------------------------------------------------
+# ToolSettingsManager.is_caveman_active
+# ---------------------------------------------------------------------------
+
+
+class TestIsCavemanActive:
+    def test_returns_true_when_active(self, manager: ToolSettingsManager) -> None:
+        manager.update_settings("claude_code", {"caveman_mode": True})
+        assert manager.is_caveman_active("claude_code") is True
+
+    def test_returns_false_when_inactive(self, manager: ToolSettingsManager) -> None:
+        assert manager.is_caveman_active("claude_code") is False
+
+    def test_returns_false_after_disable(self, manager: ToolSettingsManager) -> None:
+        manager.update_settings("claude_code", {"caveman_mode": True})
+        manager.update_settings("claude_code", {"caveman_mode": False})
+        assert manager.is_caveman_active("claude_code") is False
+
+    def test_codex_always_false(self, manager: ToolSettingsManager) -> None:
+        assert manager.is_caveman_active("codex") is False
+
+    def test_opencode_always_false(self, manager: ToolSettingsManager) -> None:
+        assert manager.is_caveman_active("opencode") is False
+
+
+# ---------------------------------------------------------------------------
 # CONFIG_OPTIONS schema validation
 # ---------------------------------------------------------------------------
 

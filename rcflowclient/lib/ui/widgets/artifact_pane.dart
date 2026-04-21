@@ -525,6 +525,18 @@ class _ArtifactContentState extends State<_ArtifactContent> {
       data: _content!,
       shrinkWrap: true,
       selectable: true,
+      checkboxBuilder: (bool checked) => Padding(
+        padding: const EdgeInsets.only(right: 6),
+        child: Icon(
+          checked
+              ? Icons.check_box_rounded
+              : Icons.check_box_outline_blank_rounded,
+          size: 16,
+          color: checked
+              ? context.appColors.accent
+              : context.appColors.textSecondary,
+        ),
+      ),
       builders: {
         'pre': SelectableCodeBlockBuilder(
           textStyle: TextStyle(

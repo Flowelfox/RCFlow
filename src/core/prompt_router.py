@@ -702,43 +702,54 @@ class PromptRouter(
         if self._check_token_limit_exceeded(session):
             return session.id
 
+        # Clean text for buffer storage and agent forwarding.  The routing
+        # text may carry a prepended "#agent_name" tag inserted by the client
+        # for backend routing; display_text strips that prefix so chat history
+        # never shows the tag.
+        #
+        # When display_text is not provided (e.g. user typed the #mention
+        # directly instead of selecting it via the chip), derive display text
+        # by stripping all #tool_mention markers so they never appear in chat.
+        # The empty-string case (chip + empty input) must be preserved as-is.
+        _display = display_text if display_text is not None else self._TOOL_MENTION_RE.sub("", text).strip()
+
         # If session has an active Claude Code executor, forward message directly
         if session.claude_code_executor is not None:
-            buffer_data: dict[str, Any] = {"content": text, "role": "user"}
+            buffer_data: dict[str, Any] = {"content": _display, "role": "user"}
             if attachments:
                 buffer_data["attachments"] = [
                     {"name": a.file_name, "mime_type": a.mime_type, "size": len(a.data)} for a in attachments
                 ]
             session.buffer.push_text(MessageType.TEXT_CHUNK, buffer_data)
-            await self._forward_to_claude_code(session, text)
+            await self._forward_to_claude_code(session, _display)
             return session.id
 
         # If session has an active Codex executor, forward message directly
         if session.codex_executor is not None:
-            buffer_data2: dict[str, Any] = {"content": text, "role": "user"}
+            buffer_data2: dict[str, Any] = {"content": _display, "role": "user"}
             if attachments:
                 buffer_data2["attachments"] = [
                     {"name": a.file_name, "mime_type": a.mime_type, "size": len(a.data)} for a in attachments
                 ]
             session.buffer.push_text(MessageType.TEXT_CHUNK, buffer_data2)
-            await self._forward_to_codex(session, text)
+            await self._forward_to_codex(session, _display)
             return session.id
 
         # If session has an active OpenCode executor, forward message directly
         if session.opencode_executor is not None:
-            buffer_data3oc: dict[str, Any] = {"content": text, "role": "user"}
+            buffer_data3oc: dict[str, Any] = {"content": _display, "role": "user"}
             if attachments:
                 buffer_data3oc["attachments"] = [
                     {"name": a.file_name, "mime_type": a.mime_type, "size": len(a.data)} for a in attachments
                 ]
             session.buffer.push_text(MessageType.TEXT_CHUNK, buffer_data3oc)
-            await self._forward_to_opencode(session, text)
+            await self._forward_to_opencode(session, _display)
             return session.id
 
         # Direct tool mode: bypass LLM entirely, parse #tool_name syntax
         if self.is_direct_tool_mode:
             session.set_active()
-            buffer_data3: dict[str, Any] = {"content": text, "role": "user"}
+            buffer_data3: dict[str, Any] = {"content": _display, "role": "user"}
             if attachments:
                 buffer_data3["attachments"] = [
                     {"name": a.file_name, "mime_type": a.mime_type, "size": len(a.data)} for a in attachments
@@ -752,7 +763,7 @@ class PromptRouter(
         # directly so it is ready for follow-up instructions.
         if self._is_bare_agent_mention(text):
             session.set_active()
-            buffer_data4: dict[str, Any] = {"content": text, "role": "user"}
+            buffer_data4: dict[str, Any] = {"content": _display, "role": "user"}
             if attachments:
                 buffer_data4["attachments"] = [
                     {"name": a.file_name, "mime_type": a.mime_type, "size": len(a.data)} for a in attachments
@@ -835,7 +846,7 @@ class PromptRouter(
 
             # Push the original user prompt to the buffer (no injected context).
             # Attachment metadata is included so clients can display file names.
-            buffer_data: dict[str, Any] = {"content": text, "role": "user"}
+            buffer_data: dict[str, Any] = {"content": _display, "role": "user"}
             if attachments:
                 buffer_data["attachments"] = [
                     {"name": a.file_name, "mime_type": a.mime_type, "size": len(a.data)} for a in attachments

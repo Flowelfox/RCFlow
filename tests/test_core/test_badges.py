@@ -202,13 +202,16 @@ class TestAgentBadge:
         badges = self._bs().compute(session)
         assert not any(b.type == "agent" for b in badges)
 
-    @pytest.mark.parametrize("agent", ["claude_code", "codex", "opencode"])
-    def test_agent_badge_present_for_known_agents(self, agent: str) -> None:
+    @pytest.mark.parametrize(
+        ("agent", "expected_label"),
+        [("claude_code", "ClaudeCode"), ("codex", "Codex"), ("opencode", "OpenCode")],
+    )
+    def test_agent_badge_present_for_known_agents(self, agent: str, expected_label: str) -> None:
         session = _make_session(agent_type=agent)
         badges = self._bs().compute(session)
         ab = [b for b in badges if b.type == "agent"]
         assert len(ab) == 1
-        assert ab[0].label == agent
+        assert ab[0].label == expected_label
 
     def test_agent_badge_payload(self) -> None:
         session = _make_session(agent_type="claude_code")
@@ -440,3 +443,69 @@ class TestBadgeStateCompute:
         assert "status" in types
         assert "worker" in types
         assert "agent" not in types
+
+
+# ---------------------------------------------------------------------------
+# BadgeState.compute_archived — badges for DB-archived sessions
+# ---------------------------------------------------------------------------
+
+
+class TestComputeArchived:
+    def _bs(self) -> BadgeState:
+        return BadgeState()
+
+    def test_always_returns_status_and_worker(self) -> None:
+        badges = self._bs().compute_archived("completed", worker_id="backend-xyz")
+        types = {b.type for b in badges}
+        assert "status" in types
+        assert "worker" in types
+
+    def test_status_badge_label_matches_arg(self) -> None:
+        badges = self._bs().compute_archived("cancelled", worker_id="w1")
+        sb = next(b for b in badges if b.type == "status")
+        assert sb.label == "cancelled"
+
+    def test_status_badge_activity_state_is_idle(self) -> None:
+        badges = self._bs().compute_archived("completed", worker_id="w1")
+        sb = next(b for b in badges if b.type == "status")
+        assert sb.payload["activity_state"] == "idle"
+
+    def test_worker_badge_label_is_backend_id(self) -> None:
+        badges = self._bs().compute_archived("completed", worker_id="my-backend")
+        wb = next(b for b in badges if b.type == "worker")
+        assert wb.label == "my-backend"
+
+    def test_worker_badge_label_falls_back_to_unknown(self) -> None:
+        badges = self._bs().compute_archived("completed")
+        wb = next(b for b in badges if b.type == "worker")
+        assert wb.label == "unknown"
+
+    def test_worker_badge_payload_contains_worker_id(self) -> None:
+        badges = self._bs().compute_archived("completed", worker_id="bk-1")
+        wb = next(b for b in badges if b.type == "worker")
+        assert wb.payload["worker_id"] == "bk-1"
+
+    def test_no_caveman_badge_by_default(self) -> None:
+        badges = self._bs().compute_archived("completed", worker_id="w")
+        assert not any(b.type == "caveman" for b in badges)
+
+    def test_caveman_badge_present_when_mode_is_true(self) -> None:
+        badges = self._bs().compute_archived("completed", worker_id="w", caveman_mode=True)
+        cb = [b for b in badges if b.type == "caveman"]
+        assert len(cb) == 1
+        assert cb[0].label == "Caveman"
+
+    def test_caveman_badge_level_propagated(self) -> None:
+        badges = self._bs().compute_archived("completed", worker_id="w", caveman_mode=True, caveman_level="moderate")
+        cb = next(b for b in badges if b.type == "caveman")
+        assert cb.payload["level"] == "moderate"
+
+    def test_all_badges_serialisable(self) -> None:
+        badges = self._bs().compute_archived("completed", worker_id="bk", caveman_mode=True)
+        for badge in badges:
+            json.dumps(badge.to_dict())  # must not raise
+
+    def test_priorities_are_ascending(self) -> None:
+        badges = self._bs().compute_archived("completed", worker_id="w", caveman_mode=True)
+        priorities = [b.priority for b in badges]
+        assert priorities == sorted(priorities)

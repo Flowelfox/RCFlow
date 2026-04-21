@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../../../state/app_state.dart';
 import '../../../theme.dart';
+import '../create_worktree_dialog.dart';
 
 /// Sidebar panel for git worktree management.
 ///
@@ -51,7 +52,7 @@ class _WorktreeListPanelState extends State<WorktreeListPanel> {
   }
 
   Future<void> _create(AppState state, String workerId, String repoPath) async {
-    final result = await _showCreateDialog(context, repoPath);
+    final result = await showCreateWorktreeDialog(context);
     if (result == null) return;
     final key = _key(workerId, repoPath);
     setState(() => _loading[key] = true);
@@ -370,66 +371,6 @@ class _WorktreeListPanelState extends State<WorktreeListPanel> {
   // Dialogs
   // -------------------------------------------------------------------------
 
-  Future<_CreateParams?> _showCreateDialog(
-    BuildContext context,
-    String repoPath,
-  ) async {
-    final branchCtrl = TextEditingController();
-    final baseCtrl = TextEditingController(text: 'main');
-    final formKey = GlobalKey<FormState>();
-
-    return showDialog<_CreateParams>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('New Worktree'),
-        content: Form(
-          key: formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextFormField(
-                controller: branchCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Branch',
-                  hintText: 'feature/PROJ-123/description',
-                ),
-                validator: (v) =>
-                    (v == null || v.trim().isEmpty) ? 'Required' : null,
-                autofocus: true,
-              ),
-              const SizedBox(height: 8),
-              TextFormField(
-                controller: baseCtrl,
-                decoration: const InputDecoration(labelText: 'Base branch'),
-                validator: (v) =>
-                    (v == null || v.trim().isEmpty) ? 'Required' : null,
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () {
-              if (formKey.currentState!.validate()) {
-                Navigator.pop(
-                  ctx,
-                  _CreateParams(
-                    branch: branchCtrl.text.trim(),
-                    base: baseCtrl.text.trim(),
-                  ),
-                );
-              }
-            },
-            child: const Text('Create'),
-          ),
-        ],
-      ),
-    );
-  }
 
   Future<String?> _showMergeDialog(BuildContext context, String name) async {
     final msgCtrl = TextEditingController();
@@ -499,11 +440,6 @@ class _WorktreeListPanelState extends State<WorktreeListPanel> {
 
 String _key(String workerId, String repoPath) => '$workerId:$repoPath';
 
-class _CreateParams {
-  final String branch;
-  final String base;
-  const _CreateParams({required this.branch, required this.base});
-}
 
 class _IconBtn extends StatelessWidget {
   final IconData icon;

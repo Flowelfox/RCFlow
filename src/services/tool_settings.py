@@ -582,6 +582,10 @@ class ToolSettingsManager:
         # Codex/OpenCode: no-op — always report False until delivery is wired.
         return False
 
+    def is_caveman_active(self, tool_name: str) -> bool:
+        """Return True if caveman mode is currently active for *tool_name*."""
+        return self._read_caveman_state(tool_name)
+
     def get_settings_with_schema(self, tool_name: str, *, managed: bool = True) -> dict[str, Any]:
         """Return schema fields merged with current values for the UI.
 

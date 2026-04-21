@@ -12,6 +12,7 @@ import '../../state/input_area_view_model.dart';
 import '../../state/pane_state.dart';
 import '../../theme.dart';
 import '../../tips.dart';
+import 'create_worktree_dialog.dart';
 
 bool get _isDesktop =>
     Platform.isWindows || Platform.isLinux || Platform.isMacOS;
@@ -57,6 +58,44 @@ class _InputAreaState extends State<InputArea> {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Failed to set worktree: $e')));
+      }
+    }
+  }
+
+  /// Create a new worktree via the REST API and auto-select it.
+  ///
+  /// For new sessions the path is stored in [PaneState.pendingWorktreePath].
+  /// For active sessions it is pushed to the server via PATCH.
+  Future<void> _createAndSelectWorktree({
+    required String projectPath,
+    required String workerId,
+    String? sessionId,
+  }) async {
+    final params = await showCreateWorktreeDialog(context);
+    if (params == null || !mounted) return;
+    try {
+      final ws = context.read<AppState>().wsForWorker(workerId);
+      final result = await ws.createWorktree(
+        branch: params.branch,
+        repoPath: projectPath,
+        base: params.base,
+      );
+      if (!mounted) return;
+      final newPath = (result['worktree'] as Map<String, dynamic>?)?['path'] as String?;
+      if (newPath != null) {
+        if (sessionId != null) {
+          await ws.setSessionWorktree(sessionId, newPath);
+        } else {
+          context.read<PaneState>().setPendingWorktreePath(newPath);
+        }
+      }
+      // Refresh the cached worktree list so the dropdown shows the new entry.
+      await _fetchWorktrees(projectPath, workerId, force: true);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Create worktree failed: $e')),
+        );
       }
     }
   }
@@ -1115,6 +1154,10 @@ class _InputAreaState extends State<InputArea> {
                         onClear: () => context
                             .read<PaneState>()
                             .setPendingWorktreePath(null),
+                        onCreateWorktree: () => _createAndSelectWorktree(
+                          projectPath: selectedProjectPath,
+                          workerId: paneWorkerId ?? state.defaultWorkerId ?? '',
+                        ),
                       ),
                     if (showActiveWorktreeChip)
                       _WorktreeChip(
@@ -1129,6 +1172,11 @@ class _InputAreaState extends State<InputArea> {
                         onSelect: (path) =>
                             _setSessionWorktree(sessionId, path),
                         onClear: () => _setSessionWorktree(sessionId, null),
+                        onCreateWorktree: () => _createAndSelectWorktree(
+                          projectPath: activeSessionProjectPath,
+                          workerId: paneWorkerId ?? state.defaultWorkerId ?? '',
+                          sessionId: sessionId,
+                        ),
                       ),
                     for (int i = 0; i < _vm.pendingAttachments.length; i++)
                       _AttachmentChip(
@@ -1588,6 +1636,7 @@ class _WorktreeChip extends StatelessWidget {
   final VoidCallback onOpen;
   final void Function(String path) onSelect;
   final VoidCallback onClear;
+  final Future<void> Function()? onCreateWorktree;
 
   const _WorktreeChip({
     required this.selectedPath,
@@ -1596,6 +1645,7 @@ class _WorktreeChip extends StatelessWidget {
     required this.onOpen,
     required this.onSelect,
     required this.onClear,
+    this.onCreateWorktree,
   });
 
   @override
@@ -1695,6 +1745,31 @@ class _WorktreeChip extends StatelessWidget {
                   ),
                 );
               }),
+            if (onCreateWorktree != null) ...[
+              const PopupMenuDivider(),
+              PopupMenuItem<String>(
+                value: '__create__',
+                height: 36,
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.add,
+                      size: 14,
+                      color: context.appColors.textSecondary,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Create worktree',
+                      style: TextStyle(
+                        color: context.appColors.textSecondary,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ];
 
           showMenu<String>(
@@ -1714,6 +1789,8 @@ class _WorktreeChip extends StatelessWidget {
             if (value == null) return;
             if (value == '__none__') {
               onClear();
+            } else if (value == '__create__') {
+              onCreateWorktree?.call();
             } else {
               onSelect(value);
             }

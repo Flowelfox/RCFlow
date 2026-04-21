@@ -17,10 +17,12 @@ class _AgentBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Match both the raw agent_type (used in draft badges from
+    // DraftBadgeComposer) and the display label sent by the server.
     final label = switch (badge.label) {
-      'claude_code' => 'Claude Code',
-      'codex' => 'Codex',
-      'opencode' => 'OpenCode',
+      'claude_code' || 'ClaudeCode' => 'Claude Code',
+      'codex' || 'Codex' => 'Codex',
+      'opencode' || 'OpenCode' => 'OpenCode',
       _ => badge.label,
     };
 

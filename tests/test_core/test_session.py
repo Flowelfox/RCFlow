@@ -17,9 +17,10 @@ from src.database.models import SessionMessage as SessionMessageModel
 def _make_session_row(
     status: str = "active",
     session_type: str = "one-shot",
-    title: str | None = None,
+    title: str | None = "Test session",
     metadata: dict | None = None,
     conversation_history: list | None = None,
+    sort_order: int | None = None,
 ) -> MagicMock:
     """Build a minimal mock SessionModel row for reload tests."""
     row = MagicMock()
@@ -38,6 +39,7 @@ def _make_session_row(
     row.tool_output_tokens = 0
     row.tool_cost_usd = 0.0
     row.conversation_history = conversation_history
+    row.sort_order = sort_order
     return row
 
 
@@ -1105,3 +1107,164 @@ class TestArchiveSessionSQLiteIntegration:
             assert len(msgs) == 2
             assert msgs[0].message_type == MessageType.TEXT_CHUNK.value
             assert msgs[1].message_type == MessageType.SESSION_END.value
+
+
+# ---------------------------------------------------------------------------
+# Integration tests: reload_stale_sessions ghost session fix
+# ---------------------------------------------------------------------------
+
+
+class TestReloadStaleSessionsSQLiteIntegration:
+    """Integration tests for reload_stale_sessions against real SQLite.
+
+    Covers the ghost-session bug (empty stub rows must be discarded) and
+    sort_order restoration.
+    """
+
+    @pytest.fixture(autouse=True)
+    async def setup_db(self):
+        self.engine = _make_sqlite_engine()
+        await _create_tables(self.engine)
+        self.factory = _session_factory(self.engine)
+        yield
+        await self.engine.dispose()
+
+    @pytest.mark.asyncio
+    async def test_empty_stub_session_skipped_and_deleted(self):
+        """A stub row with no title, no conversation_history, and no messages
+        (backend crash before first LLM response) must NOT be loaded into
+        memory and the stub row must be removed from the database."""
+        manager = SessionManager("test-backend")
+        session_uuid = uuid.uuid4()
+
+        async with self.factory() as db:
+            db.add(
+                SessionModel(
+                    id=session_uuid,
+                    backend_id="test-backend",
+                    created_at=datetime.now(UTC),
+                    session_type="one-shot",
+                    status="active",
+                    title=None,
+                    conversation_history=None,
+                )
+            )
+            await db.commit()
+
+        async with self.factory() as db:
+            count = await manager.reload_stale_sessions(db, "test-backend")
+
+        # Ghost session must not appear in memory.
+        assert count == 0
+        assert manager.get_session(str(session_uuid)) is None
+
+        # Stub row must be cleaned up so it cannot resurface on the next restart.
+        async with self.factory() as db:
+            row = await db.get(SessionModel, session_uuid)
+        assert row is None
+
+    @pytest.mark.asyncio
+    async def test_session_with_title_is_reloaded(self):
+        """A session that has a title (even with no buffered messages) is real
+        and must be restored — it is not an empty stub."""
+        manager = SessionManager("test-backend")
+        session_uuid = uuid.uuid4()
+
+        async with self.factory() as db:
+            db.add(
+                SessionModel(
+                    id=session_uuid,
+                    backend_id="test-backend",
+                    created_at=datetime.now(UTC),
+                    session_type="one-shot",
+                    status="active",
+                    title="Real session",
+                    conversation_history=None,
+                )
+            )
+            await db.commit()
+
+        async with self.factory() as db:
+            count = await manager.reload_stale_sessions(db, "test-backend")
+
+        assert count == 1
+        session = manager.get_session(str(session_uuid))
+        assert session is not None
+        assert session.title == "Real session"
+
+    @pytest.mark.asyncio
+    async def test_session_with_conversation_history_but_no_title_is_reloaded(self):
+        """A session that has conversation_history but no title (title not yet
+        extracted by the LLM) must still be restored."""
+        manager = SessionManager("test-backend")
+        session_uuid = uuid.uuid4()
+        history = [{"role": "user", "content": "hello"}]
+
+        async with self.factory() as db:
+            db.add(
+                SessionModel(
+                    id=session_uuid,
+                    backend_id="test-backend",
+                    created_at=datetime.now(UTC),
+                    session_type="conversational",
+                    status="active",
+                    title=None,
+                    conversation_history=history,
+                )
+            )
+            await db.commit()
+
+        async with self.factory() as db:
+            count = await manager.reload_stale_sessions(db, "test-backend")
+
+        assert count == 1
+        session = manager.get_session(str(session_uuid))
+        assert session is not None
+        assert session.conversation_history == history
+
+    @pytest.mark.asyncio
+    async def test_sort_order_restored_on_reload(self):
+        """sort_order from the DB row must be applied to the reloaded session."""
+        manager = SessionManager("test-backend")
+        session_uuid = uuid.uuid4()
+
+        async with self.factory() as db:
+            db.add(
+                SessionModel(
+                    id=session_uuid,
+                    backend_id="test-backend",
+                    created_at=datetime.now(UTC),
+                    session_type="one-shot",
+                    status="active",
+                    title="Ordered session",
+                    sort_order=-2000,
+                    conversation_history=[{"role": "user", "content": "hi"}],
+                )
+            )
+            await db.commit()
+
+        async with self.factory() as db:
+            count = await manager.reload_stale_sessions(db, "test-backend")
+
+        assert count == 1
+        session = manager.get_session(str(session_uuid))
+        assert session is not None
+        assert session.sort_order == -2000
+
+    @pytest.mark.asyncio
+    async def test_save_all_sessions_preserves_sort_order(self):
+        """save_all_sessions must persist sort_order so it survives a
+        graceful shutdown/restart cycle."""
+        manager = SessionManager("test-backend")
+        session = manager.create_session(SessionType.ONE_SHOT)
+        session.title = "Pinned session"
+        session.sort_order = -5000
+
+        async with self.factory() as db:
+            await manager.save_all_sessions(db)
+
+        async with self.factory() as db:
+            session_uuid = uuid.UUID(session.id)
+            row = await db.get(SessionModel, session_uuid)
+        assert row is not None
+        assert row.sort_order == -5000

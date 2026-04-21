@@ -78,6 +78,11 @@ bundle-linux-backend-install:
 bundle-macos-backend *FLAGS:
     uv run --extra bundle --extra tray python scripts/bundle.py --platform macos --installer {{ FLAGS }}
 
+# Uninstall RCFlow backend worker from macOS (app bundle + CLI install + LaunchAgents + data)
+[macos]
+uninstall-macos *FLAGS:
+    bash scripts/uninstall_macos.sh {{ FLAGS }}
+
 # Build and install macOS backend DMG (.app bundle, must be on macOS)
 [macos]
 bundle-macos-backend-install:

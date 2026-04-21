@@ -137,9 +137,96 @@ def _ensure_self_signed_certs(certfile: Path, keyfile: Path) -> None:
     print("Self-signed certificate generated successfully.")
 
 
+def _install_parent_death_watchdog() -> None:
+    """Exit when the GUI process that spawned us is gone.
+
+    The GUI sets ``RCFLOW_PARENT_PID`` to its own pid before spawning this
+    server via ``subprocess.Popen``.  If the GUI crashes (e.g. a Cocoa
+    re-entrancy after macOS auto-lock / sleep-wake), the child is reparented
+    to ``launchd`` / ``init`` and would otherwise keep serving clients
+    indefinitely with no UI to stop it.  This watchdog polls the expected
+    parent pid every two seconds and sends ``SIGTERM`` to the server when the
+    parent is no longer alive so uvicorn can shut down gracefully.
+
+    No-op when ``RCFLOW_PARENT_PID`` is absent (systemd / launchd daemon
+    installs do not set it) or invalid.
+    """
+    raw = os.environ.get("RCFLOW_PARENT_PID")
+    if not raw:
+        return
+    try:
+        parent_pid = int(raw)
+    except ValueError:
+        return
+    if parent_pid <= 0:
+        return
+
+    import threading  # noqa: PLC0415
+    import time  # noqa: PLC0415
+
+    def _watch() -> None:
+        # Poll interval chosen to bound orphan lifetime without measurable
+        # load.  Two seconds is small relative to typical GUI-restart delays
+        # but large enough to avoid racing a brief launchd respawn.
+        while True:
+            time.sleep(2.0)
+            alive = True
+            if sys.platform == "win32":
+                try:
+                    import ctypes  # noqa: PLC0415
+
+                    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000  # noqa: N806
+                    STILL_ACTIVE = 259  # noqa: N806
+                    handle = ctypes.windll.kernel32.OpenProcess(  # ty:ignore[unresolved-attribute]
+                        PROCESS_QUERY_LIMITED_INFORMATION, False, parent_pid
+                    )
+                    if not handle:
+                        alive = False
+                    else:
+                        try:
+                            exit_code = ctypes.c_ulong()
+                            if not ctypes.windll.kernel32.GetExitCodeProcess(  # ty:ignore[unresolved-attribute]
+                                handle, ctypes.byref(exit_code)
+                            ):
+                                alive = False
+                            else:
+                                alive = exit_code.value == STILL_ACTIVE
+                        finally:
+                            ctypes.windll.kernel32.CloseHandle(handle)  # ty:ignore[unresolved-attribute]
+                except Exception:
+                    alive = False
+            else:
+                try:
+                    os.kill(parent_pid, 0)
+                except ProcessLookupError:
+                    alive = False
+                except PermissionError:
+                    # Parent still exists but is owned by a different uid
+                    # (e.g. pid was recycled by another user).  Treat this as
+                    # "parent gone" for our purposes since it is no longer our
+                    # GUI.
+                    alive = False
+                except OSError:
+                    alive = True
+            if not alive:
+                try:
+                    import signal as _signal  # noqa: PLC0415
+
+                    if sys.platform == "win32":
+                        os.kill(os.getpid(), _signal.SIGTERM)
+                    else:
+                        os.kill(os.getpid(), _signal.SIGTERM)
+                except Exception:
+                    os._exit(0)
+                return
+
+    threading.Thread(target=_watch, name="parent-death-watchdog", daemon=True).start()
+
+
 def _cmd_run(args: argparse.Namespace) -> None:
     """Start the RCFlow server (default command)."""
     _check_not_root()
+    _install_parent_death_watchdog()
     settings = get_settings()
 
     _check_port_available(settings.RCFLOW_HOST, settings.RCFLOW_PORT)

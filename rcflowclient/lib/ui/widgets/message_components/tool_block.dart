@@ -48,6 +48,26 @@ class ToolBlock extends StatelessWidget {
     return null;
   }
 
+  /// Compute a compact diff stat string like "+12 -3" from a unified diff.
+  static String? _diffStats(String? diff) {
+    if (diff == null || diff.isEmpty) return null;
+    int additions = 0;
+    int deletions = 0;
+    for (final line in diff.split('\n')) {
+      if (line.startsWith('+++') || line.startsWith('---')) continue;
+      if (line.startsWith('+')) {
+        additions++;
+      } else if (line.startsWith('-')) {
+        deletions++;
+      }
+    }
+    if (additions == 0 && deletions == 0) return null;
+    final parts = <String>[];
+    if (additions > 0) parts.add('+$additions');
+    if (deletions > 0) parts.add('-$deletions');
+    return parts.join(' ');
+  }
+
   @override
   Widget build(BuildContext context) {
     final toolName = message.toolName ?? 'tool';
@@ -59,6 +79,7 @@ class ToolBlock extends StatelessWidget {
     final summary = _toolSummary(toolName, message.toolInput);
     final diff = message.fileDiff;
     final hasDiff = diff != null && diff.isNotEmpty;
+    final diffStats = _diffStats(diff);
     final hasExpandableContent =
         finished && (output.isNotEmpty || hasDiff);
 
@@ -137,6 +158,17 @@ class ToolBlock extends StatelessWidget {
                         ],
                       ),
                     ),
+                    if (diffStats != null) ...[
+                      SizedBox(width: 8),
+                      Text(
+                        diffStats,
+                        style: TextStyle(
+                          color: context.appColors.textMuted,
+                          fontSize: 11,
+                          fontFamily: 'monospace',
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -191,7 +223,12 @@ class _DiffView extends StatelessWidget {
           oldLine = int.parse(match.group(1)!);
           newLine = int.parse(match.group(2)!);
         }
-        rows.add(_DiffLine(type: _DiffLineType.hunk, text: line));
+        rows.add(_DiffLine(
+          type: _DiffLineType.hunk,
+          text: line,
+          oldLineNo: oldLine,
+          newLineNo: newLine,
+        ));
         continue;
       }
       if (line.startsWith('-')) {
@@ -252,8 +289,10 @@ class _DiffView extends StatelessWidget {
       case _DiffLineType.hunk:
         bgColor = colors.accentDim.withValues(alpha: 0.3);
         textColor = colors.accentLight;
-        oldGutter = ''.padLeft(gutterChars);
-        newGutter = ''.padLeft(gutterChars);
+        oldGutter =
+            (row.oldLineNo?.toString() ?? '').padLeft(gutterChars);
+        newGutter =
+            (row.newLineNo?.toString() ?? '').padLeft(gutterChars);
       case _DiffLineType.deletion:
         bgColor = const Color(0x33F85149); // red tint
         textColor = const Color(0xFFF85149); // bright red

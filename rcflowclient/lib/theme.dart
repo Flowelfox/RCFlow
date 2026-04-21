@@ -323,6 +323,14 @@ ThemeData buildDarkTheme() {
       ),
     ),
     dividerTheme: const DividerThemeData(color: kDivider, thickness: 1),
+    checkboxTheme: CheckboxThemeData(
+      fillColor: WidgetStateProperty.resolveWith<Color>((states) {
+        if (states.contains(WidgetState.selected)) return kAccent;
+        return Colors.transparent;
+      }),
+      side: const BorderSide(color: kTextSecondary, width: 1.5),
+      checkColor: WidgetStateProperty.all(Colors.white),
+    ),
     extensions: const [AppColors.dark],
   );
 }
@@ -379,6 +387,14 @@ ThemeData buildLightTheme() {
       ),
     ),
     dividerTheme: const DividerThemeData(color: kLightDivider, thickness: 1),
+    checkboxTheme: CheckboxThemeData(
+      fillColor: WidgetStateProperty.resolveWith<Color>((states) {
+        if (states.contains(WidgetState.selected)) return kLightAccent;
+        return Colors.transparent;
+      }),
+      side: const BorderSide(color: kLightTextSecondary, width: 1.5),
+      checkColor: WidgetStateProperty.all(Colors.white),
+    ),
     extensions: const [AppColors.light],
   );
 }

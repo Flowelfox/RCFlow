@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../../../models/artifact_info.dart';
@@ -27,6 +28,18 @@ class _ArtifactListPanelState extends State<ArtifactListPanel> {
   final Set<String> _expandedProjects = {};
   bool _initialized = false;
   bool _rechecking = false;
+
+  // ---- Multi-select state ----
+  final Set<String> _selectedArtifactIds = {};
+
+  /// Index into [_currentFlatList] of the last plain/ctrl-clicked artifact.
+  /// Used as the anchor for Shift+click range selection.
+  int? _lastClickedVisibleIndex;
+
+  /// Populated at the start of each [build] call; used by [_handleArtifactTap]
+  /// to resolve Shift+click ranges without passing the list through every
+  /// widget constructor.
+  List<ArtifactInfo> _currentFlatList = [];
 
   @override
   void initState() {
@@ -164,9 +177,33 @@ class _ArtifactListPanelState extends State<ArtifactListPanel> {
           _saveExpandedState();
         }
 
+        // Compute worker order for both list-building and flat-list resolution.
+        final workerOrder = <String, int>{};
+        for (var i = 0; i < workerConfigs.length; i++) {
+          workerOrder[workerConfigs[i].id] = i;
+        }
+        final sortedWorkerIds = grouped.keys.toList()
+          ..sort(
+            (a, b) =>
+                (workerOrder[a] ?? 999).compareTo(workerOrder[b] ?? 999),
+          );
+
+        // Cache flat visible list for range-selection.
+        _currentFlatList = computeFlatVisibleArtifactList(
+          filteredArtifacts: filtered,
+          grouped: grouped,
+          workerOrder: sortedWorkerIds,
+          hasMultipleWorkers: hasMultipleWorkers,
+          expandedWorkers: _expandedWorkers,
+          groupByProject: _groupByProject,
+          expandedProjects: _expandedProjects,
+          projectKey: _projectKey,
+        );
+
         return Column(
           children: [
             _buildFilterBar(context),
+            if (_selectedArtifactIds.isNotEmpty) _buildSelectionBar(context),
             Expanded(
               child: filtered.isEmpty && _searchQuery.isNotEmpty
                   ? _buildNoResults(context)
@@ -174,6 +211,7 @@ class _ArtifactListPanelState extends State<ArtifactListPanel> {
                       context,
                       state,
                       grouped,
+                      sortedWorkerIds,
                       workerConfigs,
                       hasMultipleWorkers,
                     ),
@@ -192,20 +230,11 @@ class _ArtifactListPanelState extends State<ArtifactListPanel> {
     BuildContext context,
     AppState state,
     Map<String, Map<String?, List<ArtifactInfo>>> grouped,
+    List<String> sortedWorkerIds,
     List workerConfigs,
     bool hasMultipleWorkers,
   ) {
     final children = <Widget>[];
-
-    // Sort workers by config order
-    final workerOrder = <String, int>{};
-    for (var i = 0; i < workerConfigs.length; i++) {
-      workerOrder[workerConfigs[i].id] = i;
-    }
-    final sortedWorkerIds = grouped.keys.toList()
-      ..sort(
-        (a, b) => (workerOrder[a] ?? 999).compareTo(workerOrder[b] ?? 999),
-      );
 
     for (final workerId in sortedWorkerIds) {
       final projectMap = grouped[workerId]!;
@@ -275,10 +304,39 @@ class _ArtifactListPanelState extends State<ArtifactListPanel> {
               for (final artifact in projectArtifacts) {
                 children.add(
                   _ArtifactTile(
+                    key: ValueKey(artifact.artifactId),
                     artifact: artifact,
                     state: state,
                     onArtifactSelected: widget.onArtifactSelected,
                     indented: hasMultipleWorkers,
+                    isSelected: _selectedArtifactIds.contains(
+                      artifact.artifactId,
+                    ),
+                    onTapOverride: () => _handleArtifactTap(
+                      context,
+                      artifact,
+                      _currentFlatList.indexOf(artifact),
+                      state,
+                    ),
+                    onSecondaryTapOverride: _selectedArtifactIds.isNotEmpty
+                        ? (pos) {
+                            if (!_selectedArtifactIds.contains(
+                              artifact.artifactId,
+                            )) {
+                              setState(
+                                () => _selectedArtifactIds.add(
+                                  artifact.artifactId,
+                                ),
+                              );
+                            }
+                            _showBulkContextMenu(context, pos, state);
+                          }
+                        : (pos) => _showSingleArtifactContextMenu(
+                              context,
+                              pos,
+                              artifact,
+                              state,
+                            ),
                   ),
                 );
               }
@@ -295,10 +353,33 @@ class _ArtifactListPanelState extends State<ArtifactListPanel> {
           for (final artifact in allArtifacts) {
             children.add(
               _ArtifactTile(
+                key: ValueKey(artifact.artifactId),
                 artifact: artifact,
                 state: state,
                 onArtifactSelected: widget.onArtifactSelected,
                 indented: hasMultipleWorkers,
+                isSelected: _selectedArtifactIds.contains(artifact.artifactId),
+                onTapOverride: () => _handleArtifactTap(
+                  context,
+                  artifact,
+                  _currentFlatList.indexOf(artifact),
+                  state,
+                ),
+                onSecondaryTapOverride: _selectedArtifactIds.isNotEmpty
+                    ? (pos) {
+                        if (!_selectedArtifactIds.contains(artifact.artifactId)) {
+                          setState(
+                            () => _selectedArtifactIds.add(artifact.artifactId),
+                          );
+                        }
+                        _showBulkContextMenu(context, pos, state);
+                      }
+                    : (pos) => _showSingleArtifactContextMenu(
+                          context,
+                          pos,
+                          artifact,
+                          state,
+                        ),
               ),
             );
           }
@@ -317,6 +398,379 @@ class _ArtifactListPanelState extends State<ArtifactListPanel> {
       if (config.id == workerId) return config.name;
     }
     return workerId;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Multi-select helpers
+  // ---------------------------------------------------------------------------
+
+  /// Handles a tap on an artifact tile, respecting Shift/Ctrl/Meta modifiers.
+  ///
+  /// - **Shift+click**: range-selects from the last clicked index to [idx].
+  /// - **Ctrl/Meta+click**: toggles [artifact] in the selection.
+  /// - **Plain click** while selection is non-empty: toggles [artifact].
+  /// - **Plain click** while selection is empty: opens the artifact in a pane.
+  void _handleArtifactTap(
+    BuildContext context,
+    ArtifactInfo artifact,
+    int idx,
+    AppState appState,
+  ) {
+    final keys = HardwareKeyboard.instance.logicalKeysPressed;
+    final shift =
+        keys.contains(LogicalKeyboardKey.shiftLeft) ||
+        keys.contains(LogicalKeyboardKey.shiftRight);
+    final ctrl =
+        keys.contains(LogicalKeyboardKey.controlLeft) ||
+        keys.contains(LogicalKeyboardKey.controlRight) ||
+        keys.contains(LogicalKeyboardKey.metaLeft) ||
+        keys.contains(LogicalKeyboardKey.metaRight);
+
+    if (shift && _lastClickedVisibleIndex != null) {
+      final anchor = _lastClickedVisibleIndex!;
+      final lo = anchor < idx ? anchor : idx;
+      final hi = anchor < idx ? idx : anchor;
+      setState(() {
+        for (var i = lo; i <= hi; i++) {
+          if (i < _currentFlatList.length) {
+            _selectedArtifactIds.add(_currentFlatList[i].artifactId);
+          }
+        }
+        _lastClickedVisibleIndex = idx;
+      });
+    } else if (ctrl) {
+      setState(() {
+        if (_selectedArtifactIds.contains(artifact.artifactId)) {
+          _selectedArtifactIds.remove(artifact.artifactId);
+        } else {
+          _selectedArtifactIds.add(artifact.artifactId);
+        }
+        _lastClickedVisibleIndex = idx;
+      });
+    } else if (_selectedArtifactIds.isNotEmpty) {
+      setState(() {
+        if (_selectedArtifactIds.contains(artifact.artifactId)) {
+          _selectedArtifactIds.remove(artifact.artifactId);
+        } else {
+          _selectedArtifactIds.add(artifact.artifactId);
+        }
+        _lastClickedVisibleIndex = idx;
+      });
+    } else {
+      setState(() => _lastClickedVisibleIndex = idx);
+      appState.openArtifactInPane(artifact.artifactId);
+      widget.onArtifactSelected?.call();
+    }
+  }
+
+  /// Shows a single-artifact context menu at [position].
+  ///
+  /// Used when no multi-selection is active and the user right-clicks one
+  /// artifact. Offers "Open in pane" and "Delete artifact…".
+  void _showSingleArtifactContextMenu(
+    BuildContext context,
+    Offset position,
+    ArtifactInfo artifact,
+    AppState state,
+  ) {
+    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+    showMenu<String>(
+      context: context,
+      position: RelativeRect.fromRect(
+        position & const Size(1, 1),
+        Offset.zero & overlay.size,
+      ),
+      color: context.appColors.bgSurface,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      items: [
+        PopupMenuItem(
+          value: 'open',
+          child: Row(
+            children: [
+              Icon(
+                Icons.open_in_new_rounded,
+                color: context.appColors.textSecondary,
+                size: 18,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'Open in pane',
+                style: TextStyle(color: context.appColors.textPrimary),
+              ),
+            ],
+          ),
+        ),
+        const PopupMenuDivider(),
+        PopupMenuItem(
+          value: 'delete',
+          child: Row(
+            children: [
+              Icon(
+                Icons.delete_outline,
+                color: context.appColors.errorText,
+                size: 18,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'Delete artifact\u2026',
+                style: TextStyle(color: context.appColors.errorText),
+              ),
+            ],
+          ),
+        ),
+      ],
+    ).then((value) {
+      if (!context.mounted || value == null) return;
+      switch (value) {
+        case 'open':
+          state.openArtifactInPane(artifact.artifactId);
+          widget.onArtifactSelected?.call();
+        case 'delete':
+          _confirmSingleArtifactDelete(context, artifact, state);
+      }
+    });
+  }
+
+  /// Confirms and deletes a single artifact (no multi-select involved).
+  Future<void> _confirmSingleArtifactDelete(
+    BuildContext context,
+    ArtifactInfo artifact,
+    AppState state,
+  ) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: context.appColors.bgSurface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        title: Text(
+          'Delete Artifact',
+          style: TextStyle(color: context.appColors.textPrimary, fontSize: 16),
+        ),
+        content: Text(
+          'Remove "${artifact.fileName}" from tracking? The file itself will not be deleted.',
+          style: TextStyle(
+            color: context.appColors.textSecondary,
+            fontSize: 14,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: Text(
+              'Cancel',
+              style: TextStyle(color: context.appColors.textSecondary),
+            ),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: context.appColors.errorText,
+            ),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Delete', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+    final worker = state.getWorker(artifact.workerId);
+    if (worker == null) return;
+    try {
+      await worker.ws.deleteArtifact(artifact.artifactId);
+    } catch (e) {
+      if (context.mounted) {
+        state.addSystemMessage(
+          'Failed to delete artifact: $e',
+          isError: true,
+        );
+      }
+    }
+  }
+
+  /// Shows a bulk context menu at [position] for the current selection.
+  void _showBulkContextMenu(
+    BuildContext context,
+    Offset position,
+    AppState state,
+  ) {
+    final count = _selectedArtifactIds.length;
+    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+
+    showMenu<String>(
+      context: context,
+      position: RelativeRect.fromRect(
+        position & const Size(1, 1),
+        Offset.zero & overlay.size,
+      ),
+      color: context.appColors.bgSurface,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      items: [
+        PopupMenuItem(
+          enabled: false,
+          height: 28,
+          child: Text(
+            '$count artifact${count == 1 ? '' : 's'} selected',
+            style: TextStyle(
+              color: context.appColors.textMuted,
+              fontSize: 11,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ),
+        const PopupMenuDivider(),
+        PopupMenuItem(
+          value: 'delete',
+          child: Row(
+            children: [
+              Icon(
+                Icons.delete_outline,
+                color: context.appColors.errorText,
+                size: 18,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'Delete $count artifact${count == 1 ? '' : 's'}\u2026',
+                style: TextStyle(color: context.appColors.errorText),
+              ),
+            ],
+          ),
+        ),
+        const PopupMenuDivider(),
+        PopupMenuItem(
+          value: 'clear',
+          child: Row(
+            children: [
+              Icon(
+                Icons.close_rounded,
+                color: context.appColors.textSecondary,
+                size: 18,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'Clear selection',
+                style: TextStyle(color: context.appColors.textPrimary),
+              ),
+            ],
+          ),
+        ),
+      ],
+    ).then((value) {
+      if (!context.mounted || value == null) return;
+      switch (value) {
+        case 'delete':
+          _confirmBulkDelete(context, state);
+        case 'clear':
+          setState(() => _selectedArtifactIds.clear());
+      }
+    });
+  }
+
+  Future<void> _confirmBulkDelete(BuildContext context, AppState state) async {
+    final count = _selectedArtifactIds.length;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: context.appColors.bgSurface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        title: Text(
+          'Delete $count artifact${count == 1 ? '' : 's'}',
+          style: TextStyle(color: context.appColors.textPrimary, fontSize: 16),
+        ),
+        content: Text(
+          'Delete $count artifact${count == 1 ? '' : 's'}? This cannot be undone.',
+          style: TextStyle(
+            color: context.appColors.textSecondary,
+            fontSize: 14,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: Text(
+              'Cancel',
+              style: TextStyle(color: context.appColors.textSecondary),
+            ),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: context.appColors.errorText,
+            ),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Delete', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+    await _bulkDeleteArtifacts(context, state);
+  }
+
+  Future<void> _bulkDeleteArtifacts(
+    BuildContext context,
+    AppState state,
+  ) async {
+    final ids = List<String>.from(_selectedArtifactIds);
+    setState(() => _selectedArtifactIds.clear());
+
+    int failures = 0;
+    await Future.wait(
+      ids.map((id) async {
+        final artifact = state.getArtifact(id);
+        if (artifact == null) return;
+        final worker = state.getWorker(artifact.workerId);
+        if (worker == null) return;
+        try {
+          await worker.ws.deleteArtifact(id);
+        } catch (_) {
+          failures++;
+        }
+      }),
+    );
+
+    if (failures > 0 && context.mounted) {
+      state.addSystemMessage(
+        'Failed to delete $failures artifact${failures == 1 ? '' : 's'}',
+        isError: true,
+      );
+    }
+  }
+
+  /// Thin bar shown below the filter bar when artifacts are selected.
+  Widget _buildSelectionBar(BuildContext context) {
+    final count = _selectedArtifactIds.length;
+    return Container(
+      color: context.appColors.accent.withAlpha(18),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 5),
+      child: Row(
+        children: [
+          Icon(
+            Icons.check_box_outlined,
+            size: 14,
+            color: context.appColors.accent,
+          ),
+          const SizedBox(width: 6),
+          Text(
+            '$count artifact${count == 1 ? '' : 's'} selected',
+            style: TextStyle(
+              color: context.appColors.accentLight,
+              fontSize: 11,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const Spacer(),
+          GestureDetector(
+            onTap: () => setState(() => _selectedArtifactIds.clear()),
+            child: Tooltip(
+              message: 'Clear selection (Esc)',
+              child: Icon(
+                Icons.close_rounded,
+                size: 14,
+                color: context.appColors.textMuted,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _buildFilterBar(BuildContext context) {
@@ -668,12 +1122,19 @@ class _ArtifactTile extends StatelessWidget {
   final AppState state;
   final VoidCallback? onArtifactSelected;
   final bool indented;
+  final bool isSelected;
+  final VoidCallback? onTapOverride;
+  final void Function(Offset)? onSecondaryTapOverride;
 
   const _ArtifactTile({
+    super.key,
     required this.artifact,
     required this.state,
     this.onArtifactSelected,
     this.indented = false,
+    this.isSelected = false,
+    this.onTapOverride,
+    this.onSecondaryTapOverride,
   });
 
   static const _extIcons = {
@@ -699,14 +1160,24 @@ class _ArtifactTile extends StatelessWidget {
         _extIcons[artifact.fileExtension.toLowerCase()] ??
         Icons.insert_drive_file_outlined;
 
-    return Container(
+    return GestureDetector(
+      onSecondaryTapDown: onSecondaryTapOverride != null
+          ? (d) => onSecondaryTapOverride!(d.globalPosition)
+          : null,
+      child: Container(
       decoration: BoxDecoration(
-        color: isActive
+        color: isSelected
+            ? context.appColors.accent.withAlpha(20)
+            : isActive
             ? context.appColors.accent.withAlpha(25)
             : isViewed
             ? context.appColors.accent.withAlpha(12)
             : null,
-        border: isActive
+        border: isSelected
+            ? Border(
+                left: BorderSide(color: context.appColors.accent, width: 3),
+              )
+            : isActive
             ? Border(
                 left: BorderSide(color: context.appColors.accent, width: 3),
               )
@@ -720,37 +1191,51 @@ class _ArtifactTile extends StatelessWidget {
             : null,
       ),
       child: ListTile(
-        leading: Stack(
-          children: [
-            Container(
-              width: 30,
-              height: 30,
-              decoration: BoxDecoration(
-                color: isMissing
-                    ? context.appColors.textMuted.withAlpha(30)
-                    : context.appColors.accent.withAlpha(30),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Icon(
-                icon,
-                color: isMissing
-                    ? context.appColors.textMuted
-                    : context.appColors.accentLight,
-                size: 16,
-              ),
-            ),
-            if (isMissing)
-              Positioned(
-                right: 0,
-                bottom: 0,
-                child: Icon(
-                  Icons.warning_amber_rounded,
-                  color: Colors.orange.shade400,
-                  size: 11,
+        leading: isSelected
+            ? Container(
+                width: 30,
+                height: 30,
+                decoration: BoxDecoration(
+                  color: context.appColors.accent.withAlpha(30),
+                  borderRadius: BorderRadius.circular(8),
                 ),
+                child: Icon(
+                  Icons.check_box_rounded,
+                  color: context.appColors.accent,
+                  size: 18,
+                ),
+              )
+            : Stack(
+                children: [
+                  Container(
+                    width: 30,
+                    height: 30,
+                    decoration: BoxDecoration(
+                      color: isMissing
+                          ? context.appColors.textMuted.withAlpha(30)
+                          : context.appColors.accent.withAlpha(30),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Icon(
+                      icon,
+                      color: isMissing
+                          ? context.appColors.textMuted
+                          : context.appColors.accentLight,
+                      size: 16,
+                    ),
+                  ),
+                  if (isMissing)
+                    Positioned(
+                      right: 0,
+                      bottom: 0,
+                      child: Icon(
+                        Icons.warning_amber_rounded,
+                        color: Colors.orange.shade400,
+                        size: 11,
+                      ),
+                    ),
+                ],
               ),
-          ],
-        ),
         title: Text(
           artifact.fileName,
           style: TextStyle(
@@ -781,10 +1266,12 @@ class _ArtifactTile extends StatelessWidget {
         dense: true,
         visualDensity: const VisualDensity(vertical: -4),
         contentPadding: EdgeInsets.only(left: indented ? 36 : 16, right: 8),
-        onTap: () {
-          state.openArtifactInPane(artifact.artifactId);
-          onArtifactSelected?.call();
-        },
+        onTap: onTapOverride ??
+            () {
+              state.openArtifactInPane(artifact.artifactId);
+              onArtifactSelected?.call();
+            },
+      ),
       ),
     );
   }

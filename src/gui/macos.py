@@ -18,13 +18,17 @@ background thread after tkinter has already claimed NSApp on the main thread.
 
 from __future__ import annotations
 
+import atexit
 import contextlib
+import fcntl
 import logging
 import plistlib
+import signal
 import sys
 import time
 import tkinter as tk
 from pathlib import Path
+from typing import IO
 
 import customtkinter as ctk  # ty:ignore[unresolved-import]
 
@@ -42,6 +46,35 @@ logger = logging.getLogger(__name__)
 # LaunchAgent plist for "Start with macOS" autostart
 _LAUNCHAGENT_LABEL = "com.rcflow.worker"
 _LAUNCHAGENT_PLIST = Path.home() / "Library" / "LaunchAgents" / f"{_LAUNCHAGENT_LABEL}.plist"
+
+# ── Singleton process lock ───────────────────────────────────────────────────
+#
+# Uses an fcntl.flock() exclusive lock on a well-known file.  The lock is
+# released automatically when this process exits (even on crash / SIGKILL),
+# so there is no stale-PID-file problem.
+
+_LOCK_PATH = Path.home() / "Library" / "Application Support" / "RCFlow" / ".worker.lock"
+_lock_fd: IO[str] | None = None
+
+
+def _acquire_singleton_lock() -> bool:
+    """Try to acquire the singleton file lock.
+
+    Returns True if this is the only running instance.  Returns False if
+    another instance already holds the lock (caller should exit).
+    """
+    global _lock_fd
+    _LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        _lock_fd = open(_LOCK_PATH, "w")  # noqa: SIM115
+        fcntl.flock(_lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return True
+    except OSError:
+        if _lock_fd is not None:
+            with contextlib.suppress(OSError):
+                _lock_fd.close()
+            _lock_fd = None
+        return False
 
 
 def _is_autostart_enabled() -> bool:
@@ -102,6 +135,12 @@ class RCFlowMacOSGUI:
         self._show_window_requested: bool = False
         self._toggle_server_requested: bool = False
         self._copy_token_requested: bool = False
+
+        # monotonic expiry for transient status messages (copy-token feedback).
+        # _update_ui will not overwrite the status pill while this is in the
+        # future, so the message is visible for ~3 seconds regardless of the
+        # 300 ms _update_ui polling rate.
+        self._status_sticky_until: float = 0.0
 
         # NSStatusItem and related ObjC objects (populated by _init_status_item)
         self._status_item: object | None = None
@@ -220,13 +259,14 @@ class RCFlowMacOSGUI:
             dc,
             text="Instance Details",
             font=ctk.CTkFont(size=theme.FONT_SIZE_SMALL, weight="bold"),
-        ).grid(row=0, column=0, columnspan=8, sticky="w", padx=g, pady=(g, s))
+        ).grid(row=0, column=0, columnspan=10, sticky="w", padx=g, pady=(g, s))
 
         detail_info = [
             ("Bound Address", "_bound_addr_var"),
             ("Uptime", "_uptime_var"),
             ("Active Sessions", "_sessions_var"),
             ("Backend ID", "_backend_id_var"),
+            ("Version", "_version_var"),
         ]
         for col, (label, var_name) in enumerate(detail_info):
             ctk.CTkLabel(
@@ -284,18 +324,18 @@ class RCFlowMacOSGUI:
 
     def _on_copy_token(self) -> None:
         try:
-            from src.config import Settings  # noqa: PLC0415
+            from src.config import read_token_from_file  # noqa: PLC0415
 
-            api_key = Settings().RCFLOW_API_KEY
+            api_key = read_token_from_file()
             if not api_key:
-                self._set_status("No API token configured", error=True)
+                self._set_status("No API token configured", error=True, sticky=True)
                 return
             self._root.clipboard_clear()
             self._root.clipboard_append(api_key)
             self._root.update()
-            self._set_status("Token copied to clipboard")
+            self._set_status("Token copied to clipboard", sticky=True)
         except Exception as exc:
-            self._set_status(f"Failed to copy token: {exc}", error=True)
+            self._set_status(f"Failed to copy token: {exc}", error=True, sticky=True)
 
     # ── Server controls ───────────────────────────────────────────────────
 
@@ -341,6 +381,24 @@ class RCFlowMacOSGUI:
         self._set_status("Stopping...")
         self._server.stop()
 
+    def _on_adopted_server(self) -> None:
+        """Reflect an adopted running server in the UI.
+
+        Mirrors the state transitions ``_start_server`` makes after a
+        successful launch (disable settings, flip toggle to Stop, update
+        status pill and tray), but without spawning a new subprocess.
+        The user can then click Stop/Quit to terminate the orphan.
+        """
+        self._ip_entry.configure(state="disabled")
+        self._port_entry.configure(state="disabled")
+        self._wss_check.configure(state="disabled")
+        self._toggle_btn.configure(
+            text="Stop", fg_color=theme.BTN_STOP_FG, hover_color=theme.BTN_STOP_HOVER, text_color=theme.BTN_STOP_TEXT
+        )
+        protocol = "WSS" if self._wss_var.get() else "WS"
+        self._set_status(f"Running ({protocol}) — recovered", sticky=True)
+        self._update_tray_status()
+
     # ── Log display ───────────────────────────────────────────────────────
 
     def _drain_log_queue(self) -> None:
@@ -370,7 +428,7 @@ class RCFlowMacOSGUI:
 
     # ── Status & details ──────────────────────────────────────────────────
 
-    def _set_status(self, text: str, *, error: bool = False) -> None:
+    def _set_status(self, text: str, *, error: bool = False, sticky: bool = False) -> None:
         tl = text.lower()
         if error:
             color = theme.STATUS_ERROR
@@ -380,6 +438,8 @@ class RCFlowMacOSGUI:
             color = theme.STATUS_STARTING
         else:
             color = theme.STATUS_RUNNING
+        if sticky:
+            self._status_sticky_until = time.monotonic() + 3.0
         self._status_label.configure(text=f"  {text}  ", fg_color=color)
 
     def _update_ui(self) -> None:
@@ -408,7 +468,8 @@ class RCFlowMacOSGUI:
 
         if running:
             protocol = "WSS" if self._wss_var.get() else "WS"
-            self._set_status(f"Running ({protocol})")
+            if time.monotonic() >= self._status_sticky_until:
+                self._set_status(f"Running ({protocol})")
             t = self._server.start_time
             if t is not None:
                 h, rem = divmod(int(time.monotonic() - t), 3600)
@@ -439,6 +500,7 @@ class RCFlowMacOSGUI:
                 self._bound_addr_var.set("\u2014")  # ty:ignore[unresolved-attribute]
                 self._sessions_var.set("\u2014")  # ty:ignore[unresolved-attribute]
                 self._backend_id_var.set("\u2014")  # ty:ignore[unresolved-attribute]
+                self._version_var.set("\u2014")  # ty:ignore[unresolved-attribute]
                 self._update_tray_status()
 
         self._root.after(POLL_MS, self._update_ui)
@@ -616,14 +678,23 @@ class RCFlowMacOSGUI:
         self._root.after(300, lambda: self._root.attributes("-topmost", False))
 
     def _on_tray_quit(self, icon: object = None, item: object = None) -> None:
+        if self._quitting:
+            return
         self._quitting = True
-        self._server.stop()
+
+        # Remove the menu bar icon immediately so it disappears while we wait
+        # for the server subprocess to shut down.
         if self._status_item is not None:
             with contextlib.suppress(Exception):
                 from AppKit import NSStatusBar  # noqa: PLC0415  # ty:ignore[unresolved-import]
 
                 NSStatusBar.systemStatusBar().removeStatusItem_(self._status_item)
             self._status_item = None
+
+        # Stop the server synchronously — blocks until the child process is
+        # dead so it cannot be orphaned when we destroy the Tk root next.
+        self._server.stop_sync()
+
         self._root.after(0, self._root.destroy)
 
     # ── Window lifecycle ──────────────────────────────────────────────────
@@ -638,6 +709,17 @@ class RCFlowMacOSGUI:
         else:
             self._on_tray_quit()
 
+    def _cleanup(self) -> None:
+        """Safety-net cleanup: kill the server subprocess if still alive.
+
+        Registered via ``atexit`` and as a SIGTERM handler so the child
+        process is always reaped — even on abnormal exits or external kills.
+        """
+        if self._quitting:
+            return  # _on_tray_quit already handled cleanup
+        self._quitting = True
+        self._server.stop_sync(timeout=5)
+
     def run(self) -> None:
         """Start the menu bar icon and CTk event loop."""
         import datetime  # noqa: PLC0415
@@ -649,6 +731,15 @@ class RCFlowMacOSGUI:
                 _f.write(f"  {datetime.datetime.now().isoformat()} {msg}\n")
 
         _t("run() entered")
+
+        # Register cleanup handlers so the server subprocess is always reaped.
+        atexit.register(self._cleanup)
+
+        def _sigterm_handler(signum: int, frame: object) -> None:
+            self._on_tray_quit()
+
+        signal.signal(signal.SIGTERM, _sigterm_handler)
+
         tray_ok = self._setup_tray()
         _t(f"_setup_tray() → tray_ok={tray_ok}")
 
@@ -664,7 +755,14 @@ class RCFlowMacOSGUI:
             logger.warning("Menu bar icon unavailable — keeping settings window visible")
             _t("tray unavailable — window visible")
 
-        self._root.after(0, self._start_server)
+        # If a previous GUI crashed, the server subprocess it spawned may
+        # still be running (reparented to launchd).  Adopt it so the user
+        # can stop it from this new GUI instead of leaving it orphaned.
+        adopted_pid = self._server.adopt_if_running()
+        if adopted_pid is None:
+            self._root.after(0, self._start_server)
+        else:
+            self._root.after(0, self._on_adopted_server)
         self._root.after(POLL_MS, self._update_ui)
 
         def _status_loop() -> None:
@@ -682,11 +780,21 @@ class RCFlowMacOSGUI:
         self._root.mainloop()
         _t("mainloop() returned")
 
-    def _on_status_result(self, sessions: int | None, backend_id: str | None) -> None:
-        if sessions is not None:
-            self._sessions_var.set(str(sessions))  # ty:ignore[unresolved-attribute]
-        if backend_id:
-            self._backend_id_var.set(backend_id)  # ty:ignore[unresolved-attribute]
+    def _on_status_result(self, sessions: int | None, backend_id: str | None, version: str | None) -> None:
+        # poll_server_status calls this from a daemon thread.  All StringVar
+        # mutations must happen on the Tk main thread — on macOS, calling them
+        # from a background thread while NSMenu is in its modal tracking loop
+        # causes AppKit to be accessed off the main thread, producing a deadlock
+        # that manifests as a spinning-beachball cursor over the menu bar area.
+        def _apply() -> None:
+            if sessions is not None:
+                self._sessions_var.set(str(sessions))  # ty:ignore[unresolved-attribute]
+            if backend_id:
+                self._backend_id_var.set(backend_id)  # ty:ignore[unresolved-attribute]
+            if version:
+                self._version_var.set(version)  # ty:ignore[unresolved-attribute]
+
+        self._root.after(0, _apply)
 
 
 # ── NSStatusItem action delegate (PyObjC) ────────────────────────────────────
@@ -768,6 +876,29 @@ def run_gui_macos() -> None:
         f"pyobjc={_PYOBJC_AVAILABLE} "
         f"platform={sys.platform}"
     )
+
+    # ── Singleton check ──────────────────────────────────────────────────
+    if not _acquire_singleton_lock():
+        _trace("another instance already running — exiting")
+        print(
+            "RCFlow Worker is already running. Look for the bolt icon in the macOS menu bar.",
+            file=sys.stderr,
+        )
+        # Try to bring the existing instance's window forward via AppleScript.
+        # This is a best-effort convenience — if it fails, no harm done.
+        with contextlib.suppress(Exception):
+            import subprocess as _sp  # noqa: PLC0415
+
+            _sp.Popen(
+                [
+                    "osascript",
+                    "-e",
+                    'tell application "RCFlow Worker" to activate',
+                ],
+                stdout=_sp.DEVNULL,
+                stderr=_sp.DEVNULL,
+            )
+        sys.exit(0)
 
     try:
         _trace("creating RCFlowMacOSGUI()")

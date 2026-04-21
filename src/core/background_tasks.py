@@ -130,6 +130,7 @@ class BackgroundTasksMixin:
                             status=session.status.value,
                             main_project_path=session.main_project_path,
                             metadata_=session.metadata,
+                            sort_order=session.sort_order,
                         )
                     )
                     await db.commit()

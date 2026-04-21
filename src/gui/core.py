@@ -16,6 +16,7 @@ import subprocess
 import sys
 import threading
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -27,6 +28,108 @@ logger = logging.getLogger(__name__)
 POLL_MS = 300
 MAX_LOG_LINES = 5000
 MAX_LOG_BUFFER = 10000
+
+# ── Worker pidfile ──────────────────────────────────────────────────────────
+#
+# The GUI spawns the RCFlow server as a subprocess via Popen.  If the GUI
+# crashes (e.g. a Cocoa re-entrancy after macOS auto-lock / sleep-wake), the
+# child is reparented to launchd and keeps serving clients — the user has no
+# UI to stop it.  To recover: the GUI writes the subprocess PID to this file
+# on start and deletes it on graceful stop.  A relaunched GUI checks the file
+# via ServerManager.adopt_if_running() and adopts the orphan so the user can
+# stop it from the new GUI.  The server itself also installs a parent-death
+# watchdog (see src/__main__._install_parent_death_watchdog) so new orphans
+# are prevented at the source.
+_PIDFILE_NAME = ".worker.pid"
+
+# Env var propagated to the server subprocess; the child's watchdog polls
+# whether this pid is still alive and exits the server if it is not.
+_PARENT_PID_ENV = "RCFLOW_PARENT_PID"
+
+
+def _worker_pidfile_path() -> Path:
+    """Return the path of the worker pidfile.
+
+    Prefers the shared data directory (same directory used for settings.json).
+    On macOS frozen builds this resolves to
+    ``~/Library/Application Support/rcflow/.worker.pid``.
+    """
+    try:
+        from src.paths import get_data_dir  # noqa: PLC0415
+
+        base = get_data_dir()
+    except Exception:
+        base = Path.home()
+    return base / _PIDFILE_NAME
+
+
+def _is_pid_alive(pid: int) -> bool:
+    """Return True if *pid* is alive and owned by the current user.
+
+    On Unix this is ``os.kill(pid, 0)``.  On Windows we use
+    ``OpenProcess / GetExitCodeProcess`` via ctypes to avoid a dependency on
+    psutil.  Any error is treated as "not alive" so adoption fails safely.
+    """
+    if pid <= 0:
+        return False
+    if sys.platform == "win32":
+        try:
+            import ctypes  # noqa: PLC0415
+
+            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000  # noqa: N806
+            STILL_ACTIVE = 259  # noqa: N806
+            handle = ctypes.windll.kernel32.OpenProcess(  # ty:ignore[unresolved-attribute]
+                PROCESS_QUERY_LIMITED_INFORMATION, False, pid
+            )
+            if not handle:
+                return False
+            try:
+                exit_code = ctypes.c_ulong()
+                if not ctypes.windll.kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):  # ty:ignore[unresolved-attribute]
+                    return False
+                return exit_code.value == STILL_ACTIVE
+            finally:
+                ctypes.windll.kernel32.CloseHandle(handle)  # ty:ignore[unresolved-attribute]
+        except Exception:
+            return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        # Process exists but is owned by a different user — not our orphan.
+        return False
+    except OSError:
+        return False
+    return True
+
+
+def _kill_pid(pid: int, *, force: bool = False) -> None:
+    """Send SIGTERM (default) or SIGKILL (force=True) to *pid*.
+
+    On Windows we fall back to ``TerminateProcess`` because Windows has no
+    SIGTERM; ``force`` is ignored there (all termination is ungraceful).
+    Errors are swallowed — the caller polls :func:`_is_pid_alive` afterwards.
+    """
+    if pid <= 0:
+        return
+    if sys.platform == "win32":
+        with contextlib.suppress(Exception):
+            import ctypes  # noqa: PLC0415
+
+            PROCESS_TERMINATE = 0x0001  # noqa: N806
+            handle = ctypes.windll.kernel32.OpenProcess(PROCESS_TERMINATE, False, pid)  # ty:ignore[unresolved-attribute]
+            if handle:
+                try:
+                    ctypes.windll.kernel32.TerminateProcess(handle, 1)  # ty:ignore[unresolved-attribute]
+                finally:
+                    ctypes.windll.kernel32.CloseHandle(handle)  # ty:ignore[unresolved-attribute]
+        return
+    import signal as _signal  # noqa: PLC0415
+
+    sig = _signal.SIGKILL if force else _signal.SIGTERM
+    with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
+        os.kill(pid, sig)
 
 
 class LogBuffer:
@@ -56,10 +159,20 @@ class ServerManager:
 
     Thread-safe: start/stop may be called from any thread; the internal
     lock guards all ``_proc`` mutations.
+
+    Two tracking modes:
+
+    - **Owned** (``_proc`` set) — the normal case; the GUI spawned the server
+      via :meth:`start` and holds a ``Popen`` handle.
+    - **Adopted** (``_adopted_pid`` set) — :meth:`adopt_if_running` found an
+      orphan left behind by a crashed previous GUI, recorded via the worker
+      pidfile.  The server is alive but this process is not its parent, so
+      we can only track it by pid and terminate it with a raw signal.
     """
 
     def __init__(self, log_buffer: LogBuffer) -> None:
         self._proc: subprocess.Popen[str] | None = None
+        self._adopted_pid: int | None = None
         self._lock = threading.Lock()
         self._start_time: float | None = None
         self._log = log_buffer
@@ -67,9 +180,21 @@ class ServerManager:
     # ── State ───────────────────────────────────────────────────────────
 
     def is_running(self) -> bool:
-        """Return True if the server subprocess is alive."""
+        """Return True if the server subprocess is alive.
+
+        Handles both owned (Popen) and adopted (pidfile) processes.
+        """
         with self._lock:
-            return self._proc is not None and self._proc.poll() is None
+            if self._proc is not None:
+                return self._proc.poll() is None
+            if self._adopted_pid is not None:
+                if _is_pid_alive(self._adopted_pid):
+                    return True
+                # Adopted pid is gone — drop the reference so subsequent
+                # calls report accurately.
+                self._adopted_pid = None
+                self._start_time = None
+            return False
 
     @property
     def start_time(self) -> float | None:
@@ -78,22 +203,100 @@ class ServerManager:
 
     @property
     def exit_code(self) -> int | None:
-        """Exit code of a finished-but-not-yet-cleared process, else None."""
+        """Exit code of a finished-but-not-yet-cleared process, else None.
+
+        Adopted processes have no exit code (we are not their parent, so
+        ``waitpid`` is not available) — returns None in that case.
+        """
         with self._lock:
             if self._proc is not None and self._proc.poll() is not None:
                 return self._proc.returncode
             return None
 
+    @property
+    def is_adopted(self) -> bool:
+        """True if the currently-tracked process was adopted from a pidfile."""
+        with self._lock:
+            return self._adopted_pid is not None and self._proc is None
+
     def clear(self) -> None:
         """Remove the reference to a stopped process and reset start time.
 
         Safe to call even if the process is already cleared or still running
-        (in the latter case it is a no-op).
+        (in the latter case it is a no-op).  Also removes the pidfile when
+        the server has exited so a subsequent launch doesn't try to adopt a
+        dead pid.
         """
+        cleared = False
         with self._lock:
             if self._proc is not None and self._proc.poll() is not None:
                 self._proc = None
+                cleared = True
+            if self._adopted_pid is not None and not _is_pid_alive(self._adopted_pid):
+                self._adopted_pid = None
+                cleared = True
+        if cleared:
+            self._delete_pidfile()
         self._start_time = None
+
+    # ── Pidfile ──────────────────────────────────────────────────────────
+
+    def _write_pidfile(self, pid: int) -> None:
+        """Persist the child PID so a relaunched GUI can adopt an orphan.
+
+        Best-effort — any I/O error is logged and ignored (pidfile is purely
+        a recovery aid; absence only prevents adoption on the next launch).
+        """
+        path = _worker_pidfile_path()
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(str(pid), encoding="utf-8")
+        except OSError as exc:
+            logger.warning("Failed to write worker pidfile %s: %s", path, exc)
+
+    def _delete_pidfile(self) -> None:
+        """Remove the pidfile (called on graceful stop)."""
+        path = _worker_pidfile_path()
+        with contextlib.suppress(OSError):
+            path.unlink()
+
+    def adopt_if_running(self) -> int | None:
+        """Re-attach to an orphaned server left behind by a crashed GUI.
+
+        Reads the worker pidfile; if the pid is alive, records it as an
+        adopted process and returns the pid.  Returns None when there is no
+        pidfile or the pid is dead (pidfile is cleaned up in that case).
+
+        Calling this on a manager that already has a running owned process
+        is a no-op and returns None.
+        """
+        with self._lock:
+            if self._proc is not None or self._adopted_pid is not None:
+                return None
+
+        path = _worker_pidfile_path()
+        try:
+            raw = path.read_text(encoding="utf-8").strip()
+        except OSError:
+            return None
+        try:
+            pid = int(raw)
+        except ValueError:
+            with contextlib.suppress(OSError):
+                path.unlink()
+            return None
+
+        if not _is_pid_alive(pid):
+            with contextlib.suppress(OSError):
+                path.unlink()
+            return None
+
+        with self._lock:
+            self._adopted_pid = pid
+        self._start_time = time.monotonic()
+        self._log.append(f"Adopted running server (PID {pid}) — recovered from previous session.")
+        logger.info("Adopted orphan worker pid=%d from %s", pid, path)
+        return pid
 
     # ── Start ────────────────────────────────────────────────────────────
 
@@ -112,15 +315,25 @@ class ServerManager:
         except OSError as exc:
             return f"Error: Cannot bind {host}:{port} \u2014 {exc}"
 
-        # Persist user settings before launching
-        from src.config import update_settings_file  # noqa: PLC0415
+        # Persist user settings and ensure the API token exists before launching.
+        # get_settings() generates RCFLOW_API_KEY (and RCFLOW_BACKEND_ID) if
+        # absent, then writes them to settings.json *and* updates os.environ in
+        # this GUI process.  Doing this here — before the subprocess spawns —
+        # eliminates the race where the GUI shows "Running" (process alive) but
+        # the server hasn't yet initialised and written the token, causing
+        # "Copy Token" to fail during the startup window.
+        from src.config import get_settings, update_settings_file  # noqa: PLC0415
 
+        get_settings()
         update_settings_file({"RCFLOW_HOST": host, "RCFLOW_PORT": str(port)})
 
         env = os.environ.copy()
         env["RCFLOW_HOST"] = host
         env["RCFLOW_PORT"] = str(port)
         env["WSS_ENABLED"] = str(wss)
+        # The server's parent-death watchdog exits the process when this
+        # pid is gone, preventing orphaned backends after GUI crashes.
+        env[_PARENT_PID_ENV] = str(os.getpid())
 
         if getattr(sys, "frozen", False):
             from src.paths import get_data_dir  # noqa: PLC0415
@@ -196,7 +409,10 @@ class ServerManager:
 
         with self._lock:
             self._proc = proc
+            # Owned start supersedes any stale adoption reference.
+            self._adopted_pid = None
         self._start_time = time.monotonic()
+        self._write_pidfile(proc.pid)
 
         # Background thread streams subprocess stdout into the log buffer
         threading.Thread(target=self._read_output, args=(proc,), daemon=True).start()
@@ -210,30 +426,109 @@ class ServerManager:
     def stop(self, on_stopped: Callable[[], None] | None = None) -> None:
         """Terminate the server subprocess in a background thread.
 
+        Handles both owned (``Popen``) and adopted (pidfile-only) processes.
         Calls ``on_stopped()`` (if provided) once the process has exited.
         """
         with self._lock:
             proc = self._proc
-        if proc is None:
+            adopted_pid = self._adopted_pid if proc is None else None
+        if proc is None and adopted_pid is None:
             return
 
         self._log.append("Stopping server...")
 
         def _do() -> None:
-            proc.terminate()
-            try:
-                proc.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                proc.wait(timeout=5)
+            if proc is not None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait(timeout=5)
+            else:
+                assert adopted_pid is not None
+                _kill_pid(adopted_pid)
+                self._wait_for_pid_exit(adopted_pid, timeout=10)
+                if _is_pid_alive(adopted_pid):
+                    _kill_pid(adopted_pid, force=True)
+                    self._wait_for_pid_exit(adopted_pid, timeout=5)
             with self._lock:
-                if self._proc is proc:
+                if proc is not None and self._proc is proc:
                     self._proc = None
+                if adopted_pid is not None and self._adopted_pid == adopted_pid:
+                    self._adopted_pid = None
             self._start_time = None
+            self._delete_pidfile()
             if on_stopped is not None:
                 on_stopped()
 
         threading.Thread(target=_do, daemon=True).start()
+
+    def stop_sync(self, timeout: float = 12) -> None:
+        """Terminate the server subprocess synchronously (blocks until dead).
+
+        Use this during app shutdown where we must guarantee the child process
+        is gone before the parent exits.  Falls back to SIGKILL if SIGTERM is
+        not honoured within *timeout* seconds.  Handles both owned and
+        adopted processes.
+        """
+        with self._lock:
+            proc = self._proc
+            adopted_pid = self._adopted_pid if proc is None else None
+
+        if proc is not None:
+            if proc.poll() is not None:
+                with self._lock:
+                    if self._proc is proc:
+                        self._proc = None
+                self._start_time = None
+                self._delete_pidfile()
+                return
+            proc.terminate()
+            try:
+                proc.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                with contextlib.suppress(subprocess.TimeoutExpired):
+                    proc.wait(timeout=3)
+            with self._lock:
+                if self._proc is proc:
+                    self._proc = None
+        elif adopted_pid is not None:
+            if not _is_pid_alive(adopted_pid):
+                with self._lock:
+                    if self._adopted_pid == adopted_pid:
+                        self._adopted_pid = None
+                self._start_time = None
+                self._delete_pidfile()
+                return
+            _kill_pid(adopted_pid)
+            self._wait_for_pid_exit(adopted_pid, timeout=timeout)
+            if _is_pid_alive(adopted_pid):
+                _kill_pid(adopted_pid, force=True)
+                self._wait_for_pid_exit(adopted_pid, timeout=3)
+            with self._lock:
+                if self._adopted_pid == adopted_pid:
+                    self._adopted_pid = None
+        else:
+            return
+
+        self._start_time = None
+        self._delete_pidfile()
+
+    @staticmethod
+    def _wait_for_pid_exit(pid: int, timeout: float) -> None:
+        """Poll until *pid* exits or *timeout* elapses.
+
+        Used for adopted processes where we cannot use ``Popen.wait`` because
+        we are not the parent.  Returns without raising on timeout so the
+        caller can escalate to SIGKILL.
+        """
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if not _is_pid_alive(pid):
+                return
+            time.sleep(0.1)
 
     # ── Output reader ─────────────────────────────────────────────────────
 
@@ -252,12 +547,12 @@ def poll_server_status(
     host: str,
     port: str,
     wss_enabled: bool,
-    on_result: Callable[[int | None, str | None], None],
+    on_result: Callable[[int | None, str | None, str | None], None],
 ) -> None:
-    """Fetch session count and backend ID from the server HTTP API (non-blocking).
+    """Fetch session count, backend ID, and version from the server HTTP API (non-blocking).
 
-    Spawns a daemon thread.  ``on_result(sessions, backend_id)`` is invoked
-    with None values when the request fails or the server is unreachable.
+    Spawns a daemon thread.  ``on_result(sessions, backend_id, version)`` is
+    invoked with None values when the request fails or the server is unreachable.
     """
 
     def _fetch() -> None:
@@ -278,10 +573,10 @@ def poll_server_status(
         try:
             with urllib.request.urlopen(f"{base}/api/health", timeout=2, context=ctx) as resp:
                 if resp.status != 200:
-                    on_result(None, None)
+                    on_result(None, None, None)
                     return
         except Exception:
-            on_result(None, None)
+            on_result(None, None, None)
             return
 
         try:
@@ -294,8 +589,9 @@ def poll_server_status(
                 sessions: int | None = data.get("active_sessions")
                 raw_id: str = data.get("backend_id", "") or ""
                 backend_id: str | None = (raw_id[:8] + "...") if len(raw_id) > 12 else (raw_id or None)
-                on_result(sessions, backend_id)
+                version: str | None = data.get("version") or None
+                on_result(sessions, backend_id, version)
         except Exception:
-            on_result(None, None)
+            on_result(None, None, None)
 
     threading.Thread(target=_fetch, daemon=True).start()

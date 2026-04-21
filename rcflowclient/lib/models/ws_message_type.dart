@@ -40,6 +40,9 @@ enum WsOutputType {
   linearIssueUpdate,
   linearIssueDeleted,
 
+  // --- Diagnostic / log (silently consumed, not rendered) ---
+  agentLog,
+
   // --- Worker-level (handled in WorkerConnection, never reach AppState) ---
   sessionList,
   sessionUpdate,
@@ -79,6 +82,7 @@ enum WsOutputType {
       'linear_issue_list' => WsOutputType.linearIssueList,
       'linear_issue_update' => WsOutputType.linearIssueUpdate,
       'linear_issue_deleted' => WsOutputType.linearIssueDeleted,
+      'agent_log' => WsOutputType.agentLog,
       'session_list' => WsOutputType.sessionList,
       'session_update' => WsOutputType.sessionUpdate,
       'session_reorder' => WsOutputType.sessionReorder,

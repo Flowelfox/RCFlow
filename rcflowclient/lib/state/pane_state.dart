@@ -385,7 +385,7 @@ class PaneState extends ChangeNotifier {
       final savedAgent =
           _host.getDraftPlucks(sessionId)?['agent'] as String?;
       if (savedAgent != null) {
-        _selectedToolMention = savedAgent;
+        _selectedToolMention = kAgentMentionNames[savedAgent] ?? savedAgent;
         notifyListeners();
       }
     }
@@ -430,7 +430,7 @@ class PaneState extends ChangeNotifier {
       var changed = false;
       final agent = plucks['agent'] as String?;
       if (agent != null) {
-        _selectedToolMention = agent;
+        _selectedToolMention = kAgentMentionNames[agent] ?? agent;
         changed = true;
       }
       final project = plucks['project'] as String?;
@@ -736,11 +736,23 @@ class PaneState extends ChangeNotifier {
     final toolMention = _selectedToolMention;
     final effectiveText = toolMention != null ? '#$toolMention $text' : text;
 
+    // When using the chip the text field is already clean (no #mention).
+    // When the user typed a #mention directly, strip it from the displayed
+    // content so routing markers never appear in chat history.
+    final displayContent = toolMention != null
+        ? text
+        : text
+            .replaceAllMapped(
+              RegExp(r'(^|\s)#\S+'),
+              (m) => m.group(1) ?? '',
+            )
+            .trim();
+
     _pendingLocalUserMessages++;
     _messages.add(
       DisplayMessage(
         type: DisplayMessageType.user,
-        content: text,
+        content: displayContent,
         sessionId: _sessionId,
         pendingLocalEcho: true,
         attachments: attachments,
@@ -762,7 +774,13 @@ class PaneState extends ChangeNotifier {
       projectName: _selectedProjectName,
       selectedWorktreePath: worktreeToSend,
       taskId: taskIdToSend,
-      displayText: toolMention != null ? text : null,
+      // When chip used: text is already clean; send it as displayText so the
+      // server echo matches the local echo for deduplication.
+      // When typed directly: send stripped content if it differs, so the
+      // server echoes back the same clean string for content-based dedup.
+      displayText: toolMention != null
+          ? text
+          : (displayContent != text ? displayContent : null),
     );
     _clearPendingTaskId();
 
@@ -866,6 +884,8 @@ class PaneState extends ChangeNotifier {
     // Restore the agent chip from the session's known agent type so that
     // switching to an existing session (e.g. after reconnect) shows which
     // agent drove that session without requiring the user to re-select it.
+    // Store the raw internal name (e.g. "claude_code") — display-name mapping
+    // is handled by the input area and badge composer independently.
     _selectedToolMention = session?.agentType;
 
     notifyListeners();
@@ -1485,6 +1505,11 @@ class PaneState extends ChangeNotifier {
     for (int i = list.length - 1; i >= 0; i--) {
       if (list[i].type == DisplayMessageType.toolBlock) {
         list[i].fileDiff = diff;
+        // Auto-expand Edit/Write blocks so the diff is visible immediately.
+        final tn = list[i].toolName?.toLowerCase();
+        if (tn == 'edit' || tn == 'write') {
+          list[i].expanded = true;
+        }
         notifyListeners();
         return;
       }

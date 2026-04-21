@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import asdict, dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 if TYPE_CHECKING:
     from src.core.session import ActiveSession
@@ -150,13 +150,20 @@ class BadgeState:
             payload={"worker_id": worker_id or ""},
         )
 
+    # Map internal agent_type identifiers to user-facing badge labels.
+    _AGENT_DISPLAY_LABELS: ClassVar[dict[str, str]] = {
+        "claude_code": "ClaudeCode",
+        "codex": "Codex",
+        "opencode": "OpenCode",
+    }
+
     def _agent_badge(self, session: ActiveSession) -> BadgeSpec | None:
         agent = session.agent_type
         if not agent:
             return None
         return BadgeSpec(
             type="agent",
-            label=agent,
+            label=self._AGENT_DISPLAY_LABELS.get(agent, agent),
             priority=BadgePriority.AGENT,
             visible=True,
             interactive=False,
@@ -221,3 +228,56 @@ class BadgeState:
             interactive=False,
             payload={"level": session.metadata.get("caveman_level", "full")},
         )
+
+    def compute_archived(
+        self,
+        status: str,
+        *,
+        worker_id: str | None = None,
+        caveman_mode: bool = False,
+        caveman_level: str = "full",
+    ) -> list[BadgeSpec]:
+        """Return a minimal badge list for DB-archived sessions.
+
+        Archived sessions are no longer in memory, so only flat fields are
+        available.  This produces the status and worker badges (always) plus
+        the caveman badge when the session had it enabled.  The worker badge
+        label is the raw ``backend_id``; the client replaces it with the
+        user-configured friendly name during session-list processing.
+
+        Args:
+            status: Serialised session status string (e.g. ``"completed"``).
+            worker_id: Backend identifier of the worker that ran the session.
+            caveman_mode: Whether caveman mode was active for this session.
+            caveman_level: Caveman mode level (default ``"full"``).
+        """
+        badges: list[BadgeSpec] = [
+            BadgeSpec(
+                type="status",
+                label=status,
+                priority=BadgePriority.STATUS,
+                visible=True,
+                interactive=False,
+                payload={"activity_state": "idle"},
+            ),
+            BadgeSpec(
+                type="worker",
+                label=worker_id or "unknown",
+                priority=BadgePriority.WORKER,
+                visible=True,
+                interactive=False,
+                payload={"worker_id": worker_id or ""},
+            ),
+        ]
+        if caveman_mode:
+            badges.append(
+                BadgeSpec(
+                    type="caveman",
+                    label="Caveman",
+                    priority=BadgePriority.CAVEMAN,
+                    visible=True,
+                    interactive=False,
+                    payload={"level": caveman_level},
+                )
+            )
+        return badges

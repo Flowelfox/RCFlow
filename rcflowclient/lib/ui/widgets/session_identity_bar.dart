@@ -7,6 +7,8 @@ import '../../state/app_state.dart';
 import '../../state/pane_state.dart';
 import '../../theme.dart';
 import '../badges/badge_bar.dart';
+import '../badges/badge_registry.dart';
+import '../badges/draft_badge_composer.dart';
 import 'worker_picker_dialog.dart';
 
 /// A thin strip displayed above the chat output that shows which session is
@@ -86,7 +88,17 @@ class _NewChatBar extends StatelessWidget {
 
     final targetId = pane.workerId ?? appState.defaultWorkerId;
     final workerName = _resolveWorkerName(targetId, connectedWorkers);
+    final agentType = pane.selectedToolMention;
     final cavemanActive = pane.isCavemanActive;
+
+    // Build a draft agent badge so the new-chat bar previews the same agent
+    // chip that will appear once the session is created.
+    final agentBadge = agentType != null
+        ? const DraftBadgeComposer()
+            .compose(agentType: agentType)
+            .where((b) => b.type == 'agent')
+            .firstOrNull
+        : null;
 
     return Container(
       width: double.infinity,
@@ -110,6 +122,10 @@ class _NewChatBar extends StatelessWidget {
                   ? () => _pickWorker(context, connectedWorkers)
                   : null,
             ),
+          ],
+          if (agentBadge != null) ...[
+            const SizedBox(width: 8),
+            BadgeRegistry.instance.render(context, agentBadge),
           ],
           if (cavemanActive) ...[
             const SizedBox(width: 8),
@@ -213,10 +229,17 @@ class _SessionBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final appColors = context.appColors;
+    // Prefer the live workerConfigs name (user-configured) over the badge
+    // label, which may carry the server's internal backend_id. Fall back to
+    // the badge label when the worker is no longer in the config list (e.g.
+    // after a worker is removed) so the name still shows for archived sessions.
+    final workerBadge = session.badges.where((b) => b.type == 'worker' && b.visible).firstOrNull;
     final workerName = appState.workerConfigs
-        .where((c) => c.id == session.workerId)
-        .map((c) => c.name)
-        .firstOrNull;
+            .where((c) => c.id == session.workerId)
+            .map((c) => c.name)
+            .where((n) => n.isNotEmpty)
+            .firstOrNull ??
+        workerBadge?.label;
 
     return GestureDetector(
       onTap: () => _showSessionActions(context),

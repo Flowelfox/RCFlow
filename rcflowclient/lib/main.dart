@@ -10,10 +10,26 @@ import 'services/foreground_service.dart';
 import 'services/settings_service.dart';
 import 'state/app_state.dart';
 import 'theme.dart';
+import 'ui/badges/badge_registry.dart';
+import 'ui/badges/renderers/agent_badge_renderer.dart';
+import 'ui/badges/renderers/caveman_badge_renderer.dart';
+import 'ui/badges/renderers/project_badge_renderer.dart';
+import 'ui/badges/renderers/status_badge_renderer.dart';
+import 'ui/badges/renderers/worker_badge_renderer.dart';
+import 'ui/badges/renderers/worktree_badge_renderer.dart';
 import 'ui/screens/home_screen.dart';
 
 bool get _isDesktop =>
     Platform.isWindows || Platform.isLinux || Platform.isMacOS;
+
+void _registerBadges(BadgeRegistry registry) {
+  registerStatusBadge(registry);
+  registerWorkerBadge(registry);
+  registerAgentBadge(registry);
+  registerCavemanBadge(registry);
+  registerProjectBadge(registry);
+  registerWorktreeBadge(registry);
+}
 
 /// Migrate legacy single-server settings to the workers model.
 void _migrateToWorkers(SettingsService settings) {
@@ -80,6 +96,9 @@ void main() async {
   }
 
   ForegroundServiceHelper.init();
+
+  // Register badge renderers once at startup.
+  _registerBadges(BadgeRegistry.instance);
 
   final settings = SettingsService();
   await settings.init();

@@ -170,6 +170,7 @@ class SessionInfo {
     if (mainProjectPath != null) 'main_project_path': mainProjectPath,
     if (agentType != null) 'agent_type': agentType,
     if (sortOrder != null) 'sort_order': sortOrder,
+    if (badges.isNotEmpty) 'badges': badges.map((b) => b.toJson()).toList(),
   };
 
   String get shortId =>
@@ -199,6 +200,7 @@ class SessionInfo {
     Object? agentType = _keep,
     // Pass Object() sentinel to explicitly clear sortOrder
     Object? sortOrder = _keep,
+    List<BadgeSpec>? badges,
   }) {
     return SessionInfo(
       sessionId: sessionId ?? this.sessionId,
@@ -228,6 +230,7 @@ class SessionInfo {
       sortOrder: identical(sortOrder, _keep)
           ? this.sortOrder
           : sortOrder as int?,
+      badges: badges ?? this.badges,
     );
   }
 }

@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import platform
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _pkg_version
 from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -41,10 +43,16 @@ async def server_info(request: Request) -> dict[str, Any]:
     session_manager: SessionManager = request.app.state.session_manager
     llm_client: LLMClient = request.app.state.llm_client
 
+    try:
+        worker_version: str | None = _pkg_version("rcflow")
+    except PackageNotFoundError:
+        worker_version = None
+
     return {
         "os": platform.system(),
         "backend_id": settings.RCFLOW_BACKEND_ID,
         "active_sessions": len(session_manager.list_active_sessions()),
+        "version": worker_version,
         # Text files are always accepted, so the attachment button is always
         # available.  Fine-grained per-type support lives in attachment_capabilities.
         "supports_attachments": True,
