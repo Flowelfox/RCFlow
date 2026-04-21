@@ -356,11 +356,8 @@ class ClaudeCodeAgentMixin:
         in ``assistant`` events are intercepted for permission approval before
         execution proceeds.
         """
-        # Stack of pre-snapshots for Edit/Write diff computation.
-        # Each tool_use pushes an entry (tuple or None sentinel);
-        # the matching tool_result pops it.
-        if not hasattr(session, "_pending_snapshots"):
-            session._pending_snapshots = []  # type: ignore[attr-defined]
+        # Reset the pre-snapshot stack for this stream.
+        session._pending_snapshots = []
 
         async for chunk in stream:
             line = chunk.content.strip()
@@ -510,11 +507,11 @@ class ClaudeCodeAgentMixin:
                                 if not fp.is_absolute() and session.subprocess_working_directory:
                                     fp = Path(session.subprocess_working_directory) / fp
                                 snapshot = await _read_file_snapshot(fp)
-                                session._pending_snapshots.append((str(fp), snapshot))  # type: ignore[attr-defined]
+                                session._pending_snapshots.append((str(fp), snapshot))
                             else:
                                 # Non-file tool — push sentinel so stack stays aligned
                                 # with 1:1 tool_use/tool_result pairing.
-                                session._pending_snapshots.append(None)  # type: ignore[attr-defined]
+                                session._pending_snapshots.append(None)
                             # Update subprocess current_tool tracking
                             session.subprocess_current_tool = tool_name
                             if session.subprocess_started_at is not None:

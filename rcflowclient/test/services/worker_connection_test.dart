@@ -5,8 +5,6 @@ library;
 import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:rcflowclient/models/badge_spec.dart';
-import 'package:rcflowclient/models/session_info.dart';
 import 'package:rcflowclient/models/worker_config.dart';
 import 'package:rcflowclient/services/settings_service.dart';
 import 'package:rcflowclient/services/websocket_service.dart';

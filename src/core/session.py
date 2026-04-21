@@ -136,6 +136,9 @@ class ActiveSession:
         self.subprocess_type: str | None = None
         self.subprocess_display_name: str | None = None
         self.subprocess_working_directory: str | None = None
+        # Per-stream stack of pre-snapshots for Edit/Write diff computation.
+        # Reset at the start of each stream; populated by agent_claude_code.
+        self._pending_snapshots: list[tuple[str, str | None] | None] = []
 
     @property
     def agent_type(self) -> str | None:

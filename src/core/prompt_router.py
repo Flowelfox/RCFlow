@@ -971,12 +971,12 @@ class PromptRouter(
                 if session.title is None and last_assistant is not None:
                     # Extract assistant text from content blocks
                     assistant_text = ""
-                    content = last_assistant.get("content")
-                    if isinstance(content, str):
-                        assistant_text = content
-                    elif isinstance(content, list):
+                    _raw = last_assistant.get("content")
+                    if isinstance(_raw, str):
+                        assistant_text = _raw
+                    elif isinstance(_raw, list):
                         assistant_text = " ".join(
-                            b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"
+                            b.get("text", "") for b in _raw if isinstance(b, dict) and b.get("type") == "text"
                         )
                     # Fall back to user prompt alone if assistant had no text (e.g. only tool_use)
                     self._fire_title_task(session, text, assistant_text or "")

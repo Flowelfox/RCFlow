@@ -6,7 +6,6 @@
 library;
 
 import 'dart:async';
-import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 
@@ -585,13 +584,9 @@ class PaneState extends ChangeNotifier {
   }
 
   // Dynamic streaming
-  final List<String> _charQueue = [];
   Timer? _streamingTimer;
   String? _activeToolName;
   static const _tickMs = 16;
-  static const _accelThreshold = 4;
-  static const _speedScale = 1.5;
-  static const _maxCharsPerTick = 80;
   static const _pageSize = 50;
 
   // Terminal statuses for sessions
@@ -1526,13 +1521,6 @@ class PaneState extends ChangeNotifier {
       const Duration(milliseconds: _tickMs),
       _renderChars,
     );
-  }
-
-  int get _charsPerTick {
-    final len = _charQueue.length;
-    if (len <= _accelThreshold) return 1;
-    final excess = (len - _accelThreshold).toDouble();
-    return (math.sqrt(excess) * _speedScale).ceil().clamp(1, _maxCharsPerTick);
   }
 
   void _renderChars() {
