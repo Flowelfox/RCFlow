@@ -101,6 +101,39 @@ class _WorkerGroupState extends State<WorkerGroup> {
   Widget build(BuildContext context) {
     final status = worker?.status ?? WorkerConnectionStatus.disconnected;
     final isConnected = status == WorkerConnectionStatus.connected;
+
+    // Compose header + body slivers. [SliverMainAxisGroup] lays them out
+    // sequentially along the main axis inside the caller's CustomScrollView,
+    // which means [SliverList]/[SliverReorderableList] below lazily builds
+    // only the session tiles currently in view — so a worker with 425
+    // sessions no longer forces every tile into the widget tree on expand.
+    return SliverMainAxisGroup(
+      slivers: [
+        SliverToBoxAdapter(child: _buildHeader(context, status, isConnected)),
+        if (expanded && sessions.isEmpty && terminals.isEmpty)
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.only(left: 44, bottom: 4),
+              child: Text(
+                isConnected ? 'No sessions' : 'Disconnected',
+                style: TextStyle(
+                  color: context.appColors.textMuted,
+                  fontSize: 11,
+                ),
+              ),
+            ),
+          )
+        else if (expanded)
+          ..._buildMergedSessionSlivers(context, isConnected),
+      ],
+    );
+  }
+
+  Widget _buildHeader(
+    BuildContext context,
+    WorkerConnectionStatus status,
+    bool isConnected,
+  ) {
     final statusColor = switch (status) {
       WorkerConnectionStatus.connected => context.appColors.successText,
       WorkerConnectionStatus.connecting => context.appColors.toolAccent,
@@ -108,211 +141,207 @@ class _WorkerGroupState extends State<WorkerGroup> {
       WorkerConnectionStatus.disconnected => context.appColors.errorText,
     };
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // Header
-        LayoutBuilder(
-          builder: (context, constraints) {
-            // At narrow sidebar widths, collapse the refresh + terminal buttons
-            // into the right-click context menu to prevent the worker name text
-            // from being squeezed into an unreadable sliver.
-            final isNarrow = constraints.maxWidth < 200;
-            return GestureDetector(
-              onSecondaryTapUp: (details) =>
-                  _showWorkerContextMenu(context, details.globalPosition),
-              child: InkWell(
-                onTap: onToggleExpand,
-                child: Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                  child: Row(
-                    children: [
-                      Icon(
-                        expanded
-                            ? Icons.expand_more_rounded
-                            : Icons.chevron_right_rounded,
-                        color: context.appColors.textSecondary,
-                        size: 18,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // At narrow sidebar widths, collapse the refresh + terminal buttons
+        // into the right-click context menu to prevent the worker name text
+        // from being squeezed into an unreadable sliver.
+        final isNarrow = constraints.maxWidth < 200;
+        return GestureDetector(
+          onSecondaryTapUp: (details) =>
+              _showWorkerContextMenu(context, details.globalPosition),
+          child: InkWell(
+            onTap: onToggleExpand,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+              child: Row(
+                children: [
+                  Icon(
+                    expanded
+                        ? Icons.expand_more_rounded
+                        : Icons.chevron_right_rounded,
+                    color: context.appColors.textSecondary,
+                    size: 18,
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      '${config.name} (${sessions.length + terminals.length})',
+                      style: TextStyle(
+                        color: context.appColors.textPrimary,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
                       ),
-                      SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          '${config.name} (${sessions.length + terminals.length})',
-                          style: TextStyle(
-                            color: context.appColors.textPrimary,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  if (isConnected) ...[
+                    if (!isNarrow) ...[
+                      SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: IconButton(
+                          padding: EdgeInsets.zero,
+                          icon: Icon(
+                            Icons.refresh_rounded,
+                            color: context.appColors.textSecondary,
+                            size: 14,
                           ),
-                          overflow: TextOverflow.ellipsis,
+                          onPressed: () => worker?.refreshSessions(),
+                          tooltip: 'Refresh sessions',
+                          constraints: const BoxConstraints(
+                            maxWidth: 24,
+                            maxHeight: 24,
+                          ),
                         ),
                       ),
-                      if (isConnected) ...[
-                        if (!isNarrow) ...[
-                          SizedBox(
-                            width: 24,
-                            height: 24,
-                            child: IconButton(
-                              padding: EdgeInsets.zero,
-                              icon: Icon(
-                                Icons.refresh_rounded,
-                                color: context.appColors.textSecondary,
-                                size: 14,
-                              ),
-                              onPressed: () => worker?.refreshSessions(),
-                              tooltip: 'Refresh sessions',
-                              constraints: const BoxConstraints(
-                                maxWidth: 24,
-                                maxHeight: 24,
-                              ),
-                            ),
+                      SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: IconButton(
+                          padding: EdgeInsets.zero,
+                          icon: Icon(
+                            Icons.terminal_rounded,
+                            color: context.appColors.textSecondary,
+                            size: 14,
                           ),
-                          SizedBox(
-                            width: 24,
-                            height: 24,
-                            child: IconButton(
-                              padding: EdgeInsets.zero,
-                              icon: Icon(
-                                Icons.terminal_rounded,
-                                color: context.appColors.textSecondary,
-                                size: 14,
-                              ),
-                              onPressed: () {
-                                state.openTerminal(config.id);
-                                onSessionSelected?.call();
-                              },
-                              tooltip: 'Open terminal',
-                              constraints: const BoxConstraints(
-                                maxWidth: 24,
-                                maxHeight: 24,
-                              ),
-                            ),
+                          onPressed: () {
+                            state.openTerminal(config.id);
+                            onSessionSelected?.call();
+                          },
+                          tooltip: 'Open terminal',
+                          constraints: const BoxConstraints(
+                            maxWidth: 24,
+                            maxHeight: 24,
                           ),
-                        ],
-                        SizedBox(
-                          width: 24,
-                          height: 24,
-                          child: IconButton(
-                            padding: EdgeInsets.zero,
-                            icon: Icon(
-                              Icons.add_rounded,
-                              color: context.appColors.textSecondary,
-                              size: 14,
-                            ),
-                            onPressed: () {
-                              final pane = state.ensureChatPane();
-                              pane.setTargetWorker(config.id);
-                              pane.startNewChat();
-                              onSessionSelected?.call();
-                            },
-                            tooltip: 'New session',
-                            constraints: const BoxConstraints(
-                              maxWidth: 24,
-                              maxHeight: 24,
-                            ),
-                          ),
-                        ),
-                      ],
-                      const SizedBox(width: 4),
-                      Container(
-                        width: 8,
-                        height: 8,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: statusColor,
-                          boxShadow: [
-                            BoxShadow(
-                              color: statusColor.withAlpha(80),
-                              blurRadius: 4,
-                              spreadRadius: 1,
-                            ),
-                          ],
                         ),
                       ),
                     ],
+                    SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: IconButton(
+                        padding: EdgeInsets.zero,
+                        icon: Icon(
+                          Icons.add_rounded,
+                          color: context.appColors.textSecondary,
+                          size: 14,
+                        ),
+                        onPressed: () {
+                          final pane = state.ensureChatPane();
+                          pane.setTargetWorker(config.id);
+                          pane.startNewChat();
+                          onSessionSelected?.call();
+                        },
+                        tooltip: 'New session',
+                        constraints: const BoxConstraints(
+                          maxWidth: 24,
+                          maxHeight: 24,
+                        ),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(width: 4),
+                  Container(
+                    width: 8,
+                    height: 8,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: statusColor,
+                      boxShadow: [
+                        BoxShadow(
+                          color: statusColor.withAlpha(80),
+                          blurRadius: 4,
+                          spreadRadius: 1,
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-              ),
-            );
-          },
-        ),
-        // Merged sessions and terminals, sorted by date
-        if (expanded) ..._buildMergedSessionList(context, isConnected),
-        if (expanded && sessions.isEmpty && terminals.isEmpty)
-          Padding(
-            padding: EdgeInsets.only(left: 44, bottom: 4),
-            child: Text(
-              isConnected ? 'No sessions' : 'Disconnected',
-              style: TextStyle(
-                color: context.appColors.textMuted,
-                fontSize: 11,
+                ],
               ),
             ),
           ),
-      ],
+        );
+      },
     );
   }
 
-  List<Widget> _buildMergedSessionList(BuildContext context, bool isConnected) {
-    if (groupByProject) {
-      return _buildProjectGroupedSessionList(context, isConnected);
-    }
-
-    final result = <Widget>[];
-
-    // Terminals first, sorted by date (not reorderable)
-    final sortedTerminals = [...terminals]
-      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
-    for (final t in sortedTerminals) {
-      result.add(
-        TerminalSessionTile(
-          info: t,
-          state: state,
-          isConnected: isConnected,
-          onSessionSelected: onSessionSelected,
-        ),
-      );
-    }
-
-    // Sessions — reorderable
-    final sortedSessions = [...sessions]..sort(compareBySortOrder);
-
-    if (widget.reorderEnabled && sortedSessions.length > 1) {
-      result.add(
-        _buildReorderableSessionList(context, sortedSessions, isConnected),
-      );
-    } else {
-      for (final s in sortedSessions) {
-        result.add(_buildSessionTile(context, s, isConnected));
-      }
-    }
-
-    return result;
-  }
-
-  /// Builds session list grouped by project when [groupByProject] is true.
-  /// Terminals are shown at the top (ungrouped). Sessions are organized into
-  /// collapsible project sub-categories below.
-  List<Widget> _buildProjectGroupedSessionList(
+  /// Returns the body slivers for the expanded state. Each returned widget is
+  /// a sliver (a SliverList / SliverReorderableList / SliverToBoxAdapter).
+  List<Widget> _buildMergedSessionSlivers(
     BuildContext context,
     bool isConnected,
   ) {
-    final result = <Widget>[];
+    if (groupByProject) {
+      return _buildProjectGroupedSessionSlivers(context, isConnected);
+    }
 
-    // Terminals first, sorted by date
+    final slivers = <Widget>[];
+
+    // Terminals first, sorted by date (not reorderable).
     final sortedTerminals = [...terminals]
       ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
-    for (final t in sortedTerminals) {
-      result.add(
-        TerminalSessionTile(
-          info: t,
-          state: state,
-          isConnected: isConnected,
-          onSessionSelected: onSessionSelected,
+    if (sortedTerminals.isNotEmpty) {
+      slivers.add(
+        SliverList.builder(
+          itemCount: sortedTerminals.length,
+          itemBuilder: (context, index) => TerminalSessionTile(
+            info: sortedTerminals[index],
+            state: state,
+            isConnected: isConnected,
+            onSessionSelected: onSessionSelected,
+          ),
         ),
       );
     }
 
-    // Group sessions by project name (last path segment of mainProjectPath)
+    // Sessions — reorderable when eligible.
+    final sortedSessions = [...sessions]..sort(compareBySortOrder);
+
+    if (sortedSessions.isEmpty) {
+      return slivers;
+    }
+
+    if (widget.reorderEnabled && sortedSessions.length > 1) {
+      slivers.add(_buildReorderableSessionSliver(context, sortedSessions, isConnected));
+    } else {
+      slivers.add(
+        SliverList.builder(
+          itemCount: sortedSessions.length,
+          itemBuilder: (context, index) =>
+              _buildSessionTile(context, sortedSessions[index], isConnected),
+        ),
+      );
+    }
+
+    return slivers;
+  }
+
+  /// Project-grouped body slivers: a terminals sliver, then per-project
+  /// [sub-header + sessions] sliver pairs.
+  List<Widget> _buildProjectGroupedSessionSlivers(
+    BuildContext context,
+    bool isConnected,
+  ) {
+    final slivers = <Widget>[];
+
+    final sortedTerminals = [...terminals]
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    if (sortedTerminals.isNotEmpty) {
+      slivers.add(
+        SliverList.builder(
+          itemCount: sortedTerminals.length,
+          itemBuilder: (context, index) => TerminalSessionTile(
+            info: sortedTerminals[index],
+            state: state,
+            isConnected: isConnected,
+            onSessionSelected: onSessionSelected,
+          ),
+        ),
+      );
+    }
+
+    // Group sessions by project name (last path segment of mainProjectPath).
     final byProject = <String?, List<SessionInfo>>{};
     for (final s in sessions) {
       final projectName = s.mainProjectPath
@@ -322,7 +351,7 @@ class _WorkerGroupState extends State<WorkerGroup> {
       byProject.putIfAbsent(projectName, () => []).add(s);
     }
 
-    // Sort project names: named projects alphabetically, null ("Other") last
+    // Sort project names: named projects alphabetically, null ("Other") last.
     final projectNames = byProject.keys.toList()
       ..sort((a, b) {
         if (a == null && b == null) return 0;
@@ -332,55 +361,64 @@ class _WorkerGroupState extends State<WorkerGroup> {
       });
 
     for (final projectName in projectNames) {
-      final projectSessions = byProject[projectName]!
-        ..sort(compareBySortOrder);
+      final projectSessions = byProject[projectName]!..sort(compareBySortOrder);
       final collapseKey = projectName ?? '\x00other';
       final collapsed = widget.collapsedProjects.contains(collapseKey);
 
-      result.add(
-        _buildProjectSubHeader(
-          context,
-          projectName: projectName,
-          count: projectSessions.length,
-          collapsed: collapsed,
-          onToggle: () => widget.onProjectToggle(collapseKey),
+      slivers.add(
+        SliverToBoxAdapter(
+          child: _buildProjectSubHeader(
+            context,
+            projectName: projectName,
+            count: projectSessions.length,
+            collapsed: collapsed,
+            onToggle: () => widget.onProjectToggle(collapseKey),
+          ),
         ),
       );
 
-      if (!collapsed) {
-        if (widget.reorderEnabled && projectSessions.length > 1) {
-          result.add(
-            _buildReorderableSessionList(
+      if (collapsed) continue;
+
+      if (widget.reorderEnabled && projectSessions.length > 1) {
+        slivers.add(
+          _buildReorderableSessionSliver(
+            context,
+            projectSessions,
+            isConnected,
+            extraIndent: true,
+          ),
+        );
+      } else {
+        slivers.add(
+          SliverList.builder(
+            itemCount: projectSessions.length,
+            itemBuilder: (context, index) => _buildSessionTile(
               context,
-              projectSessions,
+              projectSessions[index],
               isConnected,
               extraIndent: true,
             ),
-          );
-        } else {
-          for (final s in projectSessions) {
-            result.add(
-              _buildSessionTile(context, s, isConnected, extraIndent: true),
-            );
-          }
-        }
+          ),
+        );
       }
     }
 
-    return result;
+    return slivers;
   }
 
-  Widget _buildReorderableSessionList(
+  /// Sliver variant of the old [ReorderableListView.builder]. Unlike the old
+  /// non-sliver version, this one virtualizes: the outer [CustomScrollView]
+  /// only asks [itemBuilder] for tiles that are currently in view (plus a
+  /// small pre-cached window), so an expanded worker with hundreds of sessions
+  /// doesn't build every tile synchronously on screen.
+  Widget _buildReorderableSessionSliver(
     BuildContext context,
     List<SessionInfo> sortedSessions,
     bool isConnected, {
     bool extraIndent = false,
   }) {
-    return ReorderableListView.builder(
+    return SliverReorderableList(
       key: ValueKey('reorder-${config.id}-${sortedSessions.hashCode}'),
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      buildDefaultDragHandles: false,
       proxyDecorator: (child, index, animation) {
         return AnimatedBuilder(
           animation: animation,
@@ -413,9 +451,6 @@ class _WorkerGroupState extends State<WorkerGroup> {
         if (oldIndex < newIndex) newIndex -= 1;
         if (oldIndex == newIndex) return;
         final movedSession = sortedSessions[oldIndex];
-        // Determine which session it should be placed after.
-        // Build the list as it would look after removing the dragged item,
-        // then find the item at (newIndex - 1) to use as the anchor.
         String? afterSessionId;
         if (newIndex > 0) {
           final remaining = [...sortedSessions]..removeAt(oldIndex);
@@ -706,9 +741,7 @@ class _WorkerGroupState extends State<WorkerGroup> {
     return Semantics(
       key: ValueKey(s.sessionId),
       label: 'Session: ${s.title ?? s.shortId}',
-      child: ReorderableDragStartListener(
-        index: index,
-        child: GestureDetector(
+      child: GestureDetector(
         onSecondaryTapUp: (details) {
           if (widget.selectedSessionIds.isNotEmpty &&
               widget.onBulkSecondaryTap != null) {
@@ -759,24 +792,31 @@ class _WorkerGroupState extends State<WorkerGroup> {
               leading: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  // Pane-drop drag handle
-                  Draggable<SessionDragData>(
-                    data: dragData,
-                    feedback: _buildDragFeedback(
-                      context,
-                      dragData.label,
-                    ),
-                    childWhenDragging: Icon(
-                      Icons.drag_indicator_rounded,
-                      color: context.appColors.textMuted.withAlpha(80),
-                      size: 14,
-                    ),
-                    child: MouseRegion(
-                      cursor: SystemMouseCursors.grab,
-                      child: Icon(
+                  // Combined reorder + pane-drop handle. Long-press on the
+                  // grip starts a reorder (via [ReorderableDragStartListener]);
+                  // a plain drag fires the cross-pane [Draggable]. Gating both
+                  // to the grip — instead of wrapping the whole tile — stops
+                  // accidental reorders from long-pressing anywhere on a row.
+                  ReorderableDragStartListener(
+                    index: index,
+                    child: Draggable<SessionDragData>(
+                      data: dragData,
+                      feedback: _buildDragFeedback(
+                        context,
+                        dragData.label,
+                      ),
+                      childWhenDragging: Icon(
                         Icons.drag_indicator_rounded,
-                        color: context.appColors.textMuted,
+                        color: context.appColors.textMuted.withAlpha(80),
                         size: 14,
+                      ),
+                      child: MouseRegion(
+                        cursor: SystemMouseCursors.grab,
+                        child: Icon(
+                          Icons.drag_indicator_rounded,
+                          color: context.appColors.textMuted,
+                          size: 14,
+                        ),
                       ),
                     ),
                   ),
@@ -905,7 +945,6 @@ class _WorkerGroupState extends State<WorkerGroup> {
             ),
           ),
         ),
-      ),
       ),
     );
   }

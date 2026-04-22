@@ -277,7 +277,7 @@ class OpenCodeAgentMixin:
                     _completed_successfully = True
                     session.set_activity(ActivityState.IDLE)
                     summary_text = "".join(post_tool_text_chunks).strip() or "OpenCode task completed"
-                    self._fire_summary_task(session, summary_text, push_session_end_ask=True)  # ty:ignore[unresolved-attribute]
+                    self._fire_summary_task(session, summary_text)  # ty:ignore[unresolved-attribute]
                     self._fire_task_update_task(session, summary_text)  # ty:ignore[unresolved-attribute]
 
             elif event_type in ("error", "session.error"):
@@ -352,6 +352,7 @@ class OpenCodeAgentMixin:
             "OpenCode initial streaming finished (session=%s)",
             session.id,
         )
+        self.schedule_pending_drain(session)  # ty:ignore[unresolved-attribute]
 
     async def _end_opencode_session(self, session: ActiveSession) -> None:
         """Clean up OpenCode state when the session ends."""
@@ -466,3 +467,4 @@ class OpenCodeAgentMixin:
             return
 
         await executor.stop_process()
+        self.schedule_pending_drain(session)  # ty:ignore[unresolved-attribute]

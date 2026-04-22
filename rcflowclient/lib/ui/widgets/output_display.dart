@@ -7,6 +7,7 @@ import '../../state/app_state.dart';
 import '../../state/pane_state.dart';
 import '../../theme.dart';
 import '../../tips.dart';
+import '../utils/markdown_copy_menu.dart';
 import 'message_bubble.dart';
 import 'session_panel.dart';
 
@@ -295,7 +296,7 @@ class _OutputDisplayState extends State<OutputDisplay> {
             final hasMore = pane.hasMoreMessages;
             final loadingMore = pane.loadingMore;
 
-            return SelectionArea(
+            return SelectionScope(
               child: ListView.builder(
                 controller: _scrollController,
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
@@ -321,7 +322,13 @@ class _OutputDisplayState extends State<OutputDisplay> {
                       ),
                     );
                   }
-                  return MessageBubble(message: msgs[index - 1]);
+                  final msg = msgs[index - 1];
+                  // ObjectKey by message identity — DisplayMessage instances
+                  // are stable across streaming (the same object grows in
+                  // place), so this lets Flutter reuse the existing element
+                  // and child state instead of treating each rebuild as a
+                  // brand-new list item.
+                  return MessageBubble(key: ObjectKey(msg), message: msg);
                 },
               ),
             );

@@ -1,6 +1,8 @@
 import asyncio
+import contextlib
 import logging
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
@@ -63,6 +65,38 @@ class SessionType(StrEnum):
     ONE_SHOT = "one-shot"
     CONVERSATIONAL = "conversational"
     LONG_RUNNING = "long-running"
+
+
+@dataclass
+class PendingMessage:
+    """A user message queued while the agent was busy with a prior turn.
+
+    Mirrors one row of the ``session_pending_messages`` DB table.  The
+    authoritative store is the DB; this in-memory copy lets the server
+    answer queue queries and broadcasts without a round-trip.  See
+    ``Queued User Messages`` in ``Design.md``.
+    """
+
+    queued_id: str
+    position: int
+    content: str
+    display_content: str
+    attachments_path: str | None
+    project_name: str | None
+    selected_worktree_path: str | None
+    task_id: str | None
+    submitted_at: datetime
+    updated_at: datetime
+
+    def to_snapshot(self) -> dict[str, Any]:
+        """Lightweight dict included in ``session_update.queued_messages``."""
+        return {
+            "queued_id": self.queued_id,
+            "position": self.position,
+            "display_content": self.display_content,
+            "submitted_at": self.submitted_at.isoformat(),
+            "updated_at": self.updated_at.isoformat(),
+        }
 
 
 class ActiveSession:
@@ -136,6 +170,20 @@ class ActiveSession:
         self.subprocess_type: str | None = None
         self.subprocess_display_name: str | None = None
         self.subprocess_working_directory: str | None = None
+        # Per-stream stack of pre-snapshots for Edit/Write diff computation.
+        # Reset at the start of each stream; populated by agent_claude_code.
+        self._pending_snapshots: list[tuple[str, str | None] | None] = []
+        # Dirty tracking for incremental flush.
+        # True when in-memory metadata has drifted from the DB row.
+        self._dirty: bool = False
+        # Buffer sequence watermark: all messages up to (and including) this
+        # sequence have already been written to the DB by flush_dirty_sessions.
+        self._last_flush_sequence: int = 0
+        # In-memory mirror of the ``session_pending_messages`` DB table for this
+        # session.  Ordered by ``position`` ascending (FIFO).  Mutations go
+        # through :class:`SessionPendingMessageStore` which writes the DB then
+        # updates this list.  See ``Queued User Messages`` in ``Design.md``.
+        self.pending_user_messages: list[PendingMessage] = []
 
     @property
     def agent_type(self) -> str | None:
@@ -194,6 +242,89 @@ class ActiveSession:
             {"session_id": self.id, "subprocess_type": None},
         )
 
+    # ------------------------------------------------------------------
+    # Queued user messages (in-memory mirror of session_pending_messages).
+    # Writes go through :class:`SessionPendingMessageStore`; these helpers
+    # only mutate the in-memory list and are safe to call inside the
+    # store's DB transaction.
+
+    def is_busy_for_queue(self) -> bool:
+        """Return True when a new user prompt should be enqueued rather than delivered.
+
+        Busy means any of:
+        * a managed agent executor (Claude Code / Codex / OpenCode) has a
+          live stream task;
+        * the prompt lock is held (LLM path mid-turn);
+        * the activity state indicates the session is not idle.
+
+        See ``Queued User Messages`` in ``Design.md``.
+        """
+        if (
+            self.claude_code_executor is not None
+            and self._claude_code_stream_task is not None
+            and not self._claude_code_stream_task.done()
+        ):
+            return True
+        if (
+            self.codex_executor is not None
+            and self._codex_stream_task is not None
+            and not self._codex_stream_task.done()
+        ):
+            return True
+        if (
+            self.opencode_executor is not None
+            and self._opencode_stream_task is not None
+            and not self._opencode_stream_task.done()
+        ):
+            return True
+        if self._prompt_lock.locked():
+            return True
+        return self._activity_state != ActivityState.IDLE
+
+    def pending_snapshot(self) -> list[dict[str, Any]]:
+        """Return the current queue as a list of snapshot dicts (for ``session_update``)."""
+        return [p.to_snapshot() for p in self.pending_user_messages]
+
+    def _find_pending_index(self, queued_id: str) -> int | None:
+        for idx, p in enumerate(self.pending_user_messages):
+            if p.queued_id == queued_id:
+                return idx
+        return None
+
+    def mirror_add_pending(self, entry: PendingMessage) -> None:
+        """Insert *entry* into the in-memory queue at its ``position``."""
+        for idx, existing in enumerate(self.pending_user_messages):
+            if existing.position > entry.position:
+                self.pending_user_messages.insert(idx, entry)
+                return
+        self.pending_user_messages.append(entry)
+
+    def mirror_update_pending(self, queued_id: str, content: str, display_content: str, updated_at: datetime) -> None:
+        """Update text fields on a queued entry."""
+        idx = self._find_pending_index(queued_id)
+        if idx is None:
+            return
+        entry = self.pending_user_messages[idx]
+        entry.content = content
+        entry.display_content = display_content
+        entry.updated_at = updated_at
+
+    def mirror_remove_pending(self, queued_id: str) -> PendingMessage | None:
+        """Remove the named entry and renumber positions densely from 0."""
+        idx = self._find_pending_index(queued_id)
+        if idx is None:
+            return None
+        removed = self.pending_user_messages.pop(idx)
+        for new_pos, entry in enumerate(self.pending_user_messages):
+            entry.position = new_pos
+        return removed
+
+    def mirror_clear_pending(self) -> list[PendingMessage]:
+        """Drop all queued entries and return them (for per-entry cleanup by the caller)."""
+        dropped = list(self.pending_user_messages)
+        self.pending_user_messages.clear()
+        return dropped
+
     @property
     def title(self) -> str | None:
         return self._title
@@ -201,8 +332,13 @@ class ActiveSession:
     @title.setter
     def title(self, value: str | None) -> None:
         self._title = value
+        self.mark_dirty()
         if self._on_update:
             self._on_update()
+
+    def mark_dirty(self) -> None:
+        """Mark this session as having un-flushed metadata changes."""
+        self._dirty = True
 
     def set_active(self) -> None:
         if self.status in (
@@ -214,8 +350,10 @@ class ActiveSession:
             return
         old = self.status
         self.status = SessionStatus.ACTIVE
-        if old != self.status and self._on_update:
-            self._on_update()
+        if old != self.status:
+            self.mark_dirty()
+            if self._on_update:
+                self._on_update()
 
     def set_executing(self) -> None:
         if self.status in (
@@ -227,8 +365,10 @@ class ActiveSession:
             return
         old = self.status
         self.status = SessionStatus.EXECUTING
-        if old != self.status and self._on_update:
-            self._on_update()
+        if old != self.status:
+            self.mark_dirty()
+            if self._on_update:
+                self._on_update()
 
     def complete(self) -> None:
         if self.status == SessionStatus.PAUSED:
@@ -238,6 +378,7 @@ class ActiveSession:
         self._activity_state = ActivityState.IDLE
         self.ended_at = datetime.now(UTC)
         self.buffer.close()
+        self.mark_dirty()
         if self._on_update:
             self._on_update()
 
@@ -249,6 +390,7 @@ class ActiveSession:
         if error:
             self.metadata["error"] = error
         self.buffer.close()
+        self.mark_dirty()
         if self._on_update:
             self._on_update()
 
@@ -258,6 +400,7 @@ class ActiveSession:
         self.ended_at = datetime.now(UTC)
         self.paused_at = None
         self.buffer.close()
+        self.mark_dirty()
         if self._on_update:
             self._on_update()
 
@@ -277,6 +420,7 @@ class ActiveSession:
         self.metadata["restart_interrupted"] = True
         if was_paused:
             self.metadata["was_paused_before_restart"] = True
+        self.mark_dirty()
         if self._on_update:
             self._on_update()
 
@@ -296,6 +440,7 @@ class ActiveSession:
         self._activity_state = ActivityState.IDLE
         self.paused_at = datetime.now(UTC)
         self.paused_reason = reason
+        self.mark_dirty()
         if self._on_update:
             self._on_update()
 
@@ -308,6 +453,7 @@ class ActiveSession:
         self.paused_at = None
         self.paused_reason = None
         self.last_activity_at = datetime.now(UTC)
+        self.mark_dirty()
         if self._on_update:
             self._on_update()
 
@@ -325,6 +471,7 @@ class ActiveSession:
         self._activity_state = ActivityState.IDLE
         self.ended_at = None
         self.last_activity_at = datetime.now(UTC)
+        self.mark_dirty()
         if self._on_update:
             self._on_update()
 
@@ -395,6 +542,10 @@ class SessionManager:
             "caveman_mode": session.metadata.get("caveman_mode", False),
             # Unified badge list — authoritative for clients >= 0.39.0
             "badges": [b.to_dict() for b in badges],
+            # Authoritative queued-messages snapshot.  Clients fully reconcile
+            # their local pinned-at-bottom queue from this list on every
+            # receipt (reconnect-safe).
+            "queued_messages": session.pending_snapshot(),
         }
         for queue in self._update_subscribers.values():
             queue.put_nowait(update)
@@ -632,19 +783,19 @@ class SessionManager:
             session.buffer._text_messages.append(buffered)
             session.buffer._text_sequence = max(session.buffer._text_sequence, msg_row.sequence)
 
-        # Register in memory
+        # Set flush watermark so incremental flushes only append new messages.
+        session._last_flush_sequence = session.buffer._text_sequence
+        session._dirty = False
+
+        # Register in memory; keep session and message rows in DB for incremental
+        # flush continuity.  Remove runtime-only child rows that don't survive restore.
         session._on_update = lambda: self.broadcast_session_update(session)
         self._sessions[session_id] = session
         self.broadcast_session_update(session)
 
-        # Remove from DB using bulk deletes to avoid ORM cascade
-        # (db.delete(row) would trigger the messages relationship and set session_id=NULL)
-        # Delete all child records that reference this session before deleting the session itself
-        await db.execute(delete(SessionMessageModel).where(SessionMessageModel.session_id == session_uuid))
         await db.execute(delete(ToolExecutionModel).where(ToolExecutionModel.session_id == session_uuid))
         await db.execute(delete(TaskSessionModel).where(TaskSessionModel.session_id == session_uuid))
         await db.execute(delete(ArtifactModel).where(ArtifactModel.session_id == session_uuid))
-        await db.execute(delete(SessionModel).where(SessionModel.id == session_uuid))
         await db.commit()
 
         logger.info("Restored session %s from database (type=%s)", session_id, session_type)
@@ -930,15 +1081,20 @@ class SessionManager:
                     await db.commit()
                     continue
 
-                # Register in memory and remove from DB so the session is fully live
+                # Set flush watermark so incremental flushes only append new messages.
+                session._last_flush_sequence = session.buffer._text_sequence
+                session._dirty = False
+
+                # Register in memory; keep session and message rows in DB so
+                # flush_dirty_sessions can append new messages incrementally.
+                # Clean up non-message child rows (tool executions, artifacts,
+                # task links) that don't survive a restart.
                 session._on_update = lambda s=session: self.broadcast_session_update(s)
                 self._sessions[session_id] = session
 
-                await db.execute(delete(SessionMessageModel).where(SessionMessageModel.session_id == session_uuid))
                 await db.execute(delete(ToolExecutionModel).where(ToolExecutionModel.session_id == session_uuid))
                 await db.execute(delete(TaskSessionModel).where(TaskSessionModel.session_id == session_uuid))
                 await db.execute(delete(ArtifactModel).where(ArtifactModel.session_id == session_uuid))
-                await db.execute(delete(SessionModel).where(SessionModel.id == session_uuid))
                 await db.commit()
 
                 reloaded += 1
@@ -951,6 +1107,87 @@ class SessionManager:
 
         logger.info("Reloaded %d/%d stale session(s) from database on startup", reloaded, len(stale_rows))
         return reloaded
+
+    async def flush_dirty_sessions(self, db: AsyncSession) -> int:
+        """Incrementally persist dirty sessions to the database.
+
+        A session is flushed when its ``_dirty`` flag is set (metadata changed)
+        or when there are new buffer messages since the last flush
+        (``buffer._text_sequence > _last_flush_sequence``).
+
+        Upserts the session row and appends only new messages.  Advances
+        ``_last_flush_sequence`` and clears ``_dirty`` on success.
+
+        Returns the number of sessions flushed.
+        """
+        count = 0
+        for session in list(self._sessions.values()):
+            has_new_messages = session.buffer._text_sequence > session._last_flush_sequence
+            if not session._dirty and not has_new_messages:
+                continue
+            try:
+                session_uuid = uuid.UUID(session.id)
+                existing = await db.get(SessionModel, session_uuid)
+                if existing is None:
+                    db.add(
+                        SessionModel(
+                            id=session_uuid,
+                            backend_id=self._backend_id,
+                            created_at=session.created_at,
+                            session_type=session.session_type.value,
+                            status=session.status.value,
+                            title=session.title,
+                            main_project_path=session.main_project_path,
+                            metadata_=session.metadata,
+                            conversation_history=session.conversation_history or None,
+                            input_tokens=session.input_tokens,
+                            output_tokens=session.output_tokens,
+                            cache_creation_input_tokens=session.cache_creation_input_tokens,
+                            cache_read_input_tokens=session.cache_read_input_tokens,
+                            tool_input_tokens=session.tool_input_tokens,
+                            tool_output_tokens=session.tool_output_tokens,
+                            tool_cost_usd=session.tool_cost_usd,
+                            sort_order=session.sort_order,
+                        )
+                    )
+                else:
+                    existing.status = session.status.value
+                    existing.title = session.title
+                    existing.main_project_path = session.main_project_path
+                    existing.metadata_ = session.metadata
+                    existing.conversation_history = session.conversation_history or None
+                    existing.input_tokens = session.input_tokens
+                    existing.output_tokens = session.output_tokens
+                    existing.cache_creation_input_tokens = session.cache_creation_input_tokens
+                    existing.cache_read_input_tokens = session.cache_read_input_tokens
+                    existing.tool_input_tokens = session.tool_input_tokens
+                    existing.tool_output_tokens = session.tool_output_tokens
+                    existing.tool_cost_usd = session.tool_cost_usd
+                    existing.sort_order = session.sort_order
+                # Flush parent row before inserting child messages.
+                await db.flush()
+                if has_new_messages:
+                    watermark = session._last_flush_sequence
+                    new_msgs = [m for m in session.buffer.text_history if m.sequence > watermark]
+                    for msg in new_msgs:
+                        db.add(
+                            SessionMessageModel(
+                                session_id=session_uuid,
+                                sequence=msg.sequence,
+                                message_type=msg.message_type.value,
+                                content=msg.data.get("content", ""),
+                                metadata_=msg.data,
+                            )
+                        )
+                await db.commit()
+                session._last_flush_sequence = session.buffer._text_sequence
+                session._dirty = False
+                count += 1
+            except Exception:
+                logger.warning("Failed to flush session %s", session.id, exc_info=True)
+                with contextlib.suppress(Exception):
+                    await db.rollback()
+        return count
 
     async def save_all_sessions(self, db: AsyncSession) -> None:
         """Save ALL in-memory sessions to the database for graceful shutdown.

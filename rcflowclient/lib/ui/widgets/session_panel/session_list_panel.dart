@@ -7,6 +7,7 @@ import '../../../models/session_info.dart';
 import '../../../models/worker_config.dart';
 import '../../../services/notification_service.dart';
 import '../../../state/app_state.dart';
+import '../terminal_pane.dart';
 import '../../../theme.dart';
 import '../../dialogs/worker_edit_dialog.dart';
 import '../../onboarding_keys.dart' as onboarding;
@@ -16,6 +17,57 @@ import 'artifact_list_panel.dart';
 import 'helpers.dart';
 import 'task_list_panel.dart';
 import 'worker_group.dart';
+
+/// Cheap value-equality fingerprint of every AppState field that visibly
+/// affects the workers/sessions tab. Excludes high-frequency fields the tab
+/// does not display (token counts, pane content) so a Selector built on this
+/// signature skips rebuilds during pure token streaming — the Sessions tab is
+/// kept alive by [IndexedStack] in `AndroidShell`, so without this gate it
+/// re-runs all filter/grouping logic ~30×/sec while the user is on Chat.
+@immutable
+class _SessionsTabSignature {
+  final int hash;
+  const _SessionsTabSignature(this.hash);
+
+  @override
+  bool operator ==(Object other) =>
+      other is _SessionsTabSignature && other.hash == hash;
+
+  @override
+  int get hashCode => hash;
+
+  factory _SessionsTabSignature.from(AppState state) {
+    int h = 0;
+    for (final c in state.workerConfigs) {
+      h = Object.hash(h, c.id, c.name, c.host, c.port, c.useSSL, c.sortOrder);
+      final w = state.getWorker(c.id);
+      if (w != null) {
+        h = Object.hash(h, w.status, w.serverOs);
+        for (final s in w.sessions) {
+          h = Object.hash(
+            h,
+            s.sessionId,
+            s.title,
+            s.status,
+            s.activityState,
+            s.sortOrder,
+            s.mainProjectPath,
+            s.selectedWorktreePath,
+            s.agentType,
+            s.pausedReason,
+            s.badges.length,
+          );
+        }
+      }
+    }
+    for (final list in state.terminalsByWorker.values) {
+      for (final t in list) {
+        h = Object.hash(h, t.terminalId, t.title);
+      }
+    }
+    return _SessionsTabSignature(h);
+  }
+}
 
 /// Compare sessions by sort_order ascending (nulls last), then createdAt desc.
 int compareBySortOrder(SessionInfo a, SessionInfo b) {
@@ -645,19 +697,83 @@ class _SessionListPanelState extends State<SessionListPanel>
     }
   }
 
-  Widget _buildWorkersTab() {
-    return Consumer<AppState>(
-      builder: (context, state, _) {
-        final configs = state.workerConfigs;
-
-        // Auto-expand all workers on first build (no saved state)
-        if (!_initialized) {
-          _initialized = true;
-          for (final c in configs) {
-            _expandedWorkers.add(c.id);
+  /// Returns the sliver for a single worker. Factored out so the outer
+  /// [CustomScrollView.slivers] can list-comprehend over filtered configs and
+  /// each worker still closes over its own `config` / `worker` locals.
+  Widget _buildWorkerSliver({
+    required WorkerConfig config,
+    required AppState state,
+    required Map<String, List<SessionInfo>> filteredGrouped,
+    required Map<String, List<TerminalSessionInfo>> terminalsByWorker,
+  }) {
+    final worker = state.getWorker(config.id);
+    final sessions = filteredGrouped[config.id] ?? const [];
+    final terminals = terminalsByWorker[config.id] ?? const [];
+    final expanded = _expandedWorkers.contains(config.id);
+    return WorkerGroup(
+      key: ValueKey('worker-${config.id}'),
+      config: config,
+      worker: worker,
+      sessions: sessions,
+      terminals: terminals,
+      expanded: expanded,
+      groupByProject: _groupByProject,
+      onToggleExpand: () {
+        setState(() {
+          if (expanded) {
+            _expandedWorkers.remove(config.id);
+          } else {
+            _expandedWorkers.add(config.id);
           }
-          _saveExpanded();
-        }
+        });
+        _saveExpanded();
+      },
+      onSessionTap: (sessionId) {
+        state.ensureChatPane().switchSession(sessionId);
+        widget.onSessionSelected?.call();
+      },
+      state: state,
+      onSessionSelected: widget.onSessionSelected,
+      selectedSessionIds: _selectedSessionIds,
+      currentFlatList: _currentFlatSessionList,
+      onSessionSelectTap: (sessionId, flatIndex) =>
+          _handleSessionTap(context, sessionId, flatIndex, state),
+      onBulkSecondaryTap: (sessionId, position) =>
+          _showBulkSessionContextMenu(context, position, state),
+      collapsedProjects: _collapsedWorkerProjects[config.id] ?? const {},
+      onProjectToggle: (collapseKey) {
+        setState(() {
+          final set = _collapsedWorkerProjects.putIfAbsent(
+            config.id,
+            () => {},
+          );
+          if (set.contains(collapseKey)) {
+            set.remove(collapseKey);
+          } else {
+            set.add(collapseKey);
+          }
+        });
+      },
+      reorderEnabled:
+          _workerSearchQuery.isEmpty &&
+          _activeStatusFilters.isEmpty &&
+          _selectedSessionIds.isEmpty,
+      onReorder: (sessionId, afterSessionId) {
+        worker?.reorderSession(sessionId, afterSessionId: afterSessionId);
+      },
+    );
+  }
+
+  Widget _buildWorkersTab() {
+    // Selector + cheap signature: rebuild only when fields the tab actually
+    // displays change. Per-token PaneState notifications bubble up to AppState
+    // but don't alter this signature, so the tab stays inert during streaming
+    // even though IndexedStack keeps it mounted.
+    return Selector<AppState, _SessionsTabSignature>(
+      selector: (_, s) => _SessionsTabSignature.from(s),
+      builder: (context, _, _) {
+        final state = context.read<AppState>();
+        final configs = state.workerConfigs;
 
         if (configs.isEmpty) {
           return Center(
@@ -672,6 +788,18 @@ class _SessionListPanelState extends State<SessionListPanel>
         }
 
         final grouped = state.sessionsByWorker;
+
+        // Auto-expand all workers on first build (no saved state). Safe to
+        // always expand now that the body uses [SliverList]/[SliverReorderableList]
+        // for per-tile virtualization, so a worker with hundreds of sessions
+        // only builds the tiles currently in the viewport.
+        if (!_initialized) {
+          _initialized = true;
+          for (final c in configs) {
+            _expandedWorkers.add(c.id);
+          }
+          _saveExpanded();
+        }
         final terminalsByWorker = state.terminalsByWorker;
         final query = _workerSearchQuery.toLowerCase();
 
@@ -992,78 +1120,22 @@ class _SessionListPanelState extends State<SessionListPanel>
                           ],
                         ),
                       )
-                    : ListView.builder(
-                        padding: const EdgeInsets.symmetric(vertical: 4),
-                        itemCount: filteredConfigs.length,
-                        itemBuilder: (context, index) {
-                          final config = filteredConfigs[index];
-                          final worker = state.getWorker(config.id);
-                          final sessions = filteredGrouped[config.id] ?? [];
-                          final terminals = terminalsByWorker[config.id] ?? [];
-                          final expanded = _expandedWorkers.contains(config.id);
-                          return WorkerGroup(
-                            config: config,
-                            worker: worker,
-                            sessions: sessions,
-                            terminals: terminals,
-                            expanded: expanded,
-                            groupByProject: _groupByProject,
-                            onToggleExpand: () {
-                              setState(() {
-                                if (expanded) {
-                                  _expandedWorkers.remove(config.id);
-                                } else {
-                                  _expandedWorkers.add(config.id);
-                                }
-                              });
-                              _saveExpanded();
-                            },
-                            onSessionTap: (sessionId) {
-                              state.ensureChatPane().switchSession(sessionId);
-                              widget.onSessionSelected?.call();
-                            },
-                            state: state,
-                            onSessionSelected: widget.onSessionSelected,
-                            selectedSessionIds: _selectedSessionIds,
-                            currentFlatList: _currentFlatSessionList,
-                            onSessionSelectTap: (sessionId, flatIndex) =>
-                                _handleSessionTap(
-                                  context,
-                                  sessionId,
-                                  flatIndex,
-                                  state,
-                                ),
-                            onBulkSecondaryTap: (sessionId, position) =>
-                                _showBulkSessionContextMenu(
-                                  context,
-                                  position,
-                                  state,
-                                ),
-                            collapsedProjects:
-                                _collapsedWorkerProjects[config.id] ?? const {},
-                            onProjectToggle: (collapseKey) {
-                              setState(() {
-                                final set = _collapsedWorkerProjects
-                                    .putIfAbsent(config.id, () => {});
-                                if (set.contains(collapseKey)) {
-                                  set.remove(collapseKey);
-                                } else {
-                                  set.add(collapseKey);
-                                }
-                              });
-                            },
-                            reorderEnabled:
-                                _workerSearchQuery.isEmpty &&
-                                _activeStatusFilters.isEmpty &&
-                                _selectedSessionIds.isEmpty,
-                            onReorder: (sessionId, afterSessionId) {
-                              worker?.reorderSession(
-                                sessionId,
-                                afterSessionId: afterSessionId,
-                              );
-                            },
-                          );
-                        },
+                    : CustomScrollView(
+                        // Single scroll view that owns every worker's slivers.
+                        // [WorkerGroup] returns a [SliverMainAxisGroup] of
+                        // [SliverList]/[SliverReorderableList] fragments, so
+                        // only session tiles in the visible viewport are built
+                        // — a worker with 400+ sessions no longer renders all
+                        // tiles synchronously on expand.
+                        slivers: [
+                          for (final config in filteredConfigs)
+                            _buildWorkerSliver(
+                              config: config,
+                              state: state,
+                              filteredGrouped: filteredGrouped,
+                              terminalsByWorker: terminalsByWorker,
+                            ),
+                        ],
                       ),
               ),
             ],

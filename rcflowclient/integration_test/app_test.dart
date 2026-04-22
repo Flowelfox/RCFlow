@@ -12,8 +12,11 @@ import 'package:rcflowclient/main.dart' as app;
 // E2E environment (injected via --dart-define)
 // ---------------------------------------------------------------------------
 
+// ignore: unused_element
 const _e2eBackendHost = String.fromEnvironment('E2E_BACKEND_HOST', defaultValue: '');
+// ignore: unused_element
 const _e2eBackendPort = int.fromEnvironment('E2E_BACKEND_PORT', defaultValue: 0);
+// ignore: unused_element
 const _e2eApiKey = String.fromEnvironment('E2E_API_KEY', defaultValue: '');
 // Mock Anthropic server admin endpoint (optional — used by tool-use tests)
 const _e2eMockHost = String.fromEnvironment('E2E_MOCK_HOST', defaultValue: '127.0.0.1');

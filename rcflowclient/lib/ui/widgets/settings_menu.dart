@@ -732,7 +732,7 @@ class _NotificationsSectionState extends State<_NotificationsSection> {
   bool get _anySoundEnabled => _soundEnabled || _soundOnCompleteEnabled;
 
   Future<void> _pickCustomSound(SettingsService settings) async {
-    final result = await FilePicker.platform.pickFiles(
+    final result = await FilePicker.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['wav'],
       dialogTitle: 'Select notification sound',

@@ -197,9 +197,9 @@ start-emulator:
 setup-emulator:
     ./scripts/setup-emulator.sh
 
-# Run Flutter app in hot reload mode (WSL2 — connects to Windows emulator)
+# Run Flutter app on Android emulator in hot reload mode (WSL2 — connects to Windows emulator)
 [unix]
-flutter-run:
+run-android:
     cd rcflowclient && flutter run -d $(grep nameserver /etc/resolv.conf | awk '{print $2}'):15555
 
 # Build Flutter debug APK

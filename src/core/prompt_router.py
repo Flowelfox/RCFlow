@@ -16,7 +16,7 @@ The ``PromptRouter`` class is composed from five mixin modules:
   background tasks (logging, archiving, summaries, titles, tasks, artifacts)
 """
 
-import asyncio  # noqa: TC003
+import asyncio
 import json
 import logging
 import os
@@ -30,11 +30,13 @@ from src.config import Settings
 from src.core.agent_claude_code import ClaudeCodeAgentMixin
 from src.core.agent_codex import CodexAgentMixin
 from src.core.agent_opencode import OpenCodeAgentMixin
+from src.core.agent_prompt import format_agent_prompt
 from src.core.attachment_store import ResolvedAttachment
 from src.core.background_tasks import BackgroundTasksMixin
 from src.core.buffer import MessageType
 from src.core.context import ContextMixin
 from src.core.llm import LLMClient, StreamDone, TextChunk, ToolCallRequest
+from src.core.pending_store import SessionPendingMessageStore
 from src.core.session import ActiveSession, ActivityState, SessionManager, SessionStatus, SessionType
 from src.core.session_lifecycle import SessionLifecycleMixin
 from src.database.models import Session as SessionModel
@@ -113,6 +115,7 @@ class PromptRouter(
         tool_manager: ToolManager | None = None,
         artifact_scanner: ArtifactScanner | None = None,
         telemetry_service: TelemetryService | None = None,
+        pending_store: SessionPendingMessageStore | None = None,
     ) -> None:
         self._llm = llm_client
         self._session_manager = session_manager
@@ -124,6 +127,8 @@ class PromptRouter(
         self._tool_manager = tool_manager
         self._artifact_scanner = artifact_scanner
         self._telemetry = telemetry_service
+        self._pending_store = pending_store
+        self._drain_tasks: set[asyncio.Task[None]] = set()
         self._pending_log_tasks: set[asyncio.Task[None]] = set()
         self._pending_title_tasks: set[asyncio.Task[None]] = set()
         self._pending_archive_tasks: set[asyncio.Task[None]] = set()
@@ -628,6 +633,93 @@ class PromptRouter(
     # Main prompt handler
     # ------------------------------------------------------------------
 
+    async def enqueue_user_prompt(
+        self,
+        session: ActiveSession,
+        *,
+        text: str,
+        display_text: str | None,
+        attachments: list[ResolvedAttachment] | None,
+        project_name: str | None,
+        selected_worktree_path: str | None,
+        task_id: str | None,
+    ) -> str | None:
+        """Persist a user prompt in the queue when the session is busy.
+
+        Returns the new ``queued_id`` on success, or ``None`` when the session
+        is idle (caller should deliver the prompt via :meth:`handle_prompt`
+        instead) or the pending store is unavailable.  See ``Queued User
+        Messages`` in ``Design.md``.
+        """
+        if self._pending_store is None:
+            return None
+        if not session.is_busy_for_queue():
+            return None
+        display = display_text if display_text is not None else self._TOOL_MENTION_RE.sub("", text).strip()
+        entry = await self._pending_store.enqueue(
+            session,
+            content=text,
+            display_content=display,
+            attachments=attachments,
+            project_name=project_name,
+            selected_worktree_path=selected_worktree_path,
+            task_id=task_id,
+        )
+        return entry.queued_id
+
+    def schedule_pending_drain(self, session: ActiveSession) -> None:
+        """Schedule a pass over the queued messages for *session*.
+
+        Called at the end of each turn (Claude Code / Codex / OpenCode result
+        event, LLM ``_prompt_lock`` release).  Delivers the oldest pending
+        message by invoking :meth:`handle_prompt`; any subsequent queued
+        messages are picked up by the next turn-end hook.
+        """
+        if self._pending_store is None:
+            return
+        if not session.pending_user_messages:
+            return
+        if session.status in (
+            SessionStatus.PAUSED,
+            SessionStatus.COMPLETED,
+            SessionStatus.FAILED,
+            SessionStatus.CANCELLED,
+        ):
+            return
+        task = asyncio.create_task(self._drain_one(session))
+        self._drain_tasks.add(task)
+        task.add_done_callback(self._drain_tasks.discard)
+
+    async def _drain_one(self, session: ActiveSession) -> None:
+        """Deliver a single queued message (internal — called by ``schedule_pending_drain``)."""
+        if self._pending_store is None or not session.pending_user_messages:
+            return
+        head = session.pending_user_messages[0]
+        try:
+            attachments = await asyncio.to_thread(SessionPendingMessageStore.rehydrate_attachments, head)
+        except OSError as e:
+            logger.warning("Failed to rehydrate queued attachments for %s: %s", head.queued_id, e)
+            attachments = []
+        # Remove the row + disk bytes; emits ``message_dequeued``.
+        await self._pending_store.pop_head(session)
+        try:
+            await self.handle_prompt(
+                text=head.content,
+                session_id=session.id,
+                attachments=attachments or None,
+                project_name=head.project_name,
+                selected_worktree_path=head.selected_worktree_path,
+                task_id=head.task_id,
+                display_text=head.display_content,
+                queued_id=head.queued_id,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to deliver drained queued message %s for session %s",
+                head.queued_id,
+                session.id,
+            )
+
     async def handle_prompt(
         self,
         text: str,
@@ -637,6 +729,7 @@ class PromptRouter(
         selected_worktree_path: str | None = None,
         task_id: str | None = None,
         display_text: str | None = None,
+        queued_id: str | None = None,
     ) -> str:
         """Handle a user prompt. Creates a new session or resumes an existing one.
 
@@ -713,48 +806,39 @@ class PromptRouter(
         # The empty-string case (chip + empty input) must be preserved as-is.
         _display = display_text if display_text is not None else self._TOOL_MENTION_RE.sub("", text).strip()
 
-        # If session has an active Claude Code executor, forward message directly
-        if session.claude_code_executor is not None:
-            buffer_data: dict[str, Any] = {"content": _display, "role": "user"}
+        def _make_user_buffer_data() -> dict[str, Any]:
+            """Build the TEXT_CHUNK(role=user) payload, optionally tagged with queued_id."""
+            data: dict[str, Any] = {"content": _display, "role": "user"}
             if attachments:
-                buffer_data["attachments"] = [
+                data["attachments"] = [
                     {"name": a.file_name, "mime_type": a.mime_type, "size": len(a.data)} for a in attachments
                 ]
-            session.buffer.push_text(MessageType.TEXT_CHUNK, buffer_data)
+            if queued_id is not None:
+                data["queued_id"] = queued_id
+            return data
+
+        # If session has an active Claude Code executor, forward message directly
+        if session.claude_code_executor is not None:
+            session.buffer.push_text(MessageType.TEXT_CHUNK, _make_user_buffer_data())
             await self._forward_to_claude_code(session, _display)
             return session.id
 
         # If session has an active Codex executor, forward message directly
         if session.codex_executor is not None:
-            buffer_data2: dict[str, Any] = {"content": _display, "role": "user"}
-            if attachments:
-                buffer_data2["attachments"] = [
-                    {"name": a.file_name, "mime_type": a.mime_type, "size": len(a.data)} for a in attachments
-                ]
-            session.buffer.push_text(MessageType.TEXT_CHUNK, buffer_data2)
+            session.buffer.push_text(MessageType.TEXT_CHUNK, _make_user_buffer_data())
             await self._forward_to_codex(session, _display)
             return session.id
 
         # If session has an active OpenCode executor, forward message directly
         if session.opencode_executor is not None:
-            buffer_data3oc: dict[str, Any] = {"content": _display, "role": "user"}
-            if attachments:
-                buffer_data3oc["attachments"] = [
-                    {"name": a.file_name, "mime_type": a.mime_type, "size": len(a.data)} for a in attachments
-                ]
-            session.buffer.push_text(MessageType.TEXT_CHUNK, buffer_data3oc)
+            session.buffer.push_text(MessageType.TEXT_CHUNK, _make_user_buffer_data())
             await self._forward_to_opencode(session, _display)
             return session.id
 
         # Direct tool mode: bypass LLM entirely, parse #tool_name syntax
         if self.is_direct_tool_mode:
             session.set_active()
-            buffer_data3: dict[str, Any] = {"content": _display, "role": "user"}
-            if attachments:
-                buffer_data3["attachments"] = [
-                    {"name": a.file_name, "mime_type": a.mime_type, "size": len(a.data)} for a in attachments
-                ]
-            session.buffer.push_text(MessageType.TEXT_CHUNK, buffer_data3)
+            session.buffer.push_text(MessageType.TEXT_CHUNK, _make_user_buffer_data())
             await self._handle_direct_prompt(session, text)
             return session.id
 
@@ -763,12 +847,7 @@ class PromptRouter(
         # directly so it is ready for follow-up instructions.
         if self._is_bare_agent_mention(text):
             session.set_active()
-            buffer_data4: dict[str, Any] = {"content": _display, "role": "user"}
-            if attachments:
-                buffer_data4["attachments"] = [
-                    {"name": a.file_name, "mime_type": a.mime_type, "size": len(a.data)} for a in attachments
-                ]
-            session.buffer.push_text(MessageType.TEXT_CHUNK, buffer_data4)
+            session.buffer.push_text(MessageType.TEXT_CHUNK, _make_user_buffer_data())
             await self._handle_direct_prompt(session, text)
             return session.id
 
@@ -777,7 +856,6 @@ class PromptRouter(
         async with session._prompt_lock:
             session.set_active()
             session.set_activity(ActivityState.PROCESSING_LLM)
-            self._resolve_session_end_ask(session, accepted=False)
 
             # Build project context from the session's confirmed project path.
             # Injected every turn so the LLM always has the project in context,
@@ -846,12 +924,7 @@ class PromptRouter(
 
             # Push the original user prompt to the buffer (no injected context).
             # Attachment metadata is included so clients can display file names.
-            buffer_data: dict[str, Any] = {"content": _display, "role": "user"}
-            if attachments:
-                buffer_data["attachments"] = [
-                    {"name": a.file_name, "mime_type": a.mime_type, "size": len(a.data)} for a in attachments
-                ]
-            session.buffer.push_text(MessageType.TEXT_CHUNK, buffer_data)
+            session.buffer.push_text(MessageType.TEXT_CHUNK, _make_user_buffer_data())
 
             # Define tool execution callback
             agent_started = False
@@ -954,29 +1027,16 @@ class PromptRouter(
                     None,
                 )
 
-                # Check if the LLM included <SessionEndAsk> in its last response
-                if (
-                    session.claude_code_executor is None
-                    and session.codex_executor is None
-                    and session.opencode_executor is None
-                    and last_assistant
-                    and self._contains_session_end_ask(last_assistant)
-                ):
-                    session.buffer.push_text(
-                        MessageType.SESSION_END_ASK,
-                        {"session_id": session.id},
-                    )
-
                 # Auto-generate title from the first exchange
                 if session.title is None and last_assistant is not None:
                     # Extract assistant text from content blocks
                     assistant_text = ""
-                    content = last_assistant.get("content")
-                    if isinstance(content, str):
-                        assistant_text = content
-                    elif isinstance(content, list):
+                    _raw = last_assistant.get("content")
+                    if isinstance(_raw, str):
+                        assistant_text = _raw
+                    elif isinstance(_raw, list):
                         assistant_text = " ".join(
-                            b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"
+                            b.get("text", "") for b in _raw if isinstance(b, dict) and b.get("type") == "text"
                         )
                     # Fall back to user prompt alone if assistant had no text (e.g. only tool_use)
                     self._fire_title_task(session, text, assistant_text or "")
@@ -993,6 +1053,13 @@ class PromptRouter(
                     and session.opencode_executor is None
                 ):
                     session.set_activity(ActivityState.IDLE)
+                    # Emit a turn-complete signal so clients know the response
+                    # stream has ended. Pushed synchronously to avoid async task
+                    # scheduling races in the drain path.
+                    session.buffer.push_text(
+                        MessageType.SUMMARY,
+                        {"session_id": session.id, "content": ""},
+                    )
 
             except Exception as e:
                 logger.exception("Error processing prompt in session %s", session.id)
@@ -1010,6 +1077,8 @@ class PromptRouter(
                 self._fire_plan_finalization_task(session)
                 self._fire_archive_task(session.id)
 
+        # LLM-path turn complete: deliver any queued user message.
+        self.schedule_pending_drain(session)
         return session.id
 
     # ------------------------------------------------------------------
@@ -1019,6 +1088,15 @@ class PromptRouter(
     async def _execute_tool(self, session: ActiveSession, tool_call: ToolCallRequest) -> str:
         """Execute a tool call and stream output to the session buffer."""
         tool_def = self._tool_registry.get(tool_call.tool_name)
+
+        # Format agent prompts into the structured Task/Description/Additional Content
+        # sections BEFORE pushing AGENT_SESSION_START so the banner and the executor
+        # both receive the same structured text.  Raw code blocks from the user's
+        # message are preserved in the Additional Content section.
+        if tool_def is not None and tool_def.executor in ("claude_code", "codex", "opencode"):
+            raw_prompt = tool_call.tool_input.get("prompt", "")
+            if raw_prompt:
+                tool_call.tool_input["prompt"] = format_agent_prompt(raw_prompt)
 
         # For agent tools, push AGENT_SESSION_START (visible banner) then
         # AGENT_GROUP_START (collapsible sub-message group) so the frontend

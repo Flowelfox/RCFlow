@@ -6,6 +6,7 @@ import '../../../models/ws_messages.dart';
 import '../../../state/pane_state.dart';
 import '../../../theme.dart';
 import '../../utils/link_utils.dart';
+import '../../utils/markdown_copy_menu.dart';
 import '../../utils/selectable_code_block_builder.dart';
 
 class PlanReviewAskCard extends StatefulWidget {
@@ -78,38 +79,41 @@ class _PlanReviewAskCardState extends State<PlanReviewAskCard> {
               color: context.appColors.bgOverlay,
               borderRadius: BorderRadius.circular(8),
             ),
-            child: MarkdownBody(
-              data: widget.message.content,
-              shrinkWrap: true,
-              onTapLink: openLinkOnCtrlClick,
-              builders: {
-                'pre': SelectableCodeBlockBuilder(
-                  textStyle: TextStyle(
+            child: MarkdownCopyMenu(
+              rawMarkdown: widget.message.content,
+              child: MarkdownBody(
+                data: widget.message.content,
+                shrinkWrap: true,
+                onTapLink: openLinkOnCtrlClick,
+                builders: {
+                  'pre': SelectableCodeBlockBuilder(
+                    textStyle: TextStyle(
+                      color: context.appColors.textPrimary,
+                      fontSize: 12,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                },
+                styleSheet: MarkdownStyleSheet(
+                  p: TextStyle(
                     color: context.appColors.textPrimary,
+                    fontSize: 13,
+                    height: 1.45,
+                  ),
+                  code: TextStyle(
+                    color: context.appColors.textPrimary,
+                    backgroundColor: context.appColors.toolBg.withValues(
+                      alpha: 0.6,
+                    ),
                     fontSize: 12,
                     fontFamily: 'monospace',
                   ),
-                ),
-              },
-              styleSheet: MarkdownStyleSheet(
-                p: TextStyle(
-                  color: context.appColors.textPrimary,
-                  fontSize: 13,
-                  height: 1.45,
-                ),
-                code: TextStyle(
-                  color: context.appColors.textPrimary,
-                  backgroundColor: context.appColors.toolBg.withValues(
-                    alpha: 0.6,
+                  codeblockDecoration: BoxDecoration(
+                    color: context.appColors.toolBg,
+                    borderRadius: BorderRadius.circular(6),
                   ),
-                  fontSize: 12,
-                  fontFamily: 'monospace',
+                  codeblockPadding: EdgeInsets.all(8),
                 ),
-                codeblockDecoration: BoxDecoration(
-                  color: context.appColors.toolBg,
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                codeblockPadding: EdgeInsets.all(8),
               ),
             ),
           ),

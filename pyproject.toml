@@ -1,9 +1,9 @@
 [project]
 name = "rcflow"
-version = "0.39.1"
+version = "0.40.1"
 description = "WebSocket-based action server that translates natural language prompts into tool executions via LLM"
 readme = "Design.md"
-license = "MIT"
+license = "AGPL-3.0-or-later"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115.0",
@@ -63,6 +63,10 @@ packages = ["src"]
 testpaths = ["tests"]
 asyncio_mode = "auto"
 pythonpath = ["."]
+timeout = 60
+markers = [
+    "e2e: end-to-end WebSocket protocol tests (uses real session/tool pipeline with mock LLM)",
+]
 
 [tool.coverage.run]
 source = ["src"]
@@ -107,4 +111,5 @@ dev = [
     "anybadge>=1.16.0",
     "pytest>=9.0.2",
     "pytest-asyncio>=1.3.0",
+    "pytest-timeout>=2.3.0",
 ]

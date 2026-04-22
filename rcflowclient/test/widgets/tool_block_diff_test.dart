@@ -24,7 +24,7 @@ Widget _buildBlock(PaneState paneState, DisplayMessage message) {
       home: Scaffold(
         // Consumer triggers rebuild when PaneState notifies (e.g. after tap).
         body: Consumer<PaneState>(
-          builder: (_, __, ___) => ToolBlock(message: message),
+          builder: (_, _, _) => ToolBlock(message: message),
         ),
       ),
     ),

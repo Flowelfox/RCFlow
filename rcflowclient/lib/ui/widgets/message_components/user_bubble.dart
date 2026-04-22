@@ -4,6 +4,7 @@ import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import '../../../models/ws_messages.dart';
 import '../../../theme.dart';
 import '../../utils/link_utils.dart';
+import '../../utils/markdown_copy_menu.dart';
 import '../../utils/selectable_code_block_builder.dart';
 
 class UserBubble extends StatelessWidget {
@@ -47,81 +48,84 @@ class UserBubble extends StatelessWidget {
                 ),
                 SizedBox(height: 8),
               ],
-              MarkdownBody(
-                data: message.content.replaceAll('\n', '  \n'),
-                shrinkWrap: true,
-                onTapLink: openLinkOnCtrlClick,
-                builders: {
-                  'pre': SelectableCodeBlockBuilder(
-                    textStyle: TextStyle(
+              MarkdownCopyMenu(
+                rawMarkdown: message.content,
+                child: MarkdownBody(
+                  data: message.content.replaceAll('\n', '  \n'),
+                  shrinkWrap: true,
+                  onTapLink: openLinkOnCtrlClick,
+                  builders: {
+                    'pre': SelectableCodeBlockBuilder(
+                      textStyle: TextStyle(
+                        color: context.appColors.textPrimary,
+                        fontSize: 13.5,
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                  },
+                  styleSheet: MarkdownStyleSheet(
+                    p: TextStyle(
                       color: context.appColors.textPrimary,
+                      fontSize: 15,
+                      height: 1.4,
+                    ),
+                    code: TextStyle(
+                      color: context.appColors.textPrimary,
+                      backgroundColor: Colors.black.withValues(alpha: 0.2),
                       fontSize: 13.5,
                       fontFamily: 'monospace',
                     ),
-                  ),
-                },
-                styleSheet: MarkdownStyleSheet(
-                  p: TextStyle(
-                    color: context.appColors.textPrimary,
-                    fontSize: 15,
-                    height: 1.4,
-                  ),
-                  code: TextStyle(
-                    color: context.appColors.textPrimary,
-                    backgroundColor: Colors.black.withValues(alpha: 0.2),
-                    fontSize: 13.5,
-                    fontFamily: 'monospace',
-                  ),
-                  codeblockDecoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.25),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  codeblockPadding: EdgeInsets.all(12),
-                  a: TextStyle(color: context.appColors.accentLight),
-                  listBullet: TextStyle(
-                    color: context.appColors.textPrimary,
-                    fontSize: 15,
-                  ),
-                  h1: TextStyle(
-                    color: context.appColors.textPrimary,
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                  ),
-                  h2: TextStyle(
-                    color: context.appColors.textPrimary,
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
-                  h3: TextStyle(
-                    color: context.appColors.textPrimary,
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                  ),
-                  blockquoteDecoration: BoxDecoration(
-                    border: Border(
-                      left: BorderSide(
-                        color: context.appColors.accentLight,
-                        width: 3,
-                      ),
+                    codeblockDecoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.25),
+                      borderRadius: BorderRadius.circular(8),
                     ),
-                    color: Colors.black.withValues(alpha: 0.15),
-                  ),
-                  blockquotePadding: EdgeInsets.only(
-                    left: 12,
-                    top: 4,
-                    bottom: 4,
-                  ),
-                  tableBorder: TableBorder.all(
-                    color: context.appColors.divider,
-                  ),
-                  tableHead: TextStyle(
-                    color: context.appColors.textPrimary,
-                    fontWeight: FontWeight.bold,
-                  ),
-                  tableBody: TextStyle(color: context.appColors.textPrimary),
-                  horizontalRuleDecoration: BoxDecoration(
-                    border: Border(
-                      top: BorderSide(color: context.appColors.divider),
+                    codeblockPadding: EdgeInsets.all(12),
+                    a: TextStyle(color: context.appColors.accentLight),
+                    listBullet: TextStyle(
+                      color: context.appColors.textPrimary,
+                      fontSize: 15,
+                    ),
+                    h1: TextStyle(
+                      color: context.appColors.textPrimary,
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                    ),
+                    h2: TextStyle(
+                      color: context.appColors.textPrimary,
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                    h3: TextStyle(
+                      color: context.appColors.textPrimary,
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                    blockquoteDecoration: BoxDecoration(
+                      border: Border(
+                        left: BorderSide(
+                          color: context.appColors.accentLight,
+                          width: 3,
+                        ),
+                      ),
+                      color: Colors.black.withValues(alpha: 0.15),
+                    ),
+                    blockquotePadding: EdgeInsets.only(
+                      left: 12,
+                      top: 4,
+                      bottom: 4,
+                    ),
+                    tableBorder: TableBorder.all(
+                      color: context.appColors.divider,
+                    ),
+                    tableHead: TextStyle(
+                      color: context.appColors.textPrimary,
+                      fontWeight: FontWeight.bold,
+                    ),
+                    tableBody: TextStyle(color: context.appColors.textPrimary),
+                    horizontalRuleDecoration: BoxDecoration(
+                      border: Border(
+                        top: BorderSide(color: context.appColors.divider),
+                      ),
                     ),
                   ),
                 ),

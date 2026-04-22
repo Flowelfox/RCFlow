@@ -18,7 +18,6 @@ class MessageType(StrEnum):
     TOOL_OUTPUT = "tool_output"
     ERROR = "error"
     SESSION_END = "session_end"
-    SESSION_END_ASK = "session_end_ask"
     SUMMARY = "summary"
     NOTIFICATION = "notification"
     AGENT_SESSION_START = "agent_session_start"
@@ -35,6 +34,11 @@ class MessageType(StrEnum):
     AGENT_LOG = "agent_log"
     SESSION_UPDATE = "session_update"  # For broadcasting session metadata updates
     SUBPROCESS_STATUS = "subprocess_status"  # Ephemeral — not archived to DB
+    # Queued user messages (ephemeral — DB is persisted separately in
+    # ``session_pending_messages``; these events only notify live subscribers).
+    MESSAGE_QUEUED = "message_queued"
+    MESSAGE_DEQUEUED = "message_dequeued"
+    MESSAGE_QUEUED_UPDATED = "message_queued_updated"
 
 
 @dataclass
@@ -57,6 +61,7 @@ class SessionBuffer:
         self._text_messages: deque[BufferedMessage] = deque(maxlen=_MAX_BUFFER_MESSAGES)
         self._text_sequence: int = 0
         self._text_subscribers: dict[str, asyncio.Queue[BufferedMessage | None]] = {}
+        self._closed: bool = False
 
     @property
     def text_history(self) -> list[BufferedMessage]:
@@ -97,7 +102,12 @@ class SessionBuffer:
         for msg in self._text_messages:
             queue.put_nowait(msg)
 
-        self._text_subscribers[subscriber_id] = queue
+        if self._closed:
+            # Session already ended — put sentinel so stream_session exits cleanly
+            # instead of blocking on queue.get() forever.
+            queue.put_nowait(None)
+        else:
+            self._text_subscribers[subscriber_id] = queue
         return queue
 
     def unsubscribe_text(self, subscriber_id: str) -> None:
@@ -107,6 +117,7 @@ class SessionBuffer:
 
     def close(self) -> None:
         """Signal all subscribers that the session is done."""
+        self._closed = True
         for queue in self._text_subscribers.values():
             queue.put_nowait(None)
         self._text_subscribers.clear()

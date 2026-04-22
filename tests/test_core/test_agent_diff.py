@@ -21,9 +21,11 @@ from src.core.agent_claude_code import (
     _MAX_DIFF_LINES,
     _MAX_SNAPSHOT_BYTES,
     ClaudeCodeAgentMixin,
+    _classify_log_level,
     _compute_diff,
     _read_file_snapshot,
 )
+from src.executors.claude_code import ClaudeCodeExecutor
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -408,6 +410,175 @@ class TestDiffIntegration:
 
 
 # ---------------------------------------------------------------------------
+# Integration tests — real Claude Code event shape (tool_result wrapped in user)
+# ---------------------------------------------------------------------------
+
+
+class TestClaudeCodeUserEventShape:
+    """Claude Code emits tool_result as a content block inside a "user" event.
+
+    Regression coverage for the bug where the legacy top-level ``tool_result``
+    branch matched synthetic test events but never fired against real Claude
+    Code output, so no TOOL_OUTPUT was pushed for Bash/Edit/Write tools.
+    """
+
+    @pytest.mark.asyncio
+    async def test_bash_tool_result_in_user_event_emits_output(self, tmp_path: Path) -> None:
+        events = [
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "tu_bash",
+                            "name": "Bash",
+                            "input": {"command": "echo hi"},
+                        }
+                    ]
+                },
+            },
+            {
+                "type": "user",
+                "message": {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "tu_bash",
+                            "content": "hi\n",
+                            "is_error": False,
+                        }
+                    ],
+                },
+            },
+        ]
+
+        session = _make_session(tmp_path)
+        mixin = _make_mixin()
+
+        await mixin._relay_claude_code_stream(session, _make_executor_chunks(events))
+
+        calls = session.buffer.push_text.call_args_list
+        tool_output_calls = [c for c in calls if c[0][0].name == "TOOL_OUTPUT"]
+        assert len(tool_output_calls) == 1
+        msg_data = tool_output_calls[0][0][1]
+        assert msg_data["content"] == "hi\n"
+        assert msg_data["is_error"] is False
+        assert "diff" not in msg_data
+
+    @pytest.mark.asyncio
+    async def test_edit_tool_result_in_user_event_emits_diff(self, tmp_path: Path) -> None:
+        target = tmp_path / "foo.py"
+        target.write_text("old\n", encoding="utf-8")
+
+        events = [
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "tu_edit",
+                            "name": "Edit",
+                            "input": {"file_path": str(target)},
+                        }
+                    ]
+                },
+            },
+            {
+                "type": "user",
+                "message": {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "tu_edit",
+                            "content": "File edited.",
+                            "is_error": False,
+                        }
+                    ],
+                },
+            },
+        ]
+
+        call_count = 0
+
+        async def _mock_read(path: Path) -> str | None:
+            nonlocal call_count
+            call_count += 1
+            return "old\n" if call_count == 1 else "new\n"
+
+        session = _make_session(tmp_path)
+        mixin = _make_mixin()
+
+        with patch("src.core.agent_claude_code._read_file_snapshot", _mock_read):
+            await mixin._relay_claude_code_stream(session, _make_executor_chunks(events))
+
+        calls = session.buffer.push_text.call_args_list
+        tool_output_calls = [c for c in calls if c[0][0].name == "TOOL_OUTPUT"]
+        assert len(tool_output_calls) == 1
+        msg_data = tool_output_calls[0][0][1]
+        assert "diff" in msg_data
+        assert "+new" in msg_data["diff"]
+
+    @pytest.mark.asyncio
+    async def test_multiple_tool_results_in_single_user_event(self, tmp_path: Path) -> None:
+        """Parallel tool calls: one user event carrying two tool_result blocks."""
+        events = [
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "tu_a",
+                            "name": "Bash",
+                            "input": {"command": "echo a"},
+                        },
+                        {
+                            "type": "tool_use",
+                            "id": "tu_b",
+                            "name": "Bash",
+                            "input": {"command": "echo b"},
+                        },
+                    ]
+                },
+            },
+            {
+                "type": "user",
+                "message": {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "tu_a",
+                            "content": "a",
+                            "is_error": False,
+                        },
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "tu_b",
+                            "content": "b",
+                            "is_error": False,
+                        },
+                    ],
+                },
+            },
+        ]
+
+        session = _make_session(tmp_path)
+        mixin = _make_mixin()
+
+        await mixin._relay_claude_code_stream(session, _make_executor_chunks(events))
+
+        calls = session.buffer.push_text.call_args_list
+        tool_output_calls = [c for c in calls if c[0][0].name == "TOOL_OUTPUT"]
+        assert [c[0][1]["content"] for c in tool_output_calls] == ["a", "b"]
+        assert session._pending_snapshots == []
+
+
+# ---------------------------------------------------------------------------
 # _split_into_chunks unit tests (improvement C)
 # ---------------------------------------------------------------------------
 
@@ -592,6 +763,96 @@ class TestAgentLogRouting:
 
 
 # ---------------------------------------------------------------------------
+# Stderr callback tests
+# ---------------------------------------------------------------------------
+
+
+class TestStderrCallback:
+    @pytest.mark.asyncio
+    async def test_drain_stderr_calls_callback_for_each_line(self) -> None:
+        """_drain_stderr invokes _on_stderr_line for every decoded line."""
+        executor = ClaudeCodeExecutor.__new__(ClaudeCodeExecutor)
+        executor._session_id = "test"
+        executor._stderr_output = ""
+        executor._STDERR_MAX_BYTES = 64 * 1024
+
+        received: list[str] = []
+        executor._on_stderr_line = received.append
+
+        mock_stderr = AsyncMock()
+        mock_stderr.readline = AsyncMock(
+            side_effect=[
+                b"Error: something went wrong\n",
+                b"Warning: deprecated flag\n",
+                b"",  # EOF
+            ]
+        )
+        mock_process = MagicMock()
+        mock_process.stderr = mock_stderr
+        executor._process = mock_process
+
+        await executor._drain_stderr()
+
+        assert received == ["Error: something went wrong", "Warning: deprecated flag"]
+
+    @pytest.mark.asyncio
+    async def test_drain_stderr_no_callback_does_not_raise(self) -> None:
+        """_drain_stderr works correctly when _on_stderr_line is None."""
+        executor = ClaudeCodeExecutor.__new__(ClaudeCodeExecutor)
+        executor._session_id = "test"
+        executor._stderr_output = ""
+        executor._STDERR_MAX_BYTES = 64 * 1024
+        executor._on_stderr_line = None
+
+        mock_stderr = AsyncMock()
+        mock_stderr.readline = AsyncMock(side_effect=[b"some line\n", b""])
+        mock_process = MagicMock()
+        mock_process.stderr = mock_stderr
+        executor._process = mock_process
+
+        await executor._drain_stderr()
+        assert "some line" in executor._stderr_output
+
+    def test_stderr_callback_emits_agent_log_for_error_level(self, tmp_path: Path) -> None:
+        """The callback wired by _stream_claude_code_events pushes AGENT_LOG for error-level stderr."""
+        session = _make_session(tmp_path)
+
+        def _on_stderr(line: str) -> None:
+            level = _classify_log_level(line)
+            if level in ("error", "warn"):
+                session.buffer.push_text(
+                    MessageType.AGENT_LOG,
+                    {"session_id": session.id, "content": line, "source": "stderr", "level": level},
+                )
+
+        _on_stderr("Error: API key invalid")
+
+        calls = session.buffer.push_text.call_args_list
+        log_calls = [c for c in calls if c[0][0] == MessageType.AGENT_LOG]
+        assert len(log_calls) == 1
+        data = log_calls[0][0][1]
+        assert data["source"] == "stderr"
+        assert data["level"] == "error"
+        assert "API key" in data["content"]
+
+    def test_stderr_callback_suppresses_info_level(self, tmp_path: Path) -> None:
+        """Info/debug-level stderr lines are not forwarded to the session buffer."""
+        session = _make_session(tmp_path)
+
+        def _on_stderr(line: str) -> None:
+            level = _classify_log_level(line)
+            if level in ("error", "warn"):
+                session.buffer.push_text(
+                    MessageType.AGENT_LOG,
+                    {"session_id": session.id, "content": line, "source": "stderr", "level": level},
+                )
+
+        _on_stderr("Session restored from disk")  # info-level — no push expected
+
+        assert session.buffer.push_text.call_count == 0
+
+
+# ---------------------------------------------------------------------------
 # Plan mode / plan review timeout tests (improvement A)
 # ---------------------------------------------------------------------------
 
@@ -612,10 +873,11 @@ class TestPlanModeTimeout:
         mixin = _make_mixin()
         mixin._end_claude_code_session = AsyncMock()
 
-        async def _timeout(*args, **kwargs):
+        async def _timeout(coro, *args, **kwargs):
+            coro.close()
             raise TimeoutError()
 
-        with patch("asyncio.wait_for", side_effect=_timeout):
+        with patch("asyncio.wait_for", new=_timeout):
             await mixin._relay_claude_code_stream(session, _make_executor_chunks(events))
 
         calls = session.buffer.push_text.call_args_list
@@ -641,10 +903,11 @@ class TestPlanModeTimeout:
         mixin = _make_mixin()
         mixin._end_claude_code_session = AsyncMock()
 
-        async def _timeout(*args, **kwargs):
+        async def _timeout(coro, *args, **kwargs):
+            coro.close()
             raise TimeoutError()
 
-        with patch("asyncio.wait_for", side_effect=_timeout):
+        with patch("asyncio.wait_for", new=_timeout):
             await mixin._relay_claude_code_stream(session, _make_executor_chunks(events))
 
         calls = session.buffer.push_text.call_args_list
@@ -669,12 +932,14 @@ class TestPlanModeTimeout:
         mixin._end_claude_code_session = AsyncMock()
 
         async def _fast_wait(coro, *, timeout):
+            # Discard the unawaited coroutine so Python doesn't warn about it.
+            coro.close()
             # Simulate client approving plan mode before timeout fires.
             # The relay resets _plan_mode_approved=False right before waiting,
             # so we must re-set it here to represent a real client approval.
             session._plan_mode_approved = True
 
-        with patch("asyncio.wait_for", side_effect=_fast_wait):
+        with patch("asyncio.wait_for", new=_fast_wait):
             await mixin._relay_claude_code_stream(session, _make_executor_chunks(events))
 
         mixin._end_claude_code_session.assert_not_called()

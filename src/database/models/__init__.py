@@ -5,6 +5,7 @@ from src.database.models.linear_issue import LinearIssue
 from src.database.models.llm_call import LLMCall
 from src.database.models.session import Session
 from src.database.models.session_message import SessionMessage
+from src.database.models.session_pending_message import SessionPendingMessage
 from src.database.models.session_turn import SessionTurn
 from src.database.models.task import Task, TaskSession
 from src.database.models.telemetry import TelemetryMinutely
@@ -19,6 +20,7 @@ __all__ = [
     "LinearIssue",
     "Session",
     "SessionMessage",
+    "SessionPendingMessage",
     "SessionTurn",
     "Task",
     "TaskSession",

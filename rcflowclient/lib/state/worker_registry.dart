@@ -50,6 +50,11 @@ class WorkerRegistry extends ChangeNotifier {
   /// Called when a previous project_name error is cleared.
   void Function(String sessionId)? onProjectNameErrorCleared;
 
+  /// Called with the authoritative queued_messages snapshot on each
+  /// session_update broadcast.  Panes reconcile their pinned queue from it.
+  void Function(String sessionId, List<Map<String, dynamic>> snapshot)?
+      onQueuedMessagesSnapshot;
+
   /// Receives all input-channel messages from any worker.
   void Function(Map<String, dynamic> msg, String workerId)? onInputMessage;
 
@@ -296,6 +301,7 @@ class WorkerRegistry extends ChangeNotifier {
     w.onProjectPathAttached = onProjectPathAttached;
     w.onProjectNameError = onProjectNameError;
     w.onProjectNameErrorCleared = onProjectNameErrorCleared;
+    w.onQueuedMessagesSnapshot = onQueuedMessagesSnapshot;
 
     w.addListener(_onWorkerChanged);
     w.loadCachedSessions();

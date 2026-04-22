@@ -13,10 +13,12 @@ from src.api.ws.terminal import router as terminal_router
 from src.config import get_settings
 from src.core.attachment_store import AttachmentStore
 from src.core.llm import LLMClient
+from src.core.pending_store import SessionPendingMessageStore
 from src.core.prompt_router import PromptRouter
 from src.core.session import SessionManager
 from src.database.engine import check_connection, dispose_engine, get_session_factory, init_engine
 from src.logs import setup_logging
+from src.paths import get_data_dir
 from src.services.artifact_scanner import ArtifactScanner
 from src.services.telemetry_service import TelemetryService
 from src.services.tool_manager import ToolManager
@@ -130,6 +132,32 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     )
     app.state.telemetry_service = telemetry_service
 
+    # Pending message store — persists queued user prompts to DB + disk
+    # (see ``Queued User Messages`` in ``Design.md``).  Attachments are
+    # spilled under ``<data>/pending_attachments/`` and the table survives
+    # backend restarts so clients see their queue restored on reconnect.
+    pending_store = SessionPendingMessageStore(
+        db_session_factory,
+        get_data_dir() / "pending_attachments",
+    )
+    app.state.pending_store = pending_store
+
+    # One-time orphan sweep so disk spill never outlives its DB rows.
+    try:
+        await pending_store.sweep_orphans()
+    except Exception:
+        logger.exception("Pending-attachment orphan sweep failed at startup")
+
+    # Hydrate the in-memory pending-message mirror for every live session
+    # that was reloaded above.  Without this, an INTERRUPTED session whose
+    # queue survived a backend restart would look empty until the next
+    # ``session_update`` broadcast re-rendered it.
+    for _active in session_manager.list_active_sessions():
+        try:
+            await pending_store.load_for_session(_active)
+        except Exception:
+            logger.exception("Failed to hydrate pending messages for session %s", _active.id)
+
     # Prompt router
     prompt_router = PromptRouter(
         llm_client,
@@ -141,6 +169,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         tool_manager,
         artifact_scanner,
         telemetry_service,
+        pending_store=pending_store,
     )
     app.state.prompt_router = prompt_router
 

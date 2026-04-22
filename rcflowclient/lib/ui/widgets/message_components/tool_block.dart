@@ -264,14 +264,24 @@ class _DiffView extends StatelessWidget {
     });
     final gutterChars = maxLineNo.toString().length;
 
-    return Container(
-      width: double.infinity,
-      padding: EdgeInsets.fromLTRB(0, 0, 0, 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          for (final row in rows) _buildDiffRow(context, row, gutterChars),
-        ],
+    final colors = context.appColors;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 2, 12, 10),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(6),
+        child: Container(
+          width: double.infinity,
+          decoration: BoxDecoration(
+            border: Border.all(color: colors.divider),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (final row in rows) _buildDiffRow(context, row, gutterChars),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -322,11 +332,10 @@ class _DiffView extends StatelessWidget {
 
     return Container(
       color: bgColor,
-      padding: EdgeInsets.symmetric(horizontal: 4),
+      padding: const EdgeInsets.fromLTRB(8, 1, 8, 1),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Old line number gutter
           SizedBox(
             width: (gutterChars * 7.0) + 4,
             child: Text(
@@ -334,7 +343,6 @@ class _DiffView extends StatelessWidget {
               style: monoStyle.copyWith(color: colors.textMuted),
             ),
           ),
-          // New line number gutter
           SizedBox(
             width: (gutterChars * 7.0) + 4,
             child: Text(
@@ -342,8 +350,7 @@ class _DiffView extends StatelessWidget {
               style: monoStyle.copyWith(color: colors.textMuted),
             ),
           ),
-          SizedBox(width: 4),
-          // Diff content
+          const SizedBox(width: 8),
           Expanded(
             child: Text(
               row.text,

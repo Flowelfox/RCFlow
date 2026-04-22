@@ -176,23 +176,15 @@ class BackgroundTasksMixin:
 
     # --- Summary generation ---
 
-    def _fire_summary_task(self, session: ActiveSession, text: str, *, push_session_end_ask: bool = False) -> None:
+    def _fire_summary_task(self, session: ActiveSession, text: str) -> None:
         """Schedule a background task to summarize the result text and push it to the session buffer."""
         if self._llm is None:  # ty:ignore[unresolved-attribute]
-            # No LLM — skip summary, but still push SESSION_END_ASK if requested
-            if push_session_end_ask:
-                session.buffer.push_text(
-                    MessageType.SESSION_END_ASK,
-                    {"session_id": session.id},
-                )
             return
-        task = asyncio.create_task(self._summarize_and_push(session, text, push_session_end_ask=push_session_end_ask))
+        task = asyncio.create_task(self._summarize_and_push(session, text))
         self._pending_summary_tasks.add(task)  # ty:ignore[unresolved-attribute]
         task.add_done_callback(self._pending_summary_tasks.discard)  # ty:ignore[unresolved-attribute]
 
-    async def _summarize_and_push(
-        self, session: ActiveSession, text: str, *, push_session_end_ask: bool = False
-    ) -> None:
+    async def _summarize_and_push(self, session: ActiveSession, text: str) -> None:
         """Generate a concise summary and push it to the session buffer. Never raises."""
         try:
             summary = await self._llm.summarize(text)  # ty:ignore[unresolved-attribute]
@@ -205,12 +197,6 @@ class BackgroundTasksMixin:
             )
         except Exception:
             logger.exception("Failed to generate summary for session %s", session.id)
-        finally:
-            if push_session_end_ask:
-                session.buffer.push_text(
-                    MessageType.SESSION_END_ASK,
-                    {"session_id": session.id},
-                )
 
     # --- Title generation ---
 

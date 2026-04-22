@@ -456,7 +456,7 @@ class CodexAgentMixin:
                     if session._on_update:
                         session._on_update()
                 summary_text = "".join(post_tool_text_chunks).strip() or "Codex task completed"
-                self._fire_summary_task(session, summary_text, push_session_end_ask=True)  # ty:ignore[unresolved-attribute]
+                self._fire_summary_task(session, summary_text)  # ty:ignore[unresolved-attribute]
                 self._fire_task_update_task(session, summary_text)  # ty:ignore[unresolved-attribute]
 
             elif event_type == "turn.failed":
@@ -523,6 +523,7 @@ class CodexAgentMixin:
             "Codex initial streaming finished (session=%s)",
             session.id,
         )
+        self.schedule_pending_drain(session)  # ty:ignore[unresolved-attribute]
 
     async def _end_codex_session(self, session: ActiveSession) -> None:
         """Clean up Codex state when the session ends."""
@@ -631,3 +632,4 @@ class CodexAgentMixin:
             MessageType.AGENT_GROUP_END,
             {"session_id": session.id},
         )
+        self.schedule_pending_drain(session)  # ty:ignore[unresolved-attribute]

@@ -8,6 +8,7 @@ import '../../state/pane_state.dart';
 import '../../theme.dart';
 import '../onboarding_keys.dart' as onboarding;
 import 'input_area.dart';
+import 'queued_messages_bar.dart';
 import 'output_display.dart';
 import 'pane_header.dart';
 import 'session_panel.dart' show TerminalDragData;
@@ -188,6 +189,7 @@ class _SessionPaneState extends State<SessionPane> {
                             Expanded(
                               child: _OutputWithRightPanels(pane: widget.pane),
                             ),
+                            const QueuedMessagesBar(),
                             InputArea(key: onboarding.inputAreaKey),
                           ],
                         ),
@@ -224,59 +226,74 @@ class _OutputWithRightPanelsState extends State<_OutputWithRightPanels> {
     final hasTodos = pane.todos.isNotEmpty;
 
     final activePanel = pane.activeRightPanel;
-    final panelWidth = pane.rightPanelWidth;
 
     // OutputDisplay is always the first widget in the Row so its element is
     // never remounted when the right panel is toggled. Previously it sat inside
     // a nested Row (when a panel was open) vs. directly inside the Expanded
     // (when no panel was open), causing Flutter to rebuild and scroll-reset it.
-    return Row(
-      children: [
-        // Main content — stable position so OutputDisplay state is preserved.
-        const Expanded(child: OutputDisplay()),
-        // Drag handle and panel content (only when a panel is active).
-        if (activePanel != null) ...[
-          MouseRegion(
-            cursor: SystemMouseCursors.resizeColumn,
-            child: GestureDetector(
-              onHorizontalDragStart: (_) => setState(() => _dragging = true),
-              onHorizontalDragUpdate: (details) {
-                final newWidth = panelWidth - details.delta.dx;
-                pane.setRightPanelWidth(newWidth);
-              },
-              onHorizontalDragEnd: (_) => setState(() => _dragging = false),
-              child: Container(
-                width: 5,
-                color: _dragging
-                    ? context.appColors.accent.withAlpha(80)
-                    : Colors.transparent,
-                child: Align(
-                  alignment: Alignment.centerRight,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final rowMaxWidth = constraints.maxWidth;
+        final dynamicMax = (rowMaxWidth * PaneState.rightPanelMaxFraction)
+            .clamp(PaneState.rightPanelMinWidth, PaneState.rightPanelMaxWidth);
+        final panelWidth = pane.rightPanelWidth.clamp(
+          PaneState.rightPanelMinWidth,
+          dynamicMax,
+        );
+        return Row(
+          children: [
+            // Main content — stable position so OutputDisplay state is preserved.
+            const Expanded(child: OutputDisplay()),
+            // Drag handle and panel content (only when a panel is active).
+            if (activePanel != null) ...[
+              MouseRegion(
+                cursor: SystemMouseCursors.resizeColumn,
+                child: GestureDetector(
+                  onHorizontalDragStart: (_) =>
+                      setState(() => _dragging = true),
+                  onHorizontalDragUpdate: (details) {
+                    final newWidth =
+                        (pane.rightPanelWidth - details.delta.dx).clamp(
+                          PaneState.rightPanelMinWidth,
+                          dynamicMax,
+                        );
+                    pane.setRightPanelWidth(newWidth);
+                  },
+                  onHorizontalDragEnd: (_) => setState(() => _dragging = false),
                   child: Container(
-                    width: 1,
-                    height: double.infinity,
-                    color: context.appColors.divider,
+                    width: 5,
+                    color: _dragging
+                        ? context.appColors.accent.withAlpha(80)
+                        : Colors.transparent,
+                    child: Align(
+                      alignment: Alignment.centerRight,
+                      child: Container(
+                        width: 1,
+                        height: double.infinity,
+                        color: context.appColors.divider,
+                      ),
+                    ),
                   ),
                 ),
               ),
+              SizedBox(
+                width: panelWidth,
+                child: switch (activePanel) {
+                  'todo' => const TodoPanel(),
+                  'statistics' => const StatisticsPane(),
+                  _ => const ProjectPanel(),
+                },
+              ),
+            ],
+            // Bookmark tabs column — always visible so user can open any panel.
+            _RightBookmarks(
+              hasTodos: hasTodos,
+              activePanel: activePanel,
+              pane: pane,
             ),
-          ),
-          SizedBox(
-            width: panelWidth,
-            child: switch (activePanel) {
-              'todo' => const TodoPanel(),
-              'statistics' => const StatisticsPane(),
-              _ => const ProjectPanel(),
-            },
-          ),
-        ],
-        // Bookmark tabs column — always visible so user can open any panel.
-        _RightBookmarks(
-          hasTodos: hasTodos,
-          activePanel: activePanel,
-          pane: pane,
-        ),
-      ],
+          ],
+        );
+      },
     );
   }
 }

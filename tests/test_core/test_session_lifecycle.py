@@ -8,7 +8,6 @@ Covers:
 - ``interrupt_subprocess`` — kills executor, session stays ACTIVE
 - ``_reap_inactive_sessions`` — auto-ends stale sessions, skips paused/terminal
 - ``_check_token_limit_exceeded`` — limit enforcement per token type
-- ``_contains_session_end_ask`` — tag detection in content variants
 """
 
 from __future__ import annotations
@@ -498,38 +497,6 @@ class TestCheckTokenLimitExceeded:
 
 
 # ---------------------------------------------------------------------------
-# _contains_session_end_ask
-# ---------------------------------------------------------------------------
-
-
-class TestContainsSessionEndAsk:
-    def test_detects_tag_in_string_content(self) -> None:
-        msg = {"content": "Please confirm. [SessionEndAsk]"}
-        assert PromptRouter._contains_session_end_ask(msg) is True
-
-    def test_returns_false_when_tag_absent(self) -> None:
-        msg = {"content": "Normal response without the tag."}
-        assert PromptRouter._contains_session_end_ask(msg) is False
-
-    def test_detects_tag_in_list_content(self) -> None:
-        msg = {
-            "content": [
-                {"type": "text", "text": "Some intro."},
-                {"type": "text", "text": "[SessionEndAsk] Please confirm."},
-            ]
-        }
-        assert PromptRouter._contains_session_end_ask(msg) is True
-
-    def test_returns_false_when_no_tag_in_list(self) -> None:
-        msg = {
-            "content": [
-                {"type": "text", "text": "No tag here."},
-            ]
-        }
-        assert PromptRouter._contains_session_end_ask(msg) is False
-
-
-# ---------------------------------------------------------------------------
 # agent_type property
 # ---------------------------------------------------------------------------
 
@@ -574,7 +541,3 @@ class TestAgentType:
         assert msg.get("agent_type") == "claude_code"
 
         session_manager.unsubscribe_updates("test-sub")
-
-    def test_handles_missing_content_key(self) -> None:
-        msg: dict = {}
-        assert PromptRouter._contains_session_end_ask(msg) is False

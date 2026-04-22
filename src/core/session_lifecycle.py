@@ -16,7 +16,6 @@ import contextlib
 import logging
 import uuid
 from datetime import UTC, datetime, timedelta
-from typing import Any
 
 from sqlalchemy import select
 
@@ -37,6 +36,16 @@ logger = logging.getLogger(__name__)
 
 class SessionLifecycleMixin:
     """Mixin providing session lifecycle methods for PromptRouter."""
+
+    async def _drop_pending_on_session_end(self, session: ActiveSession, *, reason: str) -> None:
+        """Drop any queued user messages when the session reaches a terminal state."""
+        store = getattr(self, "_pending_store", None)
+        if store is None or not session.pending_user_messages:
+            return
+        try:
+            await store.clear_session(session, reason=reason)
+        except Exception:
+            logger.exception("Failed to clear pending messages for session %s", session.id)
 
     @property
     def is_direct_tool_mode(self) -> bool:
@@ -198,6 +207,7 @@ class SessionLifecycleMixin:
         self._fire_plan_finalization_task(session)  # ty:ignore[unresolved-attribute]
 
         session.cancel()
+        await self._drop_pending_on_session_end(session, reason="session_ended")
         self._fire_archive_task(session_id)  # ty:ignore[unresolved-attribute]
         logger.info("Cancelled session %s", session_id)
         return session
@@ -266,8 +276,6 @@ class SessionLifecycleMixin:
                 await session._opencode_stream_task
         session._opencode_stream_task = None
 
-        self._resolve_session_end_ask(session, accepted=True)
-
         # Clear subprocess tracking fields and broadcast null status
         session.clear_subprocess_tracking()
 
@@ -296,23 +304,10 @@ class SessionLifecycleMixin:
         self._fire_plan_finalization_task(session)  # ty:ignore[unresolved-attribute]
 
         session.complete()
+        await self._drop_pending_on_session_end(session, reason="session_ended")
         self._fire_archive_task(session_id)  # ty:ignore[unresolved-attribute]
         logger.info("Ended session %s (user confirmed)", session_id)
         return session
-
-    def dismiss_session_end_ask(self, session_id: str) -> None:
-        """Mark the last unresolved SESSION_END_ASK as declined (user clicked Continue).
-
-        This persists the dismissal in the buffer so that replaying the history
-        does not show the widget as pending again.
-
-        Raises:
-            ValueError: If the session does not exist.
-        """
-        session = self._session_manager.get_session(session_id)  # ty:ignore[unresolved-attribute]
-        if session is None:
-            raise ValueError(f"Session not found: {session_id}")
-        self._resolve_session_end_ask(session, accepted=False)
 
     def resolve_permission(
         self,
@@ -853,20 +848,6 @@ class SessionLifecycleMixin:
         logger.info("Restored session %s via prompt router", session_id)
         return session
 
-    # ------------------------------------------------------------------
-    # Session end ask helpers
-    # ------------------------------------------------------------------
-
-    _SESSION_END_ASK_TAG = "[SessionEndAsk]"
-
-    @staticmethod
-    def _resolve_session_end_ask(session: ActiveSession, *, accepted: bool) -> None:
-        """Mark the last unresolved SESSION_END_ASK in the buffer as accepted/declined."""
-        for msg in reversed(session.buffer.text_history):
-            if msg.message_type == MessageType.SESSION_END_ASK and "accepted" not in msg.data:
-                msg.data["accepted"] = accepted
-                return
-
     def _check_token_limit_exceeded(self, session: ActiveSession) -> bool:
         """Check if the session has exceeded its token limits.
 
@@ -904,19 +885,6 @@ class SessionLifecycleMixin:
             )
             return True
 
-        return False
-
-    @staticmethod
-    def _contains_session_end_ask(assistant_message: dict[str, Any]) -> bool:
-        """Check if an assistant message contains the [SessionEndAsk] tag."""
-        tag = SessionLifecycleMixin._SESSION_END_ASK_TAG
-        content = assistant_message.get("content")
-        if isinstance(content, str):
-            return tag in content
-        if isinstance(content, list):
-            for block in content:
-                if isinstance(block, dict) and block.get("type") == "text" and tag in block.get("text", ""):
-                    return True
         return False
 
     # ------------------------------------------------------------------

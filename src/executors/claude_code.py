@@ -5,7 +5,7 @@ import logging
 import os
 import sys
 import uuid
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 from pathlib import Path
 from typing import Any
 
@@ -86,6 +86,9 @@ class ClaudeCodeExecutor(BaseExecutor):
         self._extra_env: dict[str, str] = extra_env or {}
         # Overrides from tool settings (managed-only), applied on top of tool_def config
         self._config_overrides: dict[str, Any] = config_overrides or {}
+        # Optional callback invoked for each decoded stderr line; set by the
+        # relay layer so important stderr output can be surfaced to the user.
+        self._on_stderr_line: Callable[[str], None] | None = None
         # PTY state — set during _start_process, cleared in _cleanup_process
         self._use_pty: bool = False  # resolved per-invocation from config
         self._master_fd: int | None = None
@@ -394,6 +397,8 @@ class ClaudeCodeExecutor(BaseExecutor):
                 if len(self._stderr_output) > self._STDERR_MAX_BYTES:
                     self._stderr_output = self._stderr_output[-self._STDERR_MAX_BYTES :]
                 logger.debug("Claude Code stderr [session=%s]: %s", self._session_id, decoded)
+                if self._on_stderr_line is not None:
+                    self._on_stderr_line(decoded)
         except (asyncio.CancelledError, ConnectionResetError):
             pass
 

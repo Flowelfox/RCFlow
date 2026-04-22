@@ -3,7 +3,7 @@ description: "A new Flutter project."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
-license: MIT
+license: AGPL-3.0-or-later
 
 # The following defines the version and build number for your application.
 # A version number is three numbers separated by dots, like 1.2.43
@@ -17,7 +17,7 @@ license: MIT
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.40.2+79
+version: 1.43.1+86
 
 environment:
   sdk: ^3.11.0
@@ -39,15 +39,17 @@ dependencies:
   flutter_markdown_plus: ^1.0.7
   markdown: ^7.3.0
   audioplayers: ^6.1.0
-  file_picker: ^8.1.6
-  window_manager: ^0.4.3
+  file_picker: ^11.0.2
+  window_manager: ^0.5.1
   url_launcher: ^6.3.1
   xterm: ^4.0.0
   package_info_plus: ^9.0.0
-  fl_chart: ^0.70.2
+  fl_chart: ^1.2.0
 
 dev_dependencies:
   flutter_test:
+    sdk: flutter
+  integration_test:
     sdk: flutter
 
   # The "flutter_lints" package below contains a set of recommended lints to

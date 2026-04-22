@@ -74,7 +74,7 @@ class InputAreaViewModel extends ChangeNotifier {
   // ---------------------------------------------------------------------------
 
   Future<void> pickAttachments({required bool supportsImages}) async {
-    final result = await FilePicker.platform.pickFiles(
+    final result = await FilePicker.pickFiles(
       allowMultiple: true,
       withData: true,
       type: supportsImages ? FileType.any : FileType.custom,

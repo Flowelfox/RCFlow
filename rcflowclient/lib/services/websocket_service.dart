@@ -208,7 +208,7 @@ class WebSocketService {
 
       final response = await request.close();
       final responseBody = await response
-          .transform(const io.SystemEncoding().decoder)
+          .transform(utf8.decoder)
           .join();
       if (response.statusCode < 200 || response.statusCode >= 300) {
         throw Exception(
@@ -280,18 +280,47 @@ class WebSocketService {
     _inputChannel!.sink.add(jsonEncode(msg));
   }
 
-  void dismissSessionEndAsk(String sessionId) {
-    if (_inputChannel == null) return;
-    final msg = {'type': 'dismiss_session_end_ask', 'session_id': sessionId};
-    _inputChannel!.sink.add(jsonEncode(msg));
-  }
-
   /// Send an interrupt_subprocess message over the input WebSocket.
   /// Kills any running Claude Code / Codex subprocess without pausing the
   /// session. The session remains ACTIVE and ready for new prompts.
   void interruptSubprocess(String sessionId) {
     if (_inputChannel == null) return;
     final msg = {'type': 'interrupt_subprocess', 'session_id': sessionId};
+    _inputChannel!.sink.add(jsonEncode(msg));
+  }
+
+  /// Request cancellation of a queued user message that has not yet been
+  /// delivered to the agent.  The server may respond with a ``cancel_ack``
+  /// carrying ``ok: false`` when the message was already dequeued; the UI
+  /// handles that gracefully.
+  void cancelQueued(String sessionId, String queuedId) {
+    if (_inputChannel == null) return;
+    final msg = {
+      'type': 'cancel_queued',
+      'session_id': sessionId,
+      'queued_id': queuedId,
+    };
+    _inputChannel!.sink.add(jsonEncode(msg));
+  }
+
+  /// Edit the text of a queued user message in place (text only; attachments
+  /// are fixed at enqueue time).  Server responds with ``edit_ack``.
+  void editQueued(
+    String sessionId,
+    String queuedId,
+    String content, {
+    String? displayContent,
+  }) {
+    if (_inputChannel == null) return;
+    final msg = <String, dynamic>{
+      'type': 'edit_queued',
+      'session_id': sessionId,
+      'queued_id': queuedId,
+      'content': content,
+    };
+    if (displayContent != null) {
+      msg['display_content'] = displayContent;
+    }
     _inputChannel!.sink.add(jsonEncode(msg));
   }
 
@@ -326,7 +355,7 @@ class WebSocketService {
       request.headers.set('X-API-Key', _serverUrl!.apiKey);
       final response = await request.close();
       final body = await response
-          .transform(const io.SystemEncoding().decoder)
+          .transform(utf8.decoder)
           .join();
       if (response.statusCode != 200) {
         throw Exception('Server returned ${response.statusCode}: $body');
@@ -354,7 +383,7 @@ class WebSocketService {
       request.headers.set('X-API-Key', _serverUrl!.apiKey);
       final response = await request.close();
       final body = await response
-          .transform(const io.SystemEncoding().decoder)
+          .transform(utf8.decoder)
           .join();
       if (response.statusCode != 200) {
         return (content: '', updatedAt: DateTime.now());
@@ -406,7 +435,7 @@ class WebSocketService {
       request.headers.contentType = io.ContentType.json;
       final response = await request.close();
       final body = await response
-          .transform(const io.SystemEncoding().decoder)
+          .transform(utf8.decoder)
           .join();
       // Treat 409 (already ended) as success — the session IS ended on the
       // server, so the client should update its state accordingly.
@@ -433,7 +462,7 @@ class WebSocketService {
       request.headers.contentType = io.ContentType.json;
       final response = await request.close();
       final body = await response
-          .transform(const io.SystemEncoding().decoder)
+          .transform(utf8.decoder)
           .join();
       if (response.statusCode != 200) {
         throw Exception(
@@ -459,7 +488,7 @@ class WebSocketService {
       request.headers.contentType = io.ContentType.json;
       final response = await request.close();
       final body = await response
-          .transform(const io.SystemEncoding().decoder)
+          .transform(utf8.decoder)
           .join();
       if (response.statusCode != 200) {
         throw Exception(
@@ -485,7 +514,7 @@ class WebSocketService {
       request.headers.contentType = io.ContentType.json;
       final response = await request.close();
       final body = await response
-          .transform(const io.SystemEncoding().decoder)
+          .transform(utf8.decoder)
           .join();
       if (response.statusCode != 200) {
         throw Exception(
@@ -511,7 +540,7 @@ class WebSocketService {
       request.headers.contentType = io.ContentType.json;
       final response = await request.close();
       final body = await response
-          .transform(const io.SystemEncoding().decoder)
+          .transform(utf8.decoder)
           .join();
       if (response.statusCode != 200) {
         throw Exception(
@@ -536,7 +565,7 @@ class WebSocketService {
       request.headers.set('X-API-Key', _serverUrl!.apiKey);
       final response = await request.close();
       final body = await response
-          .transform(const io.SystemEncoding().decoder)
+          .transform(utf8.decoder)
           .join();
       if (response.statusCode != 200) {
         throw Exception('Server returned ${response.statusCode}: $body');
@@ -565,7 +594,7 @@ class WebSocketService {
       request.headers.set('X-API-Key', _serverUrl!.apiKey);
       final response = await request.close();
       final body = await response
-          .transform(const io.SystemEncoding().decoder)
+          .transform(utf8.decoder)
           .join();
       if (response.statusCode != 200) {
         throw Exception('Server returned ${response.statusCode}: $body');
@@ -597,7 +626,7 @@ class WebSocketService {
       request.headers.set('X-API-Key', _serverUrl!.apiKey);
       final response = await request.close();
       final body = await response
-          .transform(const io.SystemEncoding().decoder)
+          .transform(utf8.decoder)
           .join();
       if (response.statusCode != 200) {
         throw Exception('Server returned ${response.statusCode}: $body');
@@ -636,7 +665,7 @@ class WebSocketService {
       request.headers.set('X-API-Key', _serverUrl!.apiKey);
       final response = await request.close();
       final body = await response
-          .transform(const io.SystemEncoding().decoder)
+          .transform(utf8.decoder)
           .join();
       if (response.statusCode != 200) {
         throw Exception('Server returned ${response.statusCode}: $body');
@@ -672,7 +701,7 @@ class WebSocketService {
       request.headers.set('X-API-Key', _serverUrl!.apiKey);
       final response = await request.close();
       final body = await response
-          .transform(const io.SystemEncoding().decoder)
+          .transform(utf8.decoder)
           .join();
       if (response.statusCode != 200) {
         throw Exception('Server returned ${response.statusCode}: $body');
@@ -705,7 +734,7 @@ class WebSocketService {
       request.headers.set('X-API-Key', _serverUrl!.apiKey);
       final response = await request.close();
       final body = await response
-          .transform(const io.SystemEncoding().decoder)
+          .transform(utf8.decoder)
           .join();
       if (response.statusCode != 200) {
         throw Exception('Server returned ${response.statusCode}: $body');
@@ -733,7 +762,7 @@ class WebSocketService {
       request.add(utf8.encode(jsonEncode(body)));
       final response = await request.close();
       final responseBody = await response
-          .transform(const io.SystemEncoding().decoder)
+          .transform(utf8.decoder)
           .join();
       if (response.statusCode != 201) {
         final detail = _extractDetail(responseBody);
@@ -757,7 +786,7 @@ class WebSocketService {
       request.headers.set('X-API-Key', _serverUrl!.apiKey);
       final response = await request.close();
       final body = await response
-          .transform(const io.SystemEncoding().decoder)
+          .transform(utf8.decoder)
           .join();
       if (response.statusCode != 200) {
         final detail = _extractDetail(body);
@@ -783,7 +812,7 @@ class WebSocketService {
       request.headers.set('X-API-Key', _serverUrl!.apiKey);
       final response = await request.close();
       final body = await response
-          .transform(const io.SystemEncoding().decoder)
+          .transform(utf8.decoder)
           .join();
       if (response.statusCode != 200) {
         final detail = _extractDetail(body);
@@ -815,7 +844,7 @@ class WebSocketService {
       request.add(utf8.encode(jsonEncode(bodyMap)));
       final response = await request.close();
       final responseBody = await response
-          .transform(const io.SystemEncoding().decoder)
+          .transform(utf8.decoder)
           .join();
       if (response.statusCode != 201) {
         final detail = _extractDetail(responseBody);
@@ -839,7 +868,7 @@ class WebSocketService {
       request.headers.set('X-API-Key', _serverUrl!.apiKey);
       final response = await request.close();
       final body = await response
-          .transform(const io.SystemEncoding().decoder)
+          .transform(utf8.decoder)
           .join();
       if (response.statusCode != 200) {
         final detail = _extractDetail(body);
@@ -867,7 +896,7 @@ class WebSocketService {
       request.add(utf8.encode(jsonEncode({'enabled': enabled})));
       final response = await request.close();
       final body = await response
-          .transform(const io.SystemEncoding().decoder)
+          .transform(utf8.decoder)
           .join();
       if (response.statusCode != 200) {
         final detail = _extractDetail(body);
@@ -900,7 +929,7 @@ class WebSocketService {
       request.add(utf8.encode(jsonEncode({'title': title})));
       final response = await request.close();
       final body = await response
-          .transform(const io.SystemEncoding().decoder)
+          .transform(utf8.decoder)
           .join();
       if (response.statusCode != 200) {
         throw Exception(
@@ -931,7 +960,7 @@ class WebSocketService {
       );
       final response = await request.close();
       final body = await response
-          .transform(const io.SystemEncoding().decoder)
+          .transform(utf8.decoder)
           .join();
       if (response.statusCode != 200) {
         throw Exception(
@@ -954,7 +983,7 @@ class WebSocketService {
       request.headers.set('X-API-Key', _serverUrl!.apiKey);
       final response = await request.close();
       final body = await response
-          .transform(const io.SystemEncoding().decoder)
+          .transform(utf8.decoder)
           .join();
       if (response.statusCode != 200) {
         throw Exception('Server returned ${response.statusCode}: $body');
@@ -980,7 +1009,7 @@ class WebSocketService {
       request.add(utf8.encode(jsonEncode({'updates': updates})));
       final response = await request.close();
       final body = await response
-          .transform(const io.SystemEncoding().decoder)
+          .transform(utf8.decoder)
           .join();
       if (response.statusCode != 200) {
         throw Exception('Server returned ${response.statusCode}: $body');
@@ -1014,7 +1043,7 @@ class WebSocketService {
       request.headers.set('X-API-Key', _serverUrl!.apiKey);
       final response = await request.close();
       final body = await response
-          .transform(const io.SystemEncoding().decoder)
+          .transform(utf8.decoder)
           .join();
       if (response.statusCode != 200) {
         throw Exception('Server returned ${response.statusCode}: $body');
@@ -1035,7 +1064,7 @@ class WebSocketService {
       request.headers.set('X-API-Key', _serverUrl!.apiKey);
       final response = await request.close();
       final body = await response
-          .transform(const io.SystemEncoding().decoder)
+          .transform(utf8.decoder)
           .join();
       if (response.statusCode != 200) {
         throw Exception('Server returned ${response.statusCode}: $body');
@@ -1057,7 +1086,7 @@ class WebSocketService {
       final response = await request.close();
       if (response.statusCode == 404) return null;
       final body = await response
-          .transform(const io.SystemEncoding().decoder)
+          .transform(utf8.decoder)
           .join();
       if (response.statusCode != 200) {
         throw Exception('Server returned ${response.statusCode}: $body');
@@ -1077,7 +1106,7 @@ class WebSocketService {
       request.headers.set('X-API-Key', _serverUrl!.apiKey);
       final response = await request.close();
       final body = await response
-          .transform(const io.SystemEncoding().decoder)
+          .transform(utf8.decoder)
           .join();
       if (response.statusCode != 200) {
         throw Exception('Server returned ${response.statusCode}: $body');
@@ -1097,7 +1126,7 @@ class WebSocketService {
       request.headers.set('X-API-Key', _serverUrl!.apiKey);
       final response = await request.close();
       final body = await response
-          .transform(const io.SystemEncoding().decoder)
+          .transform(utf8.decoder)
           .join();
       if (response.statusCode != 200) {
         throw Exception('Server returned ${response.statusCode}: $body');
@@ -1148,7 +1177,7 @@ class WebSocketService {
       final response = await request.close();
       if (response.statusCode != 200) {
         final body = await response
-            .transform(const io.SystemEncoding().decoder)
+            .transform(utf8.decoder)
             .join();
         throw Exception('Server returned ${response.statusCode}: $body');
       }
@@ -1157,7 +1186,7 @@ class WebSocketService {
       // Read NDJSON lines from the streaming response
       await for (final line
           in response
-              .transform(const io.SystemEncoding().decoder)
+              .transform(utf8.decoder)
               .transform(const LineSplitter())) {
         if (line.trim().isEmpty) continue;
         final event = jsonDecode(line) as Map<String, dynamic>;
@@ -1203,14 +1232,14 @@ class WebSocketService {
       final response = await request.close();
       if (response.statusCode != 200) {
         final body = await response
-            .transform(const io.SystemEncoding().decoder)
+            .transform(utf8.decoder)
             .join();
         throw Exception('Server returned ${response.statusCode}: $body');
       }
 
       await for (final line
           in response
-              .transform(const io.SystemEncoding().decoder)
+              .transform(utf8.decoder)
               .transform(const LineSplitter())) {
         if (line.trim().isEmpty) continue;
         final event = jsonDecode(line) as Map<String, dynamic>;
@@ -1238,7 +1267,7 @@ class WebSocketService {
       request.headers.set('X-API-Key', _serverUrl!.apiKey);
       final response = await request.close();
       final body = await response
-          .transform(const io.SystemEncoding().decoder)
+          .transform(utf8.decoder)
           .join();
       if (response.statusCode != 200) {
         throw Exception('Server returned ${response.statusCode}: $body');
@@ -1263,7 +1292,7 @@ class WebSocketService {
       request.headers.set('X-API-Key', _serverUrl!.apiKey);
       final response = await request.close();
       final body = await response
-          .transform(const io.SystemEncoding().decoder)
+          .transform(utf8.decoder)
           .join();
       if (response.statusCode != 200) {
         throw Exception('Server returned ${response.statusCode}: $body');
@@ -1288,7 +1317,7 @@ class WebSocketService {
       request.add(utf8.encode(jsonEncode({'code': code})));
       final response = await request.close();
       final body = await response
-          .transform(const io.SystemEncoding().decoder)
+          .transform(utf8.decoder)
           .join();
       if (response.statusCode != 200) {
         throw Exception('Server returned ${response.statusCode}: $body');
@@ -1311,7 +1340,7 @@ class WebSocketService {
       request.headers.set('X-API-Key', _serverUrl!.apiKey);
       final response = await request.close();
       final body = await response
-          .transform(const io.SystemEncoding().decoder)
+          .transform(utf8.decoder)
           .join();
       if (response.statusCode != 200) {
         throw Exception('Server returned ${response.statusCode}: $body');
@@ -1332,7 +1361,7 @@ class WebSocketService {
       request.headers.set('X-API-Key', _serverUrl!.apiKey);
       final response = await request.close();
       final body = await response
-          .transform(const io.SystemEncoding().decoder)
+          .transform(utf8.decoder)
           .join();
       if (response.statusCode != 200) {
         throw Exception('Server returned ${response.statusCode}: $body');
@@ -1351,7 +1380,7 @@ class WebSocketService {
       request.headers.set('X-API-Key', _serverUrl!.apiKey);
       final response = await request.close();
       final body = await response
-          .transform(const io.SystemEncoding().decoder)
+          .transform(utf8.decoder)
           .join();
       if (response.statusCode != 200) {
         throw Exception('Server returned ${response.statusCode}: $body');
@@ -1376,7 +1405,7 @@ class WebSocketService {
       request.write(jsonEncode({'use_managed': useManaged}));
       final response = await request.close();
       final body = await response
-          .transform(const io.SystemEncoding().decoder)
+          .transform(utf8.decoder)
           .join();
       if (response.statusCode != 200) {
         throw Exception('Server returned ${response.statusCode}: $body');
@@ -1396,7 +1425,7 @@ class WebSocketService {
       request.headers.set('X-API-Key', _serverUrl!.apiKey);
       final response = await request.close();
       final body = await response
-          .transform(const io.SystemEncoding().decoder)
+          .transform(utf8.decoder)
           .join();
       if (response.statusCode != 200) {
         throw Exception('Server returned ${response.statusCode}: $body');
@@ -1421,7 +1450,7 @@ class WebSocketService {
       request.add(utf8.encode(jsonEncode({'updates': updates})));
       final response = await request.close();
       final body = await response
-          .transform(const io.SystemEncoding().decoder)
+          .transform(utf8.decoder)
           .join();
       if (response.statusCode != 200) {
         throw Exception('Server returned ${response.statusCode}: $body');
@@ -1461,7 +1490,7 @@ class WebSocketService {
       );
       final response = await request.close();
       final body = await response
-          .transform(const io.SystemEncoding().decoder)
+          .transform(utf8.decoder)
           .join();
       if (response.statusCode != 201) {
         throw Exception('Server returned ${response.statusCode}: $body');
@@ -1496,7 +1525,7 @@ class WebSocketService {
       );
       final response = await request.close();
       final body = await response
-          .transform(const io.SystemEncoding().decoder)
+          .transform(utf8.decoder)
           .join();
       if (response.statusCode != 200) {
         throw Exception('Server returned ${response.statusCode}: $body');
@@ -1516,7 +1545,7 @@ class WebSocketService {
       request.headers.set('X-API-Key', _serverUrl!.apiKey);
       final response = await request.close();
       final body = await response
-          .transform(const io.SystemEncoding().decoder)
+          .transform(utf8.decoder)
           .join();
       if (response.statusCode != 200) {
         throw Exception('Server returned ${response.statusCode}: $body');
@@ -1540,7 +1569,7 @@ class WebSocketService {
       request.add(utf8.encode(jsonEncode({'session_id': sessionId})));
       final response = await request.close();
       final body = await response
-          .transform(const io.SystemEncoding().decoder)
+          .transform(utf8.decoder)
           .join();
       if (response.statusCode != 201) {
         throw Exception('Server returned ${response.statusCode}: $body');
@@ -1563,7 +1592,7 @@ class WebSocketService {
       request.headers.set('X-API-Key', _serverUrl!.apiKey);
       final response = await request.close();
       final body = await response
-          .transform(const io.SystemEncoding().decoder)
+          .transform(utf8.decoder)
           .join();
       if (response.statusCode != 200) {
         throw Exception('Server returned ${response.statusCode}: $body');
@@ -1595,7 +1624,7 @@ class WebSocketService {
       request.add(utf8.encode(jsonEncode({'api_key': apiKey})));
       final response = await request.close();
       final body = await response
-          .transform(const io.SystemEncoding().decoder)
+          .transform(utf8.decoder)
           .join();
       if (response.statusCode != 200) {
         throw Exception('Server returned ${response.statusCode}: $body');
@@ -1619,7 +1648,7 @@ class WebSocketService {
       request.headers.set('X-API-Key', _serverUrl!.apiKey);
       final response = await request.close();
       final body = await response
-          .transform(const io.SystemEncoding().decoder)
+          .transform(utf8.decoder)
           .join();
       if (response.statusCode != 200) {
         throw Exception('Server returned ${response.statusCode}: $body');
@@ -1646,7 +1675,7 @@ class WebSocketService {
       request.add(utf8.encode('{}'));
       final response = await request.close();
       final body = await response
-          .transform(const io.SystemEncoding().decoder)
+          .transform(utf8.decoder)
           .join();
       if (response.statusCode != 200) {
         throw Exception('Server returned ${response.statusCode}: $body');
@@ -1680,7 +1709,7 @@ class WebSocketService {
       );
       final response = await request.close();
       final body = await response
-          .transform(const io.SystemEncoding().decoder)
+          .transform(utf8.decoder)
           .join();
       if (response.statusCode != 201) {
         throw Exception('Server returned ${response.statusCode}: $body');
@@ -1717,7 +1746,7 @@ class WebSocketService {
       );
       final response = await request.close();
       final body = await response
-          .transform(const io.SystemEncoding().decoder)
+          .transform(utf8.decoder)
           .join();
       if (response.statusCode != 200) {
         throw Exception('Server returned ${response.statusCode}: $body');
@@ -1744,7 +1773,7 @@ class WebSocketService {
       request.add(utf8.encode(jsonEncode({'task_id': taskId})));
       final response = await request.close();
       final body = await response
-          .transform(const io.SystemEncoding().decoder)
+          .transform(utf8.decoder)
           .join();
       if (response.statusCode != 200) {
         throw Exception('Server returned ${response.statusCode}: $body');
@@ -1766,7 +1795,7 @@ class WebSocketService {
       request.headers.set('X-API-Key', _serverUrl!.apiKey);
       final response = await request.close();
       final body = await response
-          .transform(const io.SystemEncoding().decoder)
+          .transform(utf8.decoder)
           .join();
       if (response.statusCode != 200) {
         throw Exception('Server returned ${response.statusCode}: $body');
@@ -1794,7 +1823,7 @@ class WebSocketService {
       request.add(utf8.encode('{}'));
       final response = await request.close();
       final body = await response
-          .transform(const io.SystemEncoding().decoder)
+          .transform(utf8.decoder)
           .join();
       if (response.statusCode != 201) {
         throw Exception('Server returned ${response.statusCode}: $body');
@@ -1831,7 +1860,7 @@ class WebSocketService {
       request.headers.set('X-API-Key', _serverUrl!.apiKey);
       final response = await request.close();
       final body = await response
-          .transform(const io.SystemEncoding().decoder)
+          .transform(utf8.decoder)
           .join();
       if (response.statusCode != 200) {
         throw Exception('Server returned ${response.statusCode}: $body');
@@ -1851,7 +1880,7 @@ class WebSocketService {
       request.headers.set('X-API-Key', _serverUrl!.apiKey);
       final response = await request.close();
       final body = await response
-          .transform(const io.SystemEncoding().decoder)
+          .transform(utf8.decoder)
           .join();
       if (response.statusCode != 200) {
         throw Exception('Server returned ${response.statusCode}: $body');
@@ -1872,7 +1901,7 @@ class WebSocketService {
       final response = await request.close();
       if (response.statusCode != 200) {
         final body = await response
-            .transform(const io.SystemEncoding().decoder)
+            .transform(utf8.decoder)
             .join();
         throw Exception('Server returned ${response.statusCode}: $body');
       }
@@ -1892,7 +1921,7 @@ class WebSocketService {
       request.headers.set('X-API-Key', _serverUrl!.apiKey);
       final response = await request.close();
       final body = await response
-          .transform(const io.SystemEncoding().decoder)
+          .transform(utf8.decoder)
           .join();
       if (response.statusCode != 200) {
         throw Exception('Server returned ${response.statusCode}: $body');
@@ -1912,7 +1941,7 @@ class WebSocketService {
       request.headers.contentLength = 0;
       final response = await request.close();
       final body = await response
-          .transform(const io.SystemEncoding().decoder)
+          .transform(utf8.decoder)
           .join();
       if (response.statusCode != 200) {
         throw Exception('Server returned ${response.statusCode}: $body');
@@ -1931,7 +1960,7 @@ class WebSocketService {
       request.headers.set('X-API-Key', _serverUrl!.apiKey);
       final response = await request.close();
       final body = await response
-          .transform(const io.SystemEncoding().decoder)
+          .transform(utf8.decoder)
           .join();
       if (response.statusCode != 200) {
         throw Exception('Server returned ${response.statusCode}: $body');
@@ -1959,7 +1988,7 @@ class WebSocketService {
       request.write(jsonEncode(body));
       final response = await request.close();
       final responseBody = await response
-          .transform(const io.SystemEncoding().decoder)
+          .transform(utf8.decoder)
           .join();
       if (response.statusCode != 200) {
         throw Exception(
@@ -1991,7 +2020,7 @@ class WebSocketService {
       request.headers.set('X-API-Key', _serverUrl!.apiKey);
       final response = await request.close();
       final body = await response
-          .transform(const io.SystemEncoding().decoder)
+          .transform(utf8.decoder)
           .join();
       if (response.statusCode != 200) {
         throw Exception('Server returned ${response.statusCode}: $body');
@@ -2020,7 +2049,7 @@ class WebSocketService {
       );
       final response = await request.close();
       final body = await response
-          .transform(const io.SystemEncoding().decoder)
+          .transform(utf8.decoder)
           .join();
       if (response.statusCode != 201) {
         throw Exception('Server returned ${response.statusCode}: $body');
@@ -2047,7 +2076,7 @@ class WebSocketService {
       request.write(jsonEncode({'message': message, 'repo_path': repoPath}));
       final response = await request.close();
       final body = await response
-          .transform(const io.SystemEncoding().decoder)
+          .transform(utf8.decoder)
           .join();
       if (response.statusCode != 200) {
         throw Exception('Server returned ${response.statusCode}: $body');
@@ -2073,7 +2102,7 @@ class WebSocketService {
       request.headers.set('X-API-Key', _serverUrl!.apiKey);
       final response = await request.close();
       final body = await response
-          .transform(const io.SystemEncoding().decoder)
+          .transform(utf8.decoder)
           .join();
       if (response.statusCode != 200) {
         throw Exception('Server returned ${response.statusCode}: $body');
@@ -2096,7 +2125,7 @@ class WebSocketService {
       request.headers.set('X-API-Key', _serverUrl!.apiKey);
       final response = await request.close();
       final body = await response
-          .transform(const io.SystemEncoding().decoder)
+          .transform(utf8.decoder)
           .join();
       if (response.statusCode != 200) {
         throw Exception('Server returned ${response.statusCode}: $body');
@@ -2122,7 +2151,7 @@ class WebSocketService {
       request.add(utf8.encode(jsonEncode({'path': path})));
       final response = await request.close();
       final body = await response
-          .transform(const io.SystemEncoding().decoder)
+          .transform(utf8.decoder)
           .join();
       if (response.statusCode != 200) {
         throw Exception(

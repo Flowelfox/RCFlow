@@ -5,8 +5,6 @@ library;
 import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:rcflowclient/models/badge_spec.dart';
-import 'package:rcflowclient/models/session_info.dart';
 import 'package:rcflowclient/models/worker_config.dart';
 import 'package:rcflowclient/services/settings_service.dart';
 import 'package:rcflowclient/services/websocket_service.dart';
@@ -156,7 +154,7 @@ Map<String, dynamic> _sessionJson(
   'session_type': 'conversational',
   'status': status,
   'created_at': '2024-01-01T00:00:00Z',
-  if (sortOrder != null) 'sort_order': sortOrder,
+  if (sortOrder != null) 'sort_order': sortOrder, // ignore: use_null_aware_elements
 };
 
 Map<String, dynamic> _sessionList(List<Map<String, dynamic>> sessions) => {
@@ -453,7 +451,7 @@ void main() {
       await Future.microtask(() {});
 
       var fireCount = 0;
-      conn.onProjectPathAttached = (_, __) => fireCount++;
+      conn.onProjectPathAttached = (_, _) => fireCount++;
 
       // Send same path again — should not re-fire
       ws.injectOutput(

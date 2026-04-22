@@ -557,40 +557,6 @@ void main() {
     });
   });
 
-  group('handleSessionEndAsk', () {
-    late PaneState pane;
-
-    setUp(() {
-      pane = PaneState(paneId: 'test', host: _FakePaneHost());
-    });
-
-    test('adds sessionEndAsk message', () {
-      handleSessionEndAsk({'session_id': 'sess1'}, pane);
-      expect(pane.messages.length, 1);
-      expect(pane.messages.last.type, DisplayMessageType.sessionEndAsk);
-      expect(pane.messages.last.accepted, isNull);
-    });
-
-    test('deduplicates pending sessionEndAsk', () {
-      // First end-ask
-      handleSessionEndAsk({'session_id': 'sess1'}, pane);
-      expect(pane.messages.length, 1);
-
-      // Duplicate end-ask should be ignored (first is still unresolved)
-      handleSessionEndAsk({'session_id': 'sess1'}, pane);
-      expect(pane.messages.length, 1, reason: 'duplicate pending end-ask must be suppressed');
-    });
-
-    test('allows new sessionEndAsk after previous resolved', () {
-      handleSessionEndAsk({'session_id': 'sess1'}, pane);
-      pane.messages.last.accepted = true; // Resolve the first one
-
-      handleSessionEndAsk({'session_id': 'sess1'}, pane);
-      expect(pane.messages.length, 2,
-          reason: 'new end-ask allowed after previous was resolved');
-    });
-  });
-
   group('handleAgentGroupStart — display name propagation', () {
     late PaneState pane;
 
@@ -684,6 +650,63 @@ void main() {
 
       expect(editBlock.toolName, 'Edit');
       expect(editBlock.fileDiff, isNotNull);
+    });
+
+    test('stderr error-level agent_log is displayed as an error message', () {
+      handleAgentLog({
+        'session_id': 's1',
+        'content': 'Error: API key invalid',
+        'source': 'stderr',
+        'level': 'error',
+      }, pane);
+
+      // addSystemMessage(isError: true) produces DisplayMessageType.error
+      final errorMsgs = pane.messages
+          .where((m) => m.type == DisplayMessageType.error)
+          .toList();
+      expect(errorMsgs, hasLength(1));
+      expect(errorMsgs.first.content, contains('API key'));
+      expect(errorMsgs.first.isError, isTrue);
+    });
+
+    test('stderr warn-level agent_log is displayed as a system message', () {
+      handleAgentLog({
+        'session_id': 's1',
+        'content': 'Warning: deprecated flag used',
+        'source': 'stderr',
+        'level': 'warn',
+      }, pane);
+
+      // addSystemMessage(isError: false) produces DisplayMessageType.system
+      final systemMsgs = pane.messages
+          .where((m) => m.type == DisplayMessageType.system)
+          .toList();
+      expect(systemMsgs, hasLength(1));
+      expect(systemMsgs.first.isError, isFalse);
+    });
+
+    test('stderr info-level agent_log is silently consumed', () {
+      handleAgentLog({
+        'session_id': 's1',
+        'content': 'Session restored from disk',
+        'source': 'stderr',
+        'level': 'info',
+      }, pane);
+
+      expect(pane.messages, isEmpty);
+    });
+
+    test('stdout error-level agent_log remains a no-op', () {
+      // Stdout noise must never add messages regardless of level, to preserve
+      // tool-group routing safety.
+      handleAgentLog({
+        'session_id': 's1',
+        'content': 'Error: non-JSON stdout line',
+        'source': 'stdout',
+        'level': 'error',
+      }, pane);
+
+      expect(pane.messages, isEmpty);
     });
   });
 }

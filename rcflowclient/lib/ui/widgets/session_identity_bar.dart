@@ -2,14 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../models/session_info.dart';
-import '../../models/worker_config.dart';
 import '../../state/app_state.dart';
 import '../../state/pane_state.dart';
 import '../../theme.dart';
 import '../badges/badge_bar.dart';
-import '../badges/badge_registry.dart';
-import '../badges/draft_badge_composer.dart';
-import 'worker_picker_dialog.dart';
 
 /// A thin strip displayed above the chat output that shows which session is
 /// currently open — title, status badge, and worker badge.
@@ -82,23 +78,6 @@ class _NewChatBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final appColors = context.appColors;
-    final connectedWorkers = appState.workerConfigs
-        .where((c) => appState.getWorker(c.id)?.isConnected == true)
-        .toList();
-
-    final targetId = pane.workerId ?? appState.defaultWorkerId;
-    final workerName = _resolveWorkerName(targetId, connectedWorkers);
-    final agentType = pane.selectedToolMention;
-    final cavemanActive = pane.isCavemanActive;
-
-    // Build a draft agent badge so the new-chat bar previews the same agent
-    // chip that will appear once the session is created.
-    final agentBadge = agentType != null
-        ? const DraftBadgeComposer()
-            .compose(agentType: agentType)
-            .where((b) => b.type == 'agent')
-            .firstOrNull
-        : null;
 
     return Container(
       width: double.infinity,
@@ -113,26 +92,6 @@ class _NewChatBar extends StatelessWidget {
               fontSize: 12,
             ),
           ),
-          if (workerName != null) ...[
-            const SizedBox(width: 8),
-            _WorkerBadge(
-              name: workerName,
-              interactive: connectedWorkers.length > 1,
-              onTap: connectedWorkers.length > 1
-                  ? () => _pickWorker(context, connectedWorkers)
-                  : null,
-            ),
-          ],
-          if (agentBadge != null) ...[
-            const SizedBox(width: 8),
-            BadgeRegistry.instance.render(context, agentBadge),
-          ],
-          if (cavemanActive) ...[
-            const SizedBox(width: 8),
-            _CavemanPreviewBadge(
-              onDismiss: () => context.read<PaneState>().setCavemanDisabled(true),
-            ),
-          ],
           const Spacer(),
           Text(
             'send a message to start',
@@ -146,38 +105,16 @@ class _NewChatBar extends StatelessWidget {
     );
   }
 
-  Future<void> _pickWorker(
-    BuildContext context,
-    List<WorkerConfig> connected,
-  ) async {
-    final selected = await showWorkerPickerDialog(context);
-    if (selected != null && context.mounted) {
-      context.read<PaneState>().setTargetWorker(selected);
-    }
-  }
-
-  static String? _resolveWorkerName(
-    String? targetId,
-    List<WorkerConfig> connected,
-  ) {
-    if (targetId == null && connected.isEmpty) return null;
-    if (targetId != null) {
-      for (final c in connected) {
-        if (c.id == targetId) return c.name;
-      }
-    }
-    return connected.isNotEmpty ? connected.first.name : null;
-  }
 }
 
 // ---------------------------------------------------------------------------
 // Caveman badge preview chip — shown in new-session pane when caveman is active
 // ---------------------------------------------------------------------------
 
-class _CavemanPreviewBadge extends StatelessWidget {
+class CavemanPreviewBadge extends StatelessWidget {
   final VoidCallback onDismiss;
 
-  const _CavemanPreviewBadge({required this.onDismiss});
+  const CavemanPreviewBadge({super.key, required this.onDismiss});
 
   static const _color = Color(0xFF92400E); // amber-800
 
@@ -231,16 +168,6 @@ class _SessionBar extends StatelessWidget {
     final appColors = context.appColors;
     // Prefer the live workerConfigs name (user-configured) over the badge
     // label, which may carry the server's internal backend_id. Fall back to
-    // the badge label when the worker is no longer in the config list (e.g.
-    // after a worker is removed) so the name still shows for archived sessions.
-    final workerBadge = session.badges.where((b) => b.type == 'worker' && b.visible).firstOrNull;
-    final workerName = appState.workerConfigs
-            .where((c) => c.id == session.workerId)
-            .map((c) => c.name)
-            .where((n) => n.isNotEmpty)
-            .firstOrNull ??
-        workerBadge?.label;
-
     return GestureDetector(
       onTap: () => _showSessionActions(context),
       child: Container(
@@ -254,10 +181,12 @@ class _SessionBar extends StatelessWidget {
         ),
         child: Row(
           children: [
-            // Status + mode badges from unified registry
+            // Status-only badges from unified registry. Caveman, worker and
+            // agent chips are rendered above the input field instead so they
+            // appear alongside the other selectable chips.
             BadgeBar(
               badges: session.badges,
-              slotFilter: {'status', 'caveman', 'agent'},
+              slotFilter: const {'status'},
             ),
             const SizedBox(width: 8),
             // Session title
@@ -272,11 +201,6 @@ class _SessionBar extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
               ),
             ),
-            // Worker badge (read-only)
-            if (workerName != null) ...[
-              const SizedBox(width: 8),
-              _WorkerBadge(name: workerName, interactive: false),
-            ],
             // Chevron hint
             const SizedBox(width: 4),
             Icon(
@@ -481,12 +405,13 @@ class _SessionBar extends StatelessWidget {
 // Worker badge chip — read-only or interactive
 // ---------------------------------------------------------------------------
 
-class _WorkerBadge extends StatelessWidget {
+class WorkerBadge extends StatelessWidget {
   final String name;
   final bool interactive;
   final VoidCallback? onTap;
 
-  const _WorkerBadge({
+  const WorkerBadge({
+    super.key,
     required this.name,
     required this.interactive,
     this.onTap,
