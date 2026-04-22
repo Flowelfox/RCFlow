@@ -164,7 +164,7 @@ class SessionPendingMessageStore:
                 .values(content=content, display_content=display_content, updated_at=now)
                 .execution_options(synchronize_session=False)
             )
-            if result.rowcount == 0:  # ty:ignore[possibly-missing-attribute]
+            if result.rowcount == 0:  # ty:ignore[unresolved-attribute]
                 return None
             await db.commit()
 
@@ -295,7 +295,7 @@ class SessionPendingMessageStore:
                 .where(SessionPendingMessageModel.queued_id == queued_id)
                 .execution_options(synchronize_session=False)
             )
-            if result.rowcount == 0:  # ty:ignore[possibly-missing-attribute]
+            if result.rowcount == 0:  # ty:ignore[unresolved-attribute]
                 return None
             # Densely renumber remaining rows in one UPDATE pass.
             remaining = await db.execute(
