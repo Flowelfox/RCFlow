@@ -20,13 +20,25 @@ API_KEY = "test-api-key"
 
 
 @pytest.fixture(autouse=True)
-def reset_cc_builtins_cache() -> Generator[None, None, None]:
-    """Reset the in-process CC builtins cache between tests.
+def reset_cc_builtins_cache(monkeypatch: pytest.MonkeyPatch) -> Generator[None, None, None]:
+    """Reset the in-process CC builtins cache and block subprocess calls between tests.
 
-    Each test that exercises the slash-commands endpoint should start with a
-    clean cache so that monkeypatches affecting the fetch path take effect.
+    Clears the cache so that monkeypatches affecting the fetch path take effect,
+    and patches out the two entry points that spawn real subprocesses — the disk-
+    cache loader (calls ``claude --version`` on every invocation) and ``shutil.which``
+    — so that tests which don't explicitly need the live-fetch path don't pay the
+    3-5 s per-test penalty of spawning the ``claude`` binary.
+
+    Tests in ``TestCCBuiltinDescriptionsFromClaude`` override these patches with
+    their own ``monkeypatch.setattr`` calls; because monkeypatch applies patches
+    in order and the later call wins, the test-specific behaviour takes precedence.
     """
     _sc_module._cc_builtins_cache = None
+    # Default: no disk cache, no binary — falls through to the hard-coded fallback
+    # instantly.  Individual tests that need the live-fetch or disk-cache path
+    # override these with their own monkeypatch.setattr() calls.
+    monkeypatch.setattr("src.api.routes.slash_commands._load_disk_cache", lambda: None)
+    monkeypatch.setattr("src.api.routes.slash_commands.shutil.which", lambda _: None)
     yield
     _sc_module._cc_builtins_cache = None
 

@@ -241,22 +241,11 @@ class _WorkerChartsBody extends StatelessWidget {
         if (state.series.isNotEmpty) ...[
           _ChartSection(
             title: 'Tokens Sent / Received',
-            child: Column(
-              children: [
-                TelemetryChart(
-                  series: state.series,
-                  metric: MetricType.tokensSent,
-                  zoomLevel: state.zoomLevel,
-                  showLabel: true,
-                ),
-                const SizedBox(height: 4),
-                TelemetryChart(
-                  series: state.series,
-                  metric: MetricType.tokensReceived,
-                  zoomLevel: state.zoomLevel,
-                  showLabel: true,
-                ),
-              ],
+            child: TelemetryChart(
+              series: state.series,
+              metric: MetricType.tokensSent,
+              secondaryMetric: MetricType.tokensReceived,
+              zoomLevel: state.zoomLevel,
             ),
           ),
           const SizedBox(height: 12),
@@ -280,22 +269,11 @@ class _WorkerChartsBody extends StatelessWidget {
           const SizedBox(height: 12),
           _ChartSection(
             title: 'Turns / Tool Calls',
-            child: Column(
-              children: [
-                TelemetryChart(
-                  series: state.series,
-                  metric: MetricType.turnCount,
-                  zoomLevel: state.zoomLevel,
-                  showLabel: true,
-                ),
-                const SizedBox(height: 4),
-                TelemetryChart(
-                  series: state.series,
-                  metric: MetricType.toolCallCount,
-                  zoomLevel: state.zoomLevel,
-                  showLabel: true,
-                ),
-              ],
+            child: TelemetryChart(
+              series: state.series,
+              metric: MetricType.turnCount,
+              secondaryMetric: MetricType.toolCallCount,
+              zoomLevel: state.zoomLevel,
             ),
           ),
         ],

@@ -479,6 +479,14 @@ class PaneState extends ChangeNotifier {
   // Prevents duplicate display when the server replays user messages.
   int _pendingLocalUserMessages = 0;
 
+  // Queued user messages — pinned at the bottom of the chat while the agent
+  // is busy processing a prior turn.  Sourced from ``message_queued`` /
+  // ``message_dequeued`` / ``message_queued_updated`` events and the
+  // ``queued_messages`` snapshot on ``session_update``.  See
+  // ``Queued User Messages`` in ``Design.md``.
+  final List<QueuedMessage> _queuedMessages = [];
+  List<QueuedMessage> get queuedMessages => List.unmodifiable(_queuedMessages);
+
   // Todo list state (from TodoWrite tool calls)
   List<TodoItem> _todos = [];
   List<TodoItem> get todos => _todos;
@@ -490,7 +498,11 @@ class PaneState extends ChangeNotifier {
   double _rightPanelWidth = 260;
   double get rightPanelWidth => _rightPanelWidth;
   static const double rightPanelMinWidth = 180;
-  static const double rightPanelMaxWidth = 500;
+  /// Absolute fallback cap. The actual max is typically constrained to a
+  /// fraction of the available row width by the caller (see session_pane).
+  static const double rightPanelMaxWidth = 2000;
+  /// Maximum fraction of the available row width the right panel may occupy.
+  static const double rightPanelMaxFraction = 0.75;
 
   // Kept for backwards compat — derived from _activeRightPanel.
   bool get todoPanelVisible => _activeRightPanel == 'todo';
@@ -725,8 +737,6 @@ class PaneState extends ChangeNotifier {
     finalizeStream();
     _closeAgentToolGroup();
     _inAgentMode = false;
-    _dismissSessionEndAsk();
-
     // Prepend #ToolName to the prompt so the backend sees a normal tool mention.
     final toolMention = _selectedToolMention;
     final effectiveText = toolMention != null ? '#$toolMention $text' : text;
@@ -820,6 +830,7 @@ class PaneState extends ChangeNotifier {
     _activeRightPanel = null;
     _resetPagination();
     _pendingLocalUserMessages = 0;
+    _queuedMessages.clear();
     _sessionEnded = false;
     _sessionPaused = false;
     _pausedReason = null;
@@ -907,6 +918,7 @@ class PaneState extends ChangeNotifier {
     _pausedReason = null;
     _runningSubprocess = null;
     _pendingLocalUserMessages = 0;
+    _queuedMessages.clear();
     _messages.clear();
     _todos = [];
     _activeRightPanel = null;
@@ -947,6 +959,7 @@ class PaneState extends ChangeNotifier {
     _pausedReason = null;
     _runningSubprocess = null;
     _pendingLocalUserMessages = 0;
+    _queuedMessages.clear();
     _pendingInputText = null;
     _selectedToolMention = null;
     _selectedProjectName = null;
@@ -989,12 +1002,38 @@ class PaneState extends ChangeNotifier {
     _todos = [];
     if (_activeRightPanel == 'todo') _activeRightPanel = null;
     _pendingLocalUserMessages = 0;
+    _queuedMessages.clear();
     notifyListeners();
   }
 
   // --- Ack handling ---
 
-  void handleAck(String sessionId, {String? workerId}) {
+  void handleAck(
+    String sessionId, {
+    String? workerId,
+    bool queued = false,
+    String? queuedId,
+  }) {
+    // Promote the optimistic pendingLocalEcho DisplayMessage to a
+    // [QueuedMessage] when the server signalled the prompt was queued.
+    // Queued prompts do not start a new stream, so skip `finalizeStream()`
+    // to avoid closing the still-running prior turn's assistant message.
+    if (queued && queuedId != null) {
+      // Take the newest pending-local-echo user message as the submission
+      // being acknowledged; its content is what we show in the pinned queue.
+      for (int i = _messages.length - 1; i >= 0; i--) {
+        final m = _messages[i];
+        if (m.type == DisplayMessageType.user && m.pendingLocalEcho) {
+          promoteLocalEchoToQueued(queuedId: queuedId, content: m.content);
+          break;
+        }
+      }
+      pendingAck = false;
+      _sessionId = sessionId;
+      if (workerId != null) _workerId = workerId;
+      notifyListeners();
+      return;
+    }
     finalizeStream();
     pendingAck = false;
     if (sessionId != _sessionId) {
@@ -1062,11 +1101,6 @@ class PaneState extends ChangeNotifier {
 
   Future<void> endSession(String sessionId) async {
     try {
-      for (final m in _messages) {
-        if (m.type == DisplayMessageType.sessionEndAsk && m.accepted == null) {
-          m.accepted = true;
-        }
-      }
       await _ws?.endSession(sessionId);
       finalizeStream();
       if (_sessionId == sessionId) {
@@ -1449,7 +1483,7 @@ class PaneState extends ChangeNotifier {
           sessionId: _sessionId,
         ),
       );
-      notifyListeners();
+      _scheduleNotify();
     }
     _enqueueText(text);
   }
@@ -1473,7 +1507,7 @@ class PaneState extends ChangeNotifier {
         toolInput: input,
       ),
     );
-    notifyListeners();
+    _scheduleNotify();
   }
 
   void appendToolOutput(String text, {bool isError = false}) {
@@ -1486,7 +1520,7 @@ class PaneState extends ChangeNotifier {
           toolName: 'output',
         ),
       );
-      notifyListeners();
+      _scheduleNotify();
     }
     if (isError && target.isNotEmpty) {
       target.last.isError = true;
@@ -1505,7 +1539,7 @@ class PaneState extends ChangeNotifier {
         if (tn == 'edit' || tn == 'write') {
           list[i].expanded = true;
         }
-        notifyListeners();
+        _scheduleNotify();
         return;
       }
     }
@@ -1515,8 +1549,15 @@ class PaneState extends ChangeNotifier {
     final target = _streamTarget;
     if (target == null) return;
     target.content += text;
-    // Debounce notifyListeners to avoid rebuilding the widget tree for every
-    // incoming chunk; the content is already written to state immediately.
+    _scheduleNotify();
+  }
+
+  /// Coalesce streaming-path mutations into a single rebuild per [_tickMs]
+  /// window. Use for any state change driven by the inbound WS stream
+  /// (append text, open tool block, attach diff, add streamed message). Use
+  /// `notifyListeners()` directly only for terminal transitions where the
+  /// 16 ms latency would feel wrong (finalize, session switch, errors).
+  void _scheduleNotify() {
     _streamingTimer ??= Timer(
       const Duration(milliseconds: _tickMs),
       _renderChars,
@@ -1547,33 +1588,6 @@ class PaneState extends ChangeNotifier {
     notifyListeners();
   }
 
-  void stripSessionEndAskTag() {
-    for (int i = _messages.length - 1; i >= 0; i--) {
-      if (_messages[i].type == DisplayMessageType.assistant) {
-        _messages[i].content = _messages[i].content
-            .replaceAll('[SessionEndAsk]', '')
-            .trimRight();
-        break;
-      }
-    }
-  }
-
-  void _dismissSessionEndAsk() {
-    for (final m in _messages) {
-      if (m.type == DisplayMessageType.sessionEndAsk && m.accepted == null) {
-        m.accepted = false;
-      }
-    }
-  }
-
-  void dismissSessionEndAsk() {
-    _dismissSessionEndAsk();
-    if (_sessionId != null && _host.connected) {
-      _ws?.dismissSessionEndAsk(_sessionId!);
-    }
-    notifyListeners();
-  }
-
   /// Returns true if a locally-added user message matches [echoContent] —
   /// meaning the server echo should be skipped.
   ///
@@ -1600,6 +1614,157 @@ class PaneState extends ChangeNotifier {
     return false;
   }
 
+  // ---------------------------------------------------------------------------
+  // Queued-message reconciliation — called by output handlers and ack handlers.
+  // See ``Queued User Messages`` in ``Design.md`` for the full protocol.
+
+  /// Promote an optimistic pending-echo DisplayMessage into a real
+  /// [QueuedMessage] after the server ack confirms the message was queued.
+  void promoteLocalEchoToQueued({
+    required String queuedId,
+    required String content,
+  }) {
+    for (int i = _messages.length - 1; i >= 0; i--) {
+      final m = _messages[i];
+      if (m.type == DisplayMessageType.user &&
+          m.pendingLocalEcho &&
+          m.content == content) {
+        _messages.removeAt(i);
+        if (_pendingLocalUserMessages > 0) _pendingLocalUserMessages--;
+        break;
+      }
+    }
+    final now = DateTime.now();
+    _upsertQueued(
+      QueuedMessage(
+        queuedId: queuedId,
+        position: _queuedMessages.length,
+        content: content,
+        displayContent: content,
+        submittedAt: now,
+        updatedAt: now,
+        pendingLocalEcho: true,
+      ),
+    );
+    notifyListeners();
+  }
+
+  void _upsertQueued(QueuedMessage entry) {
+    final idx = _queuedMessages.indexWhere((q) => q.queuedId == entry.queuedId);
+    if (idx >= 0) {
+      _queuedMessages[idx].position = entry.position;
+      _queuedMessages[idx].content = entry.content;
+      _queuedMessages[idx].displayContent = entry.displayContent;
+      _queuedMessages[idx].submittedAt = entry.submittedAt;
+      _queuedMessages[idx].updatedAt = entry.updatedAt;
+      _queuedMessages[idx].pendingLocalEcho = false;
+    } else {
+      _queuedMessages.add(entry);
+    }
+    _queuedMessages.sort((a, b) => a.position.compareTo(b.position));
+  }
+
+  void applyMessageQueued(Map<String, dynamic> msg) {
+    final queuedId = msg['queued_id'] as String?;
+    if (queuedId == null) return;
+    final entry = QueuedMessage(
+      queuedId: queuedId,
+      position: (msg['position'] as num?)?.toInt() ?? _queuedMessages.length,
+      content: msg['content'] as String? ?? '',
+      displayContent:
+          msg['display_content'] as String? ?? msg['content'] as String? ?? '',
+      submittedAt:
+          DateTime.tryParse(msg['submitted_at'] as String? ?? '') ??
+              DateTime.now(),
+      updatedAt:
+          DateTime.tryParse(msg['submitted_at'] as String? ?? '') ??
+              DateTime.now(),
+    );
+    _upsertQueued(entry);
+    notifyListeners();
+  }
+
+  void applyMessageDequeued(String queuedId) {
+    final idx = _queuedMessages.indexWhere((q) => q.queuedId == queuedId);
+    if (idx < 0) return;
+    _queuedMessages.removeAt(idx);
+    for (var i = 0; i < _queuedMessages.length; i++) {
+      _queuedMessages[i].position = i;
+    }
+    notifyListeners();
+  }
+
+  void applyMessageQueuedUpdated(Map<String, dynamic> msg) {
+    final queuedId = msg['queued_id'] as String?;
+    if (queuedId == null) return;
+    final idx = _queuedMessages.indexWhere((q) => q.queuedId == queuedId);
+    if (idx < 0) return;
+    final entry = _queuedMessages[idx];
+    entry.content = msg['content'] as String? ?? entry.content;
+    entry.displayContent =
+        msg['display_content'] as String? ?? entry.displayContent;
+    entry.updatedAt =
+        DateTime.tryParse(msg['updated_at'] as String? ?? '') ?? entry.updatedAt;
+    notifyListeners();
+  }
+
+  /// Replace the local queue with the authoritative server snapshot.
+  void applyQueueSnapshot(List<Map<String, dynamic>> snapshot) {
+    final incoming = [
+      for (final raw in snapshot) QueuedMessage.fromSnapshot(raw),
+    ];
+    incoming.sort((a, b) => a.position.compareTo(b.position));
+    _queuedMessages
+      ..clear()
+      ..addAll(incoming);
+    notifyListeners();
+  }
+
+  void applyCancelAck(Map<String, dynamic> msg) {
+    // Cancel success already removed the entry via message_dequeued; nothing to
+    // do here.  Cancel failure means the message was already delivered — the
+    // subsequent text_chunk will insert it into history, so also nothing to do.
+    // Kept for hook symmetry so ack messages are not logged as "unknown type".
+    final ok = msg['ok'] as bool? ?? false;
+    if (ok) return;
+    // Swallow — the dequeue stream handles the visible state transition.
+  }
+
+  void applyEditAck(Map<String, dynamic> msg) {
+    final ok = msg['ok'] as bool? ?? false;
+    if (ok) {
+      // message_queued_updated already carried the new text to the UI.
+      return;
+    }
+    // Edit failed (message already delivered or empty).  The UI rolls back via
+    // the caller-side optimistic tracking layer in the edit widget.
+  }
+
+  /// Request cancellation of a queued message.  Optimistically removes it
+  /// from the local queue; on ``cancel_ack{ok: false, already_delivered}``
+  /// the subsequent ``text_chunk`` reinserts it into chat history.
+  void cancelQueuedMessage(String queuedId) {
+    final sid = _sessionId;
+    if (sid == null) return;
+    applyMessageDequeued(queuedId);
+    _ws?.cancelQueued(sid, queuedId);
+  }
+
+  /// Update the text of a queued message.  Optimistically mutates the local
+  /// queue entry; the server confirms via ``edit_ack`` and mirror-broadcasts
+  /// ``message_queued_updated``.
+  void editQueuedMessage(String queuedId, String content) {
+    final sid = _sessionId;
+    if (sid == null) return;
+    final idx = _queuedMessages.indexWhere((q) => q.queuedId == queuedId);
+    if (idx < 0) return;
+    _queuedMessages[idx].content = content;
+    _queuedMessages[idx].displayContent = content;
+    _queuedMessages[idx].updatedAt = DateTime.now();
+    notifyListeners();
+    _ws?.editQueued(sid, queuedId, content);
+  }
+
   void addDisplayMessage(DisplayMessage msg) {
     _messages.add(msg);
     notifyListeners();
@@ -1611,7 +1776,7 @@ class PaneState extends ChangeNotifier {
       _ensureAgentToolGroup();
     }
     _streamTargetList.add(msg);
-    notifyListeners();
+    _scheduleNotify();
   }
 
   void addSystemMessage(String text, {bool isError = false}) {

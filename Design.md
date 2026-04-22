@@ -350,6 +350,32 @@ The server resolves each `attachment_id` from the `AttachmentStore`, builds mult
 - `selected_worktree_path`: Optional absolute path of a worktree pre-selected by the client **before the first message is sent**. Applied to `session.metadata["selected_worktree_path"]` only when the session does not already have a worktree selection (i.e., idempotent and non-clobbering). Subsequent worktree changes must use `PATCH /api/sessions/{id}/worktree`. The client sends this field from the worktree chip (visible only when `session_id == null` and a project is selected).
 - `task_id`: Optional UUID string. When set on a new-session prompt, `session.metadata["primary_task_id"]` is populated so plan context can be injected into implementation sessions (see [Pre-Planning Sessions](#pre-planning-sessions) below).
 
+**Queuing behavior**: If the session is currently busy with a prior turn (see [Queued User Messages](#queued-user-messages)), the prompt is enqueued rather than delivered. The server responds with `{"type": "ack", "queued": true, "queued_id": "<uuid>"}` and broadcasts a `message_queued` event. When the agent becomes free, queued messages are drained FIFO. Non-busy sessions receive `{"type": "ack", "queued": false}` and process the prompt normally.
+
+Cancel a queued message (only valid while the message is still queued; no-op after delivery):
+
+```json
+{
+  "type": "cancel_queued",
+  "session_id": "uuid",
+  "queued_id": "uuid"
+}
+```
+
+Edit the text of a queued message in place (only valid while queued; same `queued_id` and FIFO position retained):
+
+```json
+{
+  "type": "edit_queued",
+  "session_id": "uuid",
+  "queued_id": "uuid",
+  "content": "new routing text (may contain #mentions)",
+  "display_content": "new chat-visible text (optional; defaults to content with mentions stripped)"
+}
+```
+
+Only the text fields can be edited. Attachments are fixed at enqueue time.
+
 Start a read-only pre-planning session for a task (ONE_SHOT, write-restricted):
 
 ```json
@@ -486,7 +512,7 @@ Server sends JSON messages:
 ```
 
 Tool output is emitted for all agent executors:
-- **Claude Code**: Captured from `tool_result` events in the stream-json protocol. Content may be plain text or extracted from content blocks. `is_error` reflects the SDK's `is_error` flag.
+- **Claude Code**: Captured from `tool_result` content blocks that Claude Code emits inside `{"type":"user", "message":{"content":[{"type":"tool_result",...}]}}` stream-json events. Content may be plain text or extracted from nested content blocks. `is_error` reflects the SDK's `is_error` flag.
 - **Codex**: Captured from `item.completed` events for `command_execution` (via `aggregated_output`), `file_change` (via `diff`), and `mcp_tool_call` items. `is_error` is true when `exit_code` is non-zero (commands only).
 - **LLM pipeline**: Captured from tool execution results during the agentic loop.
 
@@ -663,7 +689,8 @@ The message gains an `"accepted": true/false` field once resolved. Session cance
   "selected_worktree_path": null,
   "main_project_path": "/home/user/Projects/RCFlow",
   "project_name_error": null,
-  "agent_type": "claude_code"
+  "agent_type": "claude_code",
+  "queued_messages": []
 }
 ```
 
@@ -678,6 +705,98 @@ Token usage fields are included in every `session_update` broadcast:
 - `tool_cost_usd`: Cumulative cost reported by Claude Code (`cost_usd` from result events).
 
 **Project name error field** (`project_name_error`): transient string field set when the backend cannot resolve or access the project folder sent via the WS prompt `project_name` field. Cleared on the next successful resolution. The client renders the project chip in error state (red, with tooltip) when this field is non-null. The field is NOT persisted to the database.
+
+**Queued messages field** (`queued_messages`): authoritative snapshot of the session's pending message queue (see [Queued User Messages](#queued-user-messages)). Each entry:
+
+```json
+{
+  "queued_id": "uuid",
+  "position": 0,
+  "display_content": "tell it to also update docs",
+  "submitted_at": "2026-04-22T10:30:00+00:00",
+  "updated_at": "2026-04-22T10:30:00+00:00"
+}
+```
+
+Entries are ordered by `position` ascending. Clients fully reconcile their local queue state from this list on every `session_update` receipt (reconnect-safe). Attachment metadata is intentionally omitted from this snapshot to keep it light; attachments are only streamed in the initial `message_queued` event and persisted server-side until drain/cancel.
+
+### Queued Message Events
+
+```json
+{
+  "type": "message_queued",
+  "session_id": "uuid",
+  "queued_id": "uuid",
+  "position": 0,
+  "content": "the full routing text including #mentions",
+  "display_content": "the chat-visible text",
+  "attachments": [
+    {"name": "photo.jpg", "mime_type": "image/jpeg", "size": 12345}
+  ],
+  "submitted_at": "2026-04-22T10:30:00+00:00"
+}
+```
+
+Ephemeral. Emitted when a user prompt is enqueued (because the agent is busy). Clients add the entry to their pinned "queued" bar.
+
+```json
+{
+  "type": "message_dequeued",
+  "session_id": "uuid",
+  "queued_id": "uuid",
+  "reason": "delivered"
+}
+```
+
+Ephemeral. Emitted immediately before the buffer push that delivers a queued message to the agent. `reason` is `"delivered"` (drained into agent), `"cancelled"` (user cancelled), or `"session_ended"` (session ended while queued). Clients remove the entry from the queued bar. For `delivered`, a `text_chunk(role=user)` with a matching `queued_id` follows.
+
+```json
+{
+  "type": "message_queued_updated",
+  "session_id": "uuid",
+  "queued_id": "uuid",
+  "content": "new routing text",
+  "display_content": "new chat-visible text",
+  "updated_at": "2026-04-22T10:31:00+00:00"
+}
+```
+
+Ephemeral. Emitted when a queued message is edited (server-acked). Clients with the queue open update the entry's text.
+
+```json
+{
+  "type": "cancel_ack",
+  "session_id": "uuid",
+  "queued_id": "uuid",
+  "ok": true
+}
+```
+
+Direct response to a `cancel_queued` input. When `ok` is `false`, a `reason` field is present (`"already_delivered"` or `"not_found"`).
+
+```json
+{
+  "type": "edit_ack",
+  "session_id": "uuid",
+  "queued_id": "uuid",
+  "ok": true
+}
+```
+
+Direct response to an `edit_queued` input. When `ok` is `false`, a `reason` field is present (`"already_delivered"`, `"empty"`, or `"not_found"`).
+
+When a queued message is drained, the corresponding `text_chunk` echo gains an optional `queued_id` field so clients can correlate it with the pinned entry they just removed:
+
+```json
+{
+  "type": "text_chunk",
+  "session_id": "uuid",
+  "role": "user",
+  "content": "the chat-visible text",
+  "sequence": 42,
+  "queued_id": "uuid"
+}
+```
 
 ### Session Subscription
 
@@ -1114,6 +1233,43 @@ Multiple sessions can run simultaneously. Each session is independent with its o
 - Tool execution subprocess(es)
 - Output buffer
 - Subscriber list
+
+### Queued User Messages
+
+When a user sends a prompt while the session is busy processing a prior turn, the prompt is enqueued server-side rather than delivered to the agent. The client renders queued messages pinned at the bottom of the chat with a "queued" indicator until the agent actually picks them up, at which point they move into the normal chat history.
+
+**Busy detection** — `ActiveSession.is_busy_for_queue()` returns true when any of the following holds:
+
+- A managed agent executor is attached (`claude_code_executor`, `codex_executor`, or `opencode_executor`) **and** its stream task exists and is not done.
+- The per-session `_prompt_lock` is held (LLM path).
+- `activity_state` is one of `processing_llm`, `executing_tool`, `running_subprocess`, `awaiting_permission`.
+
+If true, `PromptRouter.handle_prompt()` short-circuits into the enqueue path instead of the routing branches.
+
+**State model** — Each queued message has:
+
+- `queued_id` — UUID, client-visible.
+- `position` — dense integer, FIFO order within the session, renumbered on drain/cancel.
+- `content` / `display_content` — routing text (may contain `#mentions`) and chat-visible text.
+- `attachments_path` — absolute path to a disk directory holding attachment bytes + `meta.json` (all attachments disk-spilled regardless of size).
+- `project_name`, `selected_worktree_path`, `task_id` — captured at enqueue time so drain can apply the same context the user intended.
+- `submitted_at` / `updated_at` — timestamps.
+
+State is stored in the `session_pending_messages` DB table (see [Database Schema](#database-schema)) and mirrored in memory on `ActiveSession.pending_user_messages`. All writes go through the DB first, then update the in-memory mirror and broadcast the corresponding WS event.
+
+**Lifecycle**:
+
+1. **Enqueue** — `PromptRouter.handle_prompt()` detects busy, writes a row (+ attachment dir), appends to the in-memory mirror, and emits `message_queued`. The original `ack` to the client carries `queued: true, queued_id`.
+2. **Edit** — `edit_queued` input updates the row's `content` / `display_content` / `updated_at`; emits `message_queued_updated`. Only valid while the row exists; after delivery the message is immutable.
+3. **Cancel** — `cancel_queued` input deletes the row + attachment dir, renumbers remaining positions, emits `message_dequeued` with `reason: "cancelled"`.
+4. **Drain** — At the turn-end boundary in each agent path (Claude Code `result` event, Codex / OpenCode turn end, LLM `_prompt_lock` release), `_drain_pending(session)` pops the head of the queue one entry at a time: delete row + attachments, emit `message_dequeued{reason: "delivered"}`, push `text_chunk(role=user, queued_id=...)` to the buffer, then forward to the executor or append to `conversation_history`.
+5. **Clear-on-end** — When a session ends / is cancelled, `clear_pending(reason="session_ended")` deletes all rows and emits `message_dequeued` for each.
+
+**Persistence across backend restart** — Queue rows survive process crashes. When the backend restarts, sessions that were active are marked `INTERRUPTED`. `session_update` broadcasts include `queued_messages` populated from the DB, so clients restore the queued bar immediately on resubscribe. Drain does not run automatically on resume; it only runs at the next turn-end boundary after the user resumes the session.
+
+**Attachment disk spill** — Queued attachments are written to `data/pending_attachments/<session_id>/<queued_id>/` with a `meta.json` manifest. Filenames are sanitized. Directories are removed atomically on drain/cancel/session-delete. A startup task sweeps orphaned directories (dirs with no matching DB row).
+
+**Race handling** — All queue mutations are serialized by `ActiveSession._prompt_lock`. `cancel_queued` / `edit_queued` arriving after drain has removed the row respond with `ok: false, reason: "already_delivered"`. Clients handle this gracefully (cancel → treat as normal delivery, edit → revert + toast).
 
 ### Token Usage Tracking
 
@@ -1692,6 +1848,30 @@ Each file defines one tool. Drop a `.json` file into `tools/` to register a new 
 }
 ```
 
+### Structured Agent Prompt Format
+
+Every prompt dispatched to a coding agent (Claude Code, Codex, OpenCode) is normalised by `src/core/agent_prompt.py:format_agent_prompt()` before the executor is started. The canonical structure is:
+
+```
+## Task
+<single-line task title — first non-blank line of the raw prompt>
+
+## Description
+<remaining plain-text description>
+
+## Additional Content
+<fenced code blocks extracted verbatim from the raw prompt>
+```
+
+**Behaviour:**
+- If the raw prompt already contains both `## Task` and `## Description` headers it is returned unchanged (idempotent), except that a missing `## Additional Content` section is appended.
+- Fenced code blocks (` ``` … ``` `) are extracted from the body and placed under `## Additional Content` to preserve raw content; they are stripped from the Task/Description text.
+- An empty or whitespace-only prompt falls back to the task title `"Complete the requested task."`.
+
+**Interception point:** `PromptRouter._execute_tool()` in `src/core/prompt_router.py` applies `format_agent_prompt` to `tool_call.tool_input["prompt"]` for all three agent executors (`claude_code`, `codex`, `opencode`) before forwarding to `_start_claude_code / _start_codex / _start_opencode`. This covers both LLM-generated tool calls and direct-mode tool invocations (`#claude_code …`).
+
+---
+
 ### Claude Code Executor
 
 The `claude_code` executor manages a Claude Code CLI subprocess with bidirectional stream-json communication. It enables delegating complex coding tasks to Claude Code while streaming output back to the client in real time.
@@ -2250,6 +2430,26 @@ CREATE TABLE telemetry_minutely (
 );
 CREATE INDEX idx_telemetry_minutely_lookup ON telemetry_minutely(backend_id, bucket, session_id);
 
+-- Queued user messages waiting for the agent to become free.
+-- See [Queued User Messages](#queued-user-messages) for the full lifecycle.
+-- Rows survive backend restarts; attachments are disk-spilled under
+-- data/pending_attachments/<session_id>/<queued_id>/.
+CREATE TABLE session_pending_messages (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    session_id UUID NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    queued_id VARCHAR(36) NOT NULL UNIQUE,       -- client-visible UUID
+    position INTEGER NOT NULL,                   -- FIFO within session; dense, renumbered on drain/cancel
+    content TEXT NOT NULL,                       -- routing text (may contain #mentions)
+    display_content TEXT NOT NULL,               -- chat-visible text
+    attachments_path TEXT,                       -- absolute path to attachment dir (NULL when no attachments)
+    project_name TEXT,
+    selected_worktree_path TEXT,
+    task_id VARCHAR(36),
+    submitted_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX ix_pending_session_position ON session_pending_messages(session_id, position);
+
 -- One unsent message draft per session.
 -- Automatically deleted when the parent session is deleted (CASCADE).
 CREATE TABLE drafts (
@@ -2803,13 +3003,18 @@ uv run rcflow                    # or: uv run rcflow run — starts the server
 - System appearance (light/dark) is detected once at startup via `tk::mac::isDarkMode`; log widget colors are set accordingly.
 - Log draining, server HTTP polling, and subprocess I/O all use the same queue + timer pattern as the Windows GUI.
 
-**Autostart:** Writes a `LaunchAgent` plist to `~/Library/LaunchAgents/com.rcflow.worker.plist` with `RunAtLoad=true`, `KeepAlive=false`, `ProcessType=Interactive`. Immediately calls `launchctl load` / `launchctl unload` to apply the change without a reboot.
+**Autostart:** Writes a `LaunchAgent` plist to `~/Library/LaunchAgents/com.rcflow.worker.plist` with `RunAtLoad=true`, `KeepAlive=false`, `ProcessType=Interactive`. Does **not** call `launchctl load` / `unload` — placing the plist is sufficient for launchd to pick it up on next login, and avoiding `load` prevents a duplicate instance from being spawned while the app is already running; avoiding `unload` prevents SIGTERM from killing the current app when the user toggles autostart off.
 
 **Icon:** `assets/tray_icon.icns`. Copied into `Contents/Resources/tray_icon.icns` inside the `.app` bundle (standard macOS resource location). Also bundled as a PyInstaller data file at `tray_icon.icns` (accessible via `get_install_dir()`). Fallback: generates a blue rounded square with "RC" text using Pillow.
 
 **Note on LSUIElement apps:** Because `LSUIElement = true` removes the Dock icon, the app cannot be activated normally via Cmd+Tab or clicking the Dock. The window is shown/hidden exclusively through the menu bar icon. If PyObjC is unavailable and the menu bar icon cannot be created, the settings window remains visible as a fallback so the app is not completely invisible.
 
 **Crash handling:** `run_gui_macos()` is wrapped in a top-level `try/except` that writes tracebacks to `~/Library/Logs/rcflow-worker-crash.log` and shows a `tkinter.messagebox` error dialog before re-raising. This prevents silent exits in windowed (`console=False`) frozen builds where stderr goes nowhere.
+
+**Orphaned-server recovery:** The GUI spawns the backend as a `subprocess.Popen` child. If the GUI crashes (e.g. a Cocoa re-entrancy after macOS auto-lock / sleep-wake), the subprocess is reparented to `launchd` and would otherwise keep serving clients with no UI to stop it. Two mechanisms defend against this:
+
+1. **Parent-death watchdog in the server** — `ServerManager.start()` passes `RCFLOW_PARENT_PID=<gui_pid>` to the child. `_cmd_run` in `src/__main__.py` starts a daemon thread (`_install_parent_death_watchdog`) that polls `os.kill(parent_pid, 0)` every 2 s and sends `SIGTERM` to its own pid when the parent is gone, letting uvicorn shut down gracefully. The env var is absent for systemd / launchd daemon installs, in which case the watchdog is disabled.
+2. **Pidfile-based adoption on GUI relaunch** — `ServerManager.start()` writes the child PID to `<data_dir>/.worker.pid` (resolved to `~/Library/Application Support/rcflow/.worker.pid` on macOS frozen builds). `stop_sync()` / `clear()` delete it on graceful shutdown. On launch, both GUIs call `ServerManager.adopt_if_running()` *before* attempting to spawn a new server: if the pidfile references a live pid, the manager records it as **adopted** (no `Popen` handle — the process is not our child). `is_running()` / `stop()` / `stop_sync()` all handle the adopted path by tracking the pid directly and terminating it via raw signals (`_kill_pid` falls back to `TerminateProcess` on Windows). The GUI shows "Running (WSS) — recovered" in the status pill so the user knows the backend was picked up from a previous crashed session and can stop it normally from the menu.
 
 ### Production (systemd — Linux)
 

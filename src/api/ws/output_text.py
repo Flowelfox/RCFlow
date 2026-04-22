@@ -139,6 +139,13 @@ async def ws_output_text(
                         del active_tasks[session_id]
                     task = asyncio.create_task(stream_session(session_id))
                     active_tasks[session_id] = task
+                    # Rebroadcast the current session_update so the just-subscribed
+                    # client immediately sees authoritative state (including the
+                    # ``queued_messages`` snapshot) without waiting for the next
+                    # change event.
+                    fresh = session_manager.get_session(session_id)
+                    if fresh is not None:
+                        session_manager.broadcast_session_update(fresh)
 
             elif msg_type == "unsubscribe":
                 session_id = message.get("session_id")

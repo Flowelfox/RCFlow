@@ -69,7 +69,7 @@ Run targets with `just <target>`. Run `just` with no arguments to list all avail
 
 - `start-emulator` — start Windows Android emulator (cold boot) from WSL2
 - `setup-emulator` — set up WSL2 ADB connection to Windows emulator
-- `flutter-run` — run Flutter app in hot reload mode (connects to Windows emulator)
+- `run-android` — run Flutter app on Android emulator in hot reload mode (connects to Windows emulator)
 - `flutter-build` — build Flutter debug APK
 - `flutter-release` — build Flutter release APK (split per ABI)
 - `flutter-windows` — build Flutter Windows desktop app (Windows only)

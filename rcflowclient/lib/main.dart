@@ -17,6 +17,7 @@ import 'ui/badges/renderers/project_badge_renderer.dart';
 import 'ui/badges/renderers/status_badge_renderer.dart';
 import 'ui/badges/renderers/worker_badge_renderer.dart';
 import 'ui/badges/renderers/worktree_badge_renderer.dart';
+import 'ui/screens/android_shell.dart';
 import 'ui/screens/home_screen.dart';
 
 bool get _isDesktop =>
@@ -148,7 +149,7 @@ class RCFlowApp extends StatelessWidget {
       theme: buildLightTheme(),
       darkTheme: buildDarkTheme(),
       themeMode: themeMode,
-      home: const HomeScreen(),
+      home: Platform.isAndroid ? const AndroidShell() : const HomeScreen(),
       debugShowCheckedModeBanner: false,
     );
   }

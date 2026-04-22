@@ -61,7 +61,6 @@ class TestPromptBuilder:
         assert "claude_code" in result
         assert "Project resolution" in result
         assert "Task routing" in result
-        assert "Session completion" in result
 
     def test_real_template_os_name_substitution(self) -> None:
         """The os_name variable is substituted into the role description."""

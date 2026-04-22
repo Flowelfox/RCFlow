@@ -10,7 +10,6 @@ import 'message_components/permission_request_card.dart';
 import 'message_components/plan_mode_ask_card.dart';
 import 'message_components/plan_review_ask_card.dart';
 import 'message_components/question_block.dart';
-import 'message_components/session_end_ask_card.dart';
 import 'message_components/status_chip.dart';
 import 'message_components/summary_bubble.dart';
 import 'message_components/todo_list_block.dart';
@@ -51,8 +50,6 @@ class MessageBubble extends StatelessWidget {
         );
       case DisplayMessageType.summary:
         return SummaryBubble(message: message);
-      case DisplayMessageType.sessionEndAsk:
-        return SessionEndAskCard(message: message);
       case DisplayMessageType.planModeAsk:
         return PlanModeAskCard(message: message);
       case DisplayMessageType.planReviewAsk:

@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../state/app_state.dart';
 import '../../state/pane_state.dart';
 import '../../theme.dart';
+import '../dialogs/setup_wizard.dart';
 import '../widgets/input_area.dart';
 import '../widgets/output_display.dart';
 import '../widgets/session_identity_bar.dart';
@@ -25,6 +26,19 @@ class AndroidShell extends StatefulWidget {
 
 class _AndroidShellState extends State<AndroidShell> {
   int _selectedIndex = 1; // Chat is the default tab
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _checkFirstRun());
+  }
+
+  Future<void> _checkFirstRun() async {
+    final settings = context.read<AppState>().settings;
+    if (!settings.setupComplete) {
+      await showSetupWizard(context);
+    }
+  }
 
   void _setTab(int index) {
     setState(() => _selectedIndex = index);

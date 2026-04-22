@@ -5,7 +5,6 @@ enum DisplayMessageType {
   error,
   system,
   summary,
-  sessionEndAsk,
   planModeAsk,
   planReviewAsk,
   permissionRequest,
@@ -30,7 +29,7 @@ class DisplayMessage {
   bool expanded;
   bool isError;
 
-  /// For sessionEndAsk: null = pending, true = user ended, false = user continued.
+  /// For planModeAsk/planReviewAsk: null = pending, true = accepted, false = declined.
   bool? accepted;
 
   /// Tracks user-selected answers for AskUserQuestion tool blocks.
@@ -84,4 +83,51 @@ class DisplayMessage {
             (c) => c.type == DisplayMessageType.toolBlock && !c.finished,
           ) ??
           false);
+}
+
+/// A user message pinned at the bottom of the chat while the agent is busy.
+///
+/// Entries live in ``PaneState._queuedMessages`` and mirror the backend's
+/// ``session_pending_messages`` rows.  Once the backend drains the message
+/// (via a ``message_dequeued`` event), the corresponding entry is removed
+/// here and the normal ``text_chunk`` echo inserts it into the chat history
+/// at its delivered position.
+class QueuedMessage {
+  final String queuedId;
+  int position;
+  String content;
+  String displayContent;
+  DateTime submittedAt;
+  DateTime updatedAt;
+
+  /// True when the local optimistic add has not yet been confirmed by a
+  /// server-side ``message_queued`` broadcast.  Used for de-duplication
+  /// during reconcile — identical to ``DisplayMessage.pendingLocalEcho``.
+  bool pendingLocalEcho;
+
+  QueuedMessage({
+    required this.queuedId,
+    required this.position,
+    required this.content,
+    required this.displayContent,
+    required this.submittedAt,
+    required this.updatedAt,
+    this.pendingLocalEcho = false,
+  });
+
+  factory QueuedMessage.fromSnapshot(Map<String, dynamic> json) {
+    return QueuedMessage(
+      queuedId: json['queued_id'] as String,
+      position: (json['position'] as num?)?.toInt() ?? 0,
+      content: json['content'] as String? ?? '',
+      displayContent:
+          json['display_content'] as String? ?? json['content'] as String? ?? '',
+      submittedAt:
+          DateTime.tryParse(json['submitted_at'] as String? ?? '') ??
+              DateTime.now(),
+      updatedAt:
+          DateTime.tryParse(json['updated_at'] as String? ?? '') ??
+              DateTime.now(),
+    );
+  }
 }

@@ -5,7 +5,6 @@ All helpers assume Starlette's synchronous TestClient WebSocket sessions.
 
 from __future__ import annotations
 
-import time
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -39,10 +38,17 @@ def send_prompt(client: TestClient, text: str, session_id: str | None = None) ->
 def drain_output(
     client: TestClient,
     session_id: str,
-    stop_types: frozenset[str] = frozenset({"session_end_ask", "session_end", "error"}),
-    settle_ms: int = 250,
+    stop_types: frozenset[str] = frozenset({"summary", "session_end", "error"}),
+    stop_after: int = 1,
 ) -> list[dict]:
     """Subscribe to /ws/output/text and drain until a stop-type message arrives.
+
+    No pre-subscription sleep is needed: ``SessionBuffer.subscribe_text``
+    replays the full history and either adds a live subscriber (buffer still
+    open) or appends a ``None`` sentinel (buffer already closed).  In both
+    cases the drain loop receives every message that was or will be pushed —
+    including those produced by still-running background tasks — without any
+    timing dependency.
 
     Parameters
     ----------
@@ -51,23 +57,22 @@ def drain_output(
     session_id:
         Session to subscribe to.
     stop_types:
-        Receiving any message with a ``type`` in this set ends the drain loop.
-    settle_ms:
-        Milliseconds to sleep *before* subscribing so that background tasks
-        (mock LLM, title generation, etc.) have time to push messages to the
-        buffer.  With the mock LLM there is no network I/O, so 250 ms is
-        comfortably generous.
+        Receiving any message with a ``type`` in this set counts toward stopping.
+    stop_after:
+        Stop after this many stop-type messages have been received. Use > 1 for
+        multi-turn conversations where earlier turns also emit stop-type messages.
     """
-    time.sleep(settle_ms / 1000.0)
-
     messages: list[dict] = []
+    stop_count = 0
     with client.websocket_connect(_OUTPUT_URL) as ws:
         ws.send_json({"type": "subscribe", "session_id": session_id})
         for _ in range(_MAX_DRAIN):
             msg = ws.receive_json()
             messages.append(msg)
             if msg.get("type") in stop_types:
-                break
+                stop_count += 1
+                if stop_count >= stop_after:
+                    break
     return messages
 
 

@@ -872,6 +872,11 @@ class AppState extends ChangeNotifier implements PaneHost {
         pane.clearProjectError();
       }
     };
+    _registry.onQueuedMessagesSnapshot = (sessionId, snapshot) {
+      for (final pane in _findPanesForSession(sessionId)) {
+        pane.applyQueueSnapshot(snapshot);
+      }
+    };
     _registry.addListener(_onRegistryChanged);
     _registry.init(_settings.workers);
     _connectAutoConnectWorkers();
@@ -1636,8 +1641,27 @@ class AppState extends ChangeNotifier implements PaneHost {
     switch (type) {
       case 'ack':
         final sessionId = msg['session_id'] as String;
-        final pane = _findPaneWithPendingAck() ?? activePane;
-        pane.handleAck(sessionId, workerId: workerId);
+        final queued = msg['queued'] as bool? ?? false;
+        final queuedId = msg['queued_id'] as String?;
+        // For queued prompts the ack belongs to the pane that submitted them
+        // on this already-existing session — pendingAck may be false in that
+        // case, so prefer routing by session_id first.
+        PaneState? pane;
+        if (queued) {
+          for (final p in _panes.values) {
+            if (p.sessionId == sessionId) {
+              pane = p;
+              break;
+            }
+          }
+        }
+        pane ??= _findPaneWithPendingAck() ?? activePane;
+        pane.handleAck(
+          sessionId,
+          workerId: workerId,
+          queued: queued,
+          queuedId: queuedId,
+        );
         final worker = _registry[workerId];
         if (worker != null && !worker.subscribedSessions.contains(sessionId)) {
           worker.subscribe(sessionId);
@@ -1670,7 +1694,6 @@ class AppState extends ChangeNotifier implements PaneHost {
   /// Message types that trigger the "completion" sound (session resolved).
   static const _completionSoundTypes = {
     WsOutputType.summary,
-    WsOutputType.sessionEndAsk,
     WsOutputType.planModeAsk,
     WsOutputType.planReviewAsk,
   };
@@ -1678,7 +1701,6 @@ class AppState extends ChangeNotifier implements PaneHost {
   /// Message types that trigger the generic "new message" sound.
   static const _messageSoundTypes = {
     WsOutputType.summary,
-    WsOutputType.sessionEndAsk,
     WsOutputType.error,
     WsOutputType.planModeAsk,
     WsOutputType.planReviewAsk,
@@ -1687,7 +1709,6 @@ class AppState extends ChangeNotifier implements PaneHost {
   /// Message types that indicate a session is waiting for user input.
   static const _awaitingInputTypes = {
     WsOutputType.summary,
-    WsOutputType.sessionEndAsk,
     WsOutputType.planModeAsk,
     WsOutputType.planReviewAsk,
     WsOutputType.permissionRequest,

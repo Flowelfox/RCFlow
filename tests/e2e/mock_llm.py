@@ -7,14 +7,14 @@ Turn shapes
 -----------
 Text-only (happy path)::
 
-    [TextChunk("Done! [SessionEndAsk]"), StreamDone(stop_reason="end_turn")]
+    [TextChunk("Done!"), StreamDone(stop_reason="end_turn")]
 
 Tool-use (first turn) + follow-up (second turn)::
 
     [
         [TextChunk("Running…"), ToolCallRequest("toolu_01", "shell_exec", {"command": "echo hi"}),
          StreamDone(stop_reason="tool_use")],
-        [TextChunk("Done! [SessionEndAsk]"), StreamDone(stop_reason="end_turn")],
+        [TextChunk("Done!"), StreamDone(stop_reason="end_turn")],
     ]
 
 The mock implements the full ``run_agentic_loop`` so real tool execution

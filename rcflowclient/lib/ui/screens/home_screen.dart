@@ -111,7 +111,9 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
                               _SidebarDivider(
                                 onDrag: (dx) {
                                   setState(() {
-                                    final newWidth = (sidebarWidth + dx).clamp(
+                                    final current =
+                                        _sidebarFraction * totalWidth;
+                                    final newWidth = (current + dx).clamp(
                                       _minPixels,
                                       totalWidth * _maxFraction,
                                     );
@@ -435,7 +437,8 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
                     _SidebarDivider(
                       onDrag: (dx) {
                         setState(() {
-                          final newWidth = (sidebarWidth + dx).clamp(
+                          final current = _sidebarFraction * totalWidth;
+                          final newWidth = (current + dx).clamp(
                             _minPixels,
                             totalWidth * _maxFraction,
                           );

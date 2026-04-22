@@ -104,55 +104,6 @@ async def test_cancel_already_cancelled_session(session_manager: SessionManager)
 
 
 @pytest.mark.asyncio
-async def test_fire_summary_task_pushes_session_end_ask(session_manager: SessionManager) -> None:
-    """_fire_summary_task with push_session_end_ask=True should push SESSION_END_ASK after summarizing."""
-    router = _make_router(session_manager)
-    router._llm.summarize = AsyncMock(return_value="Short summary.")  # type: ignore[method-assign]
-
-    session = session_manager.create_session(SessionType.LONG_RUNNING)
-    session.set_active()
-
-    router._fire_summary_task(session, "Result text.", push_session_end_ask=True)
-    await asyncio.gather(*router._pending_summary_tasks)
-
-    end_ask_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.SESSION_END_ASK]
-    assert len(end_ask_msgs) == 1
-    assert end_ask_msgs[0].data["session_id"] == session.id
-
-
-@pytest.mark.asyncio
-async def test_fire_summary_task_no_push_without_flag(session_manager: SessionManager) -> None:
-    """_fire_summary_task without push_session_end_ask should not push SESSION_END_ASK."""
-    router = _make_router(session_manager)
-    router._llm.summarize = AsyncMock(return_value="Short summary.")  # type: ignore[method-assign]
-
-    session = session_manager.create_session(SessionType.LONG_RUNNING)
-    session.set_active()
-
-    router._fire_summary_task(session, "Result text.")
-    await asyncio.gather(*router._pending_summary_tasks)
-
-    end_ask_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.SESSION_END_ASK]
-    assert len(end_ask_msgs) == 0
-
-
-@pytest.mark.asyncio
-async def test_fire_summary_task_no_llm_still_pushes_session_end_ask(session_manager: SessionManager) -> None:
-    """When _llm is None, SESSION_END_ASK is pushed synchronously without summarizing."""
-    router = _make_router(session_manager)
-    router._llm = None
-
-    session = session_manager.create_session(SessionType.LONG_RUNNING)
-    session.set_active()
-
-    router._fire_summary_task(session, "Result text.", push_session_end_ask=True)
-
-    end_ask_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.SESSION_END_ASK]
-    assert len(end_ask_msgs) == 1
-    assert end_ask_msgs[0].data["session_id"] == session.id
-
-
-@pytest.mark.asyncio
 async def test_summarize_and_push_pushes_summary_message(session_manager: SessionManager) -> None:
     """_summarize_and_push should push a SUMMARY message with content from the LLM."""
     router = _make_router(session_manager)
@@ -183,22 +134,6 @@ async def test_summarize_and_push_failure_does_not_raise(session_manager: Sessio
 
     summary_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.SUMMARY]
     assert len(summary_msgs) == 0
-
-
-@pytest.mark.asyncio
-async def test_summarize_failure_still_pushes_session_end_ask(session_manager: SessionManager) -> None:
-    """Even when summarization fails, SESSION_END_ASK must still be delivered."""
-    router = _make_router(session_manager)
-    router._llm.summarize = AsyncMock(side_effect=RuntimeError("LLM unavailable"))  # type: ignore[method-assign]
-
-    session = session_manager.create_session(SessionType.LONG_RUNNING)
-    session.set_active()
-
-    await router._summarize_and_push(session, "Some text.", push_session_end_ask=True)
-
-    end_ask_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.SESSION_END_ASK]
-    assert len(end_ask_msgs) == 1
-    assert end_ask_msgs[0].data["session_id"] == session.id
 
 
 # --- Title generation tests ---
@@ -264,49 +199,8 @@ async def _async_stream_chunks(chunks: list[ExecutionChunk]):
 
 
 @pytest.mark.asyncio
-async def test_relay_claude_code_stream_pushes_session_end_ask_on_result(session_manager: SessionManager) -> None:
-    """_relay_claude_code_stream should push SESSION_END_ASK when a result event arrives."""
-    router = _make_router(session_manager)
-    router._llm.summarize = AsyncMock(return_value="Short summary.")  # type: ignore[method-assign]
-
-    session = session_manager.create_session(SessionType.LONG_RUNNING)
-    session.set_active()
-
-    result_event = json.dumps({"type": "result", "result": "Claude Code finished the task."})
-    stream = _async_stream_chunks([ExecutionChunk(content=result_event, stream="stdout")])
-
-    await router._relay_claude_code_stream(session, stream)
-    await asyncio.gather(*router._pending_summary_tasks)
-
-    # Verify SESSION_END_ASK was pushed
-    end_ask_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.SESSION_END_ASK]
-    assert len(end_ask_msgs) == 1
-    assert end_ask_msgs[0].data["session_id"] == session.id
-
-
-@pytest.mark.asyncio
-async def test_relay_claude_code_stream_empty_result_still_pushes_end_ask(session_manager: SessionManager) -> None:
-    """Even with empty result text, SESSION_END_ASK should fire so the user isn't left in limbo."""
-    router = _make_router(session_manager)
-    router._llm.summarize = AsyncMock(return_value="Short summary.")  # type: ignore[method-assign]
-
-    session = session_manager.create_session(SessionType.LONG_RUNNING)
-    session.set_active()
-
-    result_event = json.dumps({"type": "result", "result": ""})
-    stream = _async_stream_chunks([ExecutionChunk(content=result_event, stream="stdout")])
-
-    await router._relay_claude_code_stream(session, stream)
-    await asyncio.gather(*router._pending_summary_tasks)
-
-    # SESSION_END_ASK should still be pushed
-    end_ask_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.SESSION_END_ASK]
-    assert len(end_ask_msgs) == 1
-
-
-@pytest.mark.asyncio
 async def test_relay_claude_code_stream_max_turns_subtype(session_manager: SessionManager) -> None:
-    """When result has subtype=max_turns, the session is paused with reason='max_turns' (no SESSION_END_ASK)."""
+    """When result has subtype=max_turns, the session is paused with reason='max_turns'."""
     router = _make_router(session_manager)
 
     session = session_manager.create_session(SessionType.LONG_RUNNING)
@@ -316,10 +210,6 @@ async def test_relay_claude_code_stream_max_turns_subtype(session_manager: Sessi
     stream = _async_stream_chunks([ExecutionChunk(content=result_event, stream="stdout")])
 
     await router._relay_claude_code_stream(session, stream)
-
-    # SESSION_END_ASK must NOT be pushed — the session is paused instead
-    end_ask_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.SESSION_END_ASK]
-    assert len(end_ask_msgs) == 0
 
     # Session should be paused with reason "max_turns"
     assert session.status == SessionStatus.PAUSED
@@ -1724,3 +1614,182 @@ class TestBuildClaudeCodeExtraEnv:
         router._tool_settings = mock_ts
         env = router._build_claude_code_extra_env()
         assert "CLAUDE_CODE_UNDERCOVER" not in env
+
+
+# --- New-session structured prompt format tests ---
+
+
+def _make_agent_tool_def(executor: str = "claude_code", name: str = "claude_code") -> MagicMock:
+    """Return a mock ToolDefinition for a coding-agent executor."""
+    td = MagicMock()
+    td.executor = executor
+    td.name = name
+    td.display_name = name
+    td.executor_config = {executor: {}}
+    return td
+
+
+class TestNewSessionStructuredPrompt:
+    """_execute_tool must format the agent prompt BEFORE pushing AGENT_SESSION_START.
+
+    For new sessions the first coding-agent invocation goes through _execute_tool,
+    so both the buffer banner and the executor must receive the structured
+    Task / Description / Additional Content format.
+    """
+
+    @pytest.mark.asyncio
+    async def test_agent_session_start_has_structured_prompt(self, session_manager: SessionManager) -> None:
+        """AGENT_SESSION_START prompt field must contain all three structured sections."""
+        router = _make_router(session_manager)
+        session = session_manager.create_session(SessionType.CONVERSATIONAL)
+        session.set_active()
+
+        mock_td = _make_agent_tool_def("claude_code", "claude_code")
+        router._tool_registry.get.return_value = mock_td  # type: ignore[attr-defined]
+
+        tool_call = ToolCallRequest(
+            tool_use_id="test-1",
+            tool_name="claude_code",
+            tool_input={"prompt": "Fix the login bug\nThe auth token is never refreshed."},
+        )
+        with patch.object(router, "_start_claude_code", AsyncMock(return_value="started")):
+            await router._execute_tool(session, tool_call)
+
+        start_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.AGENT_SESSION_START]
+        assert len(start_msgs) == 1
+        prompt = start_msgs[0].data["prompt"]
+        assert "## Task" in prompt
+        assert "## Description" in prompt
+        assert "## Additional Content" in prompt
+
+    @pytest.mark.asyncio
+    async def test_code_blocks_preserved_in_additional_content(self, session_manager: SessionManager) -> None:
+        """Code blocks from the raw user message are extracted into Additional Content."""
+        router = _make_router(session_manager)
+        session = session_manager.create_session(SessionType.CONVERSATIONAL)
+        session.set_active()
+
+        mock_td = _make_agent_tool_def("claude_code", "claude_code")
+        router._tool_registry.get.return_value = mock_td  # type: ignore[attr-defined]
+
+        tool_call = ToolCallRequest(
+            tool_use_id="test-2",
+            tool_name="claude_code",
+            tool_input={
+                "prompt": "Fix this function\n\n```python\ndef broken():\n    return None\n```",
+            },
+        )
+        with patch.object(router, "_start_claude_code", AsyncMock(return_value="started")):
+            await router._execute_tool(session, tool_call)
+
+        start_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.AGENT_SESSION_START]
+        prompt = start_msgs[0].data["prompt"]
+        content_idx = prompt.index("## Additional Content")
+        additional = prompt[content_idx:]
+        assert "```python" in additional
+        assert "def broken():" in additional
+
+    @pytest.mark.asyncio
+    async def test_executor_receives_structured_prompt(self, session_manager: SessionManager) -> None:
+        """The tool_input passed to the executor must also carry the formatted prompt."""
+        router = _make_router(session_manager)
+        session = session_manager.create_session(SessionType.CONVERSATIONAL)
+        session.set_active()
+
+        mock_td = _make_agent_tool_def("claude_code", "claude_code")
+        router._tool_registry.get.return_value = mock_td  # type: ignore[attr-defined]
+
+        captured: dict[str, object] = {}
+
+        async def _capture_start(s, td, tc):  # type: ignore[no-untyped-def]
+            captured["prompt"] = tc.tool_input.get("prompt", "")
+            return "started"
+
+        tool_call = ToolCallRequest(
+            tool_use_id="test-3",
+            tool_name="claude_code",
+            tool_input={"prompt": "Refactor the parser\nUse AST instead of regex."},
+        )
+        with patch.object(router, "_start_claude_code", _capture_start):
+            await router._execute_tool(session, tool_call)
+
+        prompt = captured["prompt"]
+        assert "## Task" in prompt
+        assert "## Description" in prompt
+        assert "## Additional Content" in prompt
+
+    @pytest.mark.asyncio
+    async def test_prompt_consistent_between_banner_and_executor(self, session_manager: SessionManager) -> None:
+        """The prompt in AGENT_SESSION_START must match the prompt the executor receives."""
+        router = _make_router(session_manager)
+        session = session_manager.create_session(SessionType.CONVERSATIONAL)
+        session.set_active()
+
+        mock_td = _make_agent_tool_def("claude_code", "claude_code")
+        router._tool_registry.get.return_value = mock_td  # type: ignore[attr-defined]
+
+        captured: dict[str, object] = {}
+
+        async def _capture_start(s, td, tc):  # type: ignore[no-untyped-def]
+            captured["prompt"] = tc.tool_input.get("prompt", "")
+            return "started"
+
+        tool_call = ToolCallRequest(
+            tool_use_id="test-4",
+            tool_name="claude_code",
+            tool_input={"prompt": "Add unit tests\nCover all edge cases."},
+        )
+        with patch.object(router, "_start_claude_code", _capture_start):
+            await router._execute_tool(session, tool_call)
+
+        start_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.AGENT_SESSION_START]
+        banner_prompt = start_msgs[0].data["prompt"]
+        executor_prompt = str(captured["prompt"])
+        assert banner_prompt == executor_prompt
+
+    @pytest.mark.asyncio
+    async def test_codex_agent_session_start_has_structured_prompt(self, session_manager: SessionManager) -> None:
+        """Same formatting applies to Codex executor sessions."""
+        router = _make_router(session_manager)
+        session = session_manager.create_session(SessionType.CONVERSATIONAL)
+        session.set_active()
+
+        mock_td = _make_agent_tool_def("codex", "codex")
+        router._tool_registry.get.return_value = mock_td  # type: ignore[attr-defined]
+
+        tool_call = ToolCallRequest(
+            tool_use_id="test-5",
+            tool_name="codex",
+            tool_input={"prompt": "Implement feature X\n\n```typescript\ntype X = string;\n```"},
+        )
+        with patch.object(router, "_start_codex", AsyncMock(return_value="started")):
+            await router._execute_tool(session, tool_call)
+
+        start_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.AGENT_SESSION_START]
+        assert len(start_msgs) == 1
+        prompt = start_msgs[0].data["prompt"]
+        assert "## Task" in prompt
+        content_idx = prompt.index("## Additional Content")
+        assert "```typescript" in prompt[content_idx:]
+
+    @pytest.mark.asyncio
+    async def test_empty_prompt_not_formatted(self, session_manager: SessionManager) -> None:
+        """An empty prompt is left unchanged (no fallback injection via _execute_tool)."""
+        router = _make_router(session_manager)
+        session = session_manager.create_session(SessionType.CONVERSATIONAL)
+        session.set_active()
+
+        mock_td = _make_agent_tool_def("claude_code", "claude_code")
+        router._tool_registry.get.return_value = mock_td  # type: ignore[attr-defined]
+
+        tool_call = ToolCallRequest(
+            tool_use_id="test-6",
+            tool_name="claude_code",
+            tool_input={"prompt": ""},
+        )
+        with patch.object(router, "_start_claude_code", AsyncMock(return_value="started")):
+            await router._execute_tool(session, tool_call)
+
+        start_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.AGENT_SESSION_START]
+        assert len(start_msgs) == 1
+        assert start_msgs[0].data["prompt"] == ""

@@ -7,6 +7,7 @@ import '../../models/split_tree.dart';
 import '../../state/app_state.dart';
 import '../../state/pane_state.dart';
 import '../../theme.dart';
+import '../utils/markdown_copy_menu.dart';
 import '../utils/selectable_code_block_builder.dart';
 
 /// Full-pane artifact viewer.
@@ -521,88 +522,97 @@ class _ArtifactContentState extends State<_ArtifactContent> {
   }
 
   Widget _buildRenderedMarkdown(BuildContext context) {
-    return MarkdownBody(
-      data: _content!,
-      shrinkWrap: true,
-      selectable: true,
-      checkboxBuilder: (bool checked) => Padding(
-        padding: const EdgeInsets.only(right: 6),
-        child: Icon(
-          checked
-              ? Icons.check_box_rounded
-              : Icons.check_box_outline_blank_rounded,
-          size: 16,
-          color: checked
-              ? context.appColors.accent
-              : context.appColors.textSecondary,
-        ),
-      ),
-      builders: {
-        'pre': SelectableCodeBlockBuilder(
-          textStyle: TextStyle(
-            color: context.appColors.textPrimary,
-            fontSize: 12.5,
-            fontFamily: 'monospace',
+    return SelectionScope(
+      child: MarkdownCopyMenu(
+        rawMarkdown: _content!,
+        child: MarkdownBody(
+          data: _content!,
+          shrinkWrap: true,
+          selectable: false,
+          checkboxBuilder: (bool checked) => Padding(
+            padding: const EdgeInsets.only(right: 6),
+            child: Icon(
+              checked
+                  ? Icons.check_box_rounded
+                  : Icons.check_box_outline_blank_rounded,
+              size: 16,
+              color: checked
+                  ? context.appColors.accent
+                  : context.appColors.textSecondary,
+            ),
           ),
-        ),
-      },
-      styleSheet: MarkdownStyleSheet(
-        p: TextStyle(
-          color: context.appColors.textPrimary,
-          fontSize: 14,
-          height: 1.6,
-        ),
-        code: TextStyle(
-          color: context.appColors.textPrimary,
-          backgroundColor: context.appColors.bgElevated,
-          fontSize: 12.5,
-          fontFamily: 'monospace',
-        ),
-        codeblockDecoration: BoxDecoration(
-          color: context.appColors.bgElevated,
-          borderRadius: BorderRadius.circular(8),
-        ),
-        codeblockPadding: const EdgeInsets.all(12),
-        a: TextStyle(color: context.appColors.accentLight),
-        listBullet: TextStyle(
-          color: context.appColors.textPrimary,
-          fontSize: 14,
-        ),
-        h1: TextStyle(
-          color: context.appColors.textPrimary,
-          fontSize: 24,
-          fontWeight: FontWeight.bold,
-        ),
-        h2: TextStyle(
-          color: context.appColors.textPrimary,
-          fontSize: 20,
-          fontWeight: FontWeight.bold,
-        ),
-        h3: TextStyle(
-          color: context.appColors.textPrimary,
-          fontSize: 17,
-          fontWeight: FontWeight.bold,
-        ),
-        h4: TextStyle(
-          color: context.appColors.textPrimary,
-          fontSize: 15,
-          fontWeight: FontWeight.bold,
-        ),
-        blockquoteDecoration: BoxDecoration(
-          border: Border(
-            left: BorderSide(color: context.appColors.accentDim, width: 3),
+          builders: {
+            'pre': SelectableCodeBlockBuilder(
+              textStyle: TextStyle(
+                color: context.appColors.textPrimary,
+                fontSize: 12.5,
+                fontFamily: 'monospace',
+              ),
+            ),
+          },
+          styleSheet: MarkdownStyleSheet(
+            p: TextStyle(
+              color: context.appColors.textPrimary,
+              fontSize: 14,
+              height: 1.6,
+            ),
+            code: TextStyle(
+              color: context.appColors.textPrimary,
+              backgroundColor: context.appColors.bgElevated,
+              fontSize: 12.5,
+              fontFamily: 'monospace',
+            ),
+            codeblockDecoration: BoxDecoration(
+              color: context.appColors.bgElevated,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            codeblockPadding: const EdgeInsets.all(12),
+            a: TextStyle(color: context.appColors.accentLight),
+            listBullet: TextStyle(
+              color: context.appColors.textPrimary,
+              fontSize: 14,
+            ),
+            h1: TextStyle(
+              color: context.appColors.textPrimary,
+              fontSize: 24,
+              fontWeight: FontWeight.bold,
+            ),
+            h2: TextStyle(
+              color: context.appColors.textPrimary,
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+            ),
+            h3: TextStyle(
+              color: context.appColors.textPrimary,
+              fontSize: 17,
+              fontWeight: FontWeight.bold,
+            ),
+            h4: TextStyle(
+              color: context.appColors.textPrimary,
+              fontSize: 15,
+              fontWeight: FontWeight.bold,
+            ),
+            blockquoteDecoration: BoxDecoration(
+              border: Border(
+                left: BorderSide(color: context.appColors.accentDim, width: 3),
+              ),
+              color: context.appColors.bgElevated.withAlpha(80),
+            ),
+            blockquotePadding: const EdgeInsets.only(
+              left: 12,
+              top: 4,
+              bottom: 4,
+            ),
+            tableBorder: TableBorder.all(color: context.appColors.divider),
+            tableHead: TextStyle(
+              color: context.appColors.textPrimary,
+              fontWeight: FontWeight.bold,
+            ),
+            tableBody: TextStyle(color: context.appColors.textPrimary),
+            horizontalRuleDecoration: BoxDecoration(
+              border: Border(top: BorderSide(color: context.appColors.divider)),
+            ),
           ),
-          color: context.appColors.bgElevated.withAlpha(80),
-        ),
-        blockquotePadding: const EdgeInsets.only(left: 12, top: 4, bottom: 4),
-        tableBorder: TableBorder.all(color: context.appColors.divider),
-        tableHead: TextStyle(
-          color: context.appColors.textPrimary,
-          fontWeight: FontWeight.bold,
-        ),
-        tableBody: TextStyle(color: context.appColors.textPrimary),
-        horizontalRuleDecoration: BoxDecoration(
-          border: Border(top: BorderSide(color: context.appColors.divider)),
         ),
       ),
     );

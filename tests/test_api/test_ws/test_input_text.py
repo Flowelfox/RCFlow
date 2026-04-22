@@ -9,7 +9,6 @@ Covers:
 - ``pause_session``: missing session_id, success, router error
 - ``resume_session``: missing session_id, success, router error
 - ``restore_session``: missing session_id, success, router error
-- ``dismiss_session_end_ask``: missing session_id, success, router error
 - ``permission_response``: missing session_id, missing request_id, success
 - ``prompt``: valid dispatch sends ack; prompt with existing session_id
 """
@@ -321,47 +320,6 @@ class TestRestoreSession:
 
         assert data["type"] == "error"
         assert data["code"] == "RESTORE_SESSION_ERROR"
-
-
-# ---------------------------------------------------------------------------
-# dismiss_session_end_ask
-# ---------------------------------------------------------------------------
-
-
-class TestDismissSessionEndAsk:
-    def test_missing_session_id_returns_error(self, client: TestClient) -> None:
-        with client.websocket_connect(_ws_url()) as ws:
-            ws.send_json({"type": "dismiss_session_end_ask"})
-            data = ws.receive_json()
-
-        assert data["type"] == "error"
-        assert data["code"] == "MISSING_SESSION_ID"
-
-    def test_success_returns_ack(self, client: TestClient) -> None:
-        with (
-            patch.object(client.app.state.prompt_router, "dismiss_session_end_ask", return_value=None),
-            client.websocket_connect(_ws_url()) as ws,
-        ):
-            ws.send_json({"type": "dismiss_session_end_ask", "session_id": "test-id"})
-            data = ws.receive_json()
-
-        assert data["type"] == "ack"
-        assert data["session_id"] == "test-id"
-
-    def test_router_error_returns_error_response(self, client: TestClient) -> None:
-        with (
-            patch.object(
-                client.app.state.prompt_router,
-                "dismiss_session_end_ask",
-                side_effect=ValueError("Session not found"),
-            ),
-            client.websocket_connect(_ws_url()) as ws,
-        ):
-            ws.send_json({"type": "dismiss_session_end_ask", "session_id": "bad-id"})
-            data = ws.receive_json()
-
-        assert data["type"] == "error"
-        assert data["code"] == "DISMISS_SESSION_END_ASK_ERROR"
 
 
 # ---------------------------------------------------------------------------

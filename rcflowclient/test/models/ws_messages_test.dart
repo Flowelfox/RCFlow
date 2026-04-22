@@ -66,7 +66,6 @@ void main() {
         DisplayMessageType.error,
         DisplayMessageType.system,
         DisplayMessageType.summary,
-        DisplayMessageType.sessionEndAsk,
         DisplayMessageType.planModeAsk,
         DisplayMessageType.planReviewAsk,
         DisplayMessageType.permissionRequest,

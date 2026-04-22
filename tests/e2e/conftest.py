@@ -126,13 +126,13 @@ def make_e2e_client(e2e_settings: Settings, e2e_tool_registry: ToolRegistry):
 
         def test_something(make_e2e_client):
             client = make_e2e_client([
-                [TextChunk("Hi! [SessionEndAsk]"), StreamDone("end_turn")],
+                [TextChunk("Hi!"), StreamDone("end_turn")],
             ])
     """
 
     def _factory(turns: list[list[LLMStreamEvent]] | None = None) -> TestClient:
         _turns: list[list[LLMStreamEvent]] = turns or [
-            [TextChunk(content="Hello! [SessionEndAsk]"), StreamDone(stop_reason="end_turn")]
+            [TextChunk(content="Hello!"), StreamDone(stop_reason="end_turn")]
         ]
         app = _build_e2e_app(e2e_settings, e2e_tool_registry, _turns)
         return TestClient(app, raise_server_exceptions=True)

@@ -133,22 +133,6 @@ async def ws_input_text(
                     await websocket.send_json({"type": "error", "content": str(e), "code": "RESTORE_SESSION_ERROR"})
                 continue
 
-            if msg_type == "dismiss_session_end_ask":
-                dismiss_session_id = message.get("session_id")
-                if not dismiss_session_id:
-                    await websocket.send_json(
-                        {"type": "error", "content": "Missing session_id", "code": "MISSING_SESSION_ID"}
-                    )
-                    continue
-                try:
-                    prompt_router.dismiss_session_end_ask(dismiss_session_id)
-                    await websocket.send_json({"type": "ack", "session_id": dismiss_session_id})
-                except ValueError as e:
-                    await websocket.send_json(
-                        {"type": "error", "content": str(e), "code": "DISMISS_SESSION_END_ASK_ERROR"}
-                    )
-                continue
-
             if msg_type == "permission_response":
                 pr_session_id = message.get("session_id")
                 if not pr_session_id:
@@ -231,6 +215,98 @@ async def ws_input_text(
                     await websocket.send_json(
                         {"type": "error", "content": str(e), "code": "INTERRUPT_SUBPROCESS_ERROR"}
                     )
+                continue
+
+            if msg_type == "cancel_queued":
+                cq_session_id = message.get("session_id")
+                cq_queued_id = message.get("queued_id")
+                if not cq_session_id or not cq_queued_id:
+                    await websocket.send_json(
+                        {
+                            "type": "error",
+                            "content": "Missing session_id or queued_id",
+                            "code": "MISSING_QUEUED_ID",
+                        }
+                    )
+                    continue
+                session_obj = prompt_router._session_manager.get_session(cq_session_id)
+                store = getattr(websocket.app.state, "pending_store", None)
+                if session_obj is None or store is None:
+                    await websocket.send_json(
+                        {
+                            "type": "cancel_ack",
+                            "session_id": cq_session_id,
+                            "queued_id": cq_queued_id,
+                            "ok": False,
+                            "reason": "not_found",
+                        }
+                    )
+                    continue
+                removed = await store.cancel(session_obj, queued_id=cq_queued_id)
+                await websocket.send_json(
+                    {
+                        "type": "cancel_ack",
+                        "session_id": cq_session_id,
+                        "queued_id": cq_queued_id,
+                        "ok": removed is not None,
+                        **({} if removed is not None else {"reason": "already_delivered"}),
+                    }
+                )
+                continue
+
+            if msg_type == "edit_queued":
+                eq_session_id = message.get("session_id")
+                eq_queued_id = message.get("queued_id")
+                eq_content = (message.get("content") or "").strip()
+                eq_display = message.get("display_content")
+                if not eq_session_id or not eq_queued_id:
+                    await websocket.send_json(
+                        {
+                            "type": "error",
+                            "content": "Missing session_id or queued_id",
+                            "code": "MISSING_QUEUED_ID",
+                        }
+                    )
+                    continue
+                if not eq_content:
+                    await websocket.send_json(
+                        {
+                            "type": "edit_ack",
+                            "session_id": eq_session_id,
+                            "queued_id": eq_queued_id,
+                            "ok": False,
+                            "reason": "empty",
+                        }
+                    )
+                    continue
+                session_obj = prompt_router._session_manager.get_session(eq_session_id)
+                store = getattr(websocket.app.state, "pending_store", None)
+                if session_obj is None or store is None:
+                    await websocket.send_json(
+                        {
+                            "type": "edit_ack",
+                            "session_id": eq_session_id,
+                            "queued_id": eq_queued_id,
+                            "ok": False,
+                            "reason": "not_found",
+                        }
+                    )
+                    continue
+                updated = await store.edit(
+                    session_obj,
+                    queued_id=eq_queued_id,
+                    content=eq_content,
+                    display_content=eq_display if isinstance(eq_display, str) else eq_content,
+                )
+                await websocket.send_json(
+                    {
+                        "type": "edit_ack",
+                        "session_id": eq_session_id,
+                        "queued_id": eq_queued_id,
+                        "ok": updated is not None,
+                        **({} if updated is not None else {"reason": "already_delivered"}),
+                    }
+                )
                 continue
 
             if msg_type == "list_linear_issues":
@@ -375,11 +451,37 @@ async def ws_input_text(
                     if not resolved_attachments:
                         resolved_attachments = None
 
-            # Create/resolve session and acknowledge immediately so the
-            # client can subscribe to the output channel *before* chunks
-            # start flowing.
+            # Create/resolve session and check whether the agent is currently
+            # busy.  Busy sessions enqueue the prompt in the persistent pending
+            # queue (see ``Queued User Messages`` in ``Design.md``); the ack
+            # carries the assigned ``queued_id`` so the client can pin the
+            # message at the bottom of chat until drain.
             result_session_id = prompt_router.ensure_session(session_id)
-            await websocket.send_json({"type": "ack", "session_id": result_session_id})
+            session_obj = prompt_router._session_manager.get_session(result_session_id)
+            queued_id: str | None = None
+            if session_obj is not None:
+                queued_id = await prompt_router.enqueue_user_prompt(
+                    session_obj,
+                    text=text,
+                    display_text=display_text,
+                    attachments=resolved_attachments,
+                    project_name=project_name,
+                    selected_worktree_path=selected_worktree_path,
+                    task_id=prompt_task_id,
+                )
+            ack_payload: dict[str, object] = {
+                "type": "ack",
+                "session_id": result_session_id,
+                "queued": queued_id is not None,
+            }
+            if queued_id is not None:
+                ack_payload["queued_id"] = queued_id
+            await websocket.send_json(ack_payload)
+
+            # If the prompt was enqueued, delivery happens on the next turn
+            # boundary via ``PromptRouter.schedule_pending_drain``.
+            if queued_id is not None:
+                continue
 
             # Process prompt in the background
             task = asyncio.create_task(

@@ -88,6 +88,12 @@ class WorkerConnection extends ChangeNotifier {
   /// Fires when a previously errored project is accepted (error cleared).
   void Function(String sessionId)? onProjectNameErrorCleared;
 
+  /// Fires with the authoritative ``queued_messages`` snapshot from each
+  /// ``session_update`` broadcast.  Consumers use this to rehydrate the
+  /// pinned queue on reconnect.  See ``Queued User Messages`` in ``Design.md``.
+  void Function(String sessionId, List<Map<String, dynamic>> snapshot)?
+      onQueuedMessagesSnapshot;
+
   // Pending auto-load session after connect
   String? _pendingAutoLoadSessionId;
   String? get pendingAutoLoadSessionId => _pendingAutoLoadSessionId;
@@ -480,6 +486,21 @@ class WorkerConnection extends ChangeNotifier {
     }
     _cacheSessions();
     onSessionsChanged?.call();
+
+    // Forward the authoritative queued_messages snapshot to consumers so panes
+    // reconcile their pinned queue on every session_update (reconnect-safe).
+    if (msg.containsKey('queued_messages')) {
+      final rawList = msg['queued_messages'];
+      final snapshot = <Map<String, dynamic>>[];
+      if (rawList is List) {
+        for (final entry in rawList) {
+          if (entry is Map) {
+            snapshot.add(entry.cast<String, dynamic>());
+          }
+        }
+      }
+      onQueuedMessagesSnapshot?.call(sessionId, snapshot);
+    }
   }
 
   void _cacheSessions() {

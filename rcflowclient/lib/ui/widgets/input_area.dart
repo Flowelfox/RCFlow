@@ -13,6 +13,7 @@ import '../../state/pane_state.dart';
 import '../../theme.dart';
 import '../../tips.dart';
 import 'create_worktree_dialog.dart';
+import 'session_identity_bar.dart' show CavemanPreviewBadge, WorkerBadge;
 
 bool get _isDesktop =>
     Platform.isWindows || Platform.isLinux || Platform.isMacOS;
@@ -961,6 +962,16 @@ class _InputAreaState extends State<InputArea> {
       state.defaultWorkerId,
       connectedWorkers,
     );
+    // Read-only worker badge: shown whenever the interactive picker isn't —
+    // i.e. an existing session, or a new chat with only one connected worker —
+    // so the user can always see which worker will receive the message.
+    final showReadOnlyWorkerBadge =
+        !showWorkerChip && selectedWorkerName != null;
+    // Caveman mode indicator — surfaced alongside the other chips so the user
+    // is always reminded before sending a message.
+    final cavemanActive = context.select<PaneState, bool>(
+      (s) => s.isCavemanActive,
+    );
 
     // Project chip
     final selectedProject = context.select<PaneState, String?>(
@@ -1099,6 +1110,8 @@ class _InputAreaState extends State<InputArea> {
           children: [
             // All chips in a single horizontal Wrap row
             if (showWorkerChip ||
+                showReadOnlyWorkerBadge ||
+                cavemanActive ||
                 selectedProject != null ||
                 selectedTool != null ||
                 showWorktreeChip ||
@@ -1119,6 +1132,16 @@ class _InputAreaState extends State<InputArea> {
                         onSelected: (id) {
                           context.read<PaneState>().setTargetWorker(id);
                         },
+                      ),
+                    if (showReadOnlyWorkerBadge)
+                      WorkerBadge(
+                        name: selectedWorkerName,
+                        interactive: false,
+                      ),
+                    if (cavemanActive)
+                      CavemanPreviewBadge(
+                        onDismiss: () =>
+                            context.read<PaneState>().setCavemanDisabled(true),
                       ),
                     if (selectedProject != null)
                       _ProjectChip(

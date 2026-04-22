@@ -18,7 +18,6 @@ class MessageType(StrEnum):
     TOOL_OUTPUT = "tool_output"
     ERROR = "error"
     SESSION_END = "session_end"
-    SESSION_END_ASK = "session_end_ask"
     SUMMARY = "summary"
     NOTIFICATION = "notification"
     AGENT_SESSION_START = "agent_session_start"
@@ -35,6 +34,11 @@ class MessageType(StrEnum):
     AGENT_LOG = "agent_log"
     SESSION_UPDATE = "session_update"  # For broadcasting session metadata updates
     SUBPROCESS_STATUS = "subprocess_status"  # Ephemeral — not archived to DB
+    # Queued user messages (ephemeral — DB is persisted separately in
+    # ``session_pending_messages``; these events only notify live subscribers).
+    MESSAGE_QUEUED = "message_queued"
+    MESSAGE_DEQUEUED = "message_dequeued"
+    MESSAGE_QUEUED_UPDATED = "message_queued_updated"
 
 
 @dataclass

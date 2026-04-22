@@ -21,7 +21,6 @@ from __future__ import annotations
 import pytest
 
 from src.core.llm import StreamDone, TextChunk, ToolCallRequest
-from src.core.session import SessionManager, SessionStatus
 from tests.e2e.ws_helpers import (
     drain_output,
     find_all,
@@ -41,13 +40,13 @@ pytestmark = pytest.mark.e2e
 
 
 class TestTextResponseHappyPath:
-    """Prompt → text chunks appear on output channel → session_end_ask fires."""
+    """Prompt → text chunks appear on output channel → session_end fires."""
 
     @pytest.fixture
     def client(self, make_e2e_client):
         return make_e2e_client(
             [
-                [TextChunk(content="Hello from mock! [SessionEndAsk]"), StreamDone(stop_reason="end_turn")],
+                [TextChunk(content="Hello from mock!"), StreamDone(stop_reason="end_turn")],
             ]
         )
 
@@ -67,18 +66,12 @@ class TestTextResponseHappyPath:
         full_text = "".join(m.get("content", "") for m in text_chunks)
         assert "Hello from mock" in full_text
 
-    def test_session_end_ask_fires_after_response(self, client):
-        session_id = send_prompt(client, "hello")
-        msgs = drain_output(client, session_id)
-
-        assert find_msg(msgs, "session_end_ask") is not None, f"session_end_ask not found in: {msg_types(msgs)}"
-
     def test_output_messages_carry_session_id(self, client):
         session_id = send_prompt(client, "hello")
         msgs = drain_output(client, session_id)
 
         for msg in msgs:
-            if msg.get("type") in {"text_chunk", "session_end_ask"}:
+            if msg.get("type") == "text_chunk":
                 assert msg.get("session_id") == session_id, f"Wrong session_id on {msg['type']}: {msg}"
 
 
@@ -89,7 +82,7 @@ class TestTextResponseHappyPath:
 
 
 class TestToolUseFlow:
-    """Prompt → tool_start → tool_output → follow-up text → session_end_ask."""
+    """Prompt → tool_start → tool_output → follow-up text → session_end."""
 
     @pytest.fixture
     def client(self, make_e2e_client):
@@ -107,7 +100,7 @@ class TestToolUseFlow:
                 ],
                 # Turn 2: LLM wraps up after seeing tool result
                 [
-                    TextChunk(content="Done! [SessionEndAsk]"),
+                    TextChunk(content="Done!"),
                     StreamDone(stop_reason="end_turn"),
                 ],
             ]
@@ -139,27 +132,19 @@ class TestToolUseFlow:
         later_text = [m for m in msgs[tool_output_idx + 1 :] if m.get("type") == "text_chunk"]
         assert later_text, "Expected text_chunk after tool_output"
 
-    def test_session_end_ask_fires_after_tool_flow(self, client):
-        session_id = send_prompt(client, "run something")
-        msgs = drain_output(client, session_id)
-
-        assert find_msg(msgs, "session_end_ask") is not None, f"session_end_ask not found in: {msg_types(msgs)}"
-
     def test_message_order_is_correct(self, client):
         session_id = send_prompt(client, "run something")
         msgs = drain_output(client, session_id)
 
         types = msg_types(msgs)
-        # tool_start must precede tool_output, which must precede session_end_ask
+        # tool_start must precede tool_output
         assert "tool_start" in types
         assert "tool_output" in types
-        assert "session_end_ask" in types
 
         tool_start_idx = types.index("tool_start")
         tool_output_idx = types.index("tool_output")
-        session_end_ask_idx = types.index("session_end_ask")
 
-        assert tool_start_idx < tool_output_idx < session_end_ask_idx, f"Unexpected message order: {types}"
+        assert tool_start_idx < tool_output_idx, f"Unexpected message order: {types}"
 
 
 # ---------------------------------------------------------------------------
@@ -178,17 +163,16 @@ class TestMultiTurnConversation:
                 # Turn 1: assistant replies without ending
                 [TextChunk(content="First response."), StreamDone(stop_reason="end_turn")],
                 # Turn 2: assistant ends
-                [TextChunk(content="Second response. [SessionEndAsk]"), StreamDone(stop_reason="end_turn")],
+                [TextChunk(content="Second response."), StreamDone(stop_reason="end_turn")],
             ]
         )
 
     def test_second_response_arrives(self, client):
-        # First prompt — no SessionEndAsk in turn 1, so drain until first text_chunk
         session_id = send_prompt(client, "first message")
-
-        # Second prompt to same session; drain until session_end_ask from turn 2
         send_prompt(client, "second message", session_id=session_id)
-        msgs = drain_output(client, session_id)
+        # stop_after=2 waits for both Turn 1 and Turn 2 summaries so the full
+        # history is replayed and Turn 2 text is visible.
+        msgs = drain_output(client, session_id, stop_after=2)
 
         text_chunks = find_all(msgs, "text_chunk")
         combined = "".join(m.get("content", "") for m in text_chunks)
@@ -199,41 +183,32 @@ class TestMultiTurnConversation:
         second_ack_id = send_prompt(client, "second message", session_id=session_id)
         assert session_id == second_ack_id
 
-    def test_session_end_ask_only_after_second_turn(self, client):
-        session_id = send_prompt(client, "first message")
-        send_prompt(client, "second message", session_id=session_id)
-        msgs = drain_output(client, session_id)
-
-        assert find_msg(msgs, "session_end_ask") is not None
-
 
 # ---------------------------------------------------------------------------
 # 4. Session end — user confirms
-#    After session_end_ask, user sends end_session → session_end arrives.
+#    User sends end_session → session_end arrives.
 # ---------------------------------------------------------------------------
 
 
 class TestSessionEndConfirm:
-    """session_end_ask → end_session → session_end with status completed."""
+    """end_session → session_end with status completed."""
 
     @pytest.fixture
     def client(self, make_e2e_client):
         return make_e2e_client(
             [
-                [TextChunk(content="Done! [SessionEndAsk]"), StreamDone(stop_reason="end_turn")],
+                [TextChunk(content="Done!"), StreamDone(stop_reason="end_turn")],
             ]
         )
 
     def test_session_end_message_arrives_after_end_session(self, client):
         session_id = send_prompt(client, "do something")
-        # Drain until session_end_ask
-        msgs_before = drain_output(client, session_id)
-        assert find_msg(msgs_before, "session_end_ask") is not None
+        drain_output(client, session_id)
 
         # User confirms end
         send_control(client, {"type": "end_session", "session_id": session_id})
 
-        # Drain for session_end — use longer settle since end_session fires archiving
+        # Drain for session_end
         msgs_after = drain_output(
             client,
             session_id,
@@ -254,45 +229,7 @@ class TestSessionEndConfirm:
 
 
 # ---------------------------------------------------------------------------
-# 5. Session end — user dismisses
-#    After session_end_ask, user dismisses; no session_end appears.
-# ---------------------------------------------------------------------------
-
-
-class TestSessionEndDismiss:
-    """session_end_ask → dismiss_session_end_ask → session stays alive."""
-
-    @pytest.fixture
-    def client(self, make_e2e_client):
-        return make_e2e_client(
-            [
-                [TextChunk(content="Done! [SessionEndAsk]"), StreamDone(stop_reason="end_turn")],
-            ]
-        )
-
-    def test_dismiss_ack_is_returned(self, client):
-        session_id = send_prompt(client, "do something")
-        drain_output(client, session_id)
-
-        ack = send_control(client, {"type": "dismiss_session_end_ask", "session_id": session_id})
-        assert ack["type"] == "ack"
-        assert ack["session_id"] == session_id
-
-    def test_session_not_ended_after_dismiss(self, client):
-        session_id = send_prompt(client, "do something")
-        drain_output(client, session_id)
-
-        send_control(client, {"type": "dismiss_session_end_ask", "session_id": session_id})
-
-        # Session must still be registered as active (not completed/failed)
-        session_manager: SessionManager = client.app.state.session_manager
-        session = session_manager.get_session(session_id)
-        assert session is not None, "Session should still be in memory"
-        assert session.status not in {SessionStatus.COMPLETED, SessionStatus.FAILED, SessionStatus.CANCELLED}
-
-
-# ---------------------------------------------------------------------------
-# 6. Session not found
+# 5. Session not found
 #    Subscribing to a nonexistent session returns a SESSION_NOT_FOUND error.
 # ---------------------------------------------------------------------------
 

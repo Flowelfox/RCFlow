@@ -44,10 +44,7 @@ void handleTextChunk(Map<String, dynamic> msg, PaneState pane) {
     return;
   }
 
-  var content = (msg['content'] as String? ?? '').replaceAll(
-    '[SessionEndAsk]',
-    '',
-  );
+  var content = msg['content'] as String? ?? '';
   if (content.isNotEmpty) {
     pane.appendAssistantChunk(content);
   }
@@ -96,24 +93,6 @@ void handleSummary(Map<String, dynamic> msg, PaneState pane) {
       content: msg['content'] as String? ?? '',
       sessionId: msg['session_id'] as String?,
       finished: true,
-    ),
-  );
-}
-
-void handleSessionEndAsk(Map<String, dynamic> msg, PaneState pane) {
-  pane.finalizeStream();
-  pane.stripSessionEndAskTag();
-  // Deduplicate: skip if there is already a pending (unresolved) end-ask.
-  if (pane.messages.any(
-    (m) => m.type == DisplayMessageType.sessionEndAsk && m.accepted == null,
-  )) {
-    return;
-  }
-  pane.addDisplayMessage(
-    DisplayMessage(
-      type: DisplayMessageType.sessionEndAsk,
-      sessionId: msg['session_id'] as String?,
-      accepted: msg['accepted'] as bool?,
     ),
   );
 }
@@ -246,11 +225,20 @@ void handleAgentGroupEnd(Map<String, dynamic> msg, PaneState pane) {
 }
 
 /// Diagnostic log line from a Claude Code subprocess (startup banners, debug
-/// output). Silently consumed so it does not contaminate the assistant stream.
+/// output). Stdout noise is silently consumed to avoid contaminating the
+/// assistant stream. Stderr errors/warnings are surfaced as system messages.
 void handleAgentLog(Map<String, dynamic> msg, PaneState pane) {
-  // Intentionally no-op: agent_log messages carry subprocess stdout noise
-  // (e.g. Claude Code startup banners). They must not trigger appendAssistantChunk
-  // which would close the active agent group and misroute subsequent TOOL_OUTPUT.
+  // Stdout-sourced lines (startup banners, verbose noise) must remain a no-op:
+  // calling appendAssistantChunk here would close the active agent group and
+  // misroute subsequent TOOL_OUTPUT diffs to the wrong tool block.
+  final source = msg['source'] as String?;
+  final level = msg['level'] as String?;
+  if (source == 'stderr' && (level == 'error' || level == 'warn')) {
+    final content = msg['content'] as String? ?? '';
+    if (content.isNotEmpty) {
+      pane.addSystemMessage(content, isError: level == 'error');
+    }
+  }
 }
 
 void handleSubprocessStatus(Map<String, dynamic> msg, PaneState pane) {
@@ -294,13 +282,31 @@ void handleSessionRestored(Map<String, dynamic> msg, PaneState pane) {
 void handleSessionEnd(Map<String, dynamic> msg, PaneState pane) {
   pane.finalizeStream();
   pane.setRunningSubprocess(null);
-  for (final m in pane.messages) {
-    if (m.type == DisplayMessageType.sessionEndAsk && m.accepted == null) {
-      m.accepted = true;
-    }
-  }
   final endedId = msg['session_id'] as String?;
   pane.handleSessionEnded(endedId);
+}
+
+void handleMessageQueued(Map<String, dynamic> msg, PaneState pane) {
+  pane.applyMessageQueued(msg);
+}
+
+void handleMessageDequeued(Map<String, dynamic> msg, PaneState pane) {
+  final queuedId = msg['queued_id'] as String?;
+  if (queuedId != null) {
+    pane.applyMessageDequeued(queuedId);
+  }
+}
+
+void handleMessageQueuedUpdated(Map<String, dynamic> msg, PaneState pane) {
+  pane.applyMessageQueuedUpdated(msg);
+}
+
+void handleCancelAck(Map<String, dynamic> msg, PaneState pane) {
+  pane.applyCancelAck(msg);
+}
+
+void handleEditAck(Map<String, dynamic> msg, PaneState pane) {
+  pane.applyEditAck(msg);
 }
 
 // ---------------------------------------------------------------------------
@@ -318,7 +324,6 @@ final Map<WsOutputType, OutputHandler> typedOutputHandlerRegistry = {
   WsOutputType.toolOutput: handleToolOutput,
   WsOutputType.error: handleError,
   WsOutputType.summary: handleSummary,
-  WsOutputType.sessionEndAsk: handleSessionEndAsk,
   WsOutputType.sessionEnd: handleSessionEnd,
   WsOutputType.sessionPaused: handleSessionPaused,
   WsOutputType.sessionResumed: handleSessionResumed,
@@ -333,6 +338,11 @@ final Map<WsOutputType, OutputHandler> typedOutputHandlerRegistry = {
   WsOutputType.permissionRequest: handlePermissionRequest,
   WsOutputType.subprocessStatus: handleSubprocessStatus,
   WsOutputType.agentLog: handleAgentLog,
+  WsOutputType.messageQueued: handleMessageQueued,
+  WsOutputType.messageDequeued: handleMessageDequeued,
+  WsOutputType.messageQueuedUpdated: handleMessageQueuedUpdated,
+  WsOutputType.cancelAck: handleCancelAck,
+  WsOutputType.editAck: handleEditAck,
 };
 
 /// Legacy string-keyed registry — kept for [PaneState._loadHistory] and
@@ -344,7 +354,6 @@ final Map<String, OutputHandler> outputHandlerRegistry = {
   'tool_output': handleToolOutput,
   'error': handleError,
   'summary': handleSummary,
-  'session_end_ask': handleSessionEndAsk,
   'session_end': handleSessionEnd,
   'session_paused': handleSessionPaused,
   'session_resumed': handleSessionResumed,
@@ -359,6 +368,11 @@ final Map<String, OutputHandler> outputHandlerRegistry = {
   'permission_request': handlePermissionRequest,
   'subprocess_status': handleSubprocessStatus,
   'agent_log': handleAgentLog,
+  'message_queued': handleMessageQueued,
+  'message_dequeued': handleMessageDequeued,
+  'message_queued_updated': handleMessageQueuedUpdated,
+  'cancel_ack': handleCancelAck,
+  'edit_ack': handleEditAck,
 };
 
 // ---------------------------------------------------------------------------
@@ -378,10 +392,7 @@ void buildTextChunkHistory(
   String sessionId,
   List<DisplayMessage> messages,
 ) {
-  final content = (msg['content'] as String? ?? '').replaceAll(
-    '[SessionEndAsk]',
-    '',
-  );
+  final content = msg['content'] as String? ?? '';
   final metadata = msg['metadata'] as Map<String, dynamic>? ?? {};
 
   if (metadata['role'] == 'user') {
@@ -495,32 +506,6 @@ void buildSummaryHistory(
   );
 }
 
-void buildSessionEndAskHistory(
-  Map<String, dynamic> msg,
-  String sessionId,
-  List<DisplayMessage> messages,
-) {
-  for (int i = messages.length - 1; i >= 0; i--) {
-    if (messages[i].type == DisplayMessageType.assistant) {
-      messages[i].content = messages[i].content
-          .replaceAll('[SessionEndAsk]', '')
-          .trimRight();
-      break;
-    }
-  }
-
-  final metadata = msg['metadata'] as Map<String, dynamic>? ?? {};
-  bool? accepted = metadata['accepted'] as bool?;
-  accepted ??= false;
-  messages.add(
-    DisplayMessage(
-      type: DisplayMessageType.sessionEndAsk,
-      sessionId: sessionId,
-      accepted: accepted,
-    ),
-  );
-}
-
 void buildSessionEndHistory(
   Map<String, dynamic> msg,
   String sessionId,
@@ -537,9 +522,6 @@ void buildSessionEndHistory(
           child.finished = true;
         }
       }
-    }
-    if (m.type == DisplayMessageType.sessionEndAsk && m.accepted == null) {
-      m.accepted = true;
     }
   }
 }
@@ -718,7 +700,6 @@ final Map<String, HistoryBuilder> historyBuilderRegistry = {
   'tool_output': buildToolOutputHistory,
   'error': buildErrorHistory,
   'summary': buildSummaryHistory,
-  'session_end_ask': buildSessionEndAskHistory,
   'session_end': buildSessionEndHistory,
   'session_paused': buildSessionPausedHistory,
   'session_resumed': buildSessionResumedHistory,

@@ -47,6 +47,8 @@ _MAX_TOOL_OUTPUT_CHARS = 100_000
 _MAX_SNAPSHOT_BYTES = 1_000_000  # 1 MB limit for pre/post file snapshots
 _MAX_DIFF_LINES = 200
 _TOOL_OUTPUT_CHUNK_SIZE = 8_192
+_PLAN_MODE_TIMEOUT = 3600  # 1 hour — wait for user to approve/deny plan mode
+_PLAN_REVIEW_TIMEOUT = 3600  # 1 hour — wait for user to respond to plan review
 
 
 def _classify_log_level(line: str) -> str:
@@ -451,7 +453,22 @@ class ClaudeCodeAgentMixin:
                             # Block stream reading until the user approves or denies.
                             # While we wait, Claude Code's stdout pipe fills and it
                             # cannot advance further, effectively gating the session.
-                            await session._plan_mode_event.wait()
+                            try:
+                                await asyncio.wait_for(
+                                    session._plan_mode_event.wait(),
+                                    timeout=_PLAN_MODE_TIMEOUT,
+                                )
+                            except TimeoutError:
+                                session.buffer.push_text(
+                                    MessageType.ERROR,
+                                    {
+                                        "session_id": session.id,
+                                        "content": "Plan mode timed out. The session was stopped.",
+                                        "code": "PLAN_MODE_DENIED",
+                                    },
+                                )
+                                await self._end_claude_code_session(session)
+                                return
                             session._plan_mode_event = None
                             session.set_activity(ActivityState.RUNNING_SUBPROCESS)
                             if not session._plan_mode_approved:
@@ -482,7 +499,22 @@ class ClaudeCodeAgentMixin:
                             # Block stream reading until the user approves or provides
                             # feedback. Claude Code is waiting for stdin after ExitPlanMode,
                             # so the pipe is also effectively gated.
-                            await session._plan_review_event.wait()
+                            try:
+                                await asyncio.wait_for(
+                                    session._plan_review_event.wait(),
+                                    timeout=_PLAN_REVIEW_TIMEOUT,
+                                )
+                            except TimeoutError:
+                                session.buffer.push_text(
+                                    MessageType.ERROR,
+                                    {
+                                        "session_id": session.id,
+                                        "content": "Plan review timed out. The session was stopped.",
+                                        "code": "PLAN_REVIEW_TIMEOUT",
+                                    },
+                                )
+                                await self._end_claude_code_session(session)
+                                return
                             session._plan_review_event = None
                             session.set_activity(ActivityState.RUNNING_SUBPROCESS)
                             response_text = session._plan_review_feedback or ""
@@ -534,84 +566,27 @@ class ClaudeCodeAgentMixin:
                 if scan_texts:
                     self._fire_text_artifact_scan(session, scan_texts)  # ty:ignore[unresolved-attribute]
 
-            elif event_type == "tool_result":
-                raw_content = event.get("content", "")
-                if isinstance(raw_content, list):
-                    # Content blocks format — extract text parts only
-                    parts = []
-                    for block in raw_content:
-                        if isinstance(block, dict) and block.get("type") == "text":
-                            parts.append(block.get("text", ""))
-                    content = "\n".join(parts)
-                else:
-                    content = str(raw_content)
-
-                content = _truncate_tool_output(content)
-
-                # Compute unified diff for Edit/Write tools if we have a
-                # pre-snapshot of the file.
-                diff: str | None = None
-                snapshots: list = getattr(session, "_pending_snapshots", [])
-                if snapshots:
-                    pending = snapshots.pop(0)
-                    if pending is not None:
-                        filepath_str, before_text = pending
-                        if before_text is not None:
-                            after_text = await _read_file_snapshot(Path(filepath_str))
-                            if after_text is not None:
-                                diff = _compute_diff(before_text, after_text, filepath_str)
-
-                if content or diff:
-                    is_error = event.get("is_error", False)
-
-                    # Split large outputs into multiple chunks
-                    chunks = _split_into_chunks(content, _TOOL_OUTPUT_CHUNK_SIZE) if content else [""]
-                    if len(chunks) == 1:
-                        tool_output_data: dict[str, Any] = {
-                            "session_id": session.id,
-                            "content": chunks[0],
-                            "is_error": is_error,
-                        }
-                        if diff:
-                            tool_output_data["diff"] = diff
-                        session.buffer.push_text(
-                            MessageType.TOOL_OUTPUT,
-                            tool_output_data,
+            elif event_type == "user":
+                # Claude Code emits tool_result events wrapped inside a "user"
+                # message — iterate content blocks and process each tool_result.
+                user_message = event.get("message", {})
+                for block in user_message.get("content", []):
+                    if isinstance(block, dict) and block.get("type") == "tool_result":
+                        await self._process_tool_result(
+                            session,
+                            block.get("content", ""),
+                            bool(block.get("is_error", False)),
                         )
-                    else:
-                        for i, chunk in enumerate(chunks):
-                            chunk_data: dict[str, Any] = {
-                                "session_id": session.id,
-                                "content": chunk,
-                                "is_error": is_error,
-                                "chunk_index": i,
-                                "total_chunks": len(chunks),
-                            }
-                            # Attach diff to the last chunk only
-                            if diff and i == len(chunks) - 1:
-                                chunk_data["diff"] = diff
-                            session.buffer.push_text(
-                                MessageType.TOOL_OUTPUT,
-                                chunk_data,
-                            )
-                    # Fire artifact scan for this tool result
-                    if content:
-                        self._fire_text_artifact_scan(session, [content])  # ty:ignore[unresolved-attribute]
 
-                # Clear current_tool after the result
-                session.subprocess_current_tool = None
-                if session.subprocess_started_at is not None:
-                    session.buffer.push_ephemeral(
-                        MessageType.SUBPROCESS_STATUS,
-                        {
-                            "session_id": session.id,
-                            "subprocess_type": session.subprocess_type,
-                            "display_name": session.subprocess_display_name,
-                            "working_directory": session.subprocess_working_directory,
-                            "current_tool": None,
-                            "started_at": session.subprocess_started_at.isoformat(),
-                        },
-                    )
+            elif event_type == "tool_result":
+                # Legacy shape kept for compatibility with synthetic test events.
+                # Claude Code does not emit top-level tool_result events in
+                # production; real results arrive as "user" events (above).
+                await self._process_tool_result(
+                    session,
+                    event.get("content", ""),
+                    bool(event.get("is_error", False)),
+                )
 
             elif event_type == "result":
                 session.set_activity(ActivityState.IDLE)
@@ -651,17 +626,11 @@ class ClaudeCodeAgentMixin:
                             "claude_code_interrupted": False,
                         },
                     )
-                    self._fire_summary_task(session, summary_text)  # ty:ignore[unresolved-attribute]  # No SESSION_END_ASK
+                    self._fire_summary_task(session, summary_text)  # ty:ignore[unresolved-attribute]
                     self._fire_task_update_task(session, summary_text)  # ty:ignore[unresolved-attribute]
                 elif result_text:
-                    self._fire_summary_task(session, result_text, push_session_end_ask=True)  # ty:ignore[unresolved-attribute]
+                    self._fire_summary_task(session, result_text)  # ty:ignore[unresolved-attribute]
                     self._fire_task_update_task(session, result_text)  # ty:ignore[unresolved-attribute]
-                else:
-                    # Result event with no text and no subtype — still notify the user
-                    session.buffer.push_text(
-                        MessageType.SESSION_END_ASK,
-                        {"session_id": session.id},
-                    )
 
             elif event_type == "system":
                 # Claude Code may emit system events with usage data
@@ -679,6 +648,88 @@ class ClaudeCodeAgentMixin:
             else:
                 logger.debug("Skipping unknown Claude Code event type: %s", event_type)
 
+    async def _process_tool_result(
+        self,
+        session: ActiveSession,
+        raw_content: Any,
+        is_error: bool,
+    ) -> None:
+        """Emit a TOOL_OUTPUT message for a single tool_result payload.
+
+        Computes a unified diff against the pre-snapshot when the matching
+        tool_use was Edit/Write, splits large outputs into chunks, and clears
+        the session's current_tool tracking.
+        """
+        if isinstance(raw_content, list):
+            # Content blocks format — extract text parts only
+            parts = []
+            for block in raw_content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    parts.append(block.get("text", ""))
+            content = "\n".join(parts)
+        else:
+            content = str(raw_content) if raw_content is not None else ""
+
+        content = _truncate_tool_output(content)
+
+        diff: str | None = None
+        snapshots: list = getattr(session, "_pending_snapshots", [])
+        if snapshots:
+            pending = snapshots.pop(0)
+            if pending is not None:
+                filepath_str, before_text = pending
+                if before_text is not None:
+                    after_text = await _read_file_snapshot(Path(filepath_str))
+                    if after_text is not None:
+                        diff = _compute_diff(before_text, after_text, filepath_str)
+
+        if content or diff:
+            chunks = _split_into_chunks(content, _TOOL_OUTPUT_CHUNK_SIZE) if content else [""]
+            if len(chunks) == 1:
+                tool_output_data: dict[str, Any] = {
+                    "session_id": session.id,
+                    "content": chunks[0],
+                    "is_error": is_error,
+                }
+                if diff:
+                    tool_output_data["diff"] = diff
+                session.buffer.push_text(
+                    MessageType.TOOL_OUTPUT,
+                    tool_output_data,
+                )
+            else:
+                for i, chunk in enumerate(chunks):
+                    chunk_data: dict[str, Any] = {
+                        "session_id": session.id,
+                        "content": chunk,
+                        "is_error": is_error,
+                        "chunk_index": i,
+                        "total_chunks": len(chunks),
+                    }
+                    # Attach diff to the last chunk only
+                    if diff and i == len(chunks) - 1:
+                        chunk_data["diff"] = diff
+                    session.buffer.push_text(
+                        MessageType.TOOL_OUTPUT,
+                        chunk_data,
+                    )
+            if content:
+                self._fire_text_artifact_scan(session, [content])  # ty:ignore[unresolved-attribute]
+
+        session.subprocess_current_tool = None
+        if session.subprocess_started_at is not None:
+            session.buffer.push_ephemeral(
+                MessageType.SUBPROCESS_STATUS,
+                {
+                    "session_id": session.id,
+                    "subprocess_type": session.subprocess_type,
+                    "display_name": session.subprocess_display_name,
+                    "working_directory": session.subprocess_working_directory,
+                    "current_tool": None,
+                    "started_at": session.subprocess_started_at.isoformat(),
+                },
+            )
+
     async def _stream_claude_code_events(
         self,
         session: ActiveSession,
@@ -687,6 +738,23 @@ class ClaudeCodeAgentMixin:
         tool_call: ToolCallRequest,
     ) -> None:
         """Background task: read Claude Code events and push to session buffer."""
+
+        # Forward error/warning-level stderr lines to the session buffer so the
+        # user can see them in the UI.  Debug/info noise is kept server-side.
+        def _on_stderr(line: str) -> None:
+            level = _classify_log_level(line)
+            if level in ("error", "warn"):
+                session.buffer.push_text(
+                    MessageType.AGENT_LOG,
+                    {
+                        "session_id": session.id,
+                        "content": line,
+                        "source": "stderr",
+                        "level": level,
+                    },
+                )
+
+        executor._on_stderr_line = _on_stderr
         try:
             await self._relay_claude_code_stream(session, executor.execute_streaming(tool_def, tool_call.tool_input))
         except Exception as e:
@@ -737,10 +805,6 @@ class ClaudeCodeAgentMixin:
                     "Claude Code exited cleanly without result event (session=%s)",
                     session.id,
                 )
-                session.buffer.push_text(
-                    MessageType.SESSION_END_ASK,
-                    {"session_id": session.id},
-                )
             else:
                 logger.warning(
                     "Claude Code exited without result event (session=%s, exit_code=%s)",
@@ -771,6 +835,7 @@ class ClaudeCodeAgentMixin:
             "Claude Code initial streaming finished, process kept alive (session=%s)",
             session.id,
         )
+        self.schedule_pending_drain(session)  # ty:ignore[unresolved-attribute]
 
     async def _end_claude_code_session(self, session: ActiveSession) -> None:
         """Clean up Claude Code state when the session ends."""
@@ -927,10 +992,6 @@ class ClaudeCodeAgentMixin:
                     "Claude Code (restart) exited cleanly without result event (session=%s)",
                     session.id,
                 )
-                session.buffer.push_text(
-                    MessageType.SESSION_END_ASK,
-                    {"session_id": session.id},
-                )
             else:
                 logger.warning(
                     "Claude Code (restart) exited without result event (session=%s, exit_code=%s)",
@@ -955,6 +1016,7 @@ class ClaudeCodeAgentMixin:
             MessageType.AGENT_GROUP_END,
             {"session_id": session.id},
         )
+        self.schedule_pending_drain(session)  # ty:ignore[unresolved-attribute]
 
     async def _read_claude_code_followup(
         self,
@@ -1009,10 +1071,6 @@ class ClaudeCodeAgentMixin:
                     "Claude Code (follow-up) exited cleanly without result event (session=%s)",
                     session.id,
                 )
-                session.buffer.push_text(
-                    MessageType.SESSION_END_ASK,
-                    {"session_id": session.id},
-                )
             else:
                 logger.warning(
                     "Claude Code (follow-up) exited without result event (session=%s, exit_code=%s)",
@@ -1037,3 +1095,4 @@ class ClaudeCodeAgentMixin:
             MessageType.AGENT_GROUP_END,
             {"session_id": session.id},
         )
+        self.schedule_pending_drain(session)  # ty:ignore[unresolved-attribute]

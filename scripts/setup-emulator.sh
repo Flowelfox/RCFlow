@@ -29,4 +29,4 @@ echo "==> Connected devices:"
 "$LINUX_ADB" devices
 
 echo ""
-echo "Done. You can now run: just flutter-run"
+echo "Done. You can now run: just run-android"
