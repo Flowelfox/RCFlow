@@ -73,6 +73,15 @@ class WorkerConnection extends ChangeNotifier {
   bool _manualDisconnect = false;
   int get reconnectAttempt => _retryCount;
 
+  // Hibernation state — set while the app is backgrounded on mobile. When
+  // hibernating we drop the WebSocket to stop battery drain but keep the
+  // cached session list visible and remember which sessions were subscribed
+  // so wake() can re-subscribe (the backend replays buffer history on
+  // subscribe, so live output resumes without any extra endpoint).
+  bool _hibernating = false;
+  bool get isHibernating => _hibernating;
+  Set<String> _subscribedBeforeHibernate = {};
+
   // Callbacks for message routing (set by AppState)
   void Function(Map<String, dynamic> msg, String workerId)? onInputMessage;
   void Function(Map<String, dynamic> msg, String workerId)? onOutputMessage;
@@ -109,8 +118,14 @@ class WorkerConnection extends ChangeNotifier {
     final wasConnected = _status == WorkerConnectionStatus.connected;
     if (wasConnected && !connected) {
       _status = WorkerConnectionStatus.disconnected;
-      subscribedSessions.clear();
-      sessions = [];
+      // During hibernation we intentionally keep [sessions] and
+      // [subscribedSessions] populated so the UI shows cached state and
+      // wake() can resubscribe. For every other disconnect path we clear
+      // transient state so a reconnect starts from a clean slate.
+      if (!_hibernating) {
+        subscribedSessions.clear();
+        sessions = [];
+      }
       _inputSub?.cancel();
       _outputSub?.cancel();
       _inputSub = null;
@@ -183,6 +198,8 @@ class WorkerConnection extends ChangeNotifier {
 
   void disconnect() {
     _manualDisconnect = true;
+    _hibernating = false;
+    _subscribedBeforeHibernate = {};
     _cancelReconnect();
     subscribedSessions.clear();
     sessions = [];
@@ -198,6 +215,51 @@ class WorkerConnection extends ChangeNotifier {
     _status = WorkerConnectionStatus.disconnected;
     onSessionsChanged?.call();
     notifyListeners();
+  }
+
+  /// Release the WebSocket (and terminal WebSocket) while the app is
+  /// backgrounded so the device can sleep. The cached session list, server
+  /// info, and subscription set are preserved for restoration in [wake].
+  /// No-op if the worker is not currently connected or connecting — a
+  /// manually-disconnected worker stays disconnected.
+  void hibernate() {
+    if (!isConnected && !isConnecting) return;
+    _hibernating = true;
+    _subscribedBeforeHibernate = Set.of(subscribedSessions);
+    _cancelReconnect();
+    // Suppress the automatic reconnect that [_onConnectionStatus] would
+    // otherwise trigger when we close the socket below.
+    _manualDisconnect = true;
+    _terminalService?.disconnect();
+    ws.disconnect();
+    notifyListeners();
+  }
+
+  /// Restore the connection that was torn down by [hibernate]. Reconnects
+  /// and re-subscribes to every session that was subscribed at hibernate
+  /// time — the backend replays buffered output on re-subscribe so the
+  /// active pane catches up automatically.
+  Future<void> wake() async {
+    if (!_hibernating) return;
+    _hibernating = false;
+    final toRestore = _subscribedBeforeHibernate;
+    _subscribedBeforeHibernate = {};
+    // Clear the cached subscription set — [subscribe] below will repopulate
+    // it. This keeps the local set in sync with what we actually re-send.
+    subscribedSessions.clear();
+    try {
+      // connect() sets _manualDisconnect = false itself.
+      await connect();
+    } catch (_) {
+      // Lifecycle-driven wake should not propagate connect failures. The
+      // worker is now in disconnected state and will be reflected in the UI.
+      return;
+    }
+    if (isConnected) {
+      for (final sessionId in toRestore) {
+        subscribe(sessionId);
+      }
+    }
   }
 
   void refreshSessions() {

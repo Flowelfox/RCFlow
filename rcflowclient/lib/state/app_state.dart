@@ -880,13 +880,35 @@ class AppState extends ChangeNotifier implements PaneHost {
   void _onPaneChanged() => notifyListeners();
 
   void _onRegistryChanged() {
-    // Foreground service: run when any worker is connected.
-    if (connected) {
-      ForegroundServiceHelper.start();
-    } else if (!connecting) {
+    // The foreground service is no longer started automatically on connect —
+    // mobile lifecycle hibernation (see [hibernateForBackground]) drops the
+    // WebSocket when the app goes to background instead of holding a wake
+    // lock to keep it alive. The [stop] call below is kept as a safety net
+    // so any service left running from older builds is torn down on next
+    // disconnect.
+    if (!connected && !connecting) {
       ForegroundServiceHelper.stop();
     }
     notifyListeners();
+  }
+
+  /// Release all worker WebSocket connections when the mobile app is
+  /// backgrounded. Cached session lists, subscriptions, and server metadata
+  /// are preserved so [wakeFromBackground] can rehydrate quickly.
+  ///
+  /// No-op on desktop — call sites gate on `Platform.isAndroid || isIOS`.
+  void hibernateForBackground() {
+    _registry.hibernateAll();
+    // Explicitly stop the foreground service in case a legacy install still
+    // has it running from a previous app version.
+    ForegroundServiceHelper.stop();
+  }
+
+  /// Reconnect every worker that was hibernated in [hibernateForBackground]
+  /// and resubscribe to the sessions that were active before the app was
+  /// backgrounded. Workers that are not hibernating no-op.
+  Future<void> wakeFromBackground() async {
+    await _registry.wakeAll();
   }
 
   // --- Toast notification helpers ---

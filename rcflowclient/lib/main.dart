@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
@@ -21,6 +22,13 @@ import 'ui/screens/home_screen.dart';
 
 bool get _isDesktop =>
     Platform.isWindows || Platform.isLinux || Platform.isMacOS;
+
+bool get _isMobile => Platform.isAndroid || Platform.isIOS;
+
+/// How long the app must stay backgrounded before worker WebSockets are
+/// torn down. Short app switches (reading a notification, answering a
+/// quick call) should not thrash the connection.
+const Duration _backgroundHibernateDelay = Duration(seconds: 30);
 
 void _registerBadges(BadgeRegistry registry) {
   registerStatusBadge(registry);
@@ -131,8 +139,69 @@ void main() async {
   );
 }
 
-class RCFlowApp extends StatelessWidget {
+class RCFlowApp extends StatefulWidget {
   const RCFlowApp({super.key});
+
+  @override
+  State<RCFlowApp> createState() => _RCFlowAppState();
+}
+
+class _RCFlowAppState extends State<RCFlowApp> with WidgetsBindingObserver {
+  /// Fires [_backgroundHibernateDelay] after the app goes to background.
+  /// Cancelled when the app resumes before the delay elapses.
+  Timer? _hibernateTimer;
+
+  /// True once [_hibernateTimer] has fired and [AppState.hibernateForBackground]
+  /// has been called. Guards [AppState.wakeFromBackground] so spurious
+  /// `resumed` events (e.g. at cold start) do not trigger a pointless wake.
+  bool _hibernated = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (_isMobile) {
+      WidgetsBinding.instance.addObserver(this);
+    }
+  }
+
+  @override
+  void dispose() {
+    _hibernateTimer?.cancel();
+    if (_isMobile) {
+      WidgetsBinding.instance.removeObserver(this);
+    }
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (!_isMobile) return;
+    switch (state) {
+      case AppLifecycleState.paused:
+      case AppLifecycleState.hidden:
+      case AppLifecycleState.detached:
+        _hibernateTimer ??= Timer(_backgroundHibernateDelay, _runHibernate);
+      case AppLifecycleState.resumed:
+        _hibernateTimer?.cancel();
+        _hibernateTimer = null;
+        if (_hibernated) {
+          _hibernated = false;
+          // Fire-and-forget — wakeFromBackground swallows connect errors.
+          unawaited(context.read<AppState>().wakeFromBackground());
+        }
+      case AppLifecycleState.inactive:
+        // Transient state (dialog, incoming call, control-center pull on
+        // iOS). Don't tear down or the UX will thrash.
+        break;
+    }
+  }
+
+  void _runHibernate() {
+    _hibernateTimer = null;
+    if (!mounted) return;
+    _hibernated = true;
+    context.read<AppState>().hibernateForBackground();
+  }
 
   @override
   Widget build(BuildContext context) {

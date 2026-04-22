@@ -66,7 +66,12 @@ class FakeWebSocketService extends WebSocketService {
   @override
   void disconnect() {
     disconnectCallCount++;
+    final wasConnected = _connected;
     _connected = false;
+    // Mirror real [WebSocketService.disconnect] which always emits false.
+    if (wasConnected && !_connCtrl.isClosed) {
+      _connCtrl.add(false);
+    }
   }
 
   @override
@@ -119,10 +124,12 @@ class FakeWebSocketService extends WebSocketService {
 
   @override
   void dispose() {
+    // super.dispose() calls disconnect() which may emit on _connCtrl — close
+    // our controllers after, not before.
+    super.dispose();
     _inputCtrl.close();
     _outputCtrl.close();
     _connCtrl.close();
-    super.dispose();
   }
 }
 
@@ -712,6 +719,101 @@ void main() {
 
       expect(conn.sessions, isEmpty);
       expect(conn.subscribedSessions, isEmpty);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Hibernation (mobile background lifecycle)
+  // -------------------------------------------------------------------------
+
+  group('hibernate()', () {
+    test('disconnects the WebSocket and sets isHibernating', () async {
+      await conn.connect();
+      conn.hibernate();
+      await Future.microtask(() {});
+
+      expect(conn.isHibernating, isTrue);
+      expect(conn.isConnected, isFalse);
+      expect(ws.disconnectCallCount, greaterThanOrEqualTo(1));
+    });
+
+    test('preserves cached sessions and subscriptions', () async {
+      await conn.connect();
+      ws.injectOutput(_sessionList([_sessionJson('s1'), _sessionJson('s2')]));
+      await Future.microtask(() {});
+      conn.subscribe('s1');
+
+      conn.hibernate();
+      await Future.microtask(() {});
+
+      // Session list stays visible for the UI during background.
+      expect(conn.sessions.map((s) => s.sessionId), containsAll(['s1', 's2']));
+      expect(conn.subscribedSessions, contains('s1'));
+    });
+
+    test('does NOT trigger auto-reconnect', () async {
+      await conn.connect();
+      final statuses = <WorkerConnectionStatus>[];
+      conn.addListener(() => statuses.add(conn.status));
+
+      conn.hibernate();
+      await Future.microtask(() {});
+
+      expect(statuses, isNot(contains(WorkerConnectionStatus.reconnecting)));
+    });
+
+    test('is a no-op when worker is already disconnected', () {
+      expect(conn.isConnected, isFalse);
+      conn.hibernate();
+      expect(conn.isHibernating, isFalse);
+      expect(ws.disconnectCallCount, 0);
+    });
+  });
+
+  group('wake()', () {
+    test('reconnects and resubscribes to previously-subscribed sessions',
+        () async {
+      await conn.connect();
+      ws.injectOutput(_sessionList([_sessionJson('s1'), _sessionJson('s2')]));
+      await Future.microtask(() {});
+      conn.subscribe('s1');
+      conn.subscribe('s2');
+
+      conn.hibernate();
+      await Future.microtask(() {});
+      final subscribeBeforeWake = ws.subscribeCallCount;
+
+      await conn.wake();
+
+      expect(conn.isHibernating, isFalse);
+      expect(conn.isConnected, isTrue);
+      expect(
+        ws.subscribeCallCount - subscribeBeforeWake,
+        2,
+        reason: 'both s1 and s2 should be resubscribed on wake',
+      );
+      expect(ws.subscribedIds, containsAll(['s1', 's2']));
+      expect(conn.subscribedSessions, containsAll(['s1', 's2']));
+    });
+
+    test('is a no-op when worker was not hibernating', () async {
+      await conn.connect();
+      final subscribeBefore = ws.subscribeCallCount;
+      await conn.wake();
+      expect(ws.subscribeCallCount, subscribeBefore);
+    });
+
+    test('swallows connect errors instead of rethrowing', () async {
+      await conn.connect();
+      conn.hibernate();
+      await Future.microtask(() {});
+
+      ws.connectShouldThrow = true;
+      // Should not throw — lifecycle-driven wake must be tolerant.
+      await conn.wake();
+
+      expect(conn.isHibernating, isFalse);
+      expect(conn.isConnected, isFalse);
     });
   });
 

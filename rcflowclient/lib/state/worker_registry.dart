@@ -244,6 +244,24 @@ class WorkerRegistry extends ChangeNotifier {
     _workers[id]?.disconnect();
   }
 
+  /// Fan out [WorkerConnection.hibernate] to every worker. Workers that are
+  /// already disconnected (or were never connected) are skipped by
+  /// [WorkerConnection.hibernate] itself.
+  void hibernateAll() {
+    for (final w in _workers.values) {
+      w.hibernate();
+    }
+  }
+
+  /// Fan out [WorkerConnection.wake] to every worker. Workers that are not
+  /// hibernating no-op in [WorkerConnection.wake], so this is safe to call
+  /// unconditionally on resume.
+  Future<void> wakeAll() async {
+    for (final w in _workers.values) {
+      await w.wake();
+    }
+  }
+
   void refreshSessions() {
     for (final w in _workers.values) {
       w.refreshSessions();
@@ -321,6 +339,11 @@ class WorkerRegistry extends ChangeNotifier {
     WorkerConnectionStatus curr,
   ) {
     final name = w.config.name;
+
+    // Suppress "Lost Connection" toasts when the disconnect was driven by
+    // the mobile app going to background — the hibernation tear-down is
+    // intentional and reconnects automatically on resume.
+    if (w.isHibernating) return;
 
     if (prev == WorkerConnectionStatus.connected &&
         (curr == WorkerConnectionStatus.disconnected ||
