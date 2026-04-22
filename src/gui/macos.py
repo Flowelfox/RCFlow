@@ -806,8 +806,8 @@ class RCFlowMacOSGUI:
 _PYOBJC_AVAILABLE = False
 
 try:
-    import objc as _objc  # type: ignore[import-untyped]  # ty: ignore[unresolved-import]
-    from AppKit import NSObject  # type: ignore[assignment]  # ty: ignore[unresolved-import]
+    import objc as _objc  # type: ignore[import-untyped]
+    from AppKit import NSObject  # type: ignore[assignment]
 
     class _TrayDelegate(NSObject):
         """Objective-C action target for NSMenuItem callbacks."""

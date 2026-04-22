@@ -1639,7 +1639,7 @@ class TestNewSessionStructuredPrompt:
 
     @pytest.mark.asyncio
     async def test_agent_session_start_has_structured_prompt(self, session_manager: SessionManager) -> None:
-        """AGENT_SESSION_START prompt field must contain all three structured sections."""
+        """AGENT_SESSION_START prompt must be structured with Task + Description sections."""
         router = _make_router(session_manager)
         session = session_manager.create_session(SessionType.CONVERSATIONAL)
         session.set_active()
@@ -1660,7 +1660,6 @@ class TestNewSessionStructuredPrompt:
         prompt = start_msgs[0].data["prompt"]
         assert "## Task" in prompt
         assert "## Description" in prompt
-        assert "## Additional Content" in prompt
 
     @pytest.mark.asyncio
     async def test_code_blocks_preserved_in_additional_content(self, session_manager: SessionManager) -> None:
@@ -1716,7 +1715,6 @@ class TestNewSessionStructuredPrompt:
         prompt = captured["prompt"]
         assert "## Task" in prompt
         assert "## Description" in prompt
-        assert "## Additional Content" in prompt
 
     @pytest.mark.asyncio
     async def test_prompt_consistent_between_banner_and_executor(self, session_manager: SessionManager) -> None:

@@ -177,22 +177,18 @@ def _install_parent_death_watchdog() -> None:
 
                     PROCESS_QUERY_LIMITED_INFORMATION = 0x1000  # noqa: N806
                     STILL_ACTIVE = 259  # noqa: N806
-                    handle = ctypes.windll.kernel32.OpenProcess(  # ty:ignore[unresolved-attribute]
-                        PROCESS_QUERY_LIMITED_INFORMATION, False, parent_pid
-                    )
+                    handle = ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, parent_pid)
                     if not handle:
                         alive = False
                     else:
                         try:
                             exit_code = ctypes.c_ulong()
-                            if not ctypes.windll.kernel32.GetExitCodeProcess(  # ty:ignore[unresolved-attribute]
-                                handle, ctypes.byref(exit_code)
-                            ):
+                            if not ctypes.windll.kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
                                 alive = False
                             else:
                                 alive = exit_code.value == STILL_ACTIVE
                         finally:
-                            ctypes.windll.kernel32.CloseHandle(handle)  # ty:ignore[unresolved-attribute]
+                            ctypes.windll.kernel32.CloseHandle(handle)
                 except Exception:
                     alive = False
             else:

@@ -78,18 +78,16 @@ def _is_pid_alive(pid: int) -> bool:
 
             PROCESS_QUERY_LIMITED_INFORMATION = 0x1000  # noqa: N806
             STILL_ACTIVE = 259  # noqa: N806
-            handle = ctypes.windll.kernel32.OpenProcess(  # ty:ignore[unresolved-attribute]
-                PROCESS_QUERY_LIMITED_INFORMATION, False, pid
-            )
+            handle = ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
             if not handle:
                 return False
             try:
                 exit_code = ctypes.c_ulong()
-                if not ctypes.windll.kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):  # ty:ignore[unresolved-attribute]
+                if not ctypes.windll.kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
                     return False
                 return exit_code.value == STILL_ACTIVE
             finally:
-                ctypes.windll.kernel32.CloseHandle(handle)  # ty:ignore[unresolved-attribute]
+                ctypes.windll.kernel32.CloseHandle(handle)
         except Exception:
             return False
     try:
@@ -118,12 +116,12 @@ def _kill_pid(pid: int, *, force: bool = False) -> None:
             import ctypes  # noqa: PLC0415
 
             PROCESS_TERMINATE = 0x0001  # noqa: N806
-            handle = ctypes.windll.kernel32.OpenProcess(PROCESS_TERMINATE, False, pid)  # ty:ignore[unresolved-attribute]
+            handle = ctypes.windll.kernel32.OpenProcess(PROCESS_TERMINATE, False, pid)
             if handle:
                 try:
-                    ctypes.windll.kernel32.TerminateProcess(handle, 1)  # ty:ignore[unresolved-attribute]
+                    ctypes.windll.kernel32.TerminateProcess(handle, 1)
                 finally:
-                    ctypes.windll.kernel32.CloseHandle(handle)  # ty:ignore[unresolved-attribute]
+                    ctypes.windll.kernel32.CloseHandle(handle)
         return
     import signal as _signal  # noqa: PLC0415
 
