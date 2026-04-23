@@ -12,7 +12,7 @@ tool execution (ShellExecutor etc.).  Only the LLM step is scripted.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import patch
 
 import pytest
@@ -26,8 +26,58 @@ from src.core.attachment_store import AttachmentStore
 from src.core.llm import LLMStreamEvent, StreamDone, TextChunk
 from src.core.prompt_router import PromptRouter
 from src.core.session import SessionManager
+from src.executors.base import BaseExecutor, ExecutionChunk, ExecutionResult
 from src.tools.registry import ToolRegistry
 from tests.e2e.mock_llm import MockLLMClient
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
+
+    from src.tools.loader import ToolDefinition
+
+
+class _InProcessShellExecutor(BaseExecutor):
+    """Stand-in for ``ShellExecutor`` that never spawns a subprocess.
+
+    The real ShellExecutor spawns processes via ``asyncio.create_subprocess_shell``.
+    In e2e tests each ``TestClient`` gets its own anyio portal + event loop, which
+    is then torn down between tests. Subprocess transports retain a reference to
+    the dead loop and leave global asyncio child-watcher state in a half-broken
+    state for subsequent tests — producing a 60 s hang inside ``process.wait()``
+    on whichever test happens to land on the poisoned watcher. Avoiding real
+    subprocesses entirely sidesteps the whole interaction; the tests exercise the
+    WebSocket protocol, not shell semantics.
+    """
+
+    def __init__(self) -> None:
+        self._cancelled = False
+
+    async def execute(
+        self,
+        tool: ToolDefinition,
+        parameters: dict[str, Any],
+    ) -> ExecutionResult:
+        command = str(parameters.get("command", ""))
+        return ExecutionResult(output=command, exit_code=0)
+
+    async def execute_streaming(
+        self,
+        tool: ToolDefinition,
+        parameters: dict[str, Any],
+    ) -> AsyncGenerator[ExecutionChunk, None]:
+        command = str(parameters.get("command", ""))
+        # Strip a leading "echo " so the mock behaves like `echo X → X` and the
+        # protocol tests see the same content they asked for without caring
+        # about the wrapper.
+        output = command[5:] if command.startswith("echo ") else command
+        yield ExecutionChunk(stream="stdout", content=f"{output}\n")
+
+    async def send_input(self, data: str) -> None:
+        return
+
+    async def cancel(self) -> None:
+        self._cancelled = True
+
 
 # ---------------------------------------------------------------------------
 # Autouse: bypass WS authentication for all e2e tests
@@ -102,13 +152,18 @@ def _build_e2e_app(
     app.state.db_session_factory = None
     app.state.attachment_store = AttachmentStore()
     app.state.terminal_manager = None
-    app.state.prompt_router = PromptRouter(
+    prompt_router = PromptRouter(
         mock_llm,
         session_manager,
         tool_registry,
         db_session_factory=None,
         settings=settings,
     )
+    # Pre-populate the router's executor cache with a subprocess-free stand-in
+    # so _get_executor("shell") never constructs the real ShellExecutor. See
+    # _InProcessShellExecutor for the asyncio lifecycle reason.
+    prompt_router._executors["shell"] = _InProcessShellExecutor()
+    app.state.prompt_router = prompt_router
 
     return app
 

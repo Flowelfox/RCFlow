@@ -129,6 +129,15 @@ class PromptRouter(
         self._telemetry = telemetry_service
         self._pending_store = pending_store
         self._drain_tasks: set[asyncio.Task[None]] = set()
+        # Holds strong references to in-flight ``handle_prompt`` tasks created
+        # by the WebSocket input handler. Without this, the only reference to
+        # the task is a local set in the handler — if the client disconnects
+        # (e.g. the e2e helper closes the input channel right after the ack),
+        # that set goes out of scope and Python can GC the still-running task
+        # mid-execution, leaving subscribers blocked on messages that never
+        # arrive. Discarded via ``task.add_done_callback`` so the set only
+        # grows with truly active work.
+        self._pending_prompt_tasks: set[asyncio.Task[str]] = set()
         self._pending_log_tasks: set[asyncio.Task[None]] = set()
         self._pending_title_tasks: set[asyncio.Task[None]] = set()
         self._pending_archive_tasks: set[asyncio.Task[None]] = set()

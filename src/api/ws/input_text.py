@@ -54,7 +54,12 @@ async def ws_input_text(
             return
 
     prompt_router = websocket.app.state.prompt_router
-    background_tasks: set[asyncio.Task[str]] = set()
+    # Background tasks must outlive this handler — if the client closes the
+    # input WS right after the ack (as the e2e helpers do), a local set would
+    # go out of scope and Python could GC the still-running task. The router
+    # holds a process-lived strong reference; discard happens in the
+    # done-callback.
+    background_tasks: set[asyncio.Task[str]] = prompt_router._pending_prompt_tasks
 
     logger.info("Client connected to /ws/input/text")
 
