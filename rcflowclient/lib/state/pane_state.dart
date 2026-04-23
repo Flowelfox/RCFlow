@@ -901,6 +901,41 @@ class PaneState extends ChangeNotifier {
     _loadDraftAsync(sessionId);
   }
 
+  /// Resubscribes the pane to its current session on the output WebSocket.
+  ///
+  /// Called after an auto-reconnect where the pane already holds a session ID
+  /// but the underlying WS connection was replaced. [switchSession] would
+  /// return early in that case (same ID → no-op), leaving the pane without
+  /// a live subscription and causing the UI to hang indefinitely.
+  void resubscribeSession() {
+    if (_sessionId == null) return;
+
+    finalizeStream();
+    _inAgentMode = false;
+    _agentToolGroupIndex = null;
+    _messages.clear();
+    _todos = [];
+    _resetPagination();
+    _pendingLocalUserMessages = 0;
+    _queuedMessages.clear();
+    _runningSubprocess = null;
+
+    final session = _host.sessions.cast<SessionInfo?>().firstWhere(
+      (s) => s!.sessionId == _sessionId,
+      orElse: () => null,
+    );
+
+    _sessionPaused = session?.status == 'paused';
+    _pausedReason = _sessionPaused ? session?.pausedReason : null;
+
+    _host.muteSessionSound(_sessionId!);
+    _ws?.subscribe(_sessionId!);
+    if (_workerId != null) {
+      _host.markSubscribed(_sessionId!, workerId: _workerId!);
+    }
+    notifyListeners();
+  }
+
   void goHome() {
     // Snapshot and persist the current session's draft before clearing state.
     _saveDraftIfChanged();

@@ -6,6 +6,7 @@ import '../../state/app_state.dart';
 import '../../state/pane_state.dart';
 import '../../theme.dart';
 import '../badges/badge_bar.dart';
+import '../badges/badge_chip.dart';
 
 /// A thin strip displayed above the chat output that shows which session is
 /// currently open — title, status badge, and worker badge.
@@ -120,34 +121,13 @@ class CavemanPreviewBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: BoxDecoration(
-        color: _color.withAlpha(30),
-        borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: _color.withAlpha(80), width: 0.5),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Text(
-            'Caveman',
-            style: TextStyle(
-              color: _color,
-              fontSize: 10,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(width: 2),
-          GestureDetector(
-            onTap: onDismiss,
-            child: Icon(
-              Icons.close,
-              size: 10,
-              color: _color.withAlpha(180),
-            ),
-          ),
-        ],
+    return BadgeChip(
+      color: _color,
+      label: 'Caveman',
+      icon: Icons.warning_amber_rounded,
+      trailing: GestureDetector(
+        onTap: onDismiss,
+        child: Icon(Icons.close, size: 14, color: _color.withAlpha(180)),
       ),
     );
   }
@@ -417,44 +397,13 @@ class WorkerBadge extends StatelessWidget {
     this.onTap,
   });
 
-  static const _color = Color(0xFF6366F1); // indigo-500
-
   @override
   Widget build(BuildContext context) {
-    final badge = Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: BoxDecoration(
-        color: _color.withAlpha(25),
-        borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: _color.withAlpha(70), width: 0.5),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            Icons.dns_outlined,
-            size: 10,
-            color: _color.withAlpha(180),
-          ),
-          const SizedBox(width: 4),
-          Text(
-            name,
-            style: const TextStyle(
-              color: _color,
-              fontSize: 10,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          if (interactive) ...[
-            const SizedBox(width: 2),
-            Icon(
-              Icons.arrow_drop_down,
-              size: 12,
-              color: _color.withAlpha(150),
-            ),
-          ],
-        ],
-      ),
+    final badge = BadgeChip(
+      label: name,
+      icon: Icons.dns_outlined,
+      trailing:
+          interactive ? BadgeChip.neutralDropdownCaret(context) : null,
     );
 
     if (interactive && onTap != null) {

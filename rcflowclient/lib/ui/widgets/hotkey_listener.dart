@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import '../../models/hotkey_binding.dart';
 import '../../models/split_tree.dart';
+import '../../services/keyboard_state_reconciler.dart';
 import '../../state/app_state.dart';
 import 'settings_menu.dart';
 import 'worker_picker_dialog.dart';
@@ -36,10 +37,33 @@ class _HotkeyListenerState extends State<HotkeyListener> {
   bool _hardwareKeyHandler(KeyEvent event) {
     if (event is! KeyDownEvent) return false;
 
+    // Reconcile modifier state with the OS before consulting it. Global
+    // keyboard hooks (Wispr Flow, AutoHotkey, etc.) can swallow modifier
+    // releases and leave HardwareKeyboard convinced Ctrl/Alt is still
+    // held — which would mis-fire Ctrl-shortcut hotkeys on plain key
+    // presses.
+    KeyboardStateReconciler.reconcile();
+
     // Don't handle hotkeys when a dialog/overlay is open
     if (!mounted) return false;
     final nav = Navigator.maybeOf(context, rootNavigator: true);
-    if (nav != null && nav.canPop()) return false;
+    final hasDialog = nav != null && nav.canPop();
+
+    // Intercept Ctrl+V outside dialogs and paste programmatically.
+    // This fires before the focus tree so paste works regardless of whether
+    // the TextField's TextInput platform channel is re-attached after a window
+    // focus transition — the scenario that breaks Whisper Flow dictation.
+    if (!hasDialog &&
+        event.logicalKey == LogicalKeyboardKey.keyV &&
+        HardwareKeyboard.instance.isControlPressed &&
+        !HardwareKeyboard.instance.isShiftPressed &&
+        !HardwareKeyboard.instance.isAltPressed &&
+        !HardwareKeyboard.instance.isMetaPressed) {
+      context.read<AppState>().requestPasteToInput();
+      return true;
+    }
+
+    if (hasDialog) return false;
 
     final appState = context.read<AppState>();
     final action = appState.hotkeyService.match(

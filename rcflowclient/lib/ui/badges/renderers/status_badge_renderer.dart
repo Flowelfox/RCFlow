@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../models/badge_spec.dart';
+import '../badge_chip.dart';
 import '../badge_registry.dart';
 
 /// Registers the status badge renderer with [registry].
@@ -24,21 +25,6 @@ class _StatusBadge extends StatelessWidget {
       _ => (badge.label, const Color(0xFF6B7280)),
     };
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: BoxDecoration(
-        color: color.withAlpha(30),
-        borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: color.withAlpha(80), width: 0.5),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          color: color,
-          fontSize: 10,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
-    );
+    return BadgeChip(color: color, label: label);
   }
 }

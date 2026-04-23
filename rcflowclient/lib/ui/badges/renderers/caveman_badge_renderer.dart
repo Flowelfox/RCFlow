@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../badge_chip.dart';
 import '../badge_registry.dart';
 
 /// Registers the caveman badge renderer with [registry].
@@ -15,21 +16,10 @@ class _CavemanBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: BoxDecoration(
-        color: _color.withAlpha(30),
-        borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: _color.withAlpha(80), width: 0.5),
-      ),
-      child: const Text(
-        'Caveman',
-        style: TextStyle(
-          color: _color,
-          fontSize: 10,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
+    return const BadgeChip(
+      color: _color,
+      label: 'Caveman',
+      icon: Icons.warning_amber_rounded,
     );
   }
 }

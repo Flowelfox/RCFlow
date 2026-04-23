@@ -7,11 +7,13 @@ import 'package:provider/provider.dart';
 
 import '../../models/subprocess_info.dart';
 import '../../models/worker_config.dart';
+import '../../services/keyboard_state_reconciler.dart';
 import '../../state/app_state.dart';
 import '../../state/input_area_view_model.dart';
 import '../../state/pane_state.dart';
 import '../../theme.dart';
 import '../../tips.dart';
+import '../badges/badge_chip.dart';
 import 'create_worktree_dialog.dart';
 import 'session_identity_bar.dart' show CavemanPreviewBadge, WorkerBadge;
 
@@ -124,6 +126,8 @@ class _InputAreaState extends State<InputArea> {
   /// Saved reference to the AppState's focus request notifier so we can safely
   /// remove the listener in [dispose] without accessing [context].
   late final Listenable _focusRequestNotifier;
+  late final ValueNotifier<int> _pasteRequestNotifier;
+  late final ValueNotifier<int> _externalPasteNotifier;
 
   @override
   void initState() {
@@ -135,13 +139,29 @@ class _InputAreaState extends State<InputArea> {
     _pane = context.read<PaneState>();
     _pane.registerDraftProvider(() => _controller.text);
     _controller.addListener(_onTextChanged);
-    _focusRequestNotifier = context.read<AppState>().inputFocusRequest;
+    final appState = context.read<AppState>();
+    _focusRequestNotifier = appState.inputFocusRequest;
     _focusRequestNotifier.addListener(_onFocusRequest);
+    _pasteRequestNotifier = appState.pasteToInputRequest;
+    _pasteRequestNotifier.addListener(_onPasteRequest);
+    _externalPasteNotifier = appState.externalPasteRequest;
+    _externalPasteNotifier.addListener(_onExternalPaste);
+    _focusNode.addListener(_onFocusChanged);
     // Check for pending input text on next frame (e.g. from "Start Session
     // from Task" which pre-fills the input area, or from draft restoration).
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _consumePendingInput();
     });
+  }
+
+  /// Reconciles modifier state when the input field gains focus. Tools
+  /// like Wispr Flow grab modifier keys via global hooks and never
+  /// propagate the release to RCFlow, leaving HardwareKeyboard convinced
+  /// Ctrl/Alt/Shift are still held. Reconciler only clears on actual
+  /// drift vs OS — won't break a user genuinely holding Ctrl.
+  void _onFocusChanged() {
+    if (!_focusNode.hasFocus) return;
+    KeyboardStateReconciler.reconcile();
   }
 
   void _onVmChanged() => setState(() {});
@@ -150,12 +170,64 @@ class _InputAreaState extends State<InputArea> {
     _focusNode.requestFocus();
   }
 
+  /// Inserts text at the cursor (or replaces selection). Shared by both the
+  /// Ctrl+V async clipboard read and the external clipboard sniffer.
+  void _insertAtCursor(String text) {
+    final current = _controller.text;
+    final sel = _controller.selection;
+    final start = sel.isValid ? sel.start : current.length;
+    final end = sel.isValid ? sel.end : current.length;
+    _controller.value = TextEditingValue(
+      text: current.substring(0, start) + text + current.substring(end),
+      selection: TextSelection.collapsed(offset: start + text.length),
+    );
+  }
+
+  /// Inserts text captured by the Windows clipboard sniffer (Wispr Flow path).
+  /// Text payload is delivered already-snapshotted in AppState so we don't
+  /// race the dictation tool restoring the prior clipboard. Reconciles
+  /// modifier state after insertion because Wispr's activation hotkey can
+  /// leave Ctrl "stuck" in HardwareKeyboard — the OS has already released
+  /// it by the time the text arrives here.
+  ///
+  /// Gated on the input field actually having focus: AppState already
+  /// requires foreground + non-own clipboard, but a background clipboard
+  /// manager could still match those conditions. Requiring real focus on
+  /// the input ensures the paste only goes where the user is typing.
+  void _onExternalPaste() {
+    if (!mounted) return;
+    if (!_focusNode.hasFocus) return;
+    final appState = context.read<AppState>();
+    if (appState.activePaneId != _pane.paneId) return;
+    final text = appState.externalPasteText;
+    if (text == null || text.isEmpty) return;
+    _insertAtCursor(text);
+    KeyboardStateReconciler.reconcile();
+  }
+
+  /// Programmatic paste triggered by the global Ctrl+V hardware interceptor.
+  /// Reads the system clipboard and inserts at the current cursor position,
+  /// replacing any active selection. Only fires for the active pane so that
+  /// multi-pane layouts don't all paste simultaneously.
+  Future<void> _onPasteRequest() async {
+    if (!mounted) return;
+    final appState = context.read<AppState>();
+    if (appState.activePaneId != _pane.paneId) return;
+    _focusNode.requestFocus();
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final pasted = data?.text;
+    if (pasted == null || !mounted) return;
+    _insertAtCursor(pasted);
+  }
+
   @override
   void dispose() {
     _vm.removeListener(_onVmChanged);
     _vm.dispose();
     _pane.unregisterDraftProvider();
     _focusRequestNotifier.removeListener(_onFocusRequest);
+    _pasteRequestNotifier.removeListener(_onPasteRequest);
+    _externalPasteNotifier.removeListener(_onExternalPaste);
     _debounceTimer?.cancel();
     _draftTimer?.cancel();
     _removeOverlay();
@@ -1500,37 +1572,10 @@ class _WorkerChip extends StatelessWidget {
           if (id != null) onSelected(id);
         });
       },
-      child: Container(
-        padding: EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-        decoration: BoxDecoration(
-          color: context.appColors.bgElevated,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: context.appColors.divider),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.dns_outlined,
-              size: 14,
-              color: context.appColors.textMuted,
-            ),
-            SizedBox(width: 6),
-            Text(
-              label,
-              style: TextStyle(
-                color: context.appColors.textSecondary,
-                fontSize: 12,
-              ),
-            ),
-            SizedBox(width: 4),
-            Icon(
-              Icons.arrow_drop_down,
-              size: 16,
-              color: context.appColors.textMuted,
-            ),
-          ],
-        ),
+      child: BadgeChip(
+        label: label,
+        icon: Icons.dns_outlined,
+        trailing: BadgeChip.neutralDropdownCaret(context),
       ),
     );
   }
@@ -1543,56 +1588,23 @@ class _ProjectChip extends StatelessWidget {
 
   const _ProjectChip({required this.name, this.error, required this.onClear});
 
+  // Neutral by default; error state uses project badge's red accent.
+  static const _errorColor = Color(0xFFEF4444); // red-500
+
   @override
   Widget build(BuildContext context) {
     final hasError = error != null;
+    final trailingColor =
+        hasError ? _errorColor.withAlpha(180) : context.appColors.textMuted;
     return Tooltip(
       message: error ?? '',
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-        decoration: BoxDecoration(
-          color: hasError
-              ? context.appColors.errorBg
-              : context.appColors.bgElevated,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(
-            color: hasError
-                ? context.appColors.errorText.withValues(alpha: 0.5)
-                : context.appColors.divider,
-          ),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              hasError ? Icons.error_outline_rounded : Icons.folder_rounded,
-              size: 14,
-              color: hasError
-                  ? context.appColors.errorText
-                  : context.appColors.textMuted,
-            ),
-            const SizedBox(width: 6),
-            Text(
-              name,
-              style: TextStyle(
-                color: hasError
-                    ? context.appColors.errorText
-                    : context.appColors.textSecondary,
-                fontSize: 12,
-              ),
-            ),
-            const SizedBox(width: 4),
-            GestureDetector(
-              onTap: onClear,
-              child: Icon(
-                Icons.close_rounded,
-                size: 13,
-                color: hasError
-                    ? context.appColors.errorText
-                    : context.appColors.textMuted,
-              ),
-            ),
-          ],
+      child: BadgeChip(
+        color: hasError ? _errorColor : null,
+        label: name,
+        icon: hasError ? Icons.error_outline_rounded : Icons.folder_outlined,
+        trailing: GestureDetector(
+          onTap: onClear,
+          child: Icon(Icons.close, size: 14, color: trailingColor),
         ),
       ),
     );
@@ -1609,39 +1621,12 @@ class _ToolChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(
-        color: context.appColors.bgElevated,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: context.appColors.divider),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            Icons.build_rounded,
-            size: 14,
-            color: context.appColors.textMuted,
-          ),
-          const SizedBox(width: 6),
-          Text(
-            name,
-            style: TextStyle(
-              color: context.appColors.textSecondary,
-              fontSize: 12,
-            ),
-          ),
-          const SizedBox(width: 4),
-          GestureDetector(
-            onTap: onClear,
-            child: Icon(
-              Icons.close_rounded,
-              size: 13,
-              color: context.appColors.textMuted,
-            ),
-          ),
-        ],
+    return BadgeChip(
+      label: name,
+      icon: Icons.build_outlined,
+      trailing: GestureDetector(
+        onTap: onClear,
+        child: Icon(Icons.close, size: 14, color: context.appColors.textMuted),
       ),
     );
   }
@@ -1820,79 +1805,33 @@ class _WorktreeChip extends StatelessWidget {
           });
         });
       },
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-        decoration: BoxDecoration(
-          color: selectedPath != null
-              ? context.appColors.accent.withAlpha(18)
-              : context.appColors.bgElevated,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(
-            color: selectedPath != null
-                ? context.appColors.accent.withAlpha(100)
-                : context.appColors.divider,
-          ),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              selectedPath != null ? Icons.check_circle : Icons.call_split,
-              size: 14,
-              color: selectedPath != null
-                  ? context.appColors.accent
-                  : context.appColors.textMuted,
-            ),
-            const SizedBox(width: 6),
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 160),
-              child: Text(
-                label,
-                style: TextStyle(
-                  color: selectedPath != null
-                      ? context.appColors.accent
-                      : context.appColors.textSecondary,
-                  fontSize: 12,
-                  fontWeight: selectedPath != null
-                      ? FontWeight.w600
-                      : FontWeight.w400,
-                ),
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-            if (loading) ...[
-              const SizedBox(width: 6),
-              SizedBox(
-                width: 10,
-                height: 10,
-                child: CircularProgressIndicator(
-                  strokeWidth: 1.5,
-                  color: context.appColors.textMuted,
-                ),
-              ),
-            ] else ...[
-              const SizedBox(width: 4),
-              if (selectedPath != null)
-                GestureDetector(
-                  onTap: onClear,
-                  behavior: HitTestBehavior.opaque,
-                  child: Icon(
-                    Icons.close_rounded,
-                    size: 13,
-                    color: context.appColors.accent.withAlpha(180),
-                  ),
-                )
-              else
-                Icon(
-                  Icons.arrow_drop_down,
-                  size: 16,
-                  color: context.appColors.textMuted,
-                ),
-            ],
-          ],
-        ),
+      child: BadgeChip(
+        label: label,
+        icon: Icons.account_tree_outlined,
+        trailing: _trailing(context),
       ),
     );
+  }
+
+  Widget _trailing(BuildContext context) {
+    if (loading) {
+      return SizedBox(
+        width: 12,
+        height: 12,
+        child: CircularProgressIndicator(
+          strokeWidth: 1.5,
+          color: context.appColors.textMuted,
+        ),
+      );
+    }
+    if (selectedPath != null) {
+      return GestureDetector(
+        onTap: onClear,
+        behavior: HitTestBehavior.opaque,
+        child: Icon(Icons.close, size: 14, color: context.appColors.textMuted),
+      );
+    }
+    return BadgeChip.neutralDropdownCaret(context);
   }
 }
 

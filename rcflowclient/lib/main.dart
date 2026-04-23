@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:provider/provider.dart';
 import 'package:window_manager/window_manager.dart';
@@ -131,6 +132,40 @@ void main() async {
   // Fire the first update-check (non-blocking, fire-and-forget).
   // ignore: unawaited_futures
   appState.initAsync();
+
+  // Bridge for the Windows runner's external-input intercepts. Two methods:
+  //  - "paste": fired on WM_PASTE arrival (accessibility tools that paste via
+  //    the standard message). Routes through the existing clipboard-read path.
+  //  - "clipboard_changed": fired on WM_CLIPBOARDUPDATE while RCFlow is the
+  //    foreground window. Carries the captured text payload so we can insert
+  //    Wispr Flow's dictation result even though its TSF injection itself
+  //    doesn't reach Flutter's TextField. Deduped against our own copies.
+  if (Platform.isWindows) {
+    const channel = MethodChannel('rcflow/external_paste');
+    channel.setMethodCallHandler((call) async {
+      switch (call.method) {
+        case 'paste':
+          appState.requestPasteToInput();
+        case 'clipboard_changed':
+          final args = call.arguments;
+          if (args is! Map) break;
+          final text = args['text'] as String?;
+          if (text == null || text.isEmpty) break;
+          final previousText = args['previousText'] as String?;
+          final isOwn = args['isOwn'] as bool? ?? false;
+          final isForeground = args['isForeground'] as bool? ?? false;
+          final seqJumped = args['seqJumped'] as bool? ?? false;
+          appState.handleClipboardEvent(
+            text: text,
+            previousText: previousText,
+            isOwn: isOwn,
+            isForeground: isForeground,
+            seqJumped: seqJumped,
+          );
+      }
+      return null;
+    });
+  }
 
   runApp(
     ChangeNotifierProvider<AppState>.value(
