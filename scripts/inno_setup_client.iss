@@ -72,6 +72,15 @@ Name: "{autodesktop}\RCFlow Client"; Filename: "{app}\rcflow.exe"; Tasks: deskto
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional options:"
 
+[Registry]
+; Register the rcflow:// URL scheme so the worker GUI's "Add to Client"
+; button deep-links straight into this client. HKCU keeps the install
+; user-scoped (PrivilegesRequired=lowest).
+Root: HKCU; Subkey: "Software\Classes\rcflow"; ValueType: string; ValueData: "URL:RCFlow Protocol"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\rcflow"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""
+Root: HKCU; Subkey: "Software\Classes\rcflow\DefaultIcon"; ValueType: string; ValueData: "{app}\rcflow.exe,0"
+Root: HKCU; Subkey: "Software\Classes\rcflow\shell\open\command"; ValueType: string; ValueData: """{app}\rcflow.exe"" ""%1"""
+
 [Run]
 Filename: "{app}\rcflow.exe"; Description: "Launch RCFlow Client"; Flags: nowait postinstall skipifsilent
 

@@ -12,6 +12,18 @@ and note which component is affected where it matters.
 
 ## [Unreleased]
 
+### Added
+- **"Add to Client" deep link** — new button next to *Copy Token* in the worker GUI (Windows settings panel, macOS settings panel, and macOS menu-bar icon) launches the installed Flutter client via a `rcflow://add-worker` URL with the host, port, token, SSL flag, and worker hostname pre-filled. The client opens the Add Worker dialog with the fields populated; if a worker with the same host+port+token is already configured, it shows *"Already added as '<existing name>'"* instead of creating a duplicate. URL-scheme registration is installed on Windows (Inno Setup registry keys), macOS/iOS (`CFBundleURLTypes`), Android (`intent-filter` on `MainActivity`) and Linux (`.desktop` file with `x-scheme-handler/rcflow`). Deep-link receiver uses the `app_links` Flutter plugin (Backend + Client)
+- **`--minimized` flag on `rcflow gui` / `rcflow tray`** — starts the app with the dashboard hidden (tray-only). Login autostart entries (macOS LaunchAgent plist + Windows registry `Run` value) now pass the flag so rebooting does not steal focus with a dashboard popup; the tray icon is still visible and clicking it opens the dashboard (Backend)
+
+### Changed
+- **Worker dashboard visible on launch (macOS)** — the settings window is shown when `rcflow gui` starts instead of starting minimised to the menu bar. The close button still hides the window back to the menu bar (unchanged). The app dynamically switches between regular (Dock icon visible) while the window is open and accessory (menu-bar-only) while the window is closed (Backend)
+- **macOS "open again" opens dashboard** — double-clicking the .app in Finder / clicking it in Dock / running `open <app>` while it's already running now reliably raises the dashboard. Implemented via the `kAEReopenApplication` AppleEvent handler, which catches the reopen event that LaunchServices sends to the existing LSUIElement process (Backend)
+
+### Fixed
+- **Menu bar beachball on Quit (macOS)** — clicking "Quit" in the menu bar no longer freezes the cursor near the menu or leaves the status item visible while the server reaps. The quit action is now drained through the same flag pattern as the other menu items so the NSMenu modal tracking loop returns before `stop_sync()` blocks. The singleton file lock is released correctly so the next `rcflow gui` launch works immediately (Backend)
+- **Second `rcflow gui` launch reveals the existing dashboard (macOS + Windows)** — a loopback IPC channel (`<data_dir>/.worker.ipc`) lets the running instance raise its window when a second launch is attempted. Previously macOS relied on an AppleScript fallback that only worked for registered `.app` bundles, and Windows had no singleton at all (Backend)
+
 ---
 
 ## [Backend 0.40.1 / Client 1.43.2] — 2026-04-23
