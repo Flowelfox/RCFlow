@@ -358,7 +358,7 @@ Type=simple
 User=${SERVICE_USER}
 WorkingDirectory=${INSTALL_PREFIX}
 # Settings loaded from ${INSTALL_PREFIX}/settings.json by the application
-ExecStart=${INSTALL_PREFIX}/rcflow
+ExecStart=${INSTALL_PREFIX}/rcflow run
 Restart=on-failure
 RestartSec=5
 
@@ -396,7 +396,7 @@ SVCEOF
         fi
     else
         warn "systemd not running — skipping service setup"
-        warn "To start RCFlow manually: cd ${INSTALL_PREFIX} && sudo -u ${SERVICE_USER} ./rcflow"
+        warn "To start RCFlow manually: cd ${INSTALL_PREFIX} && sudo -u ${SERVICE_USER} ./rcflow run"
     fi
 fi
 
@@ -439,7 +439,8 @@ echo "    sudo ${INSTALL_PREFIX}/uninstall.sh"
 echo ""
 
 if ! $UPGRADING; then
-    echo -e "  ${YELLOW}IMPORTANT: Edit ${INSTALL_PREFIX}/settings.json to set your ANTHROPIC_API_KEY${NC}"
-    echo -e "  ${YELLOW}before using the server.${NC}"
+    echo -e "  ${YELLOW}IMPORTANT: Configure an LLM provider before using the server.${NC}"
+    echo -e "  ${YELLOW}Set provider credentials in ${INSTALL_PREFIX}/settings.json${NC}"
+    echo -e "  ${YELLOW}or from the client UI (Worker settings).${NC}"
     echo ""
 fi

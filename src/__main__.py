@@ -283,8 +283,14 @@ def _cmd_gui(args: argparse.Namespace) -> None:
 
     On macOS: launches the native menu bar icon + settings panel (Aqua theme).
     On Windows: launches the tkinter window + system tray icon.
+
+    The ``--minimized`` flag starts the app with the dashboard hidden (tray
+    only).  Used by the login autostart entries so rebooting does not pop a
+    window in the user's face; they can open the dashboard from the tray
+    icon or by launching the app manually.
     """
     _check_not_root()
+    minimized = bool(getattr(args, "minimized", False))
     if sys.platform == "darwin":
         import datetime  # noqa: PLC0415
         import traceback as _tb  # noqa: PLC0415
@@ -300,7 +306,7 @@ def _cmd_gui(args: argparse.Namespace) -> None:
             except OSError:
                 pass
 
-        _t(f"_cmd_gui() entered — frozen={getattr(sys, 'frozen', False)}")
+        _t(f"_cmd_gui() entered — frozen={getattr(sys, 'frozen', False)} minimized={minimized}")
         try:
             from src.gui.macos import run_gui_macos  # noqa: PLC0415
 
@@ -309,24 +315,25 @@ def _cmd_gui(args: argparse.Namespace) -> None:
             _t(f"IMPORT FAILED:\n{_tb.format_exc()}")
             raise
 
-        run_gui_macos()
+        run_gui_macos(minimized=minimized)
     else:
         from src.gui.windows import run_gui  # noqa: PLC0415
 
-        run_gui()
+        run_gui(minimized=minimized)
 
 
 def _cmd_tray(args: argparse.Namespace) -> None:
     """Run RCFlow as a system tray / menu bar application (delegates to GUI mode)."""
     _check_not_root()
+    minimized = bool(getattr(args, "minimized", False))
     if sys.platform == "darwin":
         from src.gui.macos import run_gui_macos  # noqa: PLC0415
 
-        run_gui_macos()
+        run_gui_macos(minimized=minimized)
     else:
         from src.gui.windows import run_gui  # noqa: PLC0415
 
-        run_gui()
+        run_gui(minimized=minimized)
 
 
 def _cmd_version(args: argparse.Namespace) -> None:
@@ -401,10 +408,20 @@ def main() -> None:
 
     # rcflow gui
     gui_parser = subparsers.add_parser("gui", help="Run with graphical window interface")
+    gui_parser.add_argument(
+        "--minimized",
+        action="store_true",
+        help="Start with the dashboard hidden (tray icon only). Used by login autostart.",
+    )
     gui_parser.set_defaults(func=_cmd_gui)
 
     # rcflow tray
     tray_parser = subparsers.add_parser("tray", help="Run as system tray / menu bar application")
+    tray_parser.add_argument(
+        "--minimized",
+        action="store_true",
+        help="Start with the dashboard hidden (tray icon only). Used by login autostart.",
+    )
     tray_parser.set_defaults(func=_cmd_tray)
 
     # rcflow version
@@ -427,12 +444,15 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.command is None:
-        # On Windows and macOS frozen builds, default to GUI / menu bar mode.
-        # On Linux (or any unfrozen build), fall back to plain server mode.
+        # Windows / macOS frozen builds default to GUI / menu bar mode so that
+        # double-clicking the .app / .exe launches the desktop experience.
+        # Everywhere else (Linux service install, dev runs) print help — the
+        # worker must be started explicitly with `rcflow run`.
         if sys.platform in ("win32", "darwin") and getattr(sys, "frozen", False):
             _cmd_gui(args)
         else:
-            _cmd_run(args)
+            parser.print_help()
+            sys.exit(0)
     elif hasattr(args, "func"):
         args.func(args)
     else:

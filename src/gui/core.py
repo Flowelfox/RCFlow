@@ -541,6 +541,128 @@ class ServerManager:
             pass
 
 
+# ── Singleton IPC ────────────────────────────────────────────────────────────
+#
+# The first GUI process binds a loopback-only TCP listener on an ephemeral
+# port and writes the chosen port to ``.worker.ipc`` next to the pidfile.  A
+# second launch reads the port, connects, and sends ``SHOW\n`` — the running
+# instance responds by revealing its dashboard window — then exits 0.  This
+# makes "open again" reliably re-raise the existing window instead of
+# silently failing (macOS AppleScript fallback only worked for registered
+# LaunchServices bundles).
+
+_IPC_FILENAME = ".worker.ipc"
+_IPC_SHOW_CMD = b"SHOW\n"
+
+
+def _ipc_file_path() -> Path:
+    """Return the path of the singleton IPC discovery file."""
+    try:
+        from src.paths import get_data_dir  # noqa: PLC0415
+
+        base = get_data_dir()
+    except Exception:
+        base = Path.home()
+    return base / _IPC_FILENAME
+
+
+def remove_ipc_file() -> None:
+    """Delete the IPC discovery file. Safe to call at shutdown."""
+    with contextlib.suppress(OSError):
+        _ipc_file_path().unlink()
+
+
+def start_ipc_server(on_show: Callable[[], None]) -> socket.socket | None:
+    """Bind a loopback TCP listener and record the port in ``.worker.ipc``.
+
+    Spawns a daemon thread that accepts connections and invokes ``on_show()``
+    when a client sends ``SHOW\\n``.  The callback is invoked from the daemon
+    thread — it MUST be safe to call from a non-UI thread (typically a
+    flag-set, not a direct Tk / AppKit call).
+
+    Returns the server socket on success so the caller can close it on
+    shutdown, or None if binding failed (IPC disabled in that case).
+    """
+    try:
+        srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        srv.bind(("127.0.0.1", 0))
+        srv.listen(4)
+    except OSError as exc:
+        logger.warning("IPC server bind failed: %s", exc)
+        return None
+
+    port = srv.getsockname()[1]
+    path = _ipc_file_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(str(port), encoding="utf-8")
+        with contextlib.suppress(OSError):
+            path.chmod(0o600)
+    except OSError as exc:
+        logger.warning("IPC file write failed (%s): %s", path, exc)
+        with contextlib.suppress(OSError):
+            srv.close()
+        return None
+
+    def _accept_loop() -> None:
+        while True:
+            try:
+                conn, _addr = srv.accept()
+            except OSError:
+                return
+            try:
+                conn.settimeout(1.0)
+                data = b""
+                while b"\n" not in data and len(data) < 32:
+                    chunk = conn.recv(32 - len(data))
+                    if not chunk:
+                        break
+                    data += chunk
+                line, _, _ = data.partition(b"\n")
+                if line.strip() == _IPC_SHOW_CMD.strip():
+                    try:
+                        on_show()
+                    except Exception:
+                        logger.exception("IPC on_show callback failed")
+            except OSError:
+                pass
+            finally:
+                with contextlib.suppress(OSError):
+                    conn.close()
+
+    threading.Thread(target=_accept_loop, daemon=True).start()
+    return srv
+
+
+def send_show_to_existing() -> bool:
+    """Try to hand a ``SHOW`` command to the running singleton.
+
+    Reads the port from ``.worker.ipc``, connects, writes ``SHOW\\n``, and
+    returns True when the write succeeds.  Returns False when the IPC file
+    is missing, unreadable, stale (port not listening), or the write fails —
+    the caller can then decide whether to exit or fall back to another
+    activation mechanism.
+    """
+    path = _ipc_file_path()
+    try:
+        raw = path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return False
+    try:
+        port = int(raw)
+    except ValueError:
+        return False
+    if not (1 <= port <= 65535):
+        return False
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=1.5) as sock:
+            sock.sendall(_IPC_SHOW_CMD)
+    except OSError:
+        return False
+    return True
+
+
 def poll_server_status(
     host: str,
     port: str,

@@ -375,6 +375,7 @@ if $SETUP_SERVICE; then
   <key>ProgramArguments</key>
   <array>
     <string>${INSTALL_PREFIX}/rcflow</string>
+    <string>run</string>
   </array>
   <key>WorkingDirectory</key>
   <string>${INSTALL_PREFIX}</string>
@@ -425,7 +426,7 @@ echo "    nano ${INSTALL_PREFIX}/settings.json"
 if $SETUP_SERVICE; then
     echo "    launchctl unload ${PLIST_PATH} && launchctl load -w ${PLIST_PATH}"
 else
-    echo "    ${BIN_DIR}/rcflow"
+    echo "    ${BIN_DIR}/rcflow run"
 fi
 echo ""
 echo "  Uninstall:"
@@ -433,7 +434,8 @@ echo "    ${INSTALL_PREFIX}/uninstall.sh"
 echo ""
 
 if ! $UPGRADING; then
-    echo -e "  ${YELLOW}IMPORTANT: Edit ${INSTALL_PREFIX}/settings.json to set your ANTHROPIC_API_KEY${NC}"
-    echo -e "  ${YELLOW}before using the server.${NC}"
+    echo -e "  ${YELLOW}IMPORTANT: Configure an LLM provider before using the server.${NC}"
+    echo -e "  ${YELLOW}Set provider credentials in ${INSTALL_PREFIX}/settings.json${NC}"
+    echo -e "  ${YELLOW}or from the client UI (Worker settings).${NC}"
     echo ""
 fi

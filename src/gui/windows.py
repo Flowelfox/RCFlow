@@ -29,6 +29,9 @@ from src.gui.core import (
     LogBuffer,
     ServerManager,
     poll_server_status,
+    remove_ipc_file,
+    send_show_to_existing,
+    start_ipc_server,
 )
 
 # Apply appearance settings before any CTk window is created
@@ -53,6 +56,9 @@ class RCFlowGUI:
         self._server = ServerManager(self._log_buffer)
         self._quitting = False
         self._tray_icon: _TrayIconProtocol | None = None
+        # Loopback IPC listener so a second `rcflow gui` launch can reveal
+        # this instance's dashboard instead of starting a broken second GUI.
+        self._ipc_server: object | None = None
         # monotonic expiry for transient status messages (copy-token feedback).
         # _update_ui will not overwrite the status pill while this is in the
         # future, so the message is visible for ~3 seconds regardless of the
@@ -160,7 +166,19 @@ class RCFlowGUI:
             font=ctk.CTkFont(size=theme.FONT_SIZE_BODY),
             command=self._on_copy_token,
         )
-        self._copy_token_btn.pack()
+        self._copy_token_btn.pack(pady=(0, s))
+
+        self._add_client_btn = ctk.CTkButton(
+            btns,
+            text="Add to Client",
+            width=104,
+            fg_color=theme.BTN_COPY_FG,
+            hover_color=theme.BTN_COPY_HOVER,
+            text_color=theme.BTN_COPY_TEXT,
+            font=ctk.CTkFont(size=theme.FONT_SIZE_BODY),
+            command=self._on_add_to_client,
+        )
+        self._add_client_btn.pack()
 
         # ── Status pill ──────────────────────────────────────────────
         self._status_label = ctk.CTkLabel(
@@ -258,6 +276,33 @@ class RCFlowGUI:
             self._set_status("Token copied to clipboard", sticky=True)
         except Exception as exc:
             self._set_status(f"Failed to copy token: {exc}", error=True, sticky=True)
+
+    def _on_add_to_client(self) -> None:
+        try:
+            import webbrowser  # noqa: PLC0415
+
+            from src.config import read_token_from_file  # noqa: PLC0415
+            from src.gui.deeplink import build_add_worker_url  # noqa: PLC0415
+
+            host = self._ip_var.get().strip()
+            port_str = self._port_var.get().strip()
+            if not host or not port_str:
+                self._set_status("Set IP and port first", error=True, sticky=True)
+                return
+            try:
+                port = int(port_str)
+            except ValueError:
+                self._set_status("Invalid port number", error=True, sticky=True)
+                return
+            api_key = read_token_from_file()
+            if not api_key:
+                self._set_status("No API token configured", error=True, sticky=True)
+                return
+            url = build_add_worker_url(host, port, api_key, wss=bool(self._wss_var.get()))
+            webbrowser.open(url)
+            self._set_status("Opening in client...", sticky=True)
+        except Exception as exc:
+            self._set_status(f"Failed to launch client: {exc}", error=True, sticky=True)
 
     # ── Server controls ───────────────────────────────────────────────────
 
@@ -425,8 +470,15 @@ class RCFlowGUI:
                 None,
                 enabled=False,
             ),
+            pystray.MenuItem("Dashboard", self._on_tray_open, default=True),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem("Open", self._on_tray_open, default=True),
+            pystray.MenuItem(
+                lambda item: "Stop Server" if self._server.is_running() else "Start Server",
+                self._on_tray_toggle_server,
+            ),
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem("Copy Token", self._on_tray_copy_token),
+            pystray.MenuItem("Add to Client…", self._on_tray_add_to_client),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem(
                 "Start with Windows",
@@ -474,6 +526,21 @@ class RCFlowGUI:
         self._root.lift()
         self._root.focus_force()
 
+    def _on_tray_toggle_server(self, icon: object = None, item: object = None) -> None:
+        # pystray callbacks run on a daemon thread — hop back to the Tk
+        # main loop before touching widgets.
+        def _apply() -> None:
+            self._on_toggle()
+            self._update_tray_status()
+
+        self._root.after(0, _apply)
+
+    def _on_tray_copy_token(self, icon: object = None, item: object = None) -> None:
+        self._root.after(0, self._on_copy_token)
+
+    def _on_tray_add_to_client(self, icon: object = None, item: object = None) -> None:
+        self._root.after(0, self._on_add_to_client)
+
     def _on_toggle_autostart(self, icon: object, item: object) -> None:
         _set_autostart(not _is_autostart_enabled())
         self._update_tray_status()
@@ -484,6 +551,11 @@ class RCFlowGUI:
         if self._tray_icon is not None:
             with contextlib.suppress(Exception):
                 self._tray_icon.stop()
+        if self._ipc_server is not None:
+            with contextlib.suppress(Exception):
+                self._ipc_server.close()  # ty:ignore[unresolved-attribute]
+            self._ipc_server = None
+        remove_ipc_file()
         self._root.after(0, self._root.destroy)
 
     # ── Window lifecycle ──────────────────────────────────────────────────
@@ -494,9 +566,33 @@ class RCFlowGUI:
         else:
             self._on_tray_quit()
 
-    def run(self) -> None:
-        """Start the GUI event loop."""
+    def run(self, *, minimized: bool = False) -> None:
+        """Start the GUI event loop.
+
+        When *minimized* is True (login autostart), the dashboard is hidden
+        at launch — tray icon only, no window popup on boot.
+        """
         self._setup_tray()
+        if minimized and self._tray_icon is not None:
+            self._root.withdraw()
+
+        # Upgrade path: older builds wrote the autostart registry value
+        # without ``--minimized``, so reboots popped up a dashboard.  If
+        # autostart is enabled, rewrite the value to include the flag.
+        # Idempotent for already-new values.
+        if _is_autostart_enabled():
+            with contextlib.suppress(Exception):
+                _set_autostart(True)
+
+        # Start the singleton IPC listener so a second launch can ask us to
+        # reveal the dashboard.  The accept thread schedules the window
+        # reveal onto the Tk main thread (tk.deiconify must never run from
+        # a worker thread).
+        def _on_ipc_show() -> None:
+            self._root.after(0, self._show_window)
+
+        self._ipc_server = start_ipc_server(_on_ipc_show)
+
         # If a previous GUI crashed, the server subprocess it spawned may
         # still be running (reparented to the init process).  Adopt it so
         # the user can stop it from this new GUI instead of leaving it
@@ -563,7 +659,10 @@ def _set_autostart(enabled: bool) -> None:
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _AUTOSTART_REG_KEY, 0, winreg.KEY_SET_VALUE) as key:
             if enabled:
-                winreg.SetValueEx(key, _AUTOSTART_VALUE_NAME, 0, winreg.REG_SZ, f'"{sys.executable}" gui')
+                # --minimized keeps the dashboard hidden on login so we
+                # don't pop a window every time the user boots; the tray
+                # icon is still available to open the dashboard.
+                winreg.SetValueEx(key, _AUTOSTART_VALUE_NAME, 0, winreg.REG_SZ, f'"{sys.executable}" gui --minimized')
             else:
                 with contextlib.suppress(FileNotFoundError):
                     winreg.DeleteValue(key, _AUTOSTART_VALUE_NAME)
@@ -571,7 +670,77 @@ def _set_autostart(enabled: bool) -> None:
         logger.error("Failed to update autostart registry: %s", exc)
 
 
-def run_gui() -> None:
-    """Entry point for the GUI + tray application."""
+# ── Singleton process lock ───────────────────────────────────────────────────
+#
+# A second `rcflow gui` launch should reveal the running instance's dashboard
+# rather than start a second half-broken GUI.  We acquire an exclusive lock on
+# a sentinel file under the data dir; the lock is released automatically when
+# the process exits.  If the lock is already held, run_gui() asks the running
+# instance via the IPC channel (core._start_ipc_server) to raise its window,
+# then exits 0.
+
+_LOCK_FILENAME = ".worker.lock"
+_lock_fd: object | None = None
+
+
+def _lock_file_path() -> Path:
+    from src.paths import get_data_dir  # noqa: PLC0415
+
+    return get_data_dir() / _LOCK_FILENAME
+
+
+def _acquire_singleton_lock() -> bool:
+    """Acquire an exclusive lock on the singleton sentinel file.
+
+    On Windows we use ``msvcrt.locking()`` with ``LK_NBLCK``; on POSIX
+    (when this module is somehow loaded elsewhere for tests) we fall back
+    to ``fcntl.flock`` so the helper stays usable in a testing context.
+    Returns True when this process now holds the lock.
+    """
+    global _lock_fd
+    path = _lock_file_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        fd = open(path, "a+b")  # noqa: SIM115 — held for process lifetime
+    except OSError as exc:
+        logger.warning("Singleton lock open failed (%s): %s", path, exc)
+        return False
+    try:
+        if sys.platform == "win32":
+            import msvcrt  # noqa: PLC0415
+
+            msvcrt.locking(fd.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl  # noqa: PLC0415
+
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        with contextlib.suppress(OSError):
+            fd.close()
+        return False
+    _lock_fd = fd
+    return True
+
+
+def run_gui(*, minimized: bool = False) -> None:
+    """Entry point for the GUI + tray application.
+
+    *minimized* hides the dashboard at launch (tray-only).  The registry
+    autostart entry passes it so login boot does not pop a window.
+    """
+    if not _acquire_singleton_lock():
+        # Running instance present — ask it to show its dashboard and exit.
+        # Minimized autostart still takes this path, but since the already-
+        # running instance decides whether to reveal the window, sending
+        # SHOW here would be wrong — skip the ask in that case.
+        if not minimized:
+            delivered = send_show_to_existing()
+            if not delivered:
+                print(
+                    "RCFlow Worker is already running. Look for its icon in the system tray.",
+                    file=sys.stderr,
+                )
+        sys.exit(0)
+
     gui = RCFlowGUI()
-    gui.run()
+    gui.run(minimized=minimized)

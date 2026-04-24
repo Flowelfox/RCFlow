@@ -39,6 +39,9 @@ from src.gui.core import (
     LogBuffer,
     ServerManager,
     poll_server_status,
+    remove_ipc_file,
+    send_show_to_existing,
+    start_ipc_server,
 )
 
 logger = logging.getLogger(__name__)
@@ -86,10 +89,13 @@ def _set_autostart(enabled: bool) -> None:
     """Write or remove the LaunchAgent plist for login autostart."""
     if enabled:
         _LAUNCHAGENT_PLIST.parent.mkdir(parents=True, exist_ok=True)
+        # "--minimized" keeps the dashboard window hidden on login so the
+        # user doesn't get a popup every time they boot; the tray icon is
+        # still visible and they can open the dashboard from there.
         prog_args = (
-            [str(Path(sys.executable).resolve()), "gui"]
+            [str(Path(sys.executable).resolve()), "gui", "--minimized"]
             if getattr(sys, "frozen", False)
-            else [sys.executable, "-m", "src", "gui"]
+            else [sys.executable, "-m", "src", "gui", "--minimized"]
         )
         plist: dict[str, object] = {
             "Label": _LAUNCHAGENT_LABEL,
@@ -135,6 +141,15 @@ class RCFlowMacOSGUI:
         self._show_window_requested: bool = False
         self._toggle_server_requested: bool = False
         self._copy_token_requested: bool = False
+        self._add_client_requested: bool = False
+        # Quit is driven through the same flag pattern so the NSMenu modal
+        # tracking loop returns before stop_sync() starts blocking — otherwise
+        # the menu bar freezes (stuck cursor) while the server child reaps.
+        self._quit_requested: bool = False
+
+        # Loopback IPC listener so a second `rcflow gui` launch reveals this
+        # instance's dashboard instead of silently failing the singleton check.
+        self._ipc_server: object | None = None
 
         # monotonic expiry for transient status messages (copy-token feedback).
         # _update_ui will not overwrite the status pill while this is in the
@@ -148,6 +163,7 @@ class RCFlowMacOSGUI:
         self._ns_status_text: object | None = None
         self._ns_toggle_item: object | None = None
         self._ns_copy_token_item: object | None = None
+        self._ns_add_client_item: object | None = None
         self._ns_autostart_item: object | None = None
 
         self._root = ctk.CTk()
@@ -238,7 +254,19 @@ class RCFlowMacOSGUI:
             font=ctk.CTkFont(size=theme.FONT_SIZE_BODY),
             command=self._on_copy_token,
         )
-        self._copy_token_btn.pack()
+        self._copy_token_btn.pack(pady=(0, s))
+
+        self._add_client_btn = ctk.CTkButton(
+            btns,
+            text="Add to Client",
+            width=104,
+            fg_color=theme.BTN_COPY_FG,
+            hover_color=theme.BTN_COPY_HOVER,
+            text_color=theme.BTN_COPY_TEXT,
+            font=ctk.CTkFont(size=theme.FONT_SIZE_BODY),
+            command=self._on_add_to_client,
+        )
+        self._add_client_btn.pack()
 
         # ── Status pill ──────────────────────────────────────────────
         self._status_label = ctk.CTkLabel(
@@ -336,6 +364,33 @@ class RCFlowMacOSGUI:
             self._set_status("Token copied to clipboard", sticky=True)
         except Exception as exc:
             self._set_status(f"Failed to copy token: {exc}", error=True, sticky=True)
+
+    def _on_add_to_client(self) -> None:
+        try:
+            import webbrowser  # noqa: PLC0415
+
+            from src.config import read_token_from_file  # noqa: PLC0415
+            from src.gui.deeplink import build_add_worker_url  # noqa: PLC0415
+
+            host = self._ip_var.get().strip()
+            port_str = self._port_var.get().strip()
+            if not host or not port_str:
+                self._set_status("Set IP and port first", error=True, sticky=True)
+                return
+            try:
+                port = int(port_str)
+            except ValueError:
+                self._set_status("Invalid port number", error=True, sticky=True)
+                return
+            api_key = read_token_from_file()
+            if not api_key:
+                self._set_status("No API token configured", error=True, sticky=True)
+                return
+            url = build_add_worker_url(host, port, api_key, wss=bool(self._wss_var.get()))
+            webbrowser.open(url)
+            self._set_status("Opening in client...", sticky=True)
+        except Exception as exc:
+            self._set_status(f"Failed to launch client: {exc}", error=True, sticky=True)
 
     # ── Server controls ───────────────────────────────────────────────────
 
@@ -462,6 +517,13 @@ class RCFlowMacOSGUI:
         if self._copy_token_requested:
             self._copy_token_requested = False
             self._on_copy_token()
+        if self._add_client_requested:
+            self._add_client_requested = False
+            self._on_add_to_client()
+        if self._quit_requested:
+            self._quit_requested = False
+            self._on_tray_quit()
+            return
 
         self._drain_log_queue()
         running = self._server.is_running()
@@ -527,7 +589,33 @@ class RCFlowMacOSGUI:
         self._delegate = _TrayDelegate.new()
         self._delegate._gui = self
         self._init_status_item()
+        self._install_reopen_handler()
         return self._status_item is not None
+
+    def _install_reopen_handler(self) -> None:
+        """Install the ``kAEReopenApplication`` AppleEvent handler.
+
+        macOS fires this event on the running process when the user launches
+        the .app again via Finder / Dock / Launchpad / ``open``.  Without a
+        handler, the event is dropped and the dashboard never re-opens.
+        """
+        try:
+            from Foundation import NSAppleEventManager  # noqa: PLC0415  # ty:ignore[unresolved-import]
+        except ImportError:
+            return
+
+        # FourCharCodes:  'aevt' -> kCoreEventClass,  'rapp' -> kAEReopenApplication
+        core_event_class = int.from_bytes(b"aevt", "big")
+        reopen_event_id = int.from_bytes(b"rapp", "big")
+
+        with contextlib.suppress(Exception):
+            mgr = NSAppleEventManager.sharedAppleEventManager()
+            mgr.setEventHandler_andSelector_forEventClass_andEventID_(
+                self._delegate,
+                b"handleReopen:withReplyEvent:",
+                core_event_class,
+                reopen_event_id,
+            )
 
     def _init_status_item(self) -> None:
         """Create the NSStatusItem and its dropdown menu (main thread only).
@@ -589,6 +677,10 @@ class RCFlowMacOSGUI:
             self._ns_status_text.setEnabled_(False)
             menu.addItem_(self._ns_status_text)
 
+            dashboard_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Dashboard", "openSettings:", "")
+            dashboard_item.setTarget_(self._delegate)
+            menu.addItem_(dashboard_item)
+
             menu.addItem_(NSMenuItem.separatorItem())
 
             self._ns_toggle_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
@@ -599,17 +691,17 @@ class RCFlowMacOSGUI:
 
             menu.addItem_(NSMenuItem.separatorItem())
 
-            open_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-                "Open Settings\u2026", "openSettings:", ""
-            )
-            open_item.setTarget_(self._delegate)
-            menu.addItem_(open_item)
-
             self._ns_copy_token_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
                 "Copy Token", "copyToken:", ""
             )
             self._ns_copy_token_item.setTarget_(self._delegate)
             menu.addItem_(self._ns_copy_token_item)
+
+            self._ns_add_client_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+                "Add to Client…", "addToClient:", ""
+            )
+            self._ns_add_client_item.setTarget_(self._delegate)
+            menu.addItem_(self._ns_add_client_item)
 
             menu.addItem_(NSMenuItem.separatorItem())
 
@@ -670,6 +762,17 @@ class RCFlowMacOSGUI:
 
     def _do_show_window(self) -> None:
         """Reveal and raise the settings panel.  Called only from _update_ui."""
+        # Promote to a regular foreground app while the window is visible:
+        # this gives the process a proper Dock icon + Cmd-Tab entry and lets
+        # Cocoa activate it correctly.  When the window closes we drop back
+        # to accessory so the Dock tile disappears (see _on_window_close).
+        with contextlib.suppress(Exception):
+            from AppKit import NSApplication  # noqa: PLC0415  # ty:ignore[unresolved-import]
+
+            ns_app = NSApplication.sharedApplication()
+            ns_app.setActivationPolicy_(0)  # NSApplicationActivationPolicyRegular
+            ns_app.activateIgnoringOtherApps_(True)
+
         self._root.deiconify()
         self._root.lift()
         # Float above all windows briefly so it is visible even when another
@@ -691,6 +794,13 @@ class RCFlowMacOSGUI:
                 NSStatusBar.systemStatusBar().removeStatusItem_(self._status_item)
             self._status_item = None
 
+        # Tear down the IPC listener so the discovery file does not outlive us.
+        if self._ipc_server is not None:
+            with contextlib.suppress(Exception):
+                self._ipc_server.close()  # ty:ignore[unresolved-attribute]
+            self._ipc_server = None
+        remove_ipc_file()
+
         # Stop the server synchronously — blocks until the child process is
         # dead so it cannot be orphaned when we destroy the Tk root next.
         self._server.stop_sync()
@@ -706,6 +816,13 @@ class RCFlowMacOSGUI:
         """
         if self._status_item is not None:
             self._root.withdraw()
+            # Drop back to accessory policy so the Dock tile that appeared
+            # while the window was visible disappears — menu-bar-only state
+            # is the expected "server running in the background" look.
+            with contextlib.suppress(Exception):
+                from AppKit import NSApplication  # noqa: PLC0415  # ty:ignore[unresolved-import]
+
+                NSApplication.sharedApplication().setActivationPolicy_(1)  # Accessory
         else:
             self._on_tray_quit()
 
@@ -718,10 +835,15 @@ class RCFlowMacOSGUI:
         if self._quitting:
             return  # _on_tray_quit already handled cleanup
         self._quitting = True
+        remove_ipc_file()
         self._server.stop_sync(timeout=5)
 
-    def run(self) -> None:
-        """Start the menu bar icon and CTk event loop."""
+    def run(self, *, minimized: bool = False) -> None:
+        """Start the menu bar icon and CTk event loop.
+
+        When *minimized* is True (login autostart), the dashboard is kept
+        hidden and the process stays in accessory policy — tray icon only.
+        """
         import datetime  # noqa: PLC0415
 
         _trace_path = Path.home() / "Library" / "Logs" / "rcflow-worker-trace.log"
@@ -736,9 +858,27 @@ class RCFlowMacOSGUI:
         atexit.register(self._cleanup)
 
         def _sigterm_handler(signum: int, frame: object) -> None:
-            self._on_tray_quit()
+            # Flag-based quit so the Tk event loop drains it safely.
+            self._quit_requested = True
 
         signal.signal(signal.SIGTERM, _sigterm_handler)
+
+        # Upgrade path: older builds installed the LaunchAgent plist without
+        # the ``--minimized`` flag, so login-time launches popped up the
+        # dashboard.  If autostart is currently enabled, rewrite the plist
+        # so the next login uses the new flag.  Idempotent for new plists.
+        if _is_autostart_enabled():
+            with contextlib.suppress(Exception):
+                _set_autostart(True)
+
+        # Start the singleton IPC listener; a second launch will connect here
+        # to ask us to reveal the dashboard window.  The accept thread sets a
+        # flag — Tk/AppKit APIs are never touched from the socket thread.
+        def _on_ipc_show() -> None:
+            self._show_window_requested = True
+
+        self._ipc_server = start_ipc_server(_on_ipc_show)
+        _t(f"IPC listener started: {self._ipc_server is not None}")
 
         tray_ok = self._setup_tray()
         _t(f"_setup_tray() → tray_ok={tray_ok}")
@@ -749,8 +889,18 @@ class RCFlowMacOSGUI:
                     from AppKit import NSApplication  # noqa: PLC0415  # ty:ignore[unresolved-import]
 
                     NSApplication.sharedApplication().setActivationPolicy_(1)
-            self._root.withdraw()
-            _t("window withdrawn")
+
+            if minimized:
+                # Login autostart path: keep the dashboard hidden so we don't
+                # steal focus on boot.  Tray icon remains the entry point.
+                self._root.withdraw()
+                _t("window withdrawn (minimized autostart)")
+            else:
+                # Reveal the dashboard on launch.  Scheduled on the Tk event
+                # loop so AppKit is fully initialised; _do_show_window already
+                # activates the process (LSUIElement apps are not auto-frontmost).
+                self._root.after(0, self._do_show_window)
+                _t("window scheduled to show on launch")
         else:
             logger.warning("Menu bar icon unavailable — keeping settings window visible")
             _t("tray unavailable — window visible")
@@ -806,8 +956,8 @@ class RCFlowMacOSGUI:
 _PYOBJC_AVAILABLE = False
 
 try:
-    import objc as _objc  # type: ignore[import-untyped]  # ty: ignore[unresolved-import]
-    from AppKit import NSObject  # type: ignore[assignment]  # ty: ignore[unresolved-import]
+    import objc as _objc  # type: ignore[import-untyped]
+    from AppKit import NSObject  # type: ignore[assignment]
 
     class _TrayDelegate(NSObject):
         """Objective-C action target for NSMenuItem callbacks."""
@@ -836,6 +986,11 @@ try:
                 self._gui._copy_token_requested = True
 
         @_objc.IBAction
+        def addToClient_(self, sender: object) -> None:  # noqa: N802
+            if self._gui is not None:
+                self._gui._add_client_requested = True
+
+        @_objc.IBAction
         def toggleAutostart_(self, sender: object) -> None:  # noqa: N802
             if self._gui is not None:
                 _set_autostart(not _is_autostart_enabled())
@@ -843,8 +998,25 @@ try:
 
         @_objc.IBAction
         def quitApp_(self, sender: object) -> None:  # noqa: N802
+            # Defer the actual shutdown to the Tk event loop — running
+            # _on_tray_quit inside the NSMenu modal tracking loop blocks
+            # the AppKit run loop for the full duration of stop_sync(),
+            # which manifests as a stuck beachball cursor over the menu bar.
             if self._gui is not None:
-                self._gui._on_tray_quit()
+                self._gui._quit_requested = True
+
+        def handleReopen_withReplyEvent_(self, event: object, reply: object) -> None:  # noqa: N802
+            """AppleEvent 'rapp' callback.
+
+            macOS LaunchServices routes a double-click on an already-running
+            .app (from Finder / Launchpad / Dock) to the existing process as
+            a ``kAEReopenApplication`` AppleEvent rather than spawning a new
+            process, so our singleton/IPC path never runs in that case.
+            Hooking the reopen event here makes the second launch reveal the
+            dashboard just like the IPC ``SHOW`` from a command-line launch.
+            """
+            if self._gui is not None:
+                self._gui._show_window_requested = True
 
     _PYOBJC_AVAILABLE = True
 
@@ -856,8 +1028,13 @@ def _get_crash_log_path() -> Path:
     return Path.home() / "Library" / "Logs" / "rcflow-worker-crash.log"
 
 
-def run_gui_macos() -> None:
-    """Entry point for the macOS menu bar + settings panel application."""
+def run_gui_macos(*, minimized: bool = False) -> None:
+    """Entry point for the macOS menu bar + settings panel application.
+
+    *minimized*: start with the dashboard hidden (tray-only).  The login
+    autostart LaunchAgent passes this flag so rebooting does not pop the
+    window; user-initiated launches leave it False and the dashboard shows.
+    """
     import datetime  # noqa: PLC0415
 
     _trace_path = Path.home() / "Library" / "Logs" / "rcflow-worker-trace.log"
@@ -879,32 +1056,38 @@ def run_gui_macos() -> None:
 
     # ── Singleton check ──────────────────────────────────────────────────
     if not _acquire_singleton_lock():
-        _trace("another instance already running — exiting")
-        print(
-            "RCFlow Worker is already running. Look for the bolt icon in the macOS menu bar.",
-            file=sys.stderr,
-        )
-        # Try to bring the existing instance's window forward via AppleScript.
-        # This is a best-effort convenience — if it fails, no harm done.
-        with contextlib.suppress(Exception):
-            import subprocess as _sp  # noqa: PLC0415
-
-            _sp.Popen(
-                [
-                    "osascript",
-                    "-e",
-                    'tell application "RCFlow Worker" to activate',
-                ],
-                stdout=_sp.DEVNULL,
-                stderr=_sp.DEVNULL,
+        _trace("another instance already running — asking it to show dashboard")
+        # Primary path: use the loopback IPC channel the running instance
+        # exposes.  Works regardless of LaunchServices registration and
+        # without spawning osascript.
+        delivered = send_show_to_existing()
+        _trace(f"send_show_to_existing() -> {delivered}")
+        if not delivered:
+            print(
+                "RCFlow Worker is already running. Look for the bolt icon in the macOS menu bar.",
+                file=sys.stderr,
             )
+            # Fallback: AppleScript activate.  Works only for a registered
+            # .app bundle, so it is best-effort.
+            with contextlib.suppress(Exception):
+                import subprocess as _sp  # noqa: PLC0415
+
+                _sp.Popen(
+                    [
+                        "osascript",
+                        "-e",
+                        'tell application "RCFlow Worker" to activate',
+                    ],
+                    stdout=_sp.DEVNULL,
+                    stderr=_sp.DEVNULL,
+                )
         sys.exit(0)
 
     try:
         _trace("creating RCFlowMacOSGUI()")
         gui = RCFlowMacOSGUI()
-        _trace("calling gui.run()")
-        gui.run()
+        _trace(f"calling gui.run(minimized={minimized})")
+        gui.run(minimized=minimized)
         _trace("gui.run() returned — mainloop exited cleanly")
     except Exception:
         import traceback  # noqa: PLC0415

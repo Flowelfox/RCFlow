@@ -18,7 +18,7 @@ from src.core.prompt_router import PromptRouter
 from src.core.session import SessionManager
 from src.database.engine import check_connection, dispose_engine, get_session_factory, init_engine
 from src.logs import setup_logging
-from src.paths import get_data_dir
+from src.paths import get_data_dir, is_frozen
 from src.services.artifact_scanner import ArtifactScanner
 from src.services.telemetry_service import TelemetryService
 from src.services.tool_manager import ToolManager
@@ -247,12 +247,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
 
 def create_app() -> FastAPI:
-    """Create and configure the FastAPI application."""
+    """Create and configure the FastAPI application.
+
+    Swagger UI, ReDoc, and the OpenAPI schema endpoint are only exposed when
+    running from source (e.g. via ``just run``). Released/frozen builds disable
+    them so production deployments do not expose API documentation.
+    """
+    docs_enabled = not is_frozen()
     app = FastAPI(
         title="RCFlow",
         description="WebSocket action server: natural language prompts to tool executions via LLM",
         version="0.1.0",
         lifespan=lifespan,
+        docs_url="/docs" if docs_enabled else None,
+        redoc_url="/redoc" if docs_enabled else None,
+        openapi_url="/openapi.json" if docs_enabled else None,
     )
 
     app.include_router(http_router)

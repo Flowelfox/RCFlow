@@ -6,8 +6,9 @@ Platform-specific GUI modules:
 - core:    Shared ServerManager, LogBuffer, poll_server_status
 - theme:   Design tokens (colours, fonts, spacing)
 - tray:    Legacy wrapper (delegates to windows.run_gui)
+
+Platform modules are intentionally NOT imported at package load time.
+``src.gui.windows`` requires CustomTkinter (the ``tray`` extra) and would
+crash on macOS where the correct module is ``src.gui.macos``; the dispatch
+in ``src/__main__.py`` imports the right one lazily.
 """
-
-from src.gui.windows import RCFlowGUI, run_gui
-
-__all__ = ["RCFlowGUI", "run_gui"]

@@ -358,7 +358,7 @@ def assemble_bundle(pyinstaller_dir: Path, target_platform: str, version: str, a
         print(f"Copied tools/ ({len(list(tools_dest.glob('*.json')))} JSON files)")
 
     # 3. Copy alembic migrations
-    migrations_src = PROJECT_ROOT / "src" / "db" / "migrations"
+    migrations_src = PROJECT_ROOT / "src" / "database" / "migrations"
     migrations_dest = bundle_dir / "migrations"
     if migrations_src.exists():
         shutil.copytree(migrations_src, migrations_dest)
@@ -562,7 +562,7 @@ Type=simple
 User=rcflow
 WorkingDirectory=/opt/rcflow
 # Settings loaded from /opt/rcflow/settings.json by the application
-ExecStart=/opt/rcflow/rcflow
+ExecStart=/opt/rcflow/rcflow run
 Restart=on-failure
 RestartSec=5
 
@@ -703,7 +703,7 @@ case "$1" in
         echo "Starting $NAME..."
         start-stop-daemon --start --background --make-pidfile \\
             --pidfile "$PIDFILE" --chuid "$USER" --chdir "$WORKDIR" \\
-            --startas /bin/bash -- -c "exec $DAEMON >> $LOGFILE 2>&1"
+            --startas /bin/bash -- -c "exec $DAEMON run >> $LOGFILE 2>&1"
         # Brief pause to check if the process survived startup
         sleep 1
         if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then

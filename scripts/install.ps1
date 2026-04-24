@@ -356,6 +356,7 @@ if (-not $NoService) {
 
         # Install service
         & $nssmPath install RCFlow $rcflowExe
+        & $nssmPath set RCFlow AppParameters "run"
         & $nssmPath set RCFlow DisplayName "RCFlow Action Server"
         & $nssmPath set RCFlow Description "RCFlow WebSocket action server for natural language tool execution"
         & $nssmPath set RCFlow AppDirectory $InstallDir
@@ -382,7 +383,7 @@ if (-not $NoService) {
     }
     else {
         Write-Warn "NSSM not available. Service not registered."
-        Write-Warn "You can run RCFlow manually: $InstallDir\rcflow.exe"
+        Write-Warn "You can run RCFlow manually: $InstallDir\rcflow.exe run"
     }
 }
 
@@ -436,7 +437,8 @@ Write-Host "    $InstallDir\uninstall.ps1"
 Write-Host ""
 
 if (-not $Upgrading) {
-    Write-Host "  IMPORTANT: Edit $envFile to set your ANTHROPIC_API_KEY" -ForegroundColor Yellow
-    Write-Host "  before using the server." -ForegroundColor Yellow
+    Write-Host "  IMPORTANT: Configure an LLM provider before using the server." -ForegroundColor Yellow
+    Write-Host "  Set provider credentials in $envFile" -ForegroundColor Yellow
+    Write-Host "  or from the client UI (Worker settings)." -ForegroundColor Yellow
     Write-Host ""
 }
