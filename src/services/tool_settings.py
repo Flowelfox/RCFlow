@@ -206,6 +206,7 @@ CLAUDE_CODE_SETTINGS_SCHEMA: list[dict[str, Any]] = [
         "default": False,
         "description": "Strip AI attribution from commits and PRs created by Claude Code.",
         "managed_only": True,
+        "coming_soon": True,
     },
 ]
 
@@ -617,7 +618,7 @@ class ToolSettingsManager:
                 "default": field_def["default"],
                 "description": field_def["description"],
             }
-            for extra_key in ("options", "visible_when", "hidden_when", "provider_key", "models"):
+            for extra_key in ("options", "visible_when", "hidden_when", "provider_key", "models", "coming_soon"):
                 if extra_key in field_def:
                     entry[extra_key] = field_def[extra_key]
             fields.append(entry)
@@ -687,6 +688,11 @@ class ToolSettingsManager:
                 raise ValueError(
                     f"Cannot update managed-only settings when tool is external: {', '.join(sorted(rejected))}"
                 )
+
+        coming_soon_keys = {f["key"] for f in schema if f.get("coming_soon")}
+        rejected_cs = set(updates.keys()) & coming_soon_keys
+        if rejected_cs:
+            raise ValueError(f"Cannot update coming-soon settings: {', '.join(sorted(rejected_cs))}")
 
         # Build a lookup of secret-type keys for masked value detection.
         secret_keys = {f["key"] for f in schema if f["type"] == "secret"}

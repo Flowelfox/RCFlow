@@ -1986,6 +1986,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
     final label = field['label'] as String;
     final type = field['type'] as String;
     final description = field['description'] as String? ?? '';
+    final comingSoon = field['coming_soon'] == true;
     final originalValue = field['value'];
     final edits = _toolSettingsEdited[toolName];
     final currentValue = edits != null && edits.containsKey(key)
@@ -2007,22 +2008,49 @@ class ServerConfigContentState extends State<ServerConfigContent> {
     Widget input;
     switch (type) {
       case 'boolean':
+        final titleColor = comingSoon
+            ? context.appColors.textMuted
+            : context.appColors.textPrimary;
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             SwitchListTile(
-              title: Text(
-                label,
-                style: TextStyle(
-                  color: context.appColors.textPrimary,
-                  fontSize: 13,
-                ),
+              title: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Flexible(
+                    child: Text(
+                      label,
+                      style: TextStyle(color: titleColor, fontSize: 13),
+                    ),
+                  ),
+                  if (comingSoon) ...[
+                    const SizedBox(width: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 5,
+                        vertical: 1,
+                      ),
+                      decoration: BoxDecoration(
+                        color: context.appColors.divider,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        'Coming soon',
+                        style: TextStyle(
+                          color: context.appColors.textMuted,
+                          fontSize: 10,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
               ),
               value: currentValue is bool ? currentValue : currentValue == true,
               activeTrackColor: context.appColors.accent,
               contentPadding: EdgeInsets.zero,
               dense: true,
-              onChanged: (v) => onChanged(v),
+              onChanged: comingSoon ? null : (v) => onChanged(v),
             ),
             if (description.isNotEmpty)
               Text(

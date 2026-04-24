@@ -242,27 +242,14 @@ class TestUndercoverSetting:
         assert field["default"] is False
         assert field["type"] == "boolean"
 
-    def test_undercover_update_round_trip(self, manager: ToolSettingsManager):
-        manager.update_settings("claude_code", {"undercover": True})
-        settings = manager.get_settings("claude_code")
-        assert settings["undercover"] is True
-
+    def test_undercover_marked_coming_soon(self, manager: ToolSettingsManager):
         result = manager.get_settings_with_schema("claude_code", managed=True)
         field = next(f for f in result["fields"] if f["key"] == "undercover")
-        assert field["value"] is True
+        assert field.get("coming_soon") is True
 
-    def test_undercover_toggle_off(self, manager: ToolSettingsManager):
-        """Enable then disable — value should revert to False."""
-        manager.update_settings("claude_code", {"undercover": True})
-        manager.update_settings("claude_code", {"undercover": False})
-        settings = manager.get_settings("claude_code")
-        assert settings["undercover"] is False
-
-    def test_undercover_does_not_affect_env_section(self, manager: ToolSettingsManager):
-        """Toggling undercover should not create or alter the env section."""
-        manager.update_settings("claude_code", {"undercover": True})
-        settings = manager.get_settings("claude_code")
-        assert "env" not in settings
+    def test_undercover_update_rejected(self, manager: ToolSettingsManager):
+        with pytest.raises(ValueError, match="coming-soon"):
+            manager.update_settings("claude_code", {"undercover": True})
 
 
 # ---------------------------------------------------------------------------
