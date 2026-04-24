@@ -30,6 +30,7 @@ Run targets with `just <target>`. Run `just` with no arguments to list all avail
 - `install` — install production dependencies (`uv sync`)
 - `dev` — install with dev dependencies and set up pre-commit hooks
 - `run` — start the server (`uv run rcflow`)
+- `run-gui` — start the worker GUI (dashboard + tray) in dev mode (`uv run rcflow gui`)
 
 ### Code Quality
 
@@ -52,16 +53,16 @@ Run targets with `just <target>`. Run `just` with no arguments to list all avail
 ### Bundling / Packaging
 
 - `bundle [FLAGS]` — build distributable package for the current platform
-- `bundle-linux-backend [FLAGS]` — build Linux backend `.deb` package
-- `bundle-linux-backend-install` — build and install Linux backend `.deb`
+- `bundle-linux-worker [FLAGS]` — build Linux worker `.deb` package
+- `bundle-linux-worker-install` — build and install Linux worker `.deb`
 - `bundle-linux-client` — build Linux Flutter client `.deb`
 - `bundle-linux-client-install` — build and install Linux Flutter client `.deb`
-- `bundle-macos-backend [FLAGS]` — build macOS backend DMG (macOS only)
-- `bundle-macos-backend-install` — build and install macOS backend DMG (macOS only)
+- `bundle-macos-worker [FLAGS]` — build macOS worker DMG (macOS only)
+- `bundle-macos-worker-install` — build and install macOS worker DMG (macOS only)
 - `bundle-macos-client` — build macOS Flutter client `.dmg` (macOS only)
 - `bundle-macos-client-install` — build and install macOS Flutter client (macOS only)
-- `bundle-windows-backend [FLAGS]` — build Windows backend installer (Windows only)
-- `bundle-windows-backend-install` — build and install Windows backend (Windows only)
+- `bundle-windows-worker [FLAGS]` — build Windows worker installer (Windows only)
+- `bundle-windows-worker-install` — build and install Windows worker (Windows only)
 - `bundle-windows-client` — build Windows Flutter client `.exe` installer (Windows only)
 - `bundle-windows-client-install` — build and install Windows Flutter client (Windows only)
 
