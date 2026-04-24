@@ -36,6 +36,7 @@ RCFlow is a background server running on Linux or Windows that provides a WebSoc
 | macOS Entitlements   | `scripts/rcflow_macos.entitlements` (hardened runtime, no sandbox) |
 | Worktree Manager     | wtpython (WorktreeManager library)         |
 | Telemetry Charts     | fl_chart (Flutter line/bar charts)         |
+| Client Deep Links    | app_links (rcflow:// URL scheme handling) |
 
 ---
 
@@ -244,6 +245,33 @@ Each session pane maintains its own unsent message draft. Drafts survive session
 
 **Input area worker selector**: When starting a new chat with multiple connected workers, a chip above the input field shows the target worker name with a dropdown to switch.
 
+### Add-to-Client Deep Link
+
+The worker GUI ("Add to Client" button, settings panel on Windows/macOS and the macOS menu-bar icon) emits a `rcflow://add-worker` URL that the installed Flutter client handles:
+
+```
+rcflow://add-worker?host=<host>&port=<port>&token=<urlencoded>&ssl=<0|1>&name=<urlencoded>
+```
+
+- `host`, `port`, `token` — required.
+- `ssl=1` if the worker's WSS toggle is on.
+- `name` — optional suggested label; the worker auto-fills this with `socket.gethostname()` so the client pre-fills a sensible worker name the user can edit.
+
+**URL-scheme registration** (client install):
+- Android — `<intent-filter>` on `MainActivity` (`rcflowclient/android/app/src/main/AndroidManifest.xml`).
+- iOS / macOS — `CFBundleURLTypes` in each `Info.plist`.
+- Windows — Inno Setup `[Registry]` keys under `HKCU\Software\Classes\rcflow` (`scripts/inno_setup_client.iss`).
+- Linux — `.desktop` file with `MimeType=x-scheme-handler/rcflow;` (`rcflowclient/linux/rcflow-client.desktop`, installed to `/usr/share/applications/` by `just bundle-linux-client`).
+
+**Client flow** (`lib/services/deep_link_service.dart`):
+1. `DeepLinkService.init()` wraps the `app_links` plugin. On cold start it retrieves the initial URI via `getInitialLink()`; while the app is running, it subscribes to `uriLinkStream`.
+2. `AddWorkerLink.tryParse(Uri)` validates the scheme/host and query params and returns a typed record.
+3. `_RCFlowAppState._handleAddWorkerLink` calls `AppState.findWorkerByHostPortToken(host, port, token)`. If a match exists, the app shows an "Already added as '<name>'" alert and makes no changes.
+4. Otherwise it pre-fills a `WorkerConfig` (new id via `WorkerConfig.generateId()`, name seeded from the URL) and opens `showWorkerEditDialog(prefilled: …)`. The dialog remains in "Add" mode so the user can review fields (e.g. swap `0.0.0.0` for a specific IP) before saving.
+5. Desktop platforms call `windowManager.show()` + `focus()` first so the dialog isn't hidden behind the worker GUI.
+
+**Duplicate rule**: host + port + token triple uniqueness. Changing any of the three is treated as a new worker (handles token rotation or relocating the worker to a different port).
+
 ---
 
 ## HTTP API
@@ -298,6 +326,10 @@ Each session pane maintains its own unsent message draft. Drafts survive session
 | GET    | `/api/telemetry/timeseries`            | Yes  | Pre-aggregated time-series data. Required query params: `zoom` (`minute`/`hour`/`day`), `start`, `end` (ISO8601 UTC). Optional: `session_id` (UUID, filters to one session; omit for global rollup), `metric` (returns only that field). Returns `{zoom, start, end, session_id, last_updated_at, series: [{bucket, tokens_sent, tokens_received, avg_llm_duration_ms, avg_tool_duration_ms, turn_count, tool_call_count, error_count}]}`. |
 
 Authentication for HTTP endpoints uses the `X-API-Key` header with the same key as `RCFLOW_API_KEY`.
+
+### API Documentation (Swagger / ReDoc)
+
+FastAPI's auto-generated API docs are exposed **only when running from source** (e.g. `just run` / `uv run rcflow`). In released/frozen builds (PyInstaller bundles produced via `just bundle-*`), `docs_url`, `redoc_url`, and `openapi_url` are all set to `None`, so `/docs`, `/redoc`, and `/openapi.json` return `404`. The toggle keys off `src.paths.is_frozen()` in `src/main.py::create_app()`.
 
 ---
 
@@ -2093,6 +2125,8 @@ Existing user values are never overwritten — the method only appends the missi
 
 Schema fields may include `"managed_only": true` — these are only exposed when the tool is using its managed (RCFlow-installed) binary. When the tool is switched to an external (PATH) source, managed-only fields are hidden from the GET endpoint and rejected by the PATCH endpoint. The `managed` status is resolved from `ToolManager` at request time.
 
+Schema fields may include `"coming_soon": true` — the flag is forwarded in the GET endpoint response so the client can render the field as disabled with a "Coming soon" badge. The PATCH endpoint rejects writes to any `coming_soon` key regardless of source.
+
 **Claude Code settings schema:**
 
 | Key                        | Type        | Managed-only | Visible when           | Description                                       |
@@ -2110,7 +2144,7 @@ Schema fields may include `"managed_only": true` — these are only exposed when
 | `max_turns`                | string      | yes          | —                      | Maximum agentic turns per session (default 200)    |
 | `timeout`                  | string      | yes          | —                      | Process timeout in seconds (default 1800)          |
 | `caveman_mode`             | boolean     | yes          | —                      | Inject caveman terse-mode instruction via CLAUDE.md (new sessions only) |
-| `undercover`               | boolean     | yes          | —                      | Strip AI attribution from commits and PRs (default false) |
+| `undercover`               | boolean     | yes          | —                      | Strip AI attribution from commits and PRs (default false) — **coming soon**, disabled in client and rejected by PATCH |
 
 **Provider env sync:** When `provider` or any credential field is updated, `ToolSettingsManager` automatically rebuilds the `env` section of the Claude Code `settings.json`:
 
@@ -2950,7 +2984,7 @@ uv run rcflow                    # or: uv run rcflow run — starts the server
 
 ### Production (Windows — GUI + System Tray)
 
-`rcflow gui` (or `rcflow tray`, which delegates to it) launches a combined tkinter window and system tray application (`src/gui.py`). This is the default mode for frozen Windows builds. The server runs as a subprocess — closing the window minimizes to the system tray; double-clicking the tray icon restores the window. "Quit" from the tray stops the server and exits.
+`rcflow gui` (or `rcflow tray`, which delegates to it) launches a combined tkinter window and system tray application (`src/gui/windows.py`). This is the default mode for frozen Windows builds. The server runs as a subprocess — closing the window minimizes to the system tray; double-clicking the tray icon restores the window. "Quit" from the tray stops the server and exits. Only one instance may run at a time: a file lock (`<data_dir>/.worker.lock`, `msvcrt.locking`) is held for the process lifetime, and a second `rcflow gui` invocation uses the loopback IPC channel (see "Singleton IPC" below) to reveal the running instance's dashboard before exiting 0.
 
 **Features:**
 - **Server settings** — IP address and port text fields, pre-populated from `settings.json` configuration.
@@ -2977,7 +3011,7 @@ uv run rcflow                    # or: uv run rcflow run — starts the server
 
 ### Production (macOS — Menu Bar App)
 
-`rcflow gui` (or `rcflow tray`) launches the macOS menu bar app (`src/gui_macos.py`). This is the default mode for frozen macOS builds. The app runs as an `LSUIElement` (no Dock icon, lives entirely in the macOS menu bar). The settings panel is hidden on launch and only shown when the user clicks "Open Settings…" in the menu bar.
+`rcflow gui` (or `rcflow tray`) launches the macOS menu bar app (`src/gui/macos.py`). This is the default mode for frozen macOS builds. The app runs as an `LSUIElement` (no Dock icon, lives entirely in the macOS menu bar). The settings panel **is shown on launch**; the close button (⌘W / X) hides it back to the menu bar while the server keeps running. A single-instance file lock (`fcntl.flock` on `~/Library/Application Support/RCFlow/.worker.lock`) plus the loopback IPC channel (see "Singleton IPC" below) ensures a second launch reveals the existing window instead of failing silently.
 
 **Menu bar icon menu:**
 - Status line (non-clickable) — "RCFlow Worker: Running" or "RCFlow Worker: Stopped"
@@ -2998,19 +3032,21 @@ uv run rcflow                    # or: uv run rcflow run — starts the server
 **Architecture:**
 - tkinter runs on the main thread using the native macOS `aqua` theme (Aqua controls).
 - `NSStatusItem` is created via PyObjC (`AppKit.NSStatusBar`) entirely on the main thread. A `_TrayDelegate` NSObject subclass (registered with the ObjC runtime at module import time) handles `NSMenuItem` action callbacks. The status item is initialised via `root.after(0, …)` so it runs once the tkinter event loop has started (NSApp is running by then). No background thread is needed — this avoids the `NSUpdateCycleInitialize() is called off the main thread` crash that occurs when `NSApplication.run()` is called from a non-main thread on macOS 26+.
-- The settings window starts hidden (`root.withdraw()`). "Open Settings…" calls `root.deiconify()` + `root.lift()` + brief topmost-flag nudge to bring the panel to the front from an LSUIElement process.
+- The settings window is shown on launch. "Open Settings…" (and the IPC `SHOW` path) calls `root.deiconify()` + `root.lift()` + brief topmost-flag nudge so the panel is raised to the front even though the app is an LSUIElement.
 - Closing the window (⌘W / X button) hides it back to the menu bar (`root.withdraw()`). The server keeps running.
-- "Quit" terminates the server subprocess (10 s timeout then kill), removes the NSStatusItem, and destroys the window.
+- "Quit" from the menu bar is deferred via a `_quit_requested` flag consumed on the Tk event loop — the ObjC callback itself must not call `stop_sync()` directly, because doing so from inside the NSMenu modal tracking loop blocks AppKit and produces a stuck beachball cursor over the menu bar region. Once the flag is drained, `_on_tray_quit` removes the NSStatusItem, tears down the IPC listener, stops the server subprocess (10 s timeout then kill), and destroys the window.
 - System appearance (light/dark) is detected once at startup via `tk::mac::isDarkMode`; log widget colors are set accordingly.
 - Log draining, server HTTP polling, and subprocess I/O all use the same queue + timer pattern as the Windows GUI.
 
-**Autostart:** Writes a `LaunchAgent` plist to `~/Library/LaunchAgents/com.rcflow.worker.plist` with `RunAtLoad=true`, `KeepAlive=false`, `ProcessType=Interactive`. Does **not** call `launchctl load` / `unload` — placing the plist is sufficient for launchd to pick it up on next login, and avoiding `load` prevents a duplicate instance from being spawned while the app is already running; avoiding `unload` prevents SIGTERM from killing the current app when the user toggles autostart off.
+**Autostart:** Writes a `LaunchAgent` plist to `~/Library/LaunchAgents/com.rcflow.worker.plist` with `RunAtLoad=true`, `KeepAlive=false`, `ProcessType=Interactive`. Does **not** call `launchctl load` / `unload` — placing the plist is sufficient for launchd to pick it up on next login, and avoiding `load` prevents a duplicate instance from being spawned while the app is already running; avoiding `unload` prevents SIGTERM from killing the current app when the user toggles autostart off. The plist passes `--minimized` in `ProgramArguments` so the login-triggered launch starts with the dashboard hidden (tray icon only) — user-initiated launches omit the flag and the dashboard pops up normally. The same flag is added to the Windows autostart registry value (`"<exe>" gui --minimized`).
 
 **Icon:** `assets/tray_icon.icns`. Copied into `Contents/Resources/tray_icon.icns` inside the `.app` bundle (standard macOS resource location). Also bundled as a PyInstaller data file at `tray_icon.icns` (accessible via `get_install_dir()`). Fallback: generates a blue rounded square with "RC" text using Pillow.
 
 **Note on LSUIElement apps:** Because `LSUIElement = true` removes the Dock icon, the app cannot be activated normally via Cmd+Tab or clicking the Dock. The window is shown/hidden exclusively through the menu bar icon. If PyObjC is unavailable and the menu bar icon cannot be created, the settings window remains visible as a fallback so the app is not completely invisible.
 
 **Crash handling:** `run_gui_macos()` is wrapped in a top-level `try/except` that writes tracebacks to `~/Library/Logs/rcflow-worker-crash.log` and shows a `tkinter.messagebox` error dialog before re-raising. This prevents silent exits in windowed (`console=False`) frozen builds where stderr goes nowhere.
+
+**Singleton IPC (macOS + Windows):** The first GUI process binds a loopback-only TCP listener on an ephemeral port and writes the chosen port to `<data_dir>/.worker.ipc` (permissions `0o600` on POSIX). A second `rcflow gui` invocation detects the held file lock, reads `.worker.ipc`, connects to `127.0.0.1:<port>`, and sends the literal string `SHOW\n`; the running instance sets the existing `_show_window_requested` flag (macOS) or schedules `_show_window` on the Tk main thread (Windows) and the accept loop closes the connection. The second process then exits 0 without starting a second server. Both helpers (`start_ipc_server`, `send_show_to_existing`, `remove_ipc_file`) live in `src/gui/core.py` so macOS and Windows share one implementation. The IPC file is removed on graceful quit.
 
 **Orphaned-server recovery:** The GUI spawns the backend as a `subprocess.Popen` child. If the GUI crashes (e.g. a Cocoa re-entrancy after macOS auto-lock / sleep-wake), the subprocess is reparented to `launchd` and would otherwise keep serving clients with no UI to stop it. Two mechanisms defend against this:
 
@@ -3056,13 +3092,13 @@ All artifacts follow the naming convention `rcflow-v{version}-{platform}-{compon
 
 | Target | Command | Output |
 |--------|---------|--------|
-| Linux worker (.deb) | `just bundle-linux-backend` | `dist/rcflow-v{version}-linux-worker-amd64.deb` |
+| Linux worker (.deb) | `just bundle-linux-worker` | `dist/rcflow-v{version}-linux-worker-amd64.deb` |
 | Linux client (.deb) | `just bundle-linux-client` | `dist/rcflow-v{version}-linux-client-amd64.deb` |
-| macOS worker arm64 (DMG) | `just bundle-macos-backend` *(on Apple Silicon)* | `dist/rcflow-v{version}-macos-worker-arm64.dmg` |
-| macOS worker amd64 (DMG) | `just bundle-macos-backend` *(on Intel Mac)* | `dist/rcflow-v{version}-macos-worker-amd64.dmg` |
+| macOS worker arm64 (DMG) | `just bundle-macos-worker` *(on Apple Silicon)* | `dist/rcflow-v{version}-macos-worker-arm64.dmg` |
+| macOS worker amd64 (DMG) | `just bundle-macos-worker` *(on Intel Mac)* | `dist/rcflow-v{version}-macos-worker-amd64.dmg` |
 | macOS client arm64 (DMG) | `just bundle-macos-client` *(on Apple Silicon)* | `dist/rcflow-v{version}-macos-client-arm64.dmg` |
 | macOS client amd64 (DMG) | `just bundle-macos-client` *(on Intel Mac)* | `dist/rcflow-v{version}-macos-client-amd64.dmg` |
-| Windows worker (.exe) | `just bundle-windows-backend` | `dist/rcflow-v{version}-windows-worker-amd64.exe` |
+| Windows worker (.exe) | `just bundle-windows-worker` | `dist/rcflow-v{version}-windows-worker-amd64.exe` |
 | Windows client (.exe) | `just bundle-windows-client` | `dist/rcflow-v{version}-windows-client-amd64.exe` |
 | Android client (APKs, CI only) | *(release.yml / build.yml)* | `dist/rcflow-v{version}-android-client-{arch}.apk` |
 
@@ -3082,9 +3118,9 @@ sudo apt-get install cmake ninja-build clang pkg-config libgtk-3-dev
 
 The recipe checks for these binaries at startup and prints the install command above if any are missing.
 
-The `bundle-linux-backend` target builds a `.deb` package that installs RCFlow to `/opt/rcflow` with a systemd service. Requires `dpkg-deb` (standard on Debian/Ubuntu). Install with `sudo dpkg -i dist/rcflow_*.deb`.
+The `bundle-linux-worker` target builds a `.deb` package that installs RCFlow to `/opt/rcflow` with a systemd service. Requires `dpkg-deb` (standard on Debian/Ubuntu). Install with `sudo dpkg -i dist/rcflow_*.deb`.
 
-The `bundle-windows-backend` target builds a windowed (no console) executable with GUI + system tray support and compiles a `setup.exe` installer using Inno Setup 6. Requires Inno Setup 6 installed on the build machine (`iscc.exe` on PATH or in default location).
+The `bundle-windows-worker` target builds a windowed (no console) executable with GUI + system tray support and compiles a `setup.exe` installer using Inno Setup 6. Requires Inno Setup 6 installed on the build machine (`iscc.exe` on PATH or in default location).
 
 ### Bundle Contents
 
@@ -3176,9 +3212,9 @@ All release artifacts are signed to prevent OS security warnings and verify inte
 
 ```bash
 just bundle --sign                          # Current platform
-just bundle-linux-backend --sign            # Linux .deb + GPG
-just bundle-macos-backend --sign            # macOS .pkg + notarization
-just bundle-windows-backend --sign          # Windows setup.exe + Authenticode
+just bundle-linux-worker --sign             # Linux .deb + GPG
+just bundle-macos-worker --sign             # macOS .pkg + notarization
+just bundle-windows-worker --sign           # Windows setup.exe + Authenticode
 ```
 
 **CI/CD:** The `release.yml` GitHub Actions workflow triggers on version tags (`v*.*.*`), builds all platforms in parallel with signing (including separate arm64 and x64 jobs for macOS), generates `SHA256SUMS` (GPG-signed), and publishes a GitHub Release with all artifacts.

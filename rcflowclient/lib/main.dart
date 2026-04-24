@@ -8,10 +8,12 @@ import 'package:provider/provider.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'models/worker_config.dart';
+import 'services/deep_link_service.dart';
 import 'services/foreground_service.dart';
 import 'services/settings_service.dart';
 import 'state/app_state.dart';
 import 'theme.dart';
+import 'ui/dialogs/worker_edit_dialog.dart';
 import 'ui/badges/badge_registry.dart';
 import 'ui/badges/renderers/agent_badge_renderer.dart';
 import 'ui/badges/renderers/caveman_badge_renderer.dart';
@@ -167,6 +169,11 @@ void main() async {
     });
   }
 
+  // Register the rcflow:// URL scheme handler before runApp so cold-start
+  // links are captured. Warm links arrive via the stream subscription in
+  // _RCFlowAppState.
+  await DeepLinkService.instance.init();
+
   runApp(
     ChangeNotifierProvider<AppState>.value(
       value: appState,
@@ -192,21 +199,92 @@ class _RCFlowAppState extends State<RCFlowApp> with WidgetsBindingObserver {
   /// `resumed` events (e.g. at cold start) do not trigger a pointless wake.
   bool _hibernated = false;
 
+  /// Navigator key so deep-link handlers can push dialogs without holding a
+  /// widget BuildContext.
+  final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
+
+  StreamSubscription<AddWorkerLink>? _deepLinkSub;
+
   @override
   void initState() {
     super.initState();
     if (_isMobile) {
       WidgetsBinding.instance.addObserver(this);
     }
+    _deepLinkSub =
+        DeepLinkService.instance.stream.listen(_handleAddWorkerLink);
+    final initial = DeepLinkService.instance.initialLink;
+    if (initial != null) {
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _handleAddWorkerLink(initial),
+      );
+    }
   }
 
   @override
   void dispose() {
     _hibernateTimer?.cancel();
+    _deepLinkSub?.cancel();
     if (_isMobile) {
       WidgetsBinding.instance.removeObserver(this);
     }
     super.dispose();
+  }
+
+  Future<void> _handleAddWorkerLink(AddWorkerLink link) async {
+    // Bring the desktop window forward so the dialog isn't hidden behind
+    // the worker GUI the user clicked from.
+    if (_isDesktop) {
+      unawaited(windowManager.show());
+      unawaited(windowManager.focus());
+    }
+
+    final navState = _navigatorKey.currentState;
+    if (navState == null) return;
+    final ctx = navState.context;
+    final appState = ctx.read<AppState>();
+
+    final existing = appState.findWorkerByHostPortToken(
+      link.host,
+      link.port,
+      link.token,
+    );
+    if (existing != null) {
+      await showDialog<void>(
+        context: ctx,
+        builder: (dialogCtx) => AlertDialog(
+          title: const Text('Worker already added'),
+          content: Text(
+            "This worker is already in your list as '${existing.name}'.",
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogCtx).pop(),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
+    final seed = WorkerConfig(
+      id: WorkerConfig.generateId(),
+      name: link.name ?? '',
+      host: link.host,
+      port: link.port,
+      apiKey: link.token,
+      useSSL: link.ssl,
+      sortOrder: appState.workerConfigs.length,
+    );
+    final created = await showWorkerEditDialog(
+      ctx,
+      prefilled: seed,
+      sortOrder: seed.sortOrder,
+    );
+    if (created != null) {
+      appState.addWorker(created);
+    }
   }
 
   @override
@@ -253,6 +331,7 @@ class _RCFlowAppState extends State<RCFlowApp> with WidgetsBindingObserver {
       theme: buildLightTheme(),
       darkTheme: buildDarkTheme(),
       themeMode: themeMode,
+      navigatorKey: _navigatorKey,
       home: Platform.isAndroid ? const AndroidShell() : const HomeScreen(),
       debugShowCheckedModeBanner: false,
     );

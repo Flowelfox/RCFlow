@@ -1118,6 +1118,11 @@ class AppState extends ChangeNotifier implements PaneHost {
 
   void addWorker(WorkerConfig config) => _registry.add(config);
 
+  /// Look up a worker matching the host+port+token triple from a deep link.
+  /// Returns null when no duplicate exists.
+  WorkerConfig? findWorkerByHostPortToken(String host, int port, String token) =>
+      _registry.findByHostPortToken(host, port, token);
+
   void updateWorker(WorkerConfig config) => _registry.update(config);
 
   Future<void> removeWorker(String id) => _registry.remove(id);
