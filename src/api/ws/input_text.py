@@ -458,7 +458,7 @@ async def ws_input_text(
 
             # Create/resolve session and check whether the agent is currently
             # busy.  Busy sessions enqueue the prompt in the persistent pending
-            # queue (see ``Queued User Messages`` in ``Design.md``); the ack
+            # queue (see ``Queued User Messages`` in ``docs/design/sessions.md``); the ack
             # carries the assigned ``queued_id`` so the client can pin the
             # message at the bottom of chat until drain.
             result_session_id = prompt_router.ensure_session(session_id)

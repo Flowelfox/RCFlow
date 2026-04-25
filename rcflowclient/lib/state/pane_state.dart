@@ -483,7 +483,7 @@ class PaneState extends ChangeNotifier {
   // is busy processing a prior turn.  Sourced from ``message_queued`` /
   // ``message_dequeued`` / ``message_queued_updated`` events and the
   // ``queued_messages`` snapshot on ``session_update``.  See
-  // ``Queued User Messages`` in ``Design.md``.
+  // ``Queued User Messages`` in ``docs/design/sessions.md``.
   final List<QueuedMessage> _queuedMessages = [];
   List<QueuedMessage> get queuedMessages => List.unmodifiable(_queuedMessages);
 
@@ -1651,7 +1651,7 @@ class PaneState extends ChangeNotifier {
 
   // ---------------------------------------------------------------------------
   // Queued-message reconciliation — called by output handlers and ack handlers.
-  // See ``Queued User Messages`` in ``Design.md`` for the full protocol.
+  // See ``Queued User Messages`` in ``docs/design/sessions.md`` for the full protocol.
 
   /// Promote an optimistic pending-echo DisplayMessage into a real
   /// [QueuedMessage] after the server ack confirms the message was queued.

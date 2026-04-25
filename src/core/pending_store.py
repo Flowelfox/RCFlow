@@ -16,7 +16,7 @@ Mutation order for every public method is:
 The DB is the source of truth — the mirror exists only to avoid round-trips
 when building ``session_update.queued_messages`` snapshots.
 
-See ``Queued User Messages`` in ``Design.md`` for the full lifecycle.
+See ``Queued User Messages`` in ``docs/design/sessions.md`` for the full lifecycle.
 """
 
 from __future__ import annotations

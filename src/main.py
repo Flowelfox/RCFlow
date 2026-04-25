@@ -133,7 +133,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     app.state.telemetry_service = telemetry_service
 
     # Pending message store — persists queued user prompts to DB + disk
-    # (see ``Queued User Messages`` in ``Design.md``).  Attachments are
+    # (see ``Queued User Messages`` in ``docs/design/sessions.md``).  Attachments are
     # spilled under ``<data>/pending_attachments/`` and the table survives
     # backend restarts so clients see their queue restored on reconnect.
     pending_store = SessionPendingMessageStore(

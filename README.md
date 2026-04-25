@@ -122,7 +122,7 @@ Settings are read from `settings.json` in the server directory. Edit the file di
 | `TOOLS_DIR` | Directory containing tool JSON definitions | `./tools` |
 | `LOG_LEVEL` | Logging verbosity | `INFO` |
 
-For the full configuration reference (AWS Bedrock, TTS, Codex, worker settings, etc.) see `Design.md`.
+For the full configuration reference (AWS Bedrock, TTS, Codex, worker settings, etc.) see [`docs/design/configuration.md`](docs/design/configuration.md). The design index is at [`docs/design/README.md`](docs/design/README.md).
 
 ---
 
@@ -247,10 +247,10 @@ Add your own tools by dropping a JSON file into the `tools/` directory — no co
 
 Contributions are welcome. Before opening a pull request:
 
-1. Read `Design.md` — it is the source of truth for architecture, conventions, and design decisions.
+1. Read [`docs/design/README.md`](docs/design/README.md) — it is the source of truth for architecture, conventions, and design decisions, with topic-specific subdocs in `docs/design/`.
 2. Run `just check` to verify linting, formatting, and type checking pass.
 3. Run `just test` to ensure all tests pass.
-4. If your change modifies the architecture, adds endpoints, changes data models, or alters documented behavior, update `Design.md` as part of the same PR.
+4. If your change modifies the architecture, adds endpoints, changes data models, or alters documented behavior, update the matching subdoc under `docs/design/` (and bump its `updated:` frontmatter date) as part of the same PR.
 
 ---
 

@@ -5,7 +5,7 @@
 /// button (x).  Entries disappear when the backend drains them; the message
 /// then appears in the normal chat history at its delivered position.
 ///
-/// See ``Queued User Messages`` in ``Design.md``.
+/// See ``Queued User Messages`` in ``docs/design/sessions.md``.
 library;
 
 import 'package:flutter/material.dart';

@@ -658,7 +658,7 @@ class PromptRouter(
         Returns the new ``queued_id`` on success, or ``None`` when the session
         is idle (caller should deliver the prompt via :meth:`handle_prompt`
         instead) or the pending store is unavailable.  See ``Queued User
-        Messages`` in ``Design.md``.
+        Messages`` in ``docs/design/sessions.md``.
         """
         if self._pending_store is None:
             return None

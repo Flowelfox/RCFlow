@@ -74,7 +74,7 @@ class PendingMessage:
     Mirrors one row of the ``session_pending_messages`` DB table.  The
     authoritative store is the DB; this in-memory copy lets the server
     answer queue queries and broadcasts without a round-trip.  See
-    ``Queued User Messages`` in ``Design.md``.
+    ``Queued User Messages`` in ``docs/design/sessions.md``.
     """
 
     queued_id: str
@@ -182,7 +182,7 @@ class ActiveSession:
         # In-memory mirror of the ``session_pending_messages`` DB table for this
         # session.  Ordered by ``position`` ascending (FIFO).  Mutations go
         # through :class:`SessionPendingMessageStore` which writes the DB then
-        # updates this list.  See ``Queued User Messages`` in ``Design.md``.
+        # updates this list.  See ``Queued User Messages`` in ``docs/design/sessions.md``.
         self.pending_user_messages: list[PendingMessage] = []
 
     @property
@@ -257,7 +257,7 @@ class ActiveSession:
         * the prompt lock is held (LLM path mid-turn);
         * the activity state indicates the session is not idle.
 
-        See ``Queued User Messages`` in ``Design.md``.
+        See ``Queued User Messages`` in ``docs/design/sessions.md``.
         """
         if (
             self.claude_code_executor is not None

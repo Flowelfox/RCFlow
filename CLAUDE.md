@@ -2,11 +2,11 @@
 
 ## Critical Rules
 
-1. **Read `Design.md` before starting any new task in this project.** The design document is the single source of truth for architecture, conventions, and decisions.
+1. **Read `docs/design/README.md` before starting any new task in this project.** It is the design entry point and index — pick the relevant subdoc(s) under [`docs/design/`](docs/design/) for the area you're touching (HTTP API, WebSocket API, sessions, executors, database, mentions, slash commands, etc.). The design docs are the single source of truth for architecture, conventions, and decisions.
 2. **Never use the built-in `EnterWorktree` tool.** It is permanently denied in `.claude/settings.local.json`. Always use the `wt` CLI instead — it is bundled as a project dependency (`wtpython` in `pyproject.toml`) and available at `.venv/bin/wt` after `uv sync`. Use `wt new`, `wt attach`, `wt merge`, and `wt rm` for all worktree operations.
-3. **Any changes to the system design must be reflected in `Design.md`.** If a task modifies architecture, adds endpoints, changes data models, or alters any documented behavior, update `Design.md` as part of that task.
-4. Do not introduce new dependencies without documenting them in `Design.md` under the Technology Stack section.
-5. Do not add or remove WebSocket endpoints, tool definition fields, or database models without updating the corresponding sections in `Design.md`.
+3. **Any changes to the system design must be reflected in the matching subdoc under `docs/design/`.** If a task modifies architecture, adds endpoints, changes data models, or alters any documented behavior, update the relevant `docs/design/<topic>.md` file as part of that task. Bump the `updated:` frontmatter date on any subdoc you edit. Update `docs/design/README.md` only when adding or removing whole topics.
+4. Do not introduce new dependencies without documenting them in the Technology Stack table in `docs/design/README.md`.
+5. Do not add or remove WebSocket endpoints, tool definition fields, or database models without updating `docs/design/websocket-api.md`, `docs/design/tools.md`, or `docs/design/database.md` respectively.
 6. **Keep all endpoints well-documented with docstrings, type hints, and OpenAPI metadata** (summary, description, tags, response models) so that FastAPI can auto-generate accurate API documentation. Every endpoint must be self-documenting.
 
 ## Project Conventions

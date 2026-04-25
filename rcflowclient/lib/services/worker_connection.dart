@@ -99,7 +99,7 @@ class WorkerConnection extends ChangeNotifier {
 
   /// Fires with the authoritative ``queued_messages`` snapshot from each
   /// ``session_update`` broadcast.  Consumers use this to rehydrate the
-  /// pinned queue on reconnect.  See ``Queued User Messages`` in ``Design.md``.
+  /// pinned queue on reconnect.  See ``Queued User Messages`` in ``docs/design/sessions.md``.
   void Function(String sessionId, List<Map<String, dynamic>> snapshot)?
       onQueuedMessagesSnapshot;
 

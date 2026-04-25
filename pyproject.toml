@@ -2,7 +2,7 @@
 name = "rcflow"
 version = "0.40.2"
 description = "WebSocket-based action server that translates natural language prompts into tool executions via LLM"
-readme = "Design.md"
+readme = "README.md"
 license = "AGPL-3.0-or-later"
 requires-python = ">=3.12"
 dependencies = [
