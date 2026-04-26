@@ -18,9 +18,12 @@ import threading
 import time
 import tkinter as tk
 from pathlib import Path
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
-import customtkinter as ctk  # ty:ignore[unresolved-import]
+import customtkinter as ctk
+
+if TYPE_CHECKING:
+    from types import ModuleType
 
 from src.gui import theme
 from src.gui.core import (
@@ -958,8 +961,8 @@ class RCFlowGUI:
     def _setup_tray(self) -> bool:
         """Set up the system tray icon. Returns True on success."""
         try:
-            import pystray  # noqa: PLC0415  # ty:ignore[unresolved-import]
-            from PIL import Image  # noqa: PLC0415  # ty:ignore[unresolved-import]
+            import pystray  # noqa: PLC0415
+            from PIL import Image  # noqa: PLC0415
         except ImportError:
             logger.debug("pystray/Pillow not available — running without tray icon")
             return False
@@ -1007,7 +1010,7 @@ class RCFlowGUI:
         return True
 
     @staticmethod
-    def _load_tray_icon(Image: type) -> object:  # noqa: N803
+    def _load_tray_icon(image_module: ModuleType) -> object:
         from src.paths import get_install_dir, is_frozen  # noqa: PLC0415
 
         icon_path = (
@@ -1016,11 +1019,11 @@ class RCFlowGUI:
             else Path(__file__).resolve().parent / "assets" / "tray_icon.ico"
         )
         if icon_path.exists():
-            return Image.open(str(icon_path))  # ty:ignore[unresolved-attribute]
+            return image_module.open(str(icon_path))
 
-        from PIL import ImageDraw  # noqa: PLC0415  # ty:ignore[unresolved-import]
+        from PIL import ImageDraw  # noqa: PLC0415
 
-        img = Image.new("RGBA", (64, 64), (15, 23, 42, 255))  # ty:ignore[unresolved-attribute]
+        img = image_module.new("RGBA", (64, 64), (15, 23, 42, 255))
         draw = ImageDraw.Draw(img)
         draw.rounded_rectangle([4, 4, 59, 59], radius=8, fill=(56, 189, 248, 255))
         draw.text((14, 16), "RC", fill=(15, 23, 42, 255))

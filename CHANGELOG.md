@@ -52,6 +52,9 @@ and note which component is affected where it matters.
 - **Quit from the macOS menu bar froze the cursor** — clicking Quit no longer leaves the cursor spinning or the menu bar icon hanging around while the worker shuts down (Backend)
 - **Launching the worker GUI a second time now opens the existing window** — instead of doing nothing (or relying on a flaky AppleScript fallback), a second launch on macOS or Windows brings the running dashboard to the front (Backend)
 
+### Security
+- **Patched dependencies with known vulnerabilities** — bumped Pillow (FITS GZIP decompression bomb), python-multipart (DoS via large preamble/epilogue), pytest (insecure tmpdir handling), Mako (path traversal in TemplateLookup), and python-dotenv (symlink-following file overwrite in `set_key`/`unset_key`) to their patched releases (Backend)
+
 ---
 
 ## [Backend 0.40.1 / Client 1.43.2] — 2026-04-23
