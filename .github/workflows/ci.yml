@@ -42,11 +42,13 @@ jobs:
       - name: Set up Python 3.12
         run: uv python install 3.12
 
-      # Install production dependencies + the optional "dev" extras
-      # (ruff, pytest, pytest-cov, httpx).  The [dependency-groups].dev
-      # group (pytest >= 9) is included automatically by uv sync.
+      # Install production dependencies + the "dev" and "tray" extras.
+      # Dev gives ruff/pytest/pytest-cov/httpx; tray pulls in
+      # customtkinter, pystray, and Pillow so the type-checker can
+      # resolve the GUI imports.  The [dependency-groups].dev group
+      # (pytest >= 9) is included automatically by uv sync.
       - name: Install dependencies
-        run: uv sync --extra dev
+        run: uv sync --extra dev --extra tray
 
       # ── Code quality ────────────────────────────────────────────────────
 

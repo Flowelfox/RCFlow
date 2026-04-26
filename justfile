@@ -25,9 +25,9 @@ format:
     uv run ruff format src/ tests/
     uv run ruff check --fix src/ tests/
 
-# Type checking
+# Type checking — use uvx so the resolver mirrors CI exactly
 typecheck:
-    ty check src/
+    uvx ty check src/
 
 # Run all tests (Python + Flutter)
 test:
@@ -41,7 +41,7 @@ coverage:
 # Run all static checks (ruff + ty + flutter analyze)
 check:
     uv run ruff check src/ tests/
-    ty check src/
+    uvx ty check src/
     cd rcflowclient && flutter analyze
 
 # Run the server

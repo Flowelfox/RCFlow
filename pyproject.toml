@@ -80,7 +80,7 @@ skip_empty = true
 fail_under = 0
 
 [tool.ty.src]
-exclude = ["scripts/", "src/gui_macos.py"]
+exclude = ["scripts/", "src/gui/macos.py"]
 
 [[tool.ty.overrides]]
 include = ["tests/test_api/**"]
