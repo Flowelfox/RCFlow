@@ -119,6 +119,24 @@ class TestBuildCommand:
         idx = cmd.index("--model")
         assert cmd[idx + 1] == "anthropic/claude-sonnet-4-5"
 
+    def test_bare_model_prefixed_with_provider_from_config(self, executor: OpenCodeExecutor):
+        config = {"binary_path": "opencode", "model": "gpt-5.4", "provider": "openai", "timeout": 600}
+        cmd = executor._build_command({}, config)
+        idx = cmd.index("--model")
+        assert cmd[idx + 1] == "openai/gpt-5.4"
+
+    def test_bare_model_prefixed_with_provider_from_params(self, executor: OpenCodeExecutor):
+        config = {"binary_path": "opencode", "model": "", "timeout": 600}
+        cmd = executor._build_command({"model": "gpt-5.4", "provider": "openai"}, config)
+        idx = cmd.index("--model")
+        assert cmd[idx + 1] == "openai/gpt-5.4"
+
+    def test_bare_model_without_provider_passes_through(self, executor: OpenCodeExecutor):
+        config = {"binary_path": "opencode", "model": "gpt-5.4", "timeout": 600}
+        cmd = executor._build_command({}, config)
+        idx = cmd.index("--model")
+        assert cmd[idx + 1] == "gpt-5.4"
+
     def test_resume_adds_session_flag(self, executor: OpenCodeExecutor):
         executor._session_id = "sess-abc123"
         config = {"binary_path": "opencode", "model": "", "timeout": 600}
