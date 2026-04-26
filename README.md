@@ -3,11 +3,11 @@
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/Python-3.12%2B-blue)](https://www.python.org/)
 [![Flutter](https://img.shields.io/badge/Flutter-client-54C5F8)](rcflowclient/)
-[![Coverage](docs/badges/coverage.svg)](https://github.com/Flowelfox/RCFlow/actions/workflows/ci.yml)
+[![Coverage](docs/assets/coverage.svg)](https://github.com/Flowelfox/RCFlow/actions/workflows/ci.yml)
 
 A self-hosted coding agent orchestration platform. Run a lightweight worker on your development machine and control it from the companion Flutter app — on desktop, Android, or any other device on your network. Spin up Claude Code, OpenAI Codex, or OpenCode agents across multiple projects and git worktrees simultaneously, stream output in real time, and approve tool calls from anywhere.
 
-![RCFlow screenshot](docs/rcflow.png)
+![RCFlow screenshot](docs/assets/rcflow.png)
 
 ---
 
