@@ -12,6 +12,10 @@ and note which component is affected where it matters.
 
 ## [Unreleased]
 
+---
+
+## [Backend 0.41.0 / Client 1.44.0] — 2026-04-26
+
 ### Added
 - **Worker checks for updates on its own** — the worker dashboard (Windows tray, macOS menu bar) now polls GitHub once a day for new releases. When a newer version is available you'll see an amber banner in the dashboard and an "Update available" entry near the top of the tray/menu-bar menu. Clicking **Download & Install** streams the platform-matched installer to a temp folder and asks if you want to launch it (or just reveal the file in your file manager). A new **Updates** card in the dashboard shows last-checked time and current vs. latest version, lets you trigger a manual check, and includes a toggle to turn off automatic checks entirely. Dismiss the banner and it stays hidden until an even newer version ships. Headless `rcflow run` (systemd, Docker) is unaffected — package managers handle those installs (Backend)
 - **Live model dropdowns** — the model picker in worker settings (and in each managed coding agent's settings) now shows the actual list of models your API key can see, fetched from the provider directly. The list refreshes when you change keys or hit the refresh button next to the field, and a small status chip shows whether you're looking at a live result, a cached one, or the bundled fallback. Works for Anthropic, OpenAI, Bedrock, and OpenCode (which lists OpenRouter's catalog). Custom model strings still work — anything you type that isn't in the list is accepted (Backend + Client)
@@ -219,8 +223,9 @@ and note which component is affected where it matters.
 - Linux systemd install/uninstall scripts
 - `justfile` with dev, test, lint, format, and bundle targets
 
-[Unreleased]: https://github.com/Flowelfox/RCFlow/compare/v0.38.0...HEAD
-[Backend 0.38.0 / Client 1.44.0]: https://github.com/Flowelfox/RCFlow/compare/v0.31.4...v0.38.0
+[Unreleased]: https://github.com/Flowelfox/RCFlow/compare/v0.41.0...HEAD
+[Backend 0.41.0 / Client 1.44.0]: https://github.com/Flowelfox/RCFlow/compare/v0.40.1...v0.41.0
+[Backend 0.40.1 / Client 1.43.2]: https://github.com/Flowelfox/RCFlow/compare/v0.31.4...v0.40.1
 [Backend 0.31.4 / Client 1.33.4]: https://github.com/Flowelfox/RCFlow/compare/v0.21.0...v0.31.4
 [Backend 0.21.0 / Client 1.22.0]: https://github.com/Flowelfox/RCFlow/compare/v0.11.0...v0.21.0
 [Backend 0.11.0 / Client 1.9.0]: https://github.com/Flowelfox/RCFlow/compare/v0.5.0...v0.11.0
