@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from urllib.parse import parse_qs, urlparse
 
-from src.gui.deeplink import ADD_WORKER_HOST, URL_SCHEME, build_add_worker_url
+from src.gui.deeplink import (
+    ADD_WORKER_HOST,
+    URL_SCHEME,
+    build_add_worker_url,
+    resolve_reachable_host,
+)
 
 
 def test_build_add_worker_url_basic() -> None:
@@ -51,3 +56,38 @@ def test_build_add_worker_url_default_name_uses_hostname(monkeypatch) -> None:
     params = parse_qs(parsed.query)
 
     assert params["name"] == ["My-Box"]
+
+
+def test_resolve_reachable_host_returns_concrete_address_verbatim() -> None:
+    # Any host that is not a bind-all sentinel must pass through unchanged —
+    # mapping e.g. a LAN IP to something else would break remote clients.
+    assert resolve_reachable_host("192.168.1.42") == "192.168.1.42"
+    assert resolve_reachable_host("rcflow.local") == "rcflow.local"
+    assert resolve_reachable_host("127.0.0.1") == "127.0.0.1"
+
+
+def test_resolve_reachable_host_rewrites_bind_all_with_lan_ip(monkeypatch) -> None:
+    from src.gui import deeplink  # noqa: PLC0415
+
+    monkeypatch.setattr(deeplink, "_detect_primary_lan_ip", lambda: "10.0.0.7")
+    assert resolve_reachable_host("0.0.0.0") == "10.0.0.7"
+    assert resolve_reachable_host("::") == "10.0.0.7"
+    assert resolve_reachable_host("") == "10.0.0.7"
+
+
+def test_resolve_reachable_host_falls_back_to_loopback_when_offline(monkeypatch) -> None:
+    from src.gui import deeplink  # noqa: PLC0415
+
+    monkeypatch.setattr(deeplink, "_detect_primary_lan_ip", lambda: None)
+    assert resolve_reachable_host("0.0.0.0") == "127.0.0.1"
+
+
+def test_build_add_worker_url_rewrites_bind_all_host(monkeypatch) -> None:
+    from src.gui import deeplink  # noqa: PLC0415
+
+    monkeypatch.setattr(deeplink, "_detect_primary_lan_ip", lambda: "10.0.0.7")
+    url = build_add_worker_url("0.0.0.0", 8765, "tok", wss=False, name="Host")
+    parsed = urlparse(url)
+    params = parse_qs(parsed.query)
+
+    assert params["host"] == ["10.0.0.7"]

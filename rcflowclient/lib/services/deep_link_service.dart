@@ -40,11 +40,14 @@ class AddWorkerLink {
 }
 
 /// Singleton wrapper around [AppLinks] that surfaces parsed
-/// `rcflow://add-worker` links as an [AddWorkerLink] stream.
+/// `rcflow://add-worker` links as a single [AddWorkerLink] stream.
 ///
-/// Subsequent links (the app is already running) arrive on [stream].
-/// The first link delivered on cold start is available via [initialLink]
-/// after [init] completes.
+/// On Windows the underlying plugin delivers the cold-start URI through both
+/// [AppLinks.getInitialLink] and [AppLinks.uriLinkStream], which would otherwise
+/// open the "Add Worker" dialog twice. This service collapses those sources
+/// behind a short URI-equality dedupe window. Cold-start links that arrive
+/// before any UI listener has subscribed are buffered and replayed once on the
+/// first subscription.
 class DeepLinkService {
   DeepLinkService._();
   static final DeepLinkService instance = DeepLinkService._();
@@ -53,33 +56,66 @@ class DeepLinkService {
   final StreamController<AddWorkerLink> _controller =
       StreamController<AddWorkerLink>.broadcast();
   StreamSubscription<Uri>? _sub;
-  AddWorkerLink? _initial;
   bool _initialized = false;
 
-  Stream<AddWorkerLink> get stream => _controller.stream;
-  AddWorkerLink? get initialLink => _initial;
+  final List<AddWorkerLink> _pending = [];
+  bool _drained = false;
+
+  Uri? _lastUri;
+  DateTime? _lastUriAt;
+  static const Duration _dedupeWindow = Duration(seconds: 3);
+
+  Stream<AddWorkerLink> get stream {
+    if (!_drained) {
+      _drained = true;
+      if (_pending.isNotEmpty) {
+        final pending = List<AddWorkerLink>.from(_pending);
+        _pending.clear();
+        scheduleMicrotask(() {
+          for (final link in pending) {
+            _controller.add(link);
+          }
+        });
+      }
+    }
+    return _controller.stream;
+  }
+
+  void _emit(Uri uri) {
+    final now = DateTime.now();
+    final last = _lastUriAt;
+    if (_lastUri == uri &&
+        last != null &&
+        now.difference(last) < _dedupeWindow) {
+      return;
+    }
+    _lastUri = uri;
+    _lastUriAt = now;
+
+    final parsed = AddWorkerLink.tryParse(uri);
+    if (parsed == null) return;
+
+    if (_drained) {
+      _controller.add(parsed);
+    } else {
+      _pending.add(parsed);
+    }
+  }
 
   Future<void> init() async {
     if (_initialized) return;
     _initialized = true;
 
+    _sub = _appLinks.uriLinkStream.listen(_emit, onError: (_) {});
+
     try {
       final first = await _appLinks.getInitialLink();
       if (first != null) {
-        _initial = AddWorkerLink.tryParse(first);
+        _emit(first);
       }
     } catch (_) {
-      // Platform plugin may not be available on some desktop builds;
-      // fall through to stream subscription below.
+      // Platform plugin may not be available on some desktop builds.
     }
-
-    _sub = _appLinks.uriLinkStream.listen(
-      (uri) {
-        final parsed = AddWorkerLink.tryParse(uri);
-        if (parsed != null) _controller.add(parsed);
-      },
-      onError: (_) {},
-    );
   }
 
   Future<void> dispose() async {

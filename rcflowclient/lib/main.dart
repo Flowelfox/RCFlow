@@ -211,14 +211,11 @@ class _RCFlowAppState extends State<RCFlowApp> with WidgetsBindingObserver {
     if (_isMobile) {
       WidgetsBinding.instance.addObserver(this);
     }
+    // The service buffers cold-start links and replays them once the first
+    // listener subscribes, so a single subscription covers both warm and cold
+    // launches.
     _deepLinkSub =
         DeepLinkService.instance.stream.listen(_handleAddWorkerLink);
-    final initial = DeepLinkService.instance.initialLink;
-    if (initial != null) {
-      WidgetsBinding.instance.addPostFrameCallback(
-        (_) => _handleAddWorkerLink(initial),
-      );
-    }
   }
 
   @override
@@ -232,6 +229,17 @@ class _RCFlowAppState extends State<RCFlowApp> with WidgetsBindingObserver {
   }
 
   Future<void> _handleAddWorkerLink(AddWorkerLink link) async {
+    // The replayed cold-start link can arrive before MaterialApp has built
+    // the navigator. Defer to the next frame so the dialog has somewhere to
+    // attach.
+    if (_navigatorKey.currentState == null) {
+      if (!mounted) return;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _handleAddWorkerLink(link);
+      });
+      return;
+    }
+
     // Bring the desktop window forward so the dialog isn't hidden behind
     // the worker GUI the user clicked from.
     if (_isDesktop) {
