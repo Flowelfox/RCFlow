@@ -1201,6 +1201,20 @@ class AppState extends ChangeNotifier implements PaneHost {
     return _registry[id]?.supportsImageAttachments ?? true;
   }
 
+  /// Reverse of [kAgentMentionNames]: 'ClaudeCode' → 'claude_code'.
+  static const _agentMentionToInternal = <String, String>{
+    'ClaudeCode': 'claude_code',
+    'Codex': 'codex',
+    'OpenCode': 'opencode',
+  };
+
+  /// Returns the internal agent name (e.g. ``"claude_code"``) for a given
+  /// mention or internal label, or ``null`` when [name] is not a coding agent.
+  static String? agentInternalName(String name) {
+    if (kAgentMentionNames.containsKey(name)) return name;
+    return _agentMentionToInternal[name];
+  }
+
   @override
   String? defaultAgentForWorker(String? workerId) {
     if (workerId == null) return null;

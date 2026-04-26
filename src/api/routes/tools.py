@@ -9,8 +9,10 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from src.api.deps import verify_http_api_key
+from src.core.agent_auth import agent_configuration_issue
 
 if TYPE_CHECKING:
+    from src.config import Settings
     from src.services.tool_manager import ManagedTool, ToolManager
     from src.services.tool_settings import ToolSettingsManager
 
@@ -97,6 +99,31 @@ def _tool_dict(tool: ManagedTool) -> dict[str, Any]:
         "managed_path": tool.managed_path,
         "external_path": tool.external_path,
     }
+
+
+@router.get(
+    "/tools/auth/preflight",
+    summary="Coding-agent auth-readiness preflight",
+    description=(
+        "Returns per-agent auth readiness so the client can warn the user before they "
+        "send a prompt that would otherwise hang on a CLI login prompt. Each agent "
+        "(``claude_code``, ``codex``, ``opencode``) reports ``ready: bool`` and an "
+        "``issue`` string when not ready. OAuth flows (Anthropic Login, ChatGPT) and "
+        "OpenCode global mode are reported as ``ready: true`` because their state "
+        "lives in the CLI's own credential store and cannot be inspected synchronously."
+    ),
+    dependencies=[Depends(verify_http_api_key)],
+)
+async def coding_agent_auth_preflight(request: Request) -> dict[str, Any]:
+    """Report per-agent auth readiness for the client to surface as a warning."""
+    settings: Settings = request.app.state.settings
+    tool_settings: ToolSettingsManager = request.app.state.tool_settings
+    tool_manager: ToolManager = request.app.state.tool_manager
+    out: dict[str, Any] = {}
+    for agent in ("claude_code", "codex", "opencode"):
+        issue = agent_configuration_issue(agent, settings, tool_settings, tool_manager)
+        out[agent] = {"ready": issue is None, "issue": issue}
+    return {"agents": out}
 
 
 @router.post(
@@ -196,34 +223,33 @@ async def uninstall_managed_tool(request: Request, tool_name: str) -> dict[str, 
     return {"tool": _tool_dict(tool)}
 
 
-@router.post(
-    "/tools/{tool_name}/source",
-    summary="Switch tool source",
-    description=(
-        "Switch a tool between managed (RCFlow-installed) and external (PATH) source. "
-        'Send {"use_managed": true} to use the managed install, or false to use '
-        "the external binary found on PATH."
-    ),
-    dependencies=[Depends(verify_http_api_key)],
-)
-async def switch_tool_source(request: Request, tool_name: str) -> dict[str, Any]:
-    """Switch a tool between managed and external source."""
-    tool_manager: ToolManager = request.app.state.tool_manager
-    if tool_name not in tool_manager.tool_names:
-        raise HTTPException(status_code=404, detail=f"Unknown tool: {tool_name}")
-    body = await request.json()
-    use_managed = body.get("use_managed", True)
-    try:
-        tool = await tool_manager.switch_source(tool_name, use_managed=use_managed)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from None
-    return {"tool": _tool_dict(tool)}
-
-
-def _is_tool_managed(tool_manager: ToolManager, tool_name: str) -> bool:
-    """Check whether *tool_name* is currently using its managed binary."""
+def _is_tool_installed(tool_manager: ToolManager, tool_name: str) -> bool:
+    """Whether the managed binary for *tool_name* exists on disk."""
     tool = tool_manager._tools.get(tool_name)
-    return tool.managed if tool else False
+    return bool(tool and tool.binary_path)
+
+
+# Per-tool keys that should invalidate the model-catalog cache when changed.
+# When any of these are part of a settings PATCH, the matching scope is
+# fully evicted so the UI re-fetches against the new credential next time.
+_TOOL_MODEL_CACHE_TRIGGERS: dict[str, frozenset[str]] = {
+    "claude_code": frozenset(
+        {"provider", "anthropic_api_key", "aws_region", "aws_access_key_id", "aws_secret_access_key"}
+    ),
+    "codex": frozenset({"provider", "codex_api_key"}),
+    "opencode": frozenset({"provider", "opencode_api_key", "openai_api_key"}),
+}
+
+
+def _invalidate_tool_model_cache(request: Request, tool_name: str, changed_keys: set[str]) -> None:
+    """Drop cached model lists scoped to *tool_name* when creds change."""
+    triggers = _TOOL_MODEL_CACHE_TRIGGERS.get(tool_name)
+    if not triggers or not changed_keys & triggers:
+        return
+    catalog = getattr(request.app.state, "model_catalog", None)
+    if catalog is None:
+        return
+    catalog.invalidate(scope=tool_name)
 
 
 class UpdateToolSettingsRequest(BaseModel):
@@ -237,7 +263,9 @@ class UpdateToolSettingsRequest(BaseModel):
     summary="Get per-tool settings",
     description=(
         "Returns the settings schema and current values for a managed CLI tool. "
-        "Each field includes key, label, type, current value, default, and description."
+        "Each field includes key, label, type, current value, default, and description. "
+        "When the tool is not installed yet, ``fields`` is empty and ``installed`` is "
+        "false so the client can prompt for installation instead of rendering a form."
     ),
     dependencies=[Depends(verify_http_api_key)],
 )
@@ -245,11 +273,20 @@ async def get_tool_settings(request: Request, tool_name: str) -> dict[str, Any]:
     """Return settings schema with current values for a tool."""
     tool_settings: ToolSettingsManager = request.app.state.tool_settings
     tool_manager: ToolManager = request.app.state.tool_manager
-    managed = _is_tool_managed(tool_manager, tool_name)
+    installed = _is_tool_installed(tool_manager, tool_name)
+    if not installed:
+        # Hide all configurable fields when the binary is not on disk — there is
+        # nothing useful to set until the user installs the tool.  The schema
+        # itself is still validated so a 404 surfaces an unknown tool name.
+        if tool_name not in {"claude_code", "codex", "opencode"}:
+            raise HTTPException(status_code=404, detail=f"Unknown tool: {tool_name}")
+        return {"tool": tool_name, "fields": [], "installed": False}
     try:
-        return tool_settings.get_settings_with_schema(tool_name, managed=managed)
+        result = tool_settings.get_settings_with_schema(tool_name, managed=True)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e)) from None
+    result["installed"] = True
+    return result
 
 
 @router.patch(
@@ -257,7 +294,8 @@ async def get_tool_settings(request: Request, tool_name: str) -> dict[str, Any]:
     summary="Update per-tool settings",
     description=(
         "Apply partial updates to a managed CLI tool's settings. "
-        'Body: {"updates": {"key": value, ...}}. Returns the updated schema+values.'
+        'Body: {"updates": {"key": value, ...}}. Returns the updated schema+values. '
+        "Rejected with 409 when the tool is not installed."
     ),
     dependencies=[Depends(verify_http_api_key)],
 )
@@ -265,10 +303,16 @@ async def update_tool_settings(request: Request, tool_name: str, body: UpdateToo
     """Apply partial settings updates for a tool."""
     tool_settings: ToolSettingsManager = request.app.state.tool_settings
     tool_manager: ToolManager = request.app.state.tool_manager
-    managed = _is_tool_managed(tool_manager, tool_name)
+    if not _is_tool_installed(tool_manager, tool_name):
+        raise HTTPException(
+            status_code=409,
+            detail=f"{tool_name} is not installed. Install it before configuring.",
+        )
     try:
-        result = tool_settings.update_settings(tool_name, body.updates, managed=managed)
+        result = tool_settings.update_settings(tool_name, body.updates, managed=True)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from None
+    result["installed"] = True
+    _invalidate_tool_model_cache(request, tool_name, set(body.updates.keys()))
     logger.info("Tool settings updated for '%s': %s", tool_name, list(body.updates.keys()))
     return result

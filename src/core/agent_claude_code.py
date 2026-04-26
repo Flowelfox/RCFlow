@@ -22,6 +22,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from src.core.agent_auth import agent_configuration_issue
 from src.core.buffer import MessageType
 from src.core.permissions import (
     PermissionDecision,
@@ -160,8 +161,6 @@ class ClaudeCodeAgentMixin:
             # ensure no ANTHROPIC_API_KEY leaks from the server process env,
             # which would override OAuth and cause "Invalid API key" errors.
             extra_env["ANTHROPIC_API_KEY"] = ""
-        elif not tool_provider and self._settings and self._settings.ANTHROPIC_API_KEY:  # ty:ignore[unresolved-attribute]
-            extra_env["ANTHROPIC_API_KEY"] = self._settings.ANTHROPIC_API_KEY  # ty:ignore[unresolved-attribute]
 
         if self._tool_settings:  # ty:ignore[unresolved-attribute]
             config_dir = self._tool_settings.get_config_dir("claude_code")  # ty:ignore[unresolved-attribute]
@@ -191,6 +190,28 @@ class ClaudeCodeAgentMixin:
         tool_call: ToolCallRequest,
     ) -> str:
         """Start a Claude Code session: spawn subprocess, begin background streaming."""
+        # Preflight auth: catch missing API key / login *before* spawning the
+        # PTY-backed CLI, which would otherwise hang on its own login prompt
+        # and never emit a JSON event the user can see.
+        auth_issue = agent_configuration_issue(
+            "claude_code",
+            self._settings,  # ty:ignore[unresolved-attribute]
+            self._tool_settings,  # ty:ignore[unresolved-attribute]
+            self._tool_manager,  # ty:ignore[unresolved-attribute]
+        )
+        if auth_issue is not None:
+            session.buffer.push_text(
+                MessageType.ERROR,
+                {
+                    "session_id": session.id,
+                    "content": auth_issue,
+                    "code": "AGENT_CONFIG_ERROR",
+                    "agent_type": "claude_code",
+                },
+            )
+            session.set_activity(ActivityState.IDLE)
+            return auth_issue
+
         working_dir = tool_call.tool_input.get("working_directory", ".")
         # Priority 1: explicit worktree selection overrides everything.
         # Priority 2: session project (from picker) used when no worktree is set.

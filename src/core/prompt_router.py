@@ -35,7 +35,7 @@ from src.core.attachment_store import ResolvedAttachment
 from src.core.background_tasks import BackgroundTasksMixin
 from src.core.buffer import MessageType
 from src.core.context import ContextMixin
-from src.core.llm import LLMClient, StreamDone, TextChunk, ToolCallRequest
+from src.core.llm import LLMClient, StreamDone, TextChunk, ToolCallRequest, llm_configuration_issue
 from src.core.pending_store import SessionPendingMessageStore
 from src.core.session import ActiveSession, ActivityState, SessionManager, SessionStatus, SessionType
 from src.core.session_lifecycle import SessionLifecycleMixin
@@ -59,6 +59,26 @@ from src.tools.registry import ToolRegistry
 logger = logging.getLogger(__name__)
 
 _MAX_TOOL_OUTPUT_CHARS = 100_000
+
+
+def _classify_llm_exception(exc: BaseException) -> tuple[str, str]:
+    """Map a prompt-processing exception to ``(content, code)`` for the ERROR message.
+
+    Provider-level authentication failures (missing/invalid API key or Bedrock
+    creds rejected at runtime) are rewritten to the user-friendly
+    ``LLM_CONFIG_ERROR`` text so the client can show the same message as the
+    preflight check. Any other exception falls back to ``PROMPT_PROCESSING_ERROR``
+    with the raw exception string.
+    """
+    import anthropic  # noqa: PLC0415 — local import keeps module import-time tree small
+    import openai  # noqa: PLC0415
+
+    if isinstance(exc, anthropic.AuthenticationError | openai.AuthenticationError):
+        return (
+            "LLM provider rejected the API key. Open worker settings → LLM to check the configured key.",
+            "LLM_CONFIG_ERROR",
+        )
+    return (str(exc), "PROMPT_PROCESSING_ERROR")
 
 
 def _truncate_tool_output(content: str) -> str:
@@ -860,6 +880,25 @@ class PromptRouter(
             await self._handle_direct_prompt(session, text)
             return session.id
 
+        # Preflight LLM credentials. When the worker has a provider selected
+        # (e.g. default "anthropic") but the matching API key is blank, fail
+        # fast with a user-friendly error instead of letting the provider SDK
+        # raise an opaque 401 mid-stream.
+        if self._settings is not None:
+            llm_issue = llm_configuration_issue(self._settings)
+            if llm_issue is not None:
+                session.buffer.push_text(MessageType.TEXT_CHUNK, _make_user_buffer_data())
+                session.buffer.push_text(
+                    MessageType.ERROR,
+                    {
+                        "session_id": session.id,
+                        "content": llm_issue,
+                        "code": "LLM_CONFIG_ERROR",
+                    },
+                )
+                session.fail(llm_issue)
+                return session.id
+
         # Serialize prompt processing per session to prevent concurrent writes
         # to conversation_history, which would break tool_use/tool_result pairing.
         async with session._prompt_lock:
@@ -1074,15 +1113,20 @@ class PromptRouter(
                 logger.exception("Error processing prompt in session %s", session.id)
                 if self._telemetry is not None and _tel_turn is not None:
                     await self._telemetry.mark_turn_interrupted(_tel_turn)
+                # Rewrite opaque provider auth errors (e.g. Anthropic 401 with
+                # an invalid/missing key that slipped past preflight, or
+                # Bedrock IAM creds being rejected at runtime) to the same
+                # user-friendly LLM_CONFIG_ERROR shown by the preflight path.
+                err_content, err_code = _classify_llm_exception(e)
                 session.buffer.push_text(
                     MessageType.ERROR,
                     {
                         "session_id": session.id,
-                        "content": str(e),
-                        "code": "PROMPT_PROCESSING_ERROR",
+                        "content": err_content,
+                        "code": err_code,
                     },
                 )
-                session.fail(str(e))
+                session.fail(err_content)
                 self._fire_plan_finalization_task(session)
                 self._fire_archive_task(session.id)
 

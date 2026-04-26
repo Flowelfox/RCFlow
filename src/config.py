@@ -33,6 +33,7 @@ PROVIDER_MODELS: dict[str, dict[str, Any]] = {
     },
     "openai": {
         "options": [
+            {"value": "gpt-5.5", "label": "ChatGPT 5.5"},
             {"value": "gpt-5.4", "label": "GPT-5.4"},
             {"value": "gpt-4.1", "label": "GPT-4.1"},
             {"value": "gpt-4.1-mini", "label": "GPT-4.1 Mini"},
@@ -331,7 +332,7 @@ CONFIG_OPTIONS: list[dict[str, Any]] = [
         "group": "LLM",
         "description": "LLM backend for inference. 'None' bypasses the LLM — use #tool_name to invoke tools directly.",
         "required": True,
-        "restart_required": True,
+        "restart_required": False,
     },
     {
         "key": "ANTHROPIC_API_KEY",
@@ -340,7 +341,7 @@ CONFIG_OPTIONS: list[dict[str, Any]] = [
         "group": "LLM",
         "description": "API key for direct Anthropic API access",
         "required": False,
-        "restart_required": True,
+        "restart_required": False,
         "visible_when": {"key": "LLM_PROVIDER", "value": "anthropic"},
     },
     {
@@ -350,13 +351,16 @@ CONFIG_OPTIONS: list[dict[str, Any]] = [
         "group": "LLM",
         "description": "Model ID (e.g. claude-sonnet-4-6). For Bedrock use Bedrock model IDs.",
         "required": False,
-        "restart_required": True,
+        "restart_required": False,
         "visible_when": {"key": "LLM_PROVIDER", "value_in": ["anthropic", "bedrock"]},
         "provider_key": "LLM_PROVIDER",
         "models": {
             "anthropic": PROVIDER_MODELS["anthropic"],
             "bedrock": PROVIDER_MODELS["bedrock"],
         },
+        "dynamic": True,
+        "fetch_endpoint": "/api/models",
+        "fetch_scope": "global",
     },
     {
         "key": "AWS_REGION",
@@ -365,7 +369,7 @@ CONFIG_OPTIONS: list[dict[str, Any]] = [
         "group": "LLM",
         "description": "AWS region for Bedrock (e.g. us-east-1)",
         "required": False,
-        "restart_required": True,
+        "restart_required": False,
         "visible_when": {"key": "LLM_PROVIDER", "value": "bedrock"},
     },
     {
@@ -375,7 +379,7 @@ CONFIG_OPTIONS: list[dict[str, Any]] = [
         "group": "LLM",
         "description": "AWS access key for Bedrock authentication",
         "required": False,
-        "restart_required": True,
+        "restart_required": False,
         "visible_when": {"key": "LLM_PROVIDER", "value": "bedrock"},
     },
     {
@@ -385,7 +389,7 @@ CONFIG_OPTIONS: list[dict[str, Any]] = [
         "group": "LLM",
         "description": "AWS secret key for Bedrock authentication",
         "required": False,
-        "restart_required": True,
+        "restart_required": False,
         "visible_when": {"key": "LLM_PROVIDER", "value": "bedrock"},
     },
     {
@@ -395,7 +399,7 @@ CONFIG_OPTIONS: list[dict[str, Any]] = [
         "group": "LLM",
         "description": "API key for OpenAI API access",
         "required": False,
-        "restart_required": True,
+        "restart_required": False,
         "visible_when": {"key": "LLM_PROVIDER", "value": "openai"},
     },
     {
@@ -405,12 +409,15 @@ CONFIG_OPTIONS: list[dict[str, Any]] = [
         "group": "LLM",
         "description": "OpenAI model ID (e.g. gpt-5.4, gpt-4.1, o3)",
         "required": False,
-        "restart_required": True,
+        "restart_required": False,
         "visible_when": {"key": "LLM_PROVIDER", "value": "openai"},
         "provider_key": "LLM_PROVIDER",
         "models": {
             "openai": PROVIDER_MODELS["openai"],
         },
+        "dynamic": True,
+        "fetch_endpoint": "/api/models",
+        "fetch_scope": "global",
     },
     {
         "key": "TITLE_MODEL",
@@ -419,7 +426,7 @@ CONFIG_OPTIONS: list[dict[str, Any]] = [
         "group": "LLM",
         "description": "Model for session title generation (blank = use main model)",
         "required": False,
-        "restart_required": True,
+        "restart_required": False,
         "visible_when": {"key": "LLM_PROVIDER", "value_not": "none"},
         "provider_key": "LLM_PROVIDER",
         "models": {
@@ -427,6 +434,9 @@ CONFIG_OPTIONS: list[dict[str, Any]] = [
             "bedrock": PROVIDER_MODELS["bedrock"],
             "openai": PROVIDER_MODELS["openai"],
         },
+        "dynamic": True,
+        "fetch_endpoint": "/api/models",
+        "fetch_scope": "global",
     },
     {
         "key": "TASK_MODEL",
@@ -435,7 +445,7 @@ CONFIG_OPTIONS: list[dict[str, Any]] = [
         "group": "LLM",
         "description": "Model for task extraction and status evaluation (blank = use main model)",
         "required": False,
-        "restart_required": True,
+        "restart_required": False,
         "visible_when": {"key": "LLM_PROVIDER", "value_not": "none"},
         "provider_key": "LLM_PROVIDER",
         "models": {
@@ -443,6 +453,9 @@ CONFIG_OPTIONS: list[dict[str, Any]] = [
             "bedrock": PROVIDER_MODELS["bedrock"],
             "openai": PROVIDER_MODELS["openai"],
         },
+        "dynamic": True,
+        "fetch_endpoint": "/api/models",
+        "fetch_scope": "global",
     },
     # --- Prompt ---
     {

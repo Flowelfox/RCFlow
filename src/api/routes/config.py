@@ -222,9 +222,37 @@ async def update_config(body: UpdateConfigRequest, request: Request) -> dict[str
     request.app.state.settings = new_settings
 
     _reload_components(request, new_settings)
+    _invalidate_global_model_cache(request, set(body.updates.keys()))
 
     logger.info("Config updated: %s", ", ".join(sorted(body.updates.keys())))
     return {"options": get_config_schema(new_settings)}
+
+
+_GLOBAL_MODEL_CACHE_TRIGGERS: dict[str, tuple[str, ...]] = {
+    "ANTHROPIC_API_KEY": ("anthropic", "openrouter"),
+    "OPENAI_API_KEY": ("openai",),
+    "AWS_ACCESS_KEY_ID": ("bedrock",),
+    "AWS_SECRET_ACCESS_KEY": ("bedrock",),
+    "AWS_REGION": ("bedrock",),
+    "LLM_PROVIDER": ("anthropic", "openai", "bedrock", "openrouter"),
+}
+
+
+def _invalidate_global_model_cache(request: Request, changed_keys: set[str]) -> None:
+    """Drop cached model lists for ``scope='global'`` whose creds just changed.
+
+    Each credential update only invalidates the providers it actually
+    affects. ``LLM_PROVIDER`` flips invalidate everything global-scoped
+    so the UI re-fetches against the newly active provider's key.
+    """
+    catalog = getattr(request.app.state, "model_catalog", None)
+    if catalog is None:
+        return
+    providers: set[str] = set()
+    for key in changed_keys:
+        providers.update(_GLOBAL_MODEL_CACHE_TRIGGERS.get(key, ()))
+    for provider in providers:
+        catalog.invalidate(provider=provider, scope="global")
 
 
 def _reload_components(request: Request, settings: Settings) -> None:

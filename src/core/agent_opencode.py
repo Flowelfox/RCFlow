@@ -16,6 +16,7 @@ import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+from src.core.agent_auth import agent_configuration_issue
 from src.core.buffer import MessageType
 from src.core.session import ActivityState, SessionStatus, SessionType
 from src.executors.opencode import OpenCodeExecutor
@@ -72,6 +73,25 @@ class OpenCodeAgentMixin:
         tool_call: ToolCallRequest,
     ) -> str:
         """Start an OpenCode CLI session: spawn subprocess, begin background streaming."""
+        auth_issue = agent_configuration_issue(
+            "opencode",
+            self._settings,  # ty:ignore[unresolved-attribute]
+            self._tool_settings,  # ty:ignore[unresolved-attribute]
+            self._tool_manager,  # ty:ignore[unresolved-attribute]
+        )
+        if auth_issue is not None:
+            session.buffer.push_text(
+                MessageType.ERROR,
+                {
+                    "session_id": session.id,
+                    "content": auth_issue,
+                    "code": "AGENT_CONFIG_ERROR",
+                    "agent_type": "opencode",
+                },
+            )
+            session.set_activity(ActivityState.IDLE)
+            return auth_issue
+
         working_dir = tool_call.tool_input.get("working_directory", ".")
         selected_wt = session.metadata.get("selected_worktree_path")
         if selected_wt:

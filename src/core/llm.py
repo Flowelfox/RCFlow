@@ -97,6 +97,23 @@ class StreamDone:
     usage: TurnUsage | None = None
 
 
+def llm_configuration_issue(settings: Settings) -> str | None:
+    """Return a user-friendly reason the LLM cannot run, or ``None`` when it can.
+
+    Used for a preflight check before starting an LLM turn so the client gets a
+    readable error (instead of a raw provider SDK exception) when API keys are
+    missing. Bedrock is intentionally not preflighted: the AWS SDK resolves
+    creds from a multi-step provider chain (env, shared config, IAM role) and
+    explicit keys in settings are not required for a working deployment.
+    """
+    provider = settings.LLM_PROVIDER.lower()
+    if provider == "anthropic" and not settings.ANTHROPIC_API_KEY:
+        return "Anthropic API key is not configured. Open worker settings → LLM to add one."
+    if provider == "openai" and not settings.OPENAI_API_KEY:
+        return "OpenAI API key is not configured. Open worker settings → LLM to add one."
+    return None
+
+
 type LLMStreamEvent = TextChunk | ToolCallRequest | StreamDone
 
 

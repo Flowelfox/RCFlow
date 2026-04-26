@@ -13,6 +13,7 @@ from src.api.routes import (
     artifacts_router,
     auth_router,
     config_router,
+    models_router,
     projects_router,
     rcflow_plugins_router,
     sessions_router,
@@ -31,6 +32,7 @@ from src.api.routes.tasks import VALID_TASK_TRANSITIONS as VALID_TASK_TRANSITION
 router = APIRouter(prefix="/api", tags=["API"])
 
 router.include_router(config_router)
+router.include_router(models_router)
 router.include_router(sessions_router)
 router.include_router(tools_router)
 router.include_router(auth_router)

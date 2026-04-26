@@ -271,6 +271,7 @@ class _WorkersContentState extends State<_WorkersContent> {
                               ? () => showServerConfigScreen(
                                   context,
                                   ws: worker!.ws,
+                                  connection: worker,
                                   workerName: config.name,
                                 )
                               : null,

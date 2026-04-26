@@ -104,6 +104,8 @@ LLM, Prompt, Claude Code, Codex, Paths, Session Limits, Logging, Linear, Network
 
 **Per-tool credentials**: `scope=claude_code|codex|opencode` reads keys from each tool's isolated settings (`src/services/tool_settings.py`) so a managed CLI can list models against a key independent of the global `LLM_PROVIDER` configuration.
 
+**Real-time refresh**: The Flutter client owns a per-scope generation counter on `WorkerConnection.modelCatalogGeneration` (`global`, `claude_code`, `codex`, `opencode`). It is bumped from the same call sites that mutate credentials — `PATCH /api/config` save (`global`), `PATCH /api/tools/{tool}/settings` save (matching tool scope), Anthropic Login completion (`claude_code`), Codex/ChatGPT login completion (`codex`). `_DynamicModelInput` listens to the counter and re-fetches with `refresh=true` when its scope's generation changes, so dropdowns update without closing the dialog. The server side mirrors this — `_invalidate_global_model_cache` (in `src/api/routes/config.py`), `_invalidate_tool_model_cache` (in `src/api/routes/tools.py`), and the Anthropic / Codex login handlers in `src/api/routes/auth.py` all call `ModelCatalog.invalidate(...)` so the next fetch goes upstream instead of returning stale cached entries.
+
 ## UPnP Port Forwarding
 
 When `UPNP_ENABLED=true`, the worker attempts to create a UPnP IGD port mapping on the local router during lifespan startup so external clients can reach the worker without manual port forwarding. The feature is implemented in `src/services/upnp_service.py` and wired into `src/main.py` (lifespan).

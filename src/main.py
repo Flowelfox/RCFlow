@@ -20,6 +20,7 @@ from src.database.engine import check_connection, dispose_engine, get_session_fa
 from src.logs import setup_logging
 from src.paths import get_data_dir, is_frozen
 from src.services.artifact_scanner import ArtifactScanner
+from src.services.model_catalog import ModelCatalog
 from src.services.telemetry_service import TelemetryService
 from src.services.tool_manager import ToolManager
 from src.services.tool_settings import ToolSettingsManager
@@ -123,6 +124,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     if settings.LLM_PROVIDER != "none":
         llm_client = LLMClient(settings, tool_registry)
     app.state.llm_client = llm_client
+
+    # Dynamic model catalog (TTL-cached provider model lists)
+    app.state.model_catalog = ModelCatalog(get_data_dir())
 
     # Telemetry service
     telemetry_service = TelemetryService(

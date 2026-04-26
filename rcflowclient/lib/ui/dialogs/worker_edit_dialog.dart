@@ -19,6 +19,11 @@ import '../screens/server_config_screen.dart';
 /// `rcflow://add-worker` deep link). Unlike [existing], the dialog still
 /// opens in "Add" mode and generates a fresh id on save.
 ///
+/// [initialTabIndex] preselects a tab (0 = Main, 1 = Server). Ignored when
+/// [worker] is null (single-tab layout). [initialServerSection] preselects
+/// a sidebar section inside the Server tab (e.g. `'LLM'`) — useful for
+/// deep-linking from a "Configure" prompt.
+///
 /// Returns the resulting config on save, or `null` if cancelled.
 Future<WorkerConfig?> showWorkerEditDialog(
   BuildContext context, {
@@ -26,6 +31,8 @@ Future<WorkerConfig?> showWorkerEditDialog(
   WorkerConfig? prefilled,
   int sortOrder = 0,
   WorkerConnection? worker,
+  int initialTabIndex = 0,
+  String? initialServerSection,
 }) {
   return showDialog<WorkerConfig>(
     context: context,
@@ -34,6 +41,8 @@ Future<WorkerConfig?> showWorkerEditDialog(
       prefilled: prefilled,
       sortOrder: sortOrder,
       worker: worker,
+      initialTabIndex: initialTabIndex,
+      initialServerSection: initialServerSection,
     ),
   );
 }
@@ -47,12 +56,16 @@ class _WorkerEditDialog extends StatefulWidget {
   final WorkerConfig? prefilled;
   final int sortOrder;
   final WorkerConnection? worker;
+  final int initialTabIndex;
+  final String? initialServerSection;
 
   const _WorkerEditDialog({
     required this.existing,
     required this.prefilled,
     required this.sortOrder,
     this.worker,
+    this.initialTabIndex = 0,
+    this.initialServerSection,
   });
 
   @override
@@ -92,7 +105,13 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
     // Seed controllers from `existing` (edit mode) or `prefilled` (add mode
     // with pre-filled values from a deep link). `existing` takes precedence.
     final seed = widget.existing ?? widget.prefilled;
-    _tabController = TabController(length: _tabCount, vsync: this);
+    _tabController = TabController(
+      length: _tabCount,
+      vsync: this,
+      initialIndex: (_hasWorker && widget.initialTabIndex < _tabCount)
+          ? widget.initialTabIndex
+          : 0,
+    );
     _nameCtrl = TextEditingController(text: seed?.name ?? '');
     _hostCtrl = TextEditingController(text: seed?.host ?? '');
     _portCtrl = TextEditingController(
@@ -635,8 +654,11 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
       return ServerConfigContent(
         key: _serverConfigKey,
         ws: worker.ws,
+        connection: worker,
         workerName: widget.existing?.name ?? '',
         embedded: true,
+        initialSection: widget.initialServerSection,
+        onSaved: worker.reloadDerivedConfig,
       );
     }
 

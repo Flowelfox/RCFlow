@@ -21,6 +21,7 @@ from src.core.llm import (
     StreamDone,
     TextChunk,
     ToolCallRequest,
+    llm_configuration_issue,
 )
 
 # ---------------------------------------------------------------------------
@@ -631,3 +632,48 @@ class TestRunAgenticLoop:
 
         # Orphaned assistant message must have been rolled back
         assert len(messages) == initial_len
+
+
+# ---------------------------------------------------------------------------
+# llm_configuration_issue
+# ---------------------------------------------------------------------------
+
+
+def _settings_for(provider: str, **overrides: str) -> MagicMock:
+    """Make a Settings-shaped mock with the provider keys we care about set to ''."""
+    settings = MagicMock()
+    settings.LLM_PROVIDER = provider
+    settings.ANTHROPIC_API_KEY = ""
+    settings.OPENAI_API_KEY = ""
+    for k, v in overrides.items():
+        setattr(settings, k, v)
+    return settings
+
+
+@pytest.mark.parametrize(
+    ("settings", "expect_reason"),
+    [
+        # None → direct tool mode; always OK.
+        (_settings_for("none"), False),
+        # Bedrock → delegate to AWS SDK; preflight stays quiet even with no
+        # explicit keys so IAM-chain setups aren't false-flagged.
+        (_settings_for("bedrock"), False),
+        # Anthropic with a key set → OK.
+        (_settings_for("anthropic", ANTHROPIC_API_KEY="sk-ant-xxx"), False),
+        # Anthropic with no key → reason returned.
+        (_settings_for("anthropic"), True),
+        # OpenAI with a key set → OK.
+        (_settings_for("openai", OPENAI_API_KEY="sk-oai"), False),
+        # OpenAI with no key → reason returned.
+        (_settings_for("openai"), True),
+        # Mixed casing still resolves.
+        (_settings_for("Anthropic"), True),
+    ],
+)
+def test_llm_configuration_issue(settings: MagicMock, expect_reason: bool) -> None:
+    result = llm_configuration_issue(settings)
+    if expect_reason:
+        assert isinstance(result, str)
+        assert result  # non-empty
+    else:
+        assert result is None

@@ -61,13 +61,29 @@ async def codex_login(
     config_dir = tool_settings.get_config_dir("codex")
     config_dir.mkdir(parents=True, exist_ok=True)
 
+    catalog = getattr(request.app.state, "model_catalog", None)
+
+    async def _invalidate_on_complete(gen: AsyncGenerator[str, None]) -> AsyncGenerator[str, None]:
+        """Drop the Codex model cache once the login stream finishes.
+
+        Whether the run actually succeeded or not, the safer behaviour is
+        to evict the entry so the next dropdown open re-fetches with
+        whatever credentials the CLI now has on disk.
+        """
+        try:
+            async for line in gen:
+                yield line
+        finally:
+            if catalog is not None:
+                catalog.invalidate(scope="codex")
+
     if device_code:
         return StreamingResponse(
-            _stream_device_auth(binary_path, config_dir),
+            _invalidate_on_complete(_stream_device_auth(binary_path, config_dir)),
             media_type="application/x-ndjson",
         )
     return StreamingResponse(
-        _stream_browser_auth(binary_path, config_dir),
+        _invalidate_on_complete(_stream_browser_auth(binary_path, config_dir)),
         media_type="application/x-ndjson",
     )
 
@@ -474,6 +490,13 @@ async def claude_code_login_code(request: Request, body: _ClaudeCodeLoginBody) -
 
     # Auto-set provider to anthropic_login on successful login
     tool_settings.update_settings("claude_code", {"provider": "anthropic_login"})
+
+    # Drop the cached model list for the Claude Code scope so the next
+    # ``GET /api/models?scope=claude_code`` re-fetches against the freshly
+    # logged-in identity instead of serving the pre-login (or empty) cache.
+    catalog = getattr(request.app.state, "model_catalog", None)
+    if catalog is not None:
+        catalog.invalidate(scope="claude_code")
 
     # Verify login via CLI to get subscription info
     tool_manager: ToolManager = request.app.state.tool_manager

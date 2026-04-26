@@ -62,6 +62,20 @@ class ConfigOption {
   final String? providerKey;
   final Map<String, dynamic>? models;
 
+  /// True when the worker can fetch this field's options at runtime via
+  /// [fetchEndpoint] / [fetchScope]. Falls back to [models] when the
+  /// network call fails or [isDynamic] is false.
+  final bool isDynamic;
+  final String? fetchEndpoint;
+  final String? fetchScope;
+
+  /// Optional override for the upstream provider name to fetch from. When
+  /// unset the fetcher uses the resolved [providerKey] value (e.g. the
+  /// current ``LLM_PROVIDER`` selection). OpenCode sets this to
+  /// ``"openrouter"`` so the dropdown always lists the OpenRouter catalog
+  /// regardless of the per-tool auth provider.
+  final String? fetchProvider;
+
   const ConfigOption({
     required this.key,
     required this.label,
@@ -75,6 +89,10 @@ class ConfigOption {
     this.visibleWhen,
     this.providerKey,
     this.models,
+    this.isDynamic = false,
+    this.fetchEndpoint,
+    this.fetchScope,
+    this.fetchProvider,
   });
 
   factory ConfigOption.fromJson(Map<String, dynamic> json) {
@@ -105,6 +123,10 @@ class ConfigOption {
       visibleWhen: visibleWhen,
       providerKey: json['provider_key'] as String?,
       models: json['models'] as Map<String, dynamic>?,
+      isDynamic: json['dynamic'] as bool? ?? false,
+      fetchEndpoint: json['fetch_endpoint'] as String?,
+      fetchScope: json['fetch_scope'] as String?,
+      fetchProvider: json['fetch_provider'] as String?,
     );
   }
 }
