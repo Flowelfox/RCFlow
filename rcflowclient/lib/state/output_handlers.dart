@@ -87,10 +87,14 @@ void handleError(Map<String, dynamic> msg, PaneState pane) {
 
 void handleSummary(Map<String, dynamic> msg, PaneState pane) {
   pane.finalizeStream();
+  final content = (msg['content'] as String? ?? '').trim();
+  if (content.isEmpty) {
+    return;
+  }
   pane.addDisplayMessage(
     DisplayMessage(
       type: DisplayMessageType.summary,
-      content: msg['content'] as String? ?? '',
+      content: content,
       sessionId: msg['session_id'] as String?,
       finished: true,
     ),
@@ -502,10 +506,14 @@ void buildSummaryHistory(
   String sessionId,
   List<DisplayMessage> messages,
 ) {
+  final content = (msg['content'] as String? ?? '').trim();
+  if (content.isEmpty) {
+    return;
+  }
   messages.add(
     DisplayMessage(
       type: DisplayMessageType.summary,
-      content: msg['content'] as String? ?? '',
+      content: content,
       sessionId: sessionId,
       finished: true,
     ),
