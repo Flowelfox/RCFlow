@@ -1,4 +1,4 @@
-"""Windows GUI + system tray application for the RCFlow backend server.
+"""Windows + Linux GUI + system tray application for the RCFlow worker.
 
 Launches a CustomTkinter window with server controls, a status badge,
 instance details, and a live log viewer.  The server runs as a managed
@@ -6,13 +6,17 @@ subprocess via ServerManager.  Closing the window minimizes to the system
 tray; double-clicking the tray icon restores the window.  "Quit" from the
 tray stops the server and exits the application entirely.
 
-This is the default mode for frozen Windows builds.
+This is the default mode for frozen Windows builds and is reused on Linux
+(X11 / Wayland with AppIndicator) so the worker presents the same dashboard
++ tray experience on every desktop platform that is not macOS, which has
+its own ``src/gui/macos.py`` menu-bar implementation.
 """
 
 from __future__ import annotations
 
 import contextlib
 import logging
+import os
 import sys
 import threading
 import time
@@ -158,6 +162,33 @@ class RCFlowGUI:
 
         if sys.platform == "win32":
             self._install_win32_icon(icon_path)
+        elif sys.platform.startswith("linux"):
+            self._install_linux_icon()
+
+    def _install_linux_icon(self) -> None:
+        """Set the title-bar / Alt-Tab icon on X11 / Wayland.
+
+        Tk's ``iconbitmap`` expects an ``.xbm`` on Linux and silently
+        no-ops with a Windows ``.ico``, so we use ``iconphoto`` with a
+        PNG that we ship next to the .ico inside the bundle.
+        """
+        from src.paths import get_install_dir, is_frozen  # noqa: PLC0415
+
+        png_candidates: list[Path] = []
+        if is_frozen():
+            png_candidates.append(get_install_dir() / "tray_icon.png")
+        png_candidates.append(Path(__file__).resolve().parent / "assets" / "tray_icon.png")
+        png_path = next((p for p in png_candidates if p.exists()), None)
+        if png_path is None:
+            return
+        try:
+            photo = tk.PhotoImage(file=str(png_path))
+        except tk.TclError:
+            return
+        with contextlib.suppress(tk.TclError):
+            self._root.iconphoto(True, photo)
+        # Hold a reference so Tk does not garbage-collect the image.
+        self._linux_icon_photo = photo
 
     def _install_win32_icon(self, icon_path: Path) -> None:
         """Load ico + hand native-sized HICONs to WM_SETICON + the window class."""
@@ -960,11 +991,36 @@ class RCFlowGUI:
 
     def _setup_tray(self) -> bool:
         """Set up the system tray icon. Returns True on success."""
+        # Operator escape hatch — set ``RCFLOW_DISABLE_TRAY=1`` to force
+        # window-only mode (useful on Linux desktops where the tray backend
+        # interacts badly with the X server, or when the tray is not visible
+        # because the user has not installed an AppIndicator extension).
+        if os.environ.get("RCFLOW_DISABLE_TRAY", "").lower() in {"1", "true", "yes"}:
+            logger.info("RCFLOW_DISABLE_TRAY set — running RCFlow Worker without a tray icon.")
+            return False
+
+        # On Linux, pystray's backend-selection import path probes for
+        # ``ayatana-appindicator`` first and falls back to the pure-Xlib
+        # ``_xorg`` backend.  Importing the Xlib backend calls
+        # ``XInitThreads`` at module load time, which poisons the X
+        # connection that Tk later opens — Tk then aborts with
+        # ``xcb_io.c:157 ... !xcb_xlib_unknown_seq_number`` as soon as it
+        # tries to talk to the server.  Avoid the import entirely unless
+        # AppIndicator is reachable, so we never trigger the Xlib fallback.
+        if sys.platform.startswith("linux") and not _linux_appindicator_available():
+            logger.info(
+                "ayatana-appindicator GI bindings not available; running the "
+                "RCFlow Worker dashboard without a tray icon to avoid pystray's "
+                "X11 fallback backend, which races Tk on the X connection. "
+                "Install gir1.2-ayatanaappindicator3-0.1 to re-enable the tray icon."
+            )
+            return False
+
         try:
             import pystray  # noqa: PLC0415
             from PIL import Image  # noqa: PLC0415
         except ImportError:
-            logger.debug("pystray/Pillow not available — running without tray icon")
+            logger.info("pystray/Pillow not available — running without tray icon")
             return False
 
         icon_image = self._load_tray_icon(Image)
@@ -996,10 +1052,10 @@ class RCFlowGUI:
             pystray.MenuItem("Add to Client…", self._on_tray_add_to_client),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem(
-                "Start with Windows",
+                _autostart_menu_label(),
                 self._on_toggle_autostart,
                 checked=lambda item: _is_autostart_enabled(),
-                visible=sys.platform == "win32",
+                visible=sys.platform == "win32" or sys.platform.startswith("linux"),
             ),
             pystray.MenuItem("Check for Updates", self._on_tray_check_updates),
             pystray.MenuItem("Quit", self._on_tray_quit),
@@ -1177,26 +1233,126 @@ class RCFlowGUI:
         self._root.after(0, _apply)
 
 
-# ── Windows autostart helpers ─────────────────────────────────────────────────
+# ── Autostart helpers (Windows + Linux) ───────────────────────────────────────
 
 _AUTOSTART_REG_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 _AUTOSTART_VALUE_NAME = "RCFlow"
 
+# Linux: XDG Autostart spec — files in ~/.config/autostart/<name>.desktop are
+# launched by the user's session at login. Mirrors the Windows HKCU\...\Run
+# registry value and the macOS LaunchAgent plist used by macos.py.
+_LINUX_AUTOSTART_FILENAME = "rcflow-worker.desktop"
+
+
+def _linux_appindicator_available() -> bool:
+    """Return True if pystray's AppIndicator backend can load on this host.
+
+    pystray on Linux prefers ``AyatanaAppIndicator3`` (or the legacy
+    ``AppIndicator3``) via PyGObject when present and falls back to a
+    pure-Xlib implementation otherwise.  The Xlib backend conflicts with
+    Tk (see ``_setup_tray``), so we only enable the tray when one of the
+    AppIndicator bindings actually imports.
+    """
+    try:
+        import gi  # noqa: PLC0415  # ty:ignore[unresolved-import]
+
+        gi.require_version("AyatanaAppIndicator3", "0.1")
+        from gi.repository import AyatanaAppIndicator3  # noqa: F401, PLC0415  # ty:ignore[unresolved-import]
+
+        return True
+    except (ImportError, ValueError):
+        pass
+    try:
+        import gi  # noqa: PLC0415  # ty:ignore[unresolved-import]
+
+        gi.require_version("AppIndicator3", "0.1")
+        from gi.repository import AppIndicator3  # noqa: F401, PLC0415  # ty:ignore[unresolved-import]
+
+        return True
+    except (ImportError, ValueError):
+        return False
+
+
+def _autostart_menu_label() -> str:
+    """Platform-appropriate label for the tray "Start at login" toggle."""
+    if sys.platform == "win32":
+        return "Start with Windows"
+    if sys.platform.startswith("linux"):
+        return "Start with Linux"
+    return "Start at login"
+
+
+def _linux_autostart_path() -> Path:
+    base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
+    return Path(base) / "autostart" / _LINUX_AUTOSTART_FILENAME
+
+
+def _linux_autostart_command() -> str:
+    """Resolve the command line that the autostart .desktop should Exec.
+
+    Frozen builds run the bundled binary directly; dev runs invoke the
+    current interpreter on the rcflow module.
+    """
+    if getattr(sys, "frozen", False):
+        return f'"{sys.executable}" gui --minimized'
+    return f'"{sys.executable}" -m src gui --minimized'
+
 
 def _is_autostart_enabled() -> bool:
-    if sys.platform != "win32":
-        return False
-    try:
-        import winreg  # noqa: PLC0415
+    if sys.platform == "win32":
+        try:
+            import winreg  # noqa: PLC0415
 
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _AUTOSTART_REG_KEY, 0, winreg.KEY_READ) as key:
-            winreg.QueryValueEx(key, _AUTOSTART_VALUE_NAME)
-            return True
-    except (FileNotFoundError, OSError):
-        return False
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _AUTOSTART_REG_KEY, 0, winreg.KEY_READ) as key:
+                winreg.QueryValueEx(key, _AUTOSTART_VALUE_NAME)
+                return True
+        except (FileNotFoundError, OSError):
+            return False
+    if sys.platform.startswith("linux"):
+        return _linux_autostart_path().exists()
+    return False
 
 
 def _set_autostart(enabled: bool) -> None:
+    if sys.platform == "win32":
+        _set_autostart_win32(enabled)
+        return
+    if sys.platform.startswith("linux"):
+        _set_autostart_linux(enabled)
+        return
+
+
+def _set_autostart_linux(enabled: bool) -> None:
+    """Write or remove ~/.config/autostart/rcflow-worker.desktop.
+
+    XDG-spec keys: Type, Exec, Hidden=false, X-GNOME-Autostart-enabled=true
+    so GNOME's Tweaks panel surfaces the entry. ``--minimized`` keeps the
+    dashboard hidden on login (tray-only) — same convention as Windows
+    and the macOS LaunchAgent.
+    """
+    path = _linux_autostart_path()
+    if not enabled:
+        with contextlib.suppress(FileNotFoundError, OSError):
+            path.unlink()
+        return
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            "[Desktop Entry]\n"
+            "Type=Application\n"
+            "Name=RCFlow Worker\n"
+            "Comment=RCFlow background worker\n"
+            f"Exec={_linux_autostart_command()}\n"
+            "Icon=rcflow-worker\n"
+            "Terminal=false\n"
+            "X-GNOME-Autostart-enabled=true\n"
+            "Hidden=false\n"
+        )
+    except OSError as exc:
+        logger.error("Failed to write Linux autostart entry %s: %s", path, exc)
+
+
+def _set_autostart_win32(enabled: bool) -> None:
     if sys.platform != "win32":
         return
     import winreg  # noqa: PLC0415
@@ -1314,12 +1470,35 @@ def _set_app_user_model_id() -> None:
         logger.debug("Failed to set AppUserModelID: %s", exc)
 
 
+def _enable_xlib_threads() -> None:
+    """Call ``XInitThreads`` on Linux before Tk opens its X connection.
+
+    PyInstaller's bundled tcl/tk loads the system ``libX11`` / ``libxcb``,
+    and modern libxcb (Ubuntu 25.04+) aborts with
+    ``xcb_io.c:157 ... !xcb_xlib_unknown_seq_number`` as soon as Tk talks
+    to the server unless ``XInitThreads`` has been invoked first.  We call
+    it via ctypes here — it is safe to call before any X traffic and is a
+    no-op on subsequent calls.  No-op outside Linux.
+    """
+    if not sys.platform.startswith("linux"):
+        return
+    try:
+        import ctypes  # noqa: PLC0415
+
+        libx11 = ctypes.CDLL("libX11.so.6", use_errno=True)
+        libx11.XInitThreads.restype = ctypes.c_int
+        libx11.XInitThreads()
+    except (OSError, AttributeError) as exc:
+        logger.debug("XInitThreads not callable (libX11 missing?): %s", exc)
+
+
 def run_gui(*, minimized: bool = False) -> None:
     """Entry point for the GUI + tray application.
 
     *minimized* hides the dashboard at launch (tray-only).  The registry
     autostart entry passes it so login boot does not pop a window.
     """
+    _enable_xlib_threads()
     _enable_dpi_awareness()
     _set_app_user_model_id()
     if not _acquire_singleton_lock():
