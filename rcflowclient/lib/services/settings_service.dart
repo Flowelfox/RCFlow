@@ -19,7 +19,6 @@ class SettingsService {
   static const _cachedSessionsPerWorkerKey =
       'rcflow_cached_sessions_per_worker';
   static const _lastProjectPerWorkerKey = 'rcflow_last_project_per_worker';
-  static const _lastAgentPerWorkerKey = 'rcflow_last_agent_per_worker';
 
   static const _themeModeKey = 'rcflow_theme_mode';
   static const _fontSizeKey = 'rcflow_font_size';
@@ -277,33 +276,6 @@ class SettingsService {
       map[workerId] = projectName;
     }
     _prefs.setString(_lastProjectPerWorkerKey, jsonEncode(map));
-  }
-
-  // --- Per-worker last used agent ---
-
-  Map<String, String> get _lastAgentPerWorker {
-    final raw = _prefs.getString(_lastAgentPerWorkerKey);
-    if (raw == null) return {};
-    try {
-      return (jsonDecode(raw) as Map<String, dynamic>).map(
-        (k, v) => MapEntry(k, v as String),
-      );
-    } catch (_) {
-      return {};
-    }
-  }
-
-  String? getLastAgentForWorker(String workerId) =>
-      _lastAgentPerWorker[workerId];
-
-  void setLastAgentForWorker(String workerId, String? agentName) {
-    final map = _lastAgentPerWorker;
-    if (agentName == null) {
-      map.remove(workerId);
-    } else {
-      map[workerId] = agentName;
-    }
-    _prefs.setString(_lastAgentPerWorkerKey, jsonEncode(map));
   }
 
   String get themeMode => _prefs.getString(_themeModeKey) ?? 'dark';

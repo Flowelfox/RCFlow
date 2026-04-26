@@ -84,9 +84,6 @@ abstract class PaneHost {
   /// Returns the last project name the user worked on for [workerId], or null.
   String? getLastProjectForWorker(String workerId);
 
-  /// Returns the last agent mention name the user used for [workerId], or null.
-  String? getLastAgentForWorker(String workerId);
-
   /// Read the cached draft for [key] from local storage.
   /// Key is a session ID or `"new_{workerId}"` for the new-session pane.
   ({String content, DateTime? cachedAt}) getDraft(String key);
@@ -644,10 +641,12 @@ class PaneState extends ChangeNotifier {
     _loadingWorkerDefaults = true;
     notifyListeners();
     try {
-      // Agent: last-used overrides the configured static default.
-      final lastAgent = _host.getLastAgentForWorker(workerId);
-      final configAgent = _host.defaultAgentForWorker(workerId);
-      _selectedToolMention = lastAgent ?? configAgent;
+      // Agent: honour the configured per-worker default exactly. When the
+      // worker is set to "No preference" (null) the new session starts with
+      // no agent badge — last-used auto-resurrection was deliberately removed
+      // because it produced surprising "I never picked Claude Code, why is it
+      // here" behaviour.
+      _selectedToolMention = _host.defaultAgentForWorker(workerId);
 
       // Project: validate existence on the worker before applying.
       final lastProject = _host.getLastProjectForWorker(workerId);

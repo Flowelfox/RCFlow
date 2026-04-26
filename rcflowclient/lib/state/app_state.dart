@@ -1234,10 +1234,6 @@ class AppState extends ChangeNotifier implements PaneHost {
       _settings.getLastProjectForWorker(workerId);
 
   @override
-  String? getLastAgentForWorker(String workerId) =>
-      _settings.getLastAgentForWorker(workerId);
-
-  @override
   ({String content, DateTime? cachedAt}) getDraft(String key) =>
       _settings.getDraft(key);
 
@@ -1825,15 +1821,14 @@ class AppState extends ChangeNotifier implements PaneHost {
           worker.subscribe(sessionId);
         }
         _settings.setLastSessionId(workerId, sessionId);
-        // Persist per-worker last-used project and agent so new sessions on
-        // the same worker can restore these as defaults.
+        // Persist the per-worker last-used project so new sessions on the
+        // same worker can restore it as a default.  Last-used agent is *not*
+        // persisted: the per-worker default agent (or "No preference") is
+        // the single source of truth, and silent auto-resurrection of an
+        // earlier choice surprises the user.
         final projectName = pane.selectedProjectName;
         if (projectName != null) {
           _settings.setLastProjectForWorker(workerId, projectName);
-        }
-        final agentName = pane.selectedToolMention;
-        if (agentName != null) {
-          _settings.setLastAgentForWorker(workerId, agentName);
         }
         _registry[workerId]?.refreshSessions();
         break;

@@ -69,7 +69,6 @@ class _StubHost implements PaneHost {
   String? getLastProjectForWorker(String workerId) => null;
 
   @override
-  String? getLastAgentForWorker(String workerId) => null;
 
   @override
   Future<String?> resolveProjectOnWorker(
