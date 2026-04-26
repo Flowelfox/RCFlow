@@ -439,7 +439,16 @@ async def claude_code_login_code(request: Request, body: _ClaudeCodeLoginBody) -
         "code_verifier": verifier,
         "state": state or "",
     }
-    # Exchange authorization code for tokens (Anthropic expects JSON, not form-encoded)
+    # Exchange authorization code for tokens (Anthropic expects JSON, not form-encoded).
+    #
+    # The PKCE verifier is **not** cleared on failure: the verifier is bound to
+    # the auth-url session opened by POST /login, not to the one-shot
+    # authorization code, so it stays valid across multiple /code attempts as
+    # long as the user has not started a new /login.  Clearing it on every
+    # error meant a single typo in the pasted code wiped the session and the
+    # next attempt failed with 409 "No active login" — forcing the user back to
+    # /login even though their browser tab was still authenticated.  Only a
+    # successful token exchange consumes the verifier.
     try:
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.post(
@@ -449,15 +458,15 @@ async def claude_code_login_code(request: Request, body: _ClaudeCodeLoginBody) -
             )
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Token exchange failed: {exc}") from exc
-    finally:
-        # Clear verifier regardless of outcome
-        request.app.state._claude_login_verifier = None
-        request.app.state._claude_login_state = None
 
     if resp.status_code != 200:
         detail = resp.text[:500] if resp.text else f"HTTP {resp.status_code}"
         logger.warning("Claude Code OAuth token exchange failed (%d): %s", resp.status_code, detail)
         raise HTTPException(status_code=502, detail=f"Token exchange returned {resp.status_code}: {detail}")
+
+    # Successful exchange — verifier has been consumed, retire it.
+    request.app.state._claude_login_verifier = None
+    request.app.state._claude_login_state = None
 
     token_data = resp.json()
     access_token = token_data.get("access_token", "")

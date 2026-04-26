@@ -125,6 +125,7 @@ class ClaudeCodeExecutor(BaseExecutor):
         *,
         resume: bool = False,
         prompt: str | None = None,
+        include_positional_prompt: bool = True,
     ) -> list[str]:
         """Build the command-line arguments for the Claude Code subprocess.
 
@@ -134,8 +135,11 @@ class ClaudeCodeExecutor(BaseExecutor):
         in use").
 
         *prompt* is passed as a positional CLI argument for the initial turn
-        (required by ``--print`` mode).  Follow-up messages use stdin via
-        ``--input-format stream-json``.
+        when *include_positional_prompt* is True.  In pipe mode (Windows /
+        no-TTY) the CLI ignores the positional prompt under
+        ``--input-format stream-json`` and waits for the first turn on stdin,
+        so callers there pass ``include_positional_prompt=False`` and write
+        the initial user message via :meth:`_send_message` after spawn.
         """
         cmd = [
             self._binary_path,
@@ -174,7 +178,7 @@ class ClaudeCodeExecutor(BaseExecutor):
         if model:
             cmd.extend(["--model", model])
 
-        if prompt:
+        if prompt and include_positional_prompt:
             cmd.append("--")
             cmd.append(prompt)
 
@@ -246,8 +250,17 @@ class ClaudeCodeExecutor(BaseExecutor):
         resume: bool = False,
         prompt: str | None = None,
     ) -> asyncio.subprocess.Process:
-        """Spawn using ``asyncio`` pipes (original behaviour; used on Windows or when PTY is disabled)."""
-        cmd = self._build_command(parameters, config, resume=resume, prompt=prompt)
+        """Spawn using ``asyncio`` pipes (original behaviour; used on Windows or when PTY is disabled).
+
+        The Claude Code CLI ignores the positional ``--prompt`` argument under
+        ``--input-format stream-json`` when stdin is a non-TTY pipe, so the
+        initial prompt is sent on stdin via :meth:`_send_message` after the
+        process is alive.  This matches the original pre-PTY behaviour.
+        """
+        # NB: do not pass the prompt as a positional CLI arg in pipe mode —
+        # claude.exe waits for stdin input regardless and the positional value
+        # is silently dropped.
+        cmd = self._build_command(parameters, config, resume=resume, include_positional_prompt=False)
         working_directory = str(Path(parameters.get("working_directory", ".")).expanduser())
         env = self._build_env()
 
@@ -259,12 +272,12 @@ class ClaudeCodeExecutor(BaseExecutor):
         self._last_parameters = parameters
 
         logger.info(
-            "Starting Claude Code (pipe): %s (cwd=%s, session=%s, CLAUDE_CONFIG_DIR=%s, ANTHROPIC_API_KEY=%s)",
+            "Starting Claude Code (pipe): %s (cwd=%s, session=%s, CLAUDE_CONFIG_DIR=%s, auth=%s)",
             " ".join(cmd),
             working_directory,
             self._session_id,
             env.get("CLAUDE_CONFIG_DIR", "(not set)"),
-            "SET" if env.get("ANTHROPIC_API_KEY") else "(not set)",
+            self._describe_auth_for_log(env),
         )
 
         self._stderr_output = ""
@@ -285,7 +298,28 @@ class ClaudeCodeExecutor(BaseExecutor):
         # Start draining stderr in background to prevent pipe deadlock
         self._stderr_task = asyncio.create_task(self._drain_stderr())
 
+        # Deliver the initial user turn via stdin — required because the CLI
+        # ignores the positional prompt in stream-json input mode on a pipe.
+        if prompt:
+            await self._send_message("user", prompt)
+
         return process
+
+    @staticmethod
+    def _describe_auth_for_log(env: dict[str, str]) -> str:
+        """Build a short human-readable auth description for the start-up log.
+
+        Picks the first credential signal present in [env]:
+        ``api-key`` (ANTHROPIC_API_KEY set), ``bedrock`` (CLAUDE_CODE_USE_BEDROCK
+        set), or ``oauth-or-cli`` when no env-level key is present (the CLI is
+        expected to read OAuth tokens from its own ``.credentials.json``, or
+        otherwise to surface its own login prompt).
+        """
+        if env.get("ANTHROPIC_API_KEY"):
+            return "api-key"
+        if env.get("CLAUDE_CODE_USE_BEDROCK"):
+            return "bedrock"
+        return "oauth-or-cli"
 
     async def _start_process_pty(
         self,
@@ -345,12 +379,12 @@ class ClaudeCodeExecutor(BaseExecutor):
         set_winsize(master_fd, rows=24, cols=220)
 
         logger.info(
-            "Starting Claude Code (PTY): %s (cwd=%s, session=%s, CLAUDE_CONFIG_DIR=%s, ANTHROPIC_API_KEY=%s)",
+            "Starting Claude Code (PTY): %s (cwd=%s, session=%s, CLAUDE_CONFIG_DIR=%s, auth=%s)",
             " ".join(cmd),
             working_directory,
             self._session_id,
             env.get("CLAUDE_CONFIG_DIR", "(not set)"),
-            "SET" if env.get("ANTHROPIC_API_KEY") else "(not set)",
+            self._describe_auth_for_log(env),
         )
 
         self._stderr_output = ""
