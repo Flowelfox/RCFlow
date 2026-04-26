@@ -34,7 +34,15 @@ async def health() -> dict[str, str]:
 @router.get(
     "/info",
     summary="Server information",
-    description="Returns server metadata including operating system and platform details.",
+    description=(
+        "Returns server metadata including operating system, platform details, and the "
+        "current state of both port-forwarding services.  The ``upnp`` object reports "
+        "the LAN-router (UPnP-IGD) mapping; the ``natpmp`` object reports the VPN-gateway "
+        "(NAT-PMP / RFC 6886) mapping used to escape ISP CGNAT.  Each object's ``status`` "
+        "is one of ``disabled``, ``discovering``, ``mapped``, ``failed`` or ``closing``; "
+        "clients should surface ``public_ip:external_port`` (NAT-PMP) or "
+        "``external_ip:external_port`` (UPnP) when ``status == 'mapped'``."
+    ),
     dependencies=[Depends(verify_http_api_key)],
 )
 async def server_info(request: Request) -> dict[str, Any]:
@@ -48,6 +56,48 @@ async def server_info(request: Request) -> dict[str, Any]:
     except PackageNotFoundError:
         worker_version = None
 
+    upnp_service = getattr(request.app.state, "upnp_service", None)
+    if upnp_service is not None:
+        snap = upnp_service.snapshot()
+        upnp_payload: dict[str, Any] = {
+            "enabled": True,
+            "status": snap.status.value,
+            "external_ip": snap.external_ip,
+            "external_port": snap.external_port,
+            "error": snap.error,
+        }
+    else:
+        upnp_payload = {
+            "enabled": settings.UPNP_ENABLED,
+            "status": "disabled",
+            "external_ip": None,
+            "external_port": None,
+            "error": None,
+        }
+
+    natpmp_service = getattr(request.app.state, "natpmp_service", None)
+    if natpmp_service is not None:
+        nsnap = natpmp_service.snapshot()
+        natpmp_payload: dict[str, Any] = {
+            "enabled": True,
+            "status": nsnap.status.value,
+            "gateway": nsnap.gateway,
+            "public_ip": nsnap.public_ip,
+            "external_port": nsnap.external_port,
+            "internal_port": nsnap.internal_port,
+            "error": nsnap.error,
+        }
+    else:
+        natpmp_payload = {
+            "enabled": settings.NATPMP_ENABLED,
+            "status": "disabled",
+            "gateway": None,
+            "public_ip": None,
+            "external_port": None,
+            "internal_port": None,
+            "error": None,
+        }
+
     return {
         "os": platform.system(),
         "backend_id": settings.RCFLOW_BACKEND_ID,
@@ -57,6 +107,8 @@ async def server_info(request: Request) -> dict[str, Any]:
         # available.  Fine-grained per-type support lives in attachment_capabilities.
         "supports_attachments": True,
         "attachment_capabilities": llm_client.attachment_capabilities,
+        "upnp": upnp_payload,
+        "natpmp": natpmp_payload,
     }
 
 

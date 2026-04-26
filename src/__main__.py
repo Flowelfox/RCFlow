@@ -223,6 +223,18 @@ def _cmd_run(args: argparse.Namespace) -> None:
     """Start the RCFlow server (default command)."""
     _check_not_root()
     _install_parent_death_watchdog()
+
+    # Apply --upnp / --no-upnp override before Settings is built so the lifespan
+    # sees the effective value.  Per-invocation only — not persisted to
+    # settings.json (matches how WSS_ENABLED is handled).
+    upnp_override = getattr(args, "upnp", None)
+    if upnp_override is not None:
+        os.environ["UPNP_ENABLED"] = "true" if upnp_override else "false"
+
+    natpmp_override = getattr(args, "natpmp", None)
+    if natpmp_override is not None:
+        os.environ["NATPMP_ENABLED"] = "true" if natpmp_override else "false"
+
     settings = get_settings()
 
     _check_port_available(settings.RCFLOW_HOST, settings.RCFLOW_PORT)
@@ -367,6 +379,13 @@ def _cmd_info(args: argparse.Namespace) -> None:
     print(f"  Port         : {settings.RCFLOW_PORT}")
     print(f"  WSS enabled  : {'yes' if settings.WSS_ENABLED else 'no'}")
     print(f"  URL          : {protocol}://{settings.RCFLOW_HOST}:{settings.RCFLOW_PORT}")
+    print(f"  UPnP enabled : {'yes' if settings.UPNP_ENABLED else 'no'}")
+    if settings.UPNP_ENABLED:
+        print(f"  UPnP lease   : {settings.UPNP_LEASE_SECONDS}s")
+    print(f"  NAT-PMP      : {'yes' if settings.NATPMP_ENABLED else 'no'}")
+    if settings.NATPMP_ENABLED:
+        print(f"  NAT-PMP gw   : {settings.NATPMP_GATEWAY}")
+        print(f"  NAT-PMP lease: {settings.NATPMP_LEASE_SECONDS}s")
     print(f"  Settings     : {_get_settings_path()}")
     print(f"  Logs         : {logs_dir}")
 
@@ -399,6 +418,24 @@ def main() -> None:
 
     # rcflow run
     run_parser = subparsers.add_parser("run", help="Start the RCFlow server")
+    run_parser.add_argument(
+        "--upnp",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=(
+            "Enable (--upnp) or disable (--no-upnp) UPnP port forwarding for this run. "
+            "Overrides UPNP_ENABLED in settings.json. Not persisted."
+        ),
+    )
+    run_parser.add_argument(
+        "--natpmp",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=(
+            "Enable (--natpmp) or disable (--no-natpmp) VPN-gateway port forwarding (NAT-PMP) "
+            "for this run. Overrides NATPMP_ENABLED in settings.json. Not persisted."
+        ),
+    )
     run_parser.set_defaults(func=_cmd_run)
 
     # rcflow migrate [revision]
@@ -454,7 +491,14 @@ def main() -> None:
             parser.print_help()
             sys.exit(0)
     elif hasattr(args, "func"):
-        args.func(args)
+        try:
+            args.func(args)
+        except KeyboardInterrupt:
+            # Ctrl+C from a terminal: exit cleanly without dumping a Python
+            # traceback at the user.  Graceful subprocess teardown still runs
+            # via the GUI's atexit / SIGTERM handlers and uvicorn's lifespan.
+            print("\nInterrupted by user — shutting down.", file=sys.stderr)
+            sys.exit(130)  # 128 + SIGINT, the conventional shell exit code
     else:
         parser.print_help()
         sys.exit(1)

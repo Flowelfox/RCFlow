@@ -236,6 +236,18 @@ class Settings(BaseSettings):
     # Telemetry
     TELEMETRY_RETENTION_DAYS: int = 90
 
+    # UPnP IGD port forwarding (off by default; non-fatal if router lacks UPnP)
+    UPNP_ENABLED: bool = False
+    UPNP_LEASE_SECONDS: int = 3600
+    UPNP_DISCOVERY_TIMEOUT_MS: int = 2000
+
+    # NAT-PMP (RFC 6886) for VPN-provided port forwarding (ProtonVPN Plus, Mullvad, etc.)
+    # Lets workers behind ISP CGNAT expose a public port via the VPN gateway.
+    NATPMP_ENABLED: bool = False
+    NATPMP_GATEWAY: str = "auto"  # "auto" | IPv4 literal (e.g. "10.2.0.1")
+    NATPMP_LEASE_SECONDS: int = 60  # ProtonVPN default; renewed at 50%
+    NATPMP_INITIAL_TIMEOUT_MS: int = 250  # RFC 6886 retry base (doubles each attempt)
+
     # Logging
     LOG_LEVEL: str = "INFO"
 
@@ -597,6 +609,72 @@ CONFIG_OPTIONS: list[dict[str, Any]] = [
         "description": "Automatically sync Linear issues when the server starts",
         "required": False,
         "restart_required": False,
+    },
+    # --- Networking ---
+    {
+        "key": "UPNP_ENABLED",
+        "label": "UPnP Port Forwarding",
+        "type": "boolean",
+        "group": "Networking",
+        "description": (
+            "Ask the local router (via UPnP IGD) to forward an external port to this "
+            "worker so remote clients can reach it without manual port forwarding. "
+            "Silently skipped if the router does not support UPnP."
+        ),
+        "required": False,
+        "restart_required": True,
+    },
+    {
+        "key": "UPNP_LEASE_SECONDS",
+        "label": "UPnP Lease Duration (seconds)",
+        "type": "number",
+        "group": "Networking",
+        "description": (
+            "How long the router should hold the mapping before expiry. "
+            "0 = permanent (not all routers accept 0). Default 3600. "
+            "The mapping is auto-renewed at 50% of this value."
+        ),
+        "required": False,
+        "restart_required": True,
+    },
+    {
+        "key": "NATPMP_ENABLED",
+        "label": "VPN Port Forwarding (NAT-PMP)",
+        "type": "boolean",
+        "group": "Networking",
+        "description": (
+            "Ask the VPN gateway (e.g. ProtonVPN Plus on a P2P server, Mullvad) to forward "
+            "an external port to this worker via NAT-PMP (RFC 6886).  Lets workers behind "
+            "ISP CGNAT expose a public address through the VPN.  Silently skipped if no "
+            "gateway responds."
+        ),
+        "required": False,
+        "restart_required": True,
+    },
+    {
+        "key": "NATPMP_GATEWAY",
+        "label": "NAT-PMP Gateway",
+        "type": "string",
+        "group": "Networking",
+        "description": (
+            "VPN gateway IP that speaks NAT-PMP.  'auto' tries the ProtonVPN default "
+            "(10.2.0.1), then the system default route.  Override with an explicit IPv4 "
+            "for other providers (e.g. Mullvad)."
+        ),
+        "required": False,
+        "restart_required": True,
+    },
+    {
+        "key": "NATPMP_LEASE_SECONDS",
+        "label": "NAT-PMP Lease Duration (seconds)",
+        "type": "number",
+        "group": "Networking",
+        "description": (
+            "How long the gateway should hold the mapping before expiry.  ProtonVPN "
+            "enforces 60 s; the service renews at 50% of this value."
+        ),
+        "required": False,
+        "restart_required": True,
     },
     # --- Logging ---
     {

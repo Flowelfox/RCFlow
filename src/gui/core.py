@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    import tkinter as tk
     from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
@@ -28,6 +29,123 @@ logger = logging.getLogger(__name__)
 POLL_MS = 300
 MAX_LOG_LINES = 5000
 MAX_LOG_BUFFER = 10000
+
+# Keys that must be allowed through ``make_text_readonly`` so users can still
+# navigate and select inside the read-only widget.
+_READONLY_NAV_KEYS: frozenset[str] = frozenset(
+    {
+        "left",
+        "right",
+        "up",
+        "down",
+        "home",
+        "end",
+        "prior",
+        "next",
+        "shift_l",
+        "shift_r",
+        "control_l",
+        "control_r",
+        "meta_l",
+        "meta_r",
+        "alt_l",
+        "alt_r",
+        "super_l",
+        "super_r",
+    }
+)
+# Keys whose default binding is "copy"/"select all" when a modifier (Ctrl or
+# Cmd) is held — those are allowed through so Ctrl+C / Ctrl+A still work.
+_READONLY_COPY_KEYS: frozenset[str] = frozenset({"c", "a", "insert"})
+
+
+def make_text_readonly(text_widget: tk.Text) -> None:
+    """Leave a Tk ``Text`` widget read-only while keeping selection + copy usable.
+
+    A vanilla ``Text`` widget configured with ``state='disabled'`` rejects
+    keystrokes — which is what we want — but on Linux / X11 Tk it also
+    disables mouse-driven selection entirely, so the user can't even
+    highlight a line to copy it.  Keeping the widget in ``state='normal'``
+    and intercepting every modifying keystroke is the idiomatic workaround.
+
+    Caveats for callers:
+    - Don't wrap writes in ``configure(state='normal') / configure(state='disabled')``
+      — just insert / delete directly; the binding prevents user edits.
+    - Programmatic insert/delete always works (the binding only runs on
+      real keyboard events).
+    """
+
+    def _on_key(event: object) -> str | None:
+        keysym = getattr(event, "keysym", "") or ""
+        state = getattr(event, "state", 0)
+        key = keysym.lower()
+        if key in _READONLY_NAV_KEYS:
+            return None
+        # Control=0x4 matches X11 + Windows; macOS reports Command as 0x10 in
+        # Tk's event state.  Both are honoured so Cmd-C / Cmd-A work on macOS
+        # even though the platform does not set the Control mask there.
+        modifier_held = bool(state & 0x4) or bool(state & 0x10)
+        if modifier_held and key in _READONLY_COPY_KEYS:
+            return None
+        return "break"
+
+    text_widget.bind("<Key>", _on_key)
+    # Middle-click and explicit paste events are independent of <Key>; block
+    # them so a stray middle-click doesn't inject X11 PRIMARY into the log.
+    text_widget.bind("<Button-2>", lambda _e: "break")
+    text_widget.bind("<<Paste>>", lambda _e: "break")
+    text_widget.bind("<<Cut>>", lambda _e: "break")
+
+
+def attach_copy_context_menu(text_widget: tk.Text) -> None:
+    """Attach a right-click popup menu with Copy + Select All to a Text widget.
+
+    Makes the "select + copy" affordance discoverable for mouse-first users.
+    The popup is built lazily on first right-click so it picks up the current
+    Tk theme (the widget may be created before the CTk theme engine has set
+    its defaults).
+    """
+    import tkinter as tk  # noqa: PLC0415
+
+    def _copy_selection() -> None:
+        with contextlib.suppress(tk.TclError):
+            selected = text_widget.get("sel.first", "sel.last")
+            if not selected:
+                return
+            text_widget.clipboard_clear()
+            text_widget.clipboard_append(selected)
+
+    def _select_all() -> None:
+        text_widget.tag_add("sel", "1.0", "end-1c")
+        text_widget.mark_set("insert", "end-1c")
+        text_widget.see("insert")
+
+    def _popup(event: tk.Event) -> None:
+        menu = tk.Menu(text_widget, tearoff=0)
+        try:
+            has_selection = bool(text_widget.tag_ranges("sel"))
+        except tk.TclError:
+            has_selection = False
+        menu.add_command(
+            label="Copy",
+            command=_copy_selection,
+            state="normal" if has_selection else "disabled",
+        )
+        menu.add_command(label="Select All", command=_select_all)
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+
+    # Right-click binding differs between platforms: <Button-3> on X11 +
+    # Windows, <Button-2> is right-click on some macOS configurations, and
+    # <<ContextMenu>> is the idiomatic virtual event that Tk maps correctly
+    # everywhere.  Bind both the virtual and the concrete events so the menu
+    # appears on every platform without guesswork.
+    text_widget.bind("<<ContextMenu>>", _popup)
+    text_widget.bind("<Button-3>", _popup)
+    text_widget.bind("<Control-Button-1>", _popup)  # macOS "control-click"
+
 
 # ── Worker pidfile ──────────────────────────────────────────────────────────
 #
@@ -663,16 +781,59 @@ def send_show_to_existing() -> bool:
     return True
 
 
+def _format_external_address(upnp: dict[str, object] | None, natpmp: dict[str, object] | None) -> str | None:
+    """Render a single combined ``External Address`` string for the GUI.
+
+    UPnP-IGD and NAT-PMP target different gateways (LAN router vs VPN exit)
+    and the GUI mutex prevents both from being enabled at once, so callers
+    only ever need to surface one of them.  This helper picks whichever
+    service is enabled and returns its current display value, falling back
+    to a status word when discovery / failure is in progress.
+
+    Returns None when neither service is enabled — the caller hides the
+    row entirely.  Otherwise returns a human-readable string so the user
+    sees progress feedback instead of a blank cell.
+    """
+    chosen: dict[str, object] | None = None
+    ip_field = "external_ip"
+    if natpmp and natpmp.get("enabled"):
+        chosen = natpmp
+        ip_field = "public_ip"
+    elif upnp and upnp.get("enabled"):
+        chosen = upnp
+        ip_field = "external_ip"
+
+    if chosen is None:
+        return None
+
+    status = chosen.get("status")
+    if status == "mapped":
+        ip = chosen.get(ip_field) or "?"
+        port = chosen.get("external_port")
+        return f"{ip}:{port}" if port else str(ip)
+    if status == "discovering":
+        return "Discovering…"
+    if status == "failed":
+        return "Unavailable"
+    if status == "closing":
+        return "Closing…"
+    return "Disabled"
+
+
 def poll_server_status(
     host: str,
     port: str,
     wss_enabled: bool,
-    on_result: Callable[[int | None, str | None, str | None], None],
+    on_result: Callable[[int | None, str | None, str | None, str | None], None],
 ) -> None:
-    """Fetch session count, backend ID, and version from the server HTTP API (non-blocking).
+    """Fetch session count, backend ID, version, and a combined external-address string.
 
-    Spawns a daemon thread.  ``on_result(sessions, backend_id, version)`` is
-    invoked with None values when the request fails or the server is unreachable.
+    Non-blocking: spawns a daemon thread.
+    ``on_result(sessions, backend_id, version, external_display)`` is invoked
+    with None values when the request fails or the server is unreachable.
+    ``external_display`` is the pre-rendered string for whichever
+    port-forwarding service is enabled (UPnP-IGD or NAT-PMP — they are
+    mutually exclusive), or None when neither is enabled.
     """
 
     def _fetch() -> None:
@@ -693,10 +854,10 @@ def poll_server_status(
         try:
             with urllib.request.urlopen(f"{base}/api/health", timeout=2, context=ctx) as resp:
                 if resp.status != 200:
-                    on_result(None, None, None)
+                    on_result(None, None, None, None)
                     return
         except Exception:
-            on_result(None, None, None)
+            on_result(None, None, None, None)
             return
 
         try:
@@ -710,8 +871,9 @@ def poll_server_status(
                 raw_id: str = data.get("backend_id", "") or ""
                 backend_id: str | None = (raw_id[:8] + "...") if len(raw_id) > 12 else (raw_id or None)
                 version: str | None = data.get("version") or None
-                on_result(sessions, backend_id, version)
+                external_display = _format_external_address(data.get("upnp"), data.get("natpmp"))
+                on_result(sessions, backend_id, version, external_display)
         except Exception:
-            on_result(None, None, None)
+            on_result(None, None, None, None)
 
     threading.Thread(target=_fetch, daemon=True).start()

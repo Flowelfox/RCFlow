@@ -200,6 +200,63 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     telemetry_task = asyncio.create_task(_run_telemetry_loop())
 
+    # UPnP and NAT-PMP are mutually exclusive — when a VPN tunnel captures
+    # the default route, an inbound packet via UPnP arrives via the LAN NIC
+    # but the reply egresses via the VPN, breaking the connection with
+    # asymmetric routing.  The GUI mutex prevents both from being toggled
+    # on, but a hand-edited ``settings.json`` or simultaneous CLI flags can
+    # still produce that state — defend in depth by skipping UPnP when
+    # NAT-PMP wins out.
+    upnp_enabled = settings.UPNP_ENABLED
+    if upnp_enabled and settings.NATPMP_ENABLED:
+        logger.warning(
+            "UPnP and NAT-PMP are both enabled — VPN routing makes the UPnP path unreachable. "
+            "Disabling UPnP for this run; NAT-PMP wins.",
+        )
+        upnp_enabled = False
+
+    # UPnP port forwarding — optional, non-fatal.  Runs inside the server
+    # process so CLI-only / systemd installs get it too; the GUI reads its
+    # state through ``/api/info``.
+    upnp_service = None
+    if upnp_enabled:
+        from src.services.upnp_service import UpnpService  # noqa: PLC0415
+
+        upnp_service = UpnpService(
+            internal_port=settings.RCFLOW_PORT,
+            lease_seconds=settings.UPNP_LEASE_SECONDS,
+            discovery_timeout_ms=settings.UPNP_DISCOVERY_TIMEOUT_MS,
+            description=f"RCFlow worker ({settings.RCFLOW_BACKEND_ID[:8]})",
+        )
+        try:
+            await upnp_service.start()
+        except Exception:
+            # Belt-and-braces: start() is designed never to raise, but we don't
+            # want a bug in it to tear down the whole worker.
+            logger.exception("UPnP service start failed (non-fatal)")
+            upnp_service = None
+    app.state.upnp_service = upnp_service
+
+    # NAT-PMP (RFC 6886) for VPN-provided port forwarding — lets workers
+    # behind ISP CGNAT expose a public address through the VPN gateway.
+    # Independent of UPnP; both can be enabled at once.
+    natpmp_service = None
+    if settings.NATPMP_ENABLED:
+        from src.services.natpmp_service import NatPmpService  # noqa: PLC0415
+
+        natpmp_service = NatPmpService(
+            internal_port=settings.RCFLOW_PORT,
+            gateway=settings.NATPMP_GATEWAY,
+            lease_seconds=settings.NATPMP_LEASE_SECONDS,
+            initial_timeout_ms=settings.NATPMP_INITIAL_TIMEOUT_MS,
+        )
+        try:
+            await natpmp_service.start()
+        except Exception:
+            logger.exception("NAT-PMP service start failed (non-fatal)")
+            natpmp_service = None
+    app.state.natpmp_service = natpmp_service
+
     # Background task set — keeps strong references so tasks are not GC'd
     _bg_tasks: set[asyncio.Task[None]] = set()
 
@@ -241,6 +298,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     async with db_session_factory() as db:
         await session_manager.save_all_sessions(db)
+
+    if upnp_service is not None:
+        try:
+            await asyncio.wait_for(upnp_service.stop(), timeout=5.0)
+        except Exception:
+            logger.exception("UPnP service stop failed (non-fatal)")
+
+    if natpmp_service is not None:
+        try:
+            await asyncio.wait_for(natpmp_service.stop(), timeout=5.0)
+        except Exception:
+            logger.exception("NAT-PMP service stop failed (non-fatal)")
 
     await dispose_engine()
     logger.info("RCFlow server stopped")
