@@ -290,17 +290,38 @@ def _cmd_migrate(args: argparse.Namespace) -> None:
     print("Migrations complete.")
 
 
+def _resolve_linux_gui_window_script() -> Path | None:
+    """Locate the GTK + WebKit launcher script shipped alongside the binary.
+
+    Frozen builds ship the script under ``<install_dir>/gui/linux_gui_window.py``;
+    dev runs use ``<repo>/scripts/linux_gui_window.py``.
+    """
+    candidates = [
+        get_install_dir() / "gui" / "linux_gui_window.py",
+        Path(__file__).resolve().parent.parent / "scripts" / "linux_gui_window.py",
+    ]
+    for path in candidates:
+        if path.exists():
+            return path
+    return None
+
+
 def _run_linux_browser_dashboard(*, minimized: bool) -> None:
-    """Open the worker dashboard in the user's default browser on Linux.
+    """Open the worker dashboard as a native Linux app window.
 
     Starts the worker as a child subprocess if the systemd service is not
     already serving the configured port, polls until ``/health`` responds,
-    then ``xdg-open``s ``http://127.0.0.1:<port>/dashboard#key=<api_key>``.
+    then launches a small GTK + WebKit window (``scripts/linux_gui_window.py``,
+    invoked via the system Python interpreter) that hosts the existing
+    ``/dashboard`` HTML so the worker presents a real desktop window with
+    the RCFlow icon in the dock — the same UX users get from the
+    CustomTkinter window on Windows and the NSStatusBar app on macOS.
 
-    The browser dashboard exists because PyInstaller's bundled tcl/tk
-    crashes on Ubuntu 25.04 with the modern libxcb threading checks.  Web
-    UI sidesteps the bundled-Tk path entirely while reusing the existing
-    REST API.
+    Falls back to launching the URL in a stand-alone browser
+    (firefox / chrome / chromium / epiphany), and finally to ``xdg-open``,
+    if the GTK/WebKit launcher cannot be loaded (system ``python3-gi`` /
+    ``gir1.2-webkit2-4.x`` missing — declared as deb Recommends, so this
+    only happens on stripped-down installs).
     """
     import shutil  # noqa: PLC0415
     import socket  # noqa: PLC0415
@@ -385,9 +406,53 @@ def _run_linux_browser_dashboard(*, minimized: bool) -> None:
     url = f"{scheme}://{dashboard_host}:{port}/dashboard"
     if api_key:
         url = f"{url}#key={api_key}"
-    # Prefer specific browser binaries over xdg-open/gio: gio refuses to launch
-    # a self-signed HTTPS URL outright, while every supported browser shows a
-    # one-time "advanced → accept" prompt the user can take.
+
+    # Prefer the native GTK + WebKit window (matches Win/macOS UX — the user
+    # sees a real desktop window with the RCFlow icon, not a browser tab).
+    # Spawn it under the *system* Python so the python3-gi / WebKit2 GIR
+    # bindings are available; the frozen interpreter cannot load those C
+    # extensions.
+    system_python = shutil.which("python3") or shutil.which("python")
+    launcher_script = _resolve_linux_gui_window_script()
+    if system_python and launcher_script and launcher_script.exists():
+        # Scrub PyInstaller bootloader env so the system python3 process
+        # loads the host's libgio / libgirepository / WebKit GObject types
+        # cleanly.  Inheriting LD_LIBRARY_PATH from the frozen runtime
+        # makes ``WebKit2.WebView()`` raise ``TypeError: could not get a
+        # reference to type class`` because it pulls bundled .so files
+        # built against an older libgobject ABI.
+        clean_env = {
+            k: v
+            for k, v in os.environ.items()
+            if k
+            not in {
+                "LD_LIBRARY_PATH",
+                "LD_PRELOAD",
+                "PYTHONPATH",
+                "PYTHONHOME",
+                "GI_TYPELIB_PATH",
+                "GIO_MODULE_DIR",
+                "GTK_PATH",
+                "GTK_EXE_PREFIX",
+            }
+        }
+        try:
+            subprocess.Popen(
+                [system_python, str(launcher_script), url],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+                env=clean_env,
+            )
+            return
+        except OSError as exc:
+            print(
+                f"Failed to launch native GTK dashboard ({exc}); falling back to a browser tab.",
+                file=sys.stderr,
+            )
+
+    # Browser fallback for installs missing python3-gi / WebKit GIR bindings.
     direct_browsers = (
         "firefox",
         "google-chrome",
@@ -408,10 +473,10 @@ def _run_linux_browser_dashboard(*, minimized: bool) -> None:
             )
             if scheme == "https":
                 print(
-                    "Opened RCFlow dashboard. The browser will show a "
-                    "self-signed certificate warning the first time — click "
-                    "Advanced → Accept the Risk and Continue once and the "
-                    "dashboard will load.",
+                    "Opened RCFlow dashboard in a browser. The browser will "
+                    "show a self-signed certificate warning the first time — "
+                    "click Advanced → Accept the Risk and Continue once and "
+                    "the dashboard will load.",
                     file=sys.stderr,
                 )
             return

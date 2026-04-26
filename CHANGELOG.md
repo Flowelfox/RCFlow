@@ -13,7 +13,7 @@ and note which component is affected where it matters.
 ## [Unreleased]
 
 ### Added
-- **Linux worker dashboard in your browser** — `rcflow gui` on Linux now opens a built-in browser dashboard (status, port, token, externally mapped address, active sessions, worker version) instead of the CustomTkinter window used on Windows.  The Linux GUI is delivered this way because PyInstaller's bundled tcl/tk fails the libxcb 1.17+ sequence-number assertion on Ubuntu 25.04 — the browser dashboard sidesteps the bundled-Tk crash entirely while keeping the same controls.  The `.deb` installs an "RCFlow Worker" entry into the application menu / GNOME Activities and an icon into the hicolor theme.  First-time launch shows a self-signed certificate warning that you accept once (Backend)
+- **Native Linux worker dashboard window** — `rcflow gui` on Linux now opens a real desktop application window (GTK + WebKit), titled "RCFlow Worker", with the RCFlow icon in the dock — same UX as the CustomTkinter window on Windows and the menu-bar app on macOS.  The window hosts the dashboard (status, port, token, externally mapped address, active sessions, worker version, logs).  PyInstaller's bundled tcl/tk crashes against libxcb 1.17+ on Ubuntu 25.04, so the GTK launcher runs under the system Python interpreter via `python3-gi` + `gir1.2-webkit2-4.x` (declared as `.deb` Recommends).  Browser launch (Firefox / Chrome / Chromium) is kept as a fallback for stripped-down installs missing the GTK bindings (Backend)
 - **RCFlow Client shows up in the Linux app menu** — the client `.deb` now ships an `rcflow-client.desktop` launcher and an icon, plus a postinst that refreshes the desktop / icon caches so the entry surfaces immediately without a logout cycle (Client)
 
 ### Changed

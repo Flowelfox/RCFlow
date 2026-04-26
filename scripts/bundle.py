@@ -465,6 +465,17 @@ def assemble_bundle(pyinstaller_dir: Path, target_platform: str, version: str, a
     if target_platform == "linux":
         tray_png_dest = bundle_dir / "tray_icon.png"
         ensure_tray_png(tray_png_dest)
+        # Ship the GTK + WebKit launcher script alongside the binary so
+        # `rcflow gui` can spawn it under the system Python interpreter
+        # (the frozen interpreter cannot load the C-based PyGObject /
+        # WebKit2 GIR bindings).
+        gui_dir = bundle_dir / "gui"
+        gui_dir.mkdir(parents=True, exist_ok=True)
+        gui_launcher_src = PROJECT_ROOT / "scripts" / "linux_gui_window.py"
+        if gui_launcher_src.exists():
+            shutil.copy2(gui_launcher_src, gui_dir / "linux_gui_window.py")
+            os.chmod(gui_dir / "linux_gui_window.py", 0o755)
+            print("Copied scripts/linux_gui_window.py → gui/")
 
     # Make the main executable executable on Linux
     if target_platform in {"linux", "macos"}:
@@ -665,6 +676,8 @@ def build_deb(bundle_dir: Path, version: str, arch: str) -> Path | None:
         "Icon=rcflow-worker\n"
         "Terminal=false\n"
         "Categories=Network;Development;Utility;\n"
+        # Matches the WM_CLASS instance set by scripts/linux_gui_window.py
+        # (Gtk.Window.set_wmclass("rcflow", "RCFlow Worker")).
         "StartupWMClass=rcflow\n"
         "Keywords=rcflow;worker;automation;\n"
     )
@@ -725,13 +738,21 @@ WantedBy=multi-user.target
 
     # Headless `rcflow run` (the systemd service) only needs the bundled
     # binary and standard glibc.  The optional GUI mode (`rcflow gui`,
-    # invoked by the .desktop launcher) drives the same CustomTkinter +
-    # pystray dashboard used on Windows / macOS, but PyInstaller does not
-    # bundle libtcl/libtk/libxcb on Linux — so we declare them as runtime
-    # Recommends.  Headless installs (servers, containers, WSL without
-    # X) can ignore them; desktop installs already pull them in via the
-    # default GNOME/KDE meta-packages.
+    # invoked by the .desktop launcher) opens a GTK + WebKit window via
+    # the system Python interpreter — the bundled tcl/tk path is unsafe
+    # on modern libxcb (Ubuntu 25.04+).  Headless installs (servers,
+    # containers, WSL without X) can ignore the recommends; desktop
+    # installs already pull them in via the default GNOME / KDE
+    # meta-packages.
     recommends = [
+        # Native GTK dashboard launcher (Linux GUI)
+        "python3 (>= 3.10)",
+        "python3-gi",
+        "gir1.2-gtk-3.0",
+        "gir1.2-webkit2-4.1 | gir1.2-webkit-6.0",
+        # Browser-fallback dashboard
+        "xdg-utils",
+        # Tk parity dashboard (kept as fallback for non-Ubuntu-25.04 hosts)
         "libtcl9.0 | libtcl8.6",
         "libtk9.0 | libtk8.6",
         "libxcb1",
