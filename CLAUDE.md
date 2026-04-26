@@ -8,6 +8,7 @@
 4. Do not introduce new dependencies without documenting them in the Technology Stack table in `docs/design/README.md`.
 5. Do not add or remove WebSocket endpoints, tool definition fields, or database models without updating `docs/design/websocket-api.md`, `docs/design/tools.md`, or `docs/design/database.md` respectively.
 6. **Keep all endpoints well-documented with docstrings, type hints, and OpenAPI metadata** (summary, description, tags, response models) so that FastAPI can auto-generate accurate API documentation. Every endpoint must be self-documenting.
+7. **Save all coding-agent-produced plans under `docs/plans/`.** Any plan, design sketch, or implementation outline the agent generates for this project goes in `docs/plans/` (gitignored — local working notes only, not checked in).
 
 ## Project Conventions
 
@@ -87,9 +88,37 @@ This project uses [Semantic Versioning](https://semver.org/) (MAJOR.MINOR.PATCH)
 - **MINOR** — new features or significant enhancements (backward-compatible)
 - **PATCH** — bug fixes, small improvements, refactors (backward-compatible)
 
-When a new feature is implemented, the version **must** be bumped as part of that same task.
+Version bumps happen only when cutting a release, not per-feature.
 
 The backend and client are versioned independently.
 
 - **rcflow backend** — version lives in `pyproject.toml` → `version` field under `[project]`. Update this when backend code changes.
 - **rcflowclient** — version lives in `rcflowclient/pubspec.yaml` → `version` field. Update this when client code changes.
+
+## Changelog
+
+`CHANGELOG.md` is user-facing. Follow these rules whenever you add or update an entry.
+
+### What to compare
+
+- **Compare against the most recent published release**, not against unreleased work-in-progress. The `[Unreleased]` section accumulates everything that ships in the next release; entries should describe how that next release differs from the previous published version, not how the current commit differs from a few commits ago.
+- When cutting a release, rename `[Unreleased]` to the new version and date, then start a fresh empty `[Unreleased]` section above it.
+
+### How to write entries
+
+- **Audience is end users, not developers.** Describe behaviour and impact, not implementation.
+- Avoid: file paths, function/class names, variable names, env-var names (unless the user sets them), SQL table names, library names, framework internals, stack traces, line counts, and "this commit changes X" mechanics.
+- Prefer: what the user sees, what they can now do, what was broken before, what is fixed now.
+- One sentence per bullet when possible. If a longer explanation is needed, keep it to one short paragraph.
+- Lead with a short bold title, then a plain-language description.
+- Tag the affected component in parentheses at the end: `(Backend)`, `(Client)`, or `(Backend + Client)`.
+- Group entries under `### Added`, `### Changed`, `### Fixed`, `### Performance`, `### Removed`, `### Security` — in that order, omitting empty sections.
+- Order entries within a section roughly by user-visible significance, not by commit order.
+
+### Example
+
+Bad (too technical):
+> **Caveman mode not engaging for externally-installed Claude Code** — `_get_managed_config_overrides` gated caveman `--append-system-prompt` injection on `tool.managed`, so externally-installed Claude Code never received the system-prompt flag. Moved caveman injection outside the managed-only guard.
+
+Good:
+> **Caveman mode didn't engage for externally-installed Claude Code** — caveman now applies regardless of how Claude Code was installed (Backend).
