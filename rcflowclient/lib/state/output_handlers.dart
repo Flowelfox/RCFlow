@@ -309,6 +309,10 @@ void handleEditAck(Map<String, dynamic> msg, PaneState pane) {
   pane.applyEditAck(msg);
 }
 
+void handleTurnComplete(Map<String, dynamic> msg, PaneState pane) {
+  pane.finalizeStream();
+}
+
 // ---------------------------------------------------------------------------
 // Registry — per-pane handlers (routed by session_id in AppState)
 // ---------------------------------------------------------------------------
@@ -324,6 +328,7 @@ final Map<WsOutputType, OutputHandler> typedOutputHandlerRegistry = {
   WsOutputType.toolOutput: handleToolOutput,
   WsOutputType.error: handleError,
   WsOutputType.summary: handleSummary,
+  WsOutputType.turnComplete: handleTurnComplete,
   WsOutputType.sessionEnd: handleSessionEnd,
   WsOutputType.sessionPaused: handleSessionPaused,
   WsOutputType.sessionResumed: handleSessionResumed,
@@ -354,6 +359,7 @@ final Map<String, OutputHandler> outputHandlerRegistry = {
   'tool_output': handleToolOutput,
   'error': handleError,
   'summary': handleSummary,
+  'turn_complete': handleTurnComplete,
   'session_end': handleSessionEnd,
   'session_paused': handleSessionPaused,
   'session_resumed': handleSessionResumed,

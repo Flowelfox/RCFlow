@@ -34,6 +34,7 @@ class MessageType(StrEnum):
     AGENT_LOG = "agent_log"
     SESSION_UPDATE = "session_update"  # For broadcasting session metadata updates
     SUBPROCESS_STATUS = "subprocess_status"  # Ephemeral — not archived to DB
+    TURN_COMPLETE = "turn_complete"  # Ephemeral — turn-finalization signal, not archived
     # Queued user messages (ephemeral — DB is persisted separately in
     # ``session_pending_messages``; these events only notify live subscribers).
     MESSAGE_QUEUED = "message_queued"

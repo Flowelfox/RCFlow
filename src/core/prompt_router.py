@@ -182,7 +182,7 @@ class PromptRouter(
             return {}
         # Extract keys relevant to executor config
         overrides: dict[str, Any] = {}
-        for key in ("model", "default_permission_mode", "max_turns", "timeout", "approval_mode"):
+        for key in ("model", "default_permission_mode", "max_turns", "timeout", "approval_mode", "provider"):
             val = settings.get(key)
             if val not in (None, "", []):
                 overrides[key] = val
@@ -1103,10 +1103,12 @@ class PromptRouter(
                     session.set_activity(ActivityState.IDLE)
                     # Emit a turn-complete signal so clients know the response
                     # stream has ended. Pushed synchronously to avoid async task
-                    # scheduling races in the drain path.
+                    # scheduling races in the drain path.  Lives in the text
+                    # history (so reconnecting clients also receive it) but is
+                    # filtered out in archive_session to keep the DB clean.
                     session.buffer.push_text(
-                        MessageType.SUMMARY,
-                        {"session_id": session.id, "content": ""},
+                        MessageType.TURN_COMPLETE,
+                        {"session_id": session.id},
                     )
 
             except Exception as e:

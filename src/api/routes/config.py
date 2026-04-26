@@ -49,7 +49,10 @@ async def server_info(request: Request) -> dict[str, Any]:
     """Return server metadata so clients can display OS and platform info."""
     settings: Settings = request.app.state.settings
     session_manager: SessionManager = request.app.state.session_manager
-    llm_client: LLMClient = request.app.state.llm_client
+    # ``llm_client`` is None in direct-tool mode (``LLM_PROVIDER=none``) — the
+    # worker runs without an LLM and exposes an empty attachment-capability map.
+    llm_client: LLMClient | None = request.app.state.llm_client
+    attachment_capabilities = llm_client.attachment_capabilities if llm_client is not None else {}
 
     try:
         worker_version: str | None = _pkg_version("rcflow")
@@ -106,7 +109,7 @@ async def server_info(request: Request) -> dict[str, Any]:
         # Text files are always accepted, so the attachment button is always
         # available.  Fine-grained per-type support lives in attachment_capabilities.
         "supports_attachments": True,
-        "attachment_capabilities": llm_client.attachment_capabilities,
+        "attachment_capabilities": attachment_capabilities,
         "upnp": upnp_payload,
         "natpmp": natpmp_payload,
     }
@@ -259,12 +262,14 @@ def _reload_components(request: Request, settings: Settings) -> None:
     """Hot-reload server components that depend on settings.
 
     Recreates the LLM client from the new settings and patches the prompt
-    router to use it.
+    router to use it. When ``LLM_PROVIDER`` is ``"none"`` the router runs in
+    direct-tool mode with no LLM client (matches startup semantics in
+    ``src/main.py``).
     """
     tool_registry = request.app.state.tool_registry
 
-    old_llm: LLMClient = request.app.state.llm_client
-    new_llm = LLMClient(settings, tool_registry)
+    old_llm: LLMClient | None = request.app.state.llm_client
+    new_llm: LLMClient | None = LLMClient(settings, tool_registry) if settings.LLM_PROVIDER != "none" else None
     request.app.state.llm_client = new_llm
 
     prompt_router = request.app.state.prompt_router
