@@ -22,7 +22,11 @@ EnvironmentFile=-/opt/rcflow/env
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=no
-ReadWritePaths=/opt/rcflow/data /opt/rcflow/logs /opt/rcflow/certs /opt/rcflow/managed-tools
+# Whole install dir is writable so settings.json (resolved by paths.get_data_dir)
+# can be created/updated by the service user.
+ReadWritePaths=/opt/rcflow
+# HOME points at the install dir so XDG fallbacks land somewhere writable.
+Environment="HOME=/opt/rcflow"
 PrivateTmp=true
 
 [Install]

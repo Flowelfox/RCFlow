@@ -12,6 +12,13 @@ and note which component is affected where it matters.
 
 ## [Unreleased]
 
+### Added
+- **Linux worker dashboard in your browser** — `rcflow gui` on Linux now opens a built-in browser dashboard (status, port, token, externally mapped address, active sessions, worker version) instead of the CustomTkinter window used on Windows.  The Linux GUI is delivered this way because PyInstaller's bundled tcl/tk fails the libxcb 1.17+ sequence-number assertion on Ubuntu 25.04 — the browser dashboard sidesteps the bundled-Tk crash entirely while keeping the same controls.  The `.deb` installs an "RCFlow Worker" entry into the application menu / GNOME Activities and an icon into the hicolor theme.  First-time launch shows a self-signed certificate warning that you accept once (Backend)
+- **RCFlow Client shows up in the Linux app menu** — the client `.deb` now ships an `rcflow-client.desktop` launcher and an icon, plus a postinst that refreshes the desktop / icon caches so the entry surfaces immediately without a logout cycle (Client)
+
+### Changed
+- **Headless worker no longer crashes when /home/rcflow is missing** — the bundled systemd unit now sets `HOME=/opt/rcflow` and grants the service write access to the whole install directory, so XDG-style settings paths resolve to a directory the service can actually write to (Backend)
+
 ---
 
 ## [Backend 0.41.0 / Client 1.44.0] — 2026-04-26

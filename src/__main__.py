@@ -290,11 +290,157 @@ def _cmd_migrate(args: argparse.Namespace) -> None:
     print("Migrations complete.")
 
 
+def _run_linux_browser_dashboard(*, minimized: bool) -> None:
+    """Open the worker dashboard in the user's default browser on Linux.
+
+    Starts the worker as a child subprocess if the systemd service is not
+    already serving the configured port, polls until ``/health`` responds,
+    then ``xdg-open``s ``http://127.0.0.1:<port>/dashboard#key=<api_key>``.
+
+    The browser dashboard exists because PyInstaller's bundled tcl/tk
+    crashes on Ubuntu 25.04 with the modern libxcb threading checks.  Web
+    UI sidesteps the bundled-Tk path entirely while reusing the existing
+    REST API.
+    """
+    import shutil  # noqa: PLC0415
+    import socket  # noqa: PLC0415
+    import subprocess  # noqa: PLC0415
+    import time  # noqa: PLC0415
+    import urllib.error  # noqa: PLC0415
+    import urllib.request  # noqa: PLC0415
+
+    settings = get_settings()
+    host = settings.RCFLOW_HOST or "0.0.0.0"
+    port = int(settings.RCFLOW_PORT)
+    scheme = "https" if settings.WSS_ENABLED else "http"
+    # Always talk to localhost from the launcher; the configured bind address
+    # may be 0.0.0.0 (any interface) but the dashboard is meant for the local
+    # user and avoids advertising on the LAN.
+    dashboard_host = "127.0.0.1"
+
+    def _port_open() -> bool:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(0.5)
+            try:
+                s.connect((dashboard_host, port))
+            except OSError:
+                return False
+            return True
+
+    started_child: subprocess.Popen[bytes] | None = None
+    if not _port_open():
+        # No worker on the port — start one in the background and let it
+        # outlive this launcher (detached process group).  Skip if the
+        # configured host is not 0.0.0.0/127.0.0.1 since the launcher would
+        # be unable to talk to a remote instance anyway.
+        if host not in {"0.0.0.0", "127.0.0.1", "::"}:
+            print(
+                f"Worker is configured to bind {host}:{port} which the "
+                "launcher cannot reach.  Start the worker manually with "
+                "`rcflow run` and reopen the dashboard.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        argv = [sys.executable, "run"] if getattr(sys, "frozen", False) else [sys.executable, "-m", "src", "run"]
+        try:
+            started_child = subprocess.Popen(
+                argv,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+        except OSError as exc:
+            print(f"Failed to start worker subprocess: {exc}", file=sys.stderr)
+            sys.exit(1)
+        # Poll /health until it answers (max ~10s).  The server prints
+        # nothing here so we silently wait.
+        deadline = time.monotonic() + 10.0
+        url = f"{scheme}://{dashboard_host}:{port}/api/health"
+        ctx = None
+        if scheme == "https":
+            import ssl  # noqa: PLC0415
+
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+        while time.monotonic() < deadline:
+            try:
+                with urllib.request.urlopen(url, timeout=1.0, context=ctx):
+                    break
+            except (urllib.error.URLError, OSError):
+                time.sleep(0.3)
+        else:
+            print("Worker did not become reachable in time; aborting.", file=sys.stderr)
+            if started_child is not None:
+                started_child.terminate()
+            sys.exit(1)
+
+    if minimized:
+        # Login-autostart path — server is up, do not pop a browser tab.
+        print(f"Worker running at {scheme}://{dashboard_host}:{port}/dashboard", file=sys.stderr)
+        return
+
+    api_key = settings.RCFLOW_API_KEY or ""
+    url = f"{scheme}://{dashboard_host}:{port}/dashboard"
+    if api_key:
+        url = f"{url}#key={api_key}"
+    # Prefer specific browser binaries over xdg-open/gio: gio refuses to launch
+    # a self-signed HTTPS URL outright, while every supported browser shows a
+    # one-time "advanced → accept" prompt the user can take.
+    direct_browsers = (
+        "firefox",
+        "google-chrome",
+        "google-chrome-stable",
+        "chromium",
+        "chromium-browser",
+        "epiphany-browser",
+    )
+    browser_path = next((p for p in (shutil.which(b) for b in direct_browsers) if p), None)
+    if browser_path is not None:
+        try:
+            subprocess.Popen(
+                [browser_path, "--new-window", url],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+            if scheme == "https":
+                print(
+                    "Opened RCFlow dashboard. The browser will show a "
+                    "self-signed certificate warning the first time — click "
+                    "Advanced → Accept the Risk and Continue once and the "
+                    "dashboard will load.",
+                    file=sys.stderr,
+                )
+            return
+        except OSError as exc:
+            print(f"Failed to launch {browser_path} ({exc}); falling back to xdg-open.", file=sys.stderr)
+    opener = shutil.which("xdg-open") or shutil.which("gio") or shutil.which("gnome-open")
+    if opener is None:
+        print(f"Open this URL in your browser: {url}", file=sys.stderr)
+        return
+    try:
+        subprocess.Popen(
+            [opener, url] if "xdg-open" in opener else [opener, "open", url],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except OSError as exc:
+        print(f"Failed to open browser ({exc}). URL: {url}", file=sys.stderr)
+
+
 def _cmd_gui(args: argparse.Namespace) -> None:
     """Run RCFlow with a graphical window interface.
 
     On macOS: launches the native menu bar icon + settings panel (Aqua theme).
-    On Windows: launches the tkinter window + system tray icon.
+    On Windows: launches the CustomTkinter dashboard + system tray icon.
+    On Linux: launches the browser-based dashboard at ``/dashboard`` because
+    PyInstaller's bundled tcl/tk fails the libxcb 1.17+ sequence-number
+    assertion on Ubuntu 25.04.  The browser dashboard offers the same
+    status / token / log surface as the native windows.
 
     The ``--minimized`` flag starts the app with the dashboard hidden (tray
     only).  Used by the login autostart entries so rebooting does not pop a
@@ -303,6 +449,9 @@ def _cmd_gui(args: argparse.Namespace) -> None:
     """
     _check_not_root()
     minimized = bool(getattr(args, "minimized", False))
+    if sys.platform.startswith("linux"):
+        _run_linux_browser_dashboard(minimized=minimized)
+        return
     if sys.platform == "darwin":
         import datetime  # noqa: PLC0415
         import traceback as _tb  # noqa: PLC0415
@@ -338,6 +487,9 @@ def _cmd_tray(args: argparse.Namespace) -> None:
     """Run RCFlow as a system tray / menu bar application (delegates to GUI mode)."""
     _check_not_root()
     minimized = bool(getattr(args, "minimized", False))
+    if sys.platform.startswith("linux"):
+        _run_linux_browser_dashboard(minimized=minimized)
+        return
     if sys.platform == "darwin":
         from src.gui.macos import run_gui_macos  # noqa: PLC0415
 

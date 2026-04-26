@@ -60,8 +60,25 @@ jobs:
       - name: Set up Python 3.12
         run: uv python install 3.12
 
+      - name: Install Linux GUI build dependencies
+        # tcl/tk runtime libs + gobject-introspection / libayatana-appindicator
+        # are needed at build time so PyInstaller can collect the shared
+        # objects required by tkinter, customtkinter, and pystray's
+        # AppIndicator backend.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            tk tcl python3-tk \
+            gir1.2-ayatanaappindicator3-0.1 \
+            libayatana-appindicator3-1 \
+            libgirepository-1.0-1 \
+            libcairo2-dev libgirepository1.0-dev
+
       - name: Install dependencies
-        run: uv sync --extra bundle
+        # --extra tray installs customtkinter + pystray + Pillow so the worker
+        # GUI dashboard and tray icon work in the bundled .deb (matches the
+        # macOS and Windows backend jobs).
+        run: uv sync --extra bundle --extra tray
 
       - name: Import GPG key
         if: "${{ env.GPG_PRIVATE_KEY != '' }}"
@@ -205,9 +222,32 @@ jobs:
           cp -r rcflowclient/build/linux/x64/release/bundle/lib  "$DEB_ROOT/opt/rcflowclient/"
           mkdir -p "$DEB_ROOT/usr/bin"
           ln -s /opt/rcflowclient/rcflowclient "$DEB_ROOT/usr/bin/rcflowclient"
+
+          # Register the rcflow:// URL scheme via .desktop MimeType so xdg-open
+          # routes deep links from the worker GUI into this client, AND so the
+          # client shows up in the GNOME Activities / app launcher search.
+          install -Dm644 rcflowclient/linux/rcflow-client.desktop \
+            "$DEB_ROOT/usr/share/applications/rcflow-client.desktop"
+
+          # Install hicolor icons across the standard sizes so app launchers
+          # render the client launcher with the proper RCFlow icon instead of
+          # the missing-icon placeholder.
+          for size in 48 64 128 256 512; do
+            ICONS_DIR="$DEB_ROOT/usr/share/icons/hicolor/${size}x${size}/apps"
+            mkdir -p "$ICONS_DIR"
+            install -Dm644 rcflowclient/assets/icon/app_icon.png \
+              "$ICONS_DIR/rcflow-client.png"
+          done
+
           mkdir -p "$DEB_ROOT/DEBIAN"
           printf 'Package: rcflow-client\nVersion: %s\nArchitecture: amd64\nMaintainer: RCFlow <rcflow@localhost>\nDescription: RCFlow Desktop Client\n Self-contained RCFlow Flutter desktop client.\nSection: net\nPriority: optional\n' \
             "$CLIENT_VERSION" > "$DEB_ROOT/DEBIAN/control"
+
+          # Refresh the desktop / icon caches on install + removal so the
+          # launcher entry surfaces immediately without a logout cycle.
+          install -Dm755 scripts/deb-cache-refresh.sh "$DEB_ROOT/DEBIAN/postinst"
+          install -Dm755 scripts/deb-cache-refresh.sh "$DEB_ROOT/DEBIAN/postrm"
+
           mkdir -p dist
           dpkg-deb --build --root-owner-group "$DEB_ROOT" "dist/${PKG_NAME}.deb"
           rm -rf "$DEB_ROOT"

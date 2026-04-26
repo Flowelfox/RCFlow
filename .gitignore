@@ -125,3 +125,4 @@ plans/
 docs/plans/
 data/
 .claude/
+model_cache.json

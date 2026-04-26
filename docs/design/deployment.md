@@ -1,5 +1,5 @@
 ---
-updated: 2026-04-26
+updated: 2026-04-27
 ---
 
 # Platform Support, Deployment & Bundling
@@ -28,8 +28,8 @@ RCFlow supports **Linux (x64, arm64)** and **Windows (x64)**.
 | Process isolation | `start_new_session=True` | `CREATE_NEW_PROCESS_GROUP` |
 | Process tree kill | `os.killpg(SIGKILL)` | `taskkill /T /F /PID` |
 | Claude Code stdin/stdout | PTY master fd (`pty.openpty`) | asyncio pipe (`PIPE`) |
-| Background mode | systemd service | GUI window (`rcflow gui`) or system tray (`rcflow tray`) | Menu bar app (`rcflow gui`) |
-| Auto-start | systemd enable | Registry `HKCU\...\Run` key |
+| Background mode | systemd service **and** GUI dashboard + tray (`rcflow gui`) | GUI window (`rcflow gui`) / system tray (`rcflow tray`) | Menu bar app (`rcflow gui`) |
+| Auto-start | systemd enable, **or** XDG `~/.config/autostart/rcflow-worker.desktop` for the user-level GUI | Registry `HKCU\...\Run` key | LaunchAgent `~/Library/LaunchAgents/com.rcflow.worker.plist` |
 
 ### Database
 
@@ -133,6 +133,22 @@ uv run rcflow                    # or: uv run rcflow run — starts the server
 
 1. **Parent-death watchdog in the server** — `ServerManager.start()` passes `RCFLOW_PARENT_PID=<gui_pid>` to the child. `_cmd_run` in `src/__main__.py` starts a daemon thread (`_install_parent_death_watchdog`) that polls `os.kill(parent_pid, 0)` every 2 s and sends `SIGTERM` to its own pid when the parent is gone, letting uvicorn shut down gracefully. The env var is absent for systemd / launchd daemon installs, in which case the watchdog is disabled.
 2. **Pidfile-based adoption on GUI relaunch** — `ServerManager.start()` writes the child PID to `<data_dir>/.worker.pid` (resolved to `~/Library/Application Support/rcflow/.worker.pid` on macOS frozen builds). `stop_sync()` / `clear()` delete it on graceful shutdown. On launch, both GUIs call `ServerManager.adopt_if_running()` *before* attempting to spawn a new server: if the pidfile references a live pid, the manager records it as **adopted** (no `Popen` handle — the process is not our child). `is_running()` / `stop()` / `stop_sync()` all handle the adopted path by tracking the pid directly and terminating it via raw signals (`_kill_pid` falls back to `TerminateProcess` on Windows). The GUI shows "Running (WSS) — recovered" in the status pill so the user knows the backend was picked up from a previous crashed session and can stop it normally from the menu.
+
+### Production (Linux — GUI Dashboard + Tray)
+
+The same CustomTkinter dashboard + pystray tray icon used on Windows is reused on Linux via `src/gui/windows.py`.  `rcflow gui` (or `rcflow tray`, which delegates to it) launches the dashboard on the user's session; the worker `.deb` ships an XDG `.desktop` entry (`/usr/share/applications/rcflow-worker.desktop`) so the GUI shows up in GNOME Activities / KDE app menus alongside the existing **RCFlow Client** entry.  The `rcflow-worker` icon is installed into the hicolor theme at standard sizes (48 / 64 / 128 / 256 / 512 px).
+
+The Windows GUI codebase is platform-aware so most of the dashboard, log viewer, IPC singleton, and updater logic is shared verbatim across the Win / Linux branches:
+
+- **Tray backend** — `pystray` chooses `AyatanaAppIndicator3` first and `_xorg` last.  The `_xorg` backend opens its own Xlib connection from a daemon thread and races Tk on `xcb_io.c:157 ... !xcb_xlib_unknown_seq_number`, so we skip the tray entirely when AppIndicator GI bindings are unreachable (`_linux_appindicator_available()` in `src/gui/windows.py`).  Closing the window in window-only mode quits the app, mirroring the no-tray fallback that already exists on Windows when `pystray` is missing.
+- **Window icon** — Tk's `iconbitmap` accepts the Windows `.ico` only on Windows; on Linux we install a PNG copy (`tray_icon.png`, generated from the same `.ico` at bundle time) via `iconphoto`.
+- **Autostart** — Mirrors Windows' `HKCU\...\Run` value with an XDG `~/.config/autostart/rcflow-worker.desktop` file that runs `rcflow gui --minimized` at login.  Toggled from the tray menu's **Start with Linux** entry.
+- **`XInitThreads` shim** — Called via `ctypes.CDLL("libX11.so.6").XInitThreads()` before any X traffic, since modern libxcb (Ubuntu 25.04+) aborts the process unless threading is initialised before the first request.
+- **Headless escape hatch** — `RCFLOW_DISABLE_TRAY=1` forces window-only mode at runtime; useful when the user has not installed an AppIndicator extension or wants to suppress the tray icon entirely.
+
+**Recommends (deb control)** — `libtcl9.0 | libtcl8.6`, `libtk9.0 | libtk8.6`, `libxcb1`, `libxft2`, `libxss1`, `libfontconfig1`, `gir1.2-ayatanaappindicator3-0.1`.  Headless installs (servers, containers, WSL without X) can ignore the recommends; desktop installs already pull them in via the default GNOME / KDE meta-packages.
+
+**Note on Ubuntu 25.04 + bundled tk** — PyInstaller's bundled tcl/tk on some Linux hosts fails the libxcb 1.17+ sequence-number assertion even with `XInitThreads()` called early; this is a known upstream interaction.  The systemd-managed headless mode is unaffected and remains the recommended deployment for headless servers.
 
 ### Production (systemd — Linux)
 

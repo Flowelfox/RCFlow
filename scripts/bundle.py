@@ -236,26 +236,57 @@ def run_pyinstaller(target_platform: str, *, windowed: bool = False) -> Path:
         hidden_imports.extend(
             [
                 "src.tray",
+                "src.gui",
+                "src.gui.windows",
+                "src.gui.core",
+                "src.gui.theme",
+                "src.gui.updater",
                 "pystray",
                 "pystray._win32",
                 "PIL",
                 "PIL.Image",
                 "PIL.ImageDraw",
                 "winpty",
+                "customtkinter",
             ]
         )
 
-    # macOS menu bar build needs src.gui_macos, PyObjC AppKit bridge, and PIL
+    # macOS menu bar build needs src.gui.macos, PyObjC AppKit bridge, and PIL
     if target_platform == "macos":
         hidden_imports.extend(
             [
-                "src.gui_macos",
+                "src.gui",
+                "src.gui.macos",
+                "src.gui.core",
+                "src.gui.theme",
+                "src.gui.updater",
                 "AppKit",
                 "Foundation",
                 "objc",
                 "PIL",
                 "PIL.Image",
                 "PIL.ImageDraw",
+                "customtkinter",
+            ]
+        )
+
+    # Linux GUI dashboard + tray reuses src.gui.windows; needs pystray (X/AppIndicator backend) + PIL
+    if target_platform == "linux":
+        hidden_imports.extend(
+            [
+                "src.gui",
+                "src.gui.windows",
+                "src.gui.core",
+                "src.gui.theme",
+                "src.gui.updater",
+                "pystray",
+                "pystray._appindicator",
+                "pystray._gtk",
+                "pystray._xorg",
+                "PIL",
+                "PIL.Image",
+                "PIL.ImageDraw",
+                "customtkinter",
             ]
         )
 
@@ -294,6 +325,15 @@ def run_pyinstaller(target_platform: str, *, windowed: bool = False) -> Path:
         icon_path = PROJECT_ROOT / "src" / "gui" / "assets" / "tray_icon.ico"
         if icon_path.exists():
             cmd.extend(["--icon", str(icon_path)])
+
+    # Linux: keep console so `rcflow run` from a terminal still prints output;
+    # the .desktop launcher uses `Terminal=false` and the GUI takes over the
+    # window.  Collect customtkinter assets so the bundled CTk theme JSON files
+    # are present at runtime; PyInstaller's built-in tkinter hook handles
+    # tcl/tk shared libraries automatically once tkinter is reachable from the
+    # import graph.
+    if target_platform == "linux":
+        cmd.extend(["--collect-data", "customtkinter"])
 
     # macOS: always windowed (needed for NSStatusBar / LSUIElement app)
     if target_platform == "macos":
@@ -411,12 +451,20 @@ def assemble_bundle(pyinstaller_dir: Path, target_platform: str, version: str, a
     if license_file.exists():
         shutil.copy2(license_file, bundle_dir / "LICENSE")
 
-    # 10. Copy tray icon (Windows)
-    if target_platform == "windows":
+    # 10. Copy tray icon (Windows + Linux)
+    if target_platform in {"windows", "linux"}:
         tray_icon_src = PROJECT_ROOT / "src" / "gui" / "assets" / "tray_icon.ico"
         if tray_icon_src.exists():
             shutil.copy2(tray_icon_src, bundle_dir / "tray_icon.ico")
             print("Copied tray_icon.ico")
+
+    # Linux additionally needs a PNG copy of the tray icon: Tk's iconphoto
+    # accepts PNG (via the Img extension that ships with modern Tk) but does
+    # not accept Windows .ico, and pystray's AppIndicator backend wants a
+    # path-on-disk PNG/SVG to hand to the indicator.
+    if target_platform == "linux":
+        tray_png_dest = bundle_dir / "tray_icon.png"
+        ensure_tray_png(tray_png_dest)
 
     # Make the main executable executable on Linux
     if target_platform in {"linux", "macos"}:
@@ -425,6 +473,61 @@ def assemble_bundle(pyinstaller_dir: Path, target_platform: str, version: str, a
             os.chmod(exe, 0o755)
 
     return bundle_dir
+
+
+def install_hicolor_icon(source_png: Path, pkg_root: Path, icon_name: str) -> None:
+    """Render *source_png* into the hicolor icon theme under ``pkg_root``.
+
+    The standard sizes are 48, 64, 128, 256, 512.  If Pillow is available
+    we resize the source to each size for crisp renderings; otherwise we
+    drop a single copy at the largest hicolor directory and rely on
+    desktop environments to scale.
+    """
+    sizes = (48, 64, 128, 256, 512)
+    try:
+        from PIL import Image as _pil_image  # noqa: PLC0415, N813
+    except ImportError:
+        _pil_image = None  # ty:ignore[invalid-assignment]
+
+    for size in sizes:
+        icons_dir = pkg_root / "usr" / "share" / "icons" / "hicolor" / f"{size}x{size}" / "apps"
+        icons_dir.mkdir(parents=True, exist_ok=True)
+        dest = icons_dir / f"{icon_name}.png"
+        if _pil_image is None:
+            shutil.copy2(source_png, dest)
+            continue
+        with _pil_image.open(source_png) as img:
+            img.convert("RGBA").resize((size, size), _pil_image.LANCZOS).save(dest, "PNG")
+    print(f"Installed {icon_name}.png into hicolor icon theme ({len(sizes)} sizes)")
+
+
+def ensure_tray_png(dest: Path) -> None:
+    """Materialise a square PNG of the worker icon at *dest*.
+
+    Prefers a pre-rendered ``src/gui/assets/tray_icon.png`` if present;
+    otherwise rasterises the largest frame of ``tray_icon.ico`` via Pillow.
+    """
+    src_png = PROJECT_ROOT / "src" / "gui" / "assets" / "tray_icon.png"
+    if src_png.exists():
+        shutil.copy2(src_png, dest)
+        print("Copied tray_icon.png")
+        return
+    src_ico = PROJECT_ROOT / "src" / "gui" / "assets" / "tray_icon.ico"
+    if not src_ico.exists():
+        print("WARNING: no tray_icon.ico to derive tray_icon.png from", file=sys.stderr)
+        return
+    try:
+        from PIL import Image  # noqa: PLC0415
+
+        with Image.open(src_ico) as ico:
+            sizes = ico.info.get("sizes") or [ico.size]
+            largest = max(sizes, key=lambda s: s[0])
+            ico.size = largest
+            ico.load()
+            ico.convert("RGBA").save(dest, "PNG")
+        print(f"Derived tray_icon.png ({largest[0]}x{largest[1]}) from tray_icon.ico")
+    except (OSError, ValueError, ImportError) as exc:
+        print(f"WARNING: failed to render tray_icon.png: {exc}", file=sys.stderr)
 
 
 def create_archive(bundle_dir: Path, target_platform: str, version: str, arch: str) -> Path:
@@ -548,6 +651,31 @@ def build_deb(bundle_dir: Path, version: str, arch: str) -> Path | None:
     usr_bin.mkdir(parents=True)
     (usr_bin / "rcflow").symlink_to("/opt/rcflow/rcflow")
 
+    # Install XDG desktop entry so the worker GUI shows up in the application
+    # menu / GNOME Activities search alongside the rcflow-client entry.
+    apps_dir = pkg_root / "usr" / "share" / "applications"
+    apps_dir.mkdir(parents=True)
+    (apps_dir / "rcflow-worker.desktop").write_text(
+        "[Desktop Entry]\n"
+        "Type=Application\n"
+        "Name=RCFlow Worker\n"
+        "GenericName=RCFlow Worker\n"
+        "Comment=RCFlow background worker — dashboard and tray\n"
+        "Exec=/opt/rcflow/rcflow gui\n"
+        "Icon=rcflow-worker\n"
+        "Terminal=false\n"
+        "Categories=Network;Development;Utility;\n"
+        "StartupWMClass=rcflow\n"
+        "Keywords=rcflow;worker;automation;\n"
+    )
+
+    # Install hicolor icon so the .desktop entry renders properly in app
+    # launchers and GNOME Activities.  We render one PNG per common size so
+    # the launcher picks the closest match without scaling artefacts.
+    tray_png_src = bundle_dir / "tray_icon.png"
+    if tray_png_src.exists():
+        install_hicolor_icon(tray_png_src, pkg_root, "rcflow-worker")
+
     # Create systemd service unit
     systemd_dir = pkg_root / "lib" / "systemd" / "system"
     systemd_dir.mkdir(parents=True)
@@ -576,7 +704,14 @@ EnvironmentFile=-/opt/rcflow/env
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/opt/rcflow/data /opt/rcflow/logs /opt/rcflow/certs
+# Whole install dir is writable so settings.json (resolved by paths.get_data_dir)
+# can be created/updated by the service user.  Subpaths data/, logs/, certs/
+# are inside this tree and inherit the same access.
+ReadWritePaths=/opt/rcflow
+# HOME points at the install dir so XDG fallbacks (used when /opt/rcflow is
+# not writable, e.g. interactive `rcflow` invocations) land somewhere the
+# service can actually write to instead of hitting a missing /home/rcflow.
+Environment="HOME=/opt/rcflow"
 PrivateTmp=true
 
 [Install]
@@ -588,6 +723,23 @@ WantedBy=multi-user.target
     debian_dir = pkg_root / "DEBIAN"
     debian_dir.mkdir(parents=True)
 
+    # Headless `rcflow run` (the systemd service) only needs the bundled
+    # binary and standard glibc.  The optional GUI mode (`rcflow gui`,
+    # invoked by the .desktop launcher) drives the same CustomTkinter +
+    # pystray dashboard used on Windows / macOS, but PyInstaller does not
+    # bundle libtcl/libtk/libxcb on Linux — so we declare them as runtime
+    # Recommends.  Headless installs (servers, containers, WSL without
+    # X) can ignore them; desktop installs already pull them in via the
+    # default GNOME/KDE meta-packages.
+    recommends = [
+        "libtcl9.0 | libtcl8.6",
+        "libtk9.0 | libtk8.6",
+        "libxcb1",
+        "libxft2",
+        "libxss1",
+        "libfontconfig1",
+        "gir1.2-ayatanaappindicator3-0.1",
+    ]
     (debian_dir / "control").write_text(
         f"""\
 Package: rcflow
@@ -596,8 +748,11 @@ Architecture: {deb_arch}
 Maintainer: RCFlow <rcflow@localhost>
 Description: RCFlow Action Server
  Self-contained RCFlow backend server with all dependencies bundled.
+ Run headless via the bundled systemd service or interactively with the
+ GUI dashboard (`rcflow gui`, also available from the application menu).
 Section: net
 Priority: optional
+Recommends: {", ".join(recommends)}
 Installed-Size: {sum(f.stat().st_size for f in install_dir.rglob("*") if f.is_file()) // 1024}
 """
     )
@@ -745,11 +900,23 @@ INITEOF
     service rcflow start || true
 fi
 
+# Refresh desktop entry / icon caches so the worker GUI shows up immediately
+# in app launchers and GNOME Activities search.  Both tools are best-effort:
+# they may be absent on minimal server installs.
+if command -v update-desktop-database >/dev/null 2>&1; then
+    update-desktop-database -q /usr/share/applications 2>/dev/null || true
+fi
+if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+    gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor 2>/dev/null || true
+fi
+
 echo ""
 echo "============================================"
 echo "  RCFlow installed successfully!"
 echo "  Run 'rcflow info' to view server details."
 echo "  Run 'rcflow api-key' to view your API key."
+echo "  Launch the GUI dashboard from your app menu"
+echo "  ('RCFlow Worker') or run 'rcflow gui'."
 echo "============================================"
 echo ""
 """
@@ -787,6 +954,15 @@ fi
 
 if pidof systemd &>/dev/null; then
     systemctl daemon-reload
+fi
+
+# Keep desktop / icon caches in sync after removal so stale RCFlow launchers
+# don't linger in the app menu.
+if command -v update-desktop-database >/dev/null 2>&1; then
+    update-desktop-database -q /usr/share/applications 2>/dev/null || true
+fi
+if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+    gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor 2>/dev/null || true
 fi
 """
     )

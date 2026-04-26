@@ -7,4 +7,4 @@ Icon=rcflow-client
 Terminal=false
 Categories=Network;Utility;
 MimeType=x-scheme-handler/rcflow;
-StartupWMClass=rcflowclient
+StartupWMClass=com.rcflow.rcflowclient.Com.rcflow.rcflowclient

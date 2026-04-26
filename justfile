@@ -69,12 +69,14 @@ bundle *FLAGS:
     uv run python scripts/bundle.py {{ FLAGS }}
 
 # Build Linux worker .deb package (must be on Linux)
+# --extra tray installs customtkinter + pystray + Pillow so the worker GUI
+# dashboard and tray icon are bundled into the .deb (matches macOS/Windows).
 bundle-linux-worker *FLAGS:
-    uv run --extra bundle python scripts/bundle.py --platform linux --installer {{ FLAGS }}
+    uv run --extra bundle --extra tray python scripts/bundle.py --platform linux --installer {{ FLAGS }}
 
 # Build and install Linux worker .deb package (must be on Linux)
 bundle-linux-worker-install:
-    uv run --extra bundle python scripts/bundle.py --platform linux --install
+    uv run --extra bundle --extra tray python scripts/bundle.py --platform linux --install
 
 # Build macOS worker DMG (.app bundle, must be on macOS)
 # --extra tray installs pystray + Pillow for the menu bar UI and DMG background
@@ -122,12 +124,24 @@ bundle-linux-client:
     mkdir -p "$DEB_ROOT/usr/bin"
     ln -s /opt/rcflowclient/rcflowclient "$DEB_ROOT/usr/bin/rcflowclient"
     # Register rcflow:// URL scheme via .desktop MimeType so xdg-open routes
-    # deep links from the worker GUI into this client.
+    # deep links from the worker GUI into this client AND so the launcher
+    # surfaces the client in app menus / GNOME Activities search.
     install -Dm644 rcflowclient/linux/rcflow-client.desktop \
       "$DEB_ROOT/usr/share/applications/rcflow-client.desktop"
+    # Install hicolor icons across the standard sizes so the launcher renders
+    # the correct icon instead of the missing-icon placeholder.
+    for size in 48 64 128 256 512; do
+        ICONS_DIR="$DEB_ROOT/usr/share/icons/hicolor/${size}x${size}/apps"
+        install -Dm644 rcflowclient/assets/icon/app_icon.png \
+          "$ICONS_DIR/rcflow-client.png"
+    done
     mkdir -p "$DEB_ROOT/DEBIAN"
     printf 'Package: rcflow-client\nVersion: %s\nArchitecture: amd64\nMaintainer: RCFlow <rcflow@localhost>\nDescription: RCFlow Desktop Client\n Self-contained RCFlow Flutter desktop client.\nSection: net\nPriority: optional\n' \
       "$CLIENT_VERSION" > "$DEB_ROOT/DEBIAN/control"
+    # Refresh the desktop / icon caches on install + removal so the launcher
+    # entry surfaces immediately without a logout cycle.
+    install -Dm755 scripts/deb-cache-refresh.sh "$DEB_ROOT/DEBIAN/postinst"
+    install -Dm755 scripts/deb-cache-refresh.sh "$DEB_ROOT/DEBIAN/postrm"
     dpkg-deb --build --root-owner-group "$DEB_ROOT" "dist/${PKG_NAME}.deb"
     printf 'Built dist/%s.deb\n' "$PKG_NAME"
 

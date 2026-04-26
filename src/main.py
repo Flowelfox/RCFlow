@@ -7,6 +7,7 @@ from fastapi import FastAPI
 
 from src.api.http import router as http_router
 from src.api.integrations.linear import router as linear_router
+from src.api.routes.dashboard import router as dashboard_router
 from src.api.ws.input_text import router as input_text_router
 from src.api.ws.output_text import router as output_text_router
 from src.api.ws.terminal import router as terminal_router
@@ -339,6 +340,7 @@ def create_app() -> FastAPI:
 
     app.include_router(http_router)
     app.include_router(linear_router)
+    app.include_router(dashboard_router)
     app.include_router(input_text_router)
     app.include_router(output_text_router)
     app.include_router(terminal_router)
