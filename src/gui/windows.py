@@ -35,6 +35,11 @@ from src.gui.core import (
     send_show_to_existing,
     start_ipc_server,
 )
+from src.gui.updater import (
+    UpdateService,
+    cleanup_partial_downloads,
+    resolve_current_version,
+)
 
 # Apply appearance settings before any CTk window is created
 ctk.set_appearance_mode("system")
@@ -86,6 +91,15 @@ class RCFlowGUI:
         self._upnp_enabled_mirror: bool = False
         self._natpmp_enabled_mirror: bool = False
         self._external_addr_mirror: str = "—"
+        # Mirror for the pystray menu (which runs on a daemon thread and
+        # cannot read Tk vars).  Updated whenever the updater state changes.
+        self._update_available_mirror: bool = False
+        self._update_latest_mirror: str = ""
+
+        cleanup_partial_downloads()
+        self._updater = UpdateService(current_version=resolve_current_version())
+        self._updater.restore_cached_state()
+        self._updater.add_listener(self._on_updater_change)
 
         self._root = ctk.CTk()
         self._root.title("RCFlow Worker")
@@ -229,7 +243,7 @@ class RCFlowGUI:
         s = theme.PAD_SMALL
 
         self._root.grid_columnconfigure(0, weight=1)
-        self._root.grid_rowconfigure(3, weight=1)  # log row expands
+        self._root.grid_rowconfigure(5, weight=1)  # log row expands
 
         # ── Settings + controls ──────────────────────────────────────
         top = ctk.CTkFrame(self._root, fg_color="transparent")
@@ -338,6 +352,9 @@ class RCFlowGUI:
         )
         self._add_client_btn.pack()
 
+        # ── Update banner (hidden unless update available) ───────────
+        self._build_update_banner(row=1)
+
         # ── Status pill ──────────────────────────────────────────────
         self._status_label = ctk.CTkLabel(
             self._root,
@@ -347,11 +364,11 @@ class RCFlowGUI:
             corner_radius=6,
             font=ctk.CTkFont(size=theme.FONT_SIZE_SMALL, weight="bold"),
         )
-        self._status_label.grid(row=1, column=0, sticky="w", padx=p, pady=(s + 2, 0))
+        self._status_label.grid(row=2, column=0, sticky="w", padx=p, pady=(s + 2, 0))
 
         # ── Instance details card ────────────────────────────────────
         dc = ctk.CTkFrame(self._root, corner_radius=8)
-        dc.grid(row=2, column=0, sticky="ew", padx=p, pady=(s, 0))
+        dc.grid(row=3, column=0, sticky="ew", padx=p, pady=(s, 0))
 
         ctk.CTkLabel(
             dc,
@@ -410,9 +427,12 @@ class RCFlowGUI:
                 font=ctk.CTkFont(size=theme.FONT_SIZE_SMALL, weight="bold"),
             ).grid(row=row, column=value_col, sticky="w", padx=(0, s), pady=row_pady)
 
+        # ── Updates card ─────────────────────────────────────────────
+        self._build_updates_card(row=4)
+
         # ── Log viewer card ──────────────────────────────────────────
         lc = ctk.CTkFrame(self._root, corner_radius=8)
-        lc.grid(row=3, column=0, sticky="nsew", padx=p, pady=(s, p))
+        lc.grid(row=5, column=0, sticky="nsew", padx=p, pady=(s, p))
         lc.grid_rowconfigure(1, weight=1)
         lc.grid_columnconfigure(0, weight=1)
 
@@ -434,6 +454,236 @@ class RCFlowGUI:
         # Ctrl/Cmd+C — a plain ``state='disabled'`` blocks selection on X11.
         make_text_readonly(self._log_widget)
         attach_copy_context_menu(self._log_widget)
+
+    # ── Update banner / card ─────────────────────────────────────────────
+
+    def _build_update_banner(self, *, row: int) -> None:
+        """Construct the amber banner shown when a newer release is available."""
+        p = theme.PAD_OUTER
+        g = theme.PAD_GROUP
+        s = theme.PAD_SMALL
+
+        self._update_banner = ctk.CTkFrame(self._root, fg_color=("#fde68a", "#854d0e"), corner_radius=8)
+        self._update_banner.grid(row=row, column=0, sticky="ew", padx=p, pady=(s, 0))
+        self._update_banner.grid_columnconfigure(1, weight=1)
+        self._update_banner.grid_remove()  # hidden until first update detected
+
+        self._update_banner_label = ctk.CTkLabel(
+            self._update_banner,
+            text="",
+            text_color=("#1f2937", "#fef3c7"),
+            anchor="w",
+            font=ctk.CTkFont(size=theme.FONT_SIZE_BODY, weight="bold"),
+        )
+        self._update_banner_label.grid(row=0, column=1, sticky="ew", padx=(g, s), pady=s)
+
+        self._update_banner_install_btn = ctk.CTkButton(
+            self._update_banner,
+            text="Download & Install",
+            width=140,
+            command=self._on_update_install,
+            font=ctk.CTkFont(size=theme.FONT_SIZE_SMALL, weight="bold"),
+        )
+        self._update_banner_install_btn.grid(row=0, column=2, padx=(s, s), pady=s)
+
+        self._update_banner_notes_btn = ctk.CTkButton(
+            self._update_banner,
+            text="Release Notes",
+            width=110,
+            fg_color="transparent",
+            border_width=1,
+            text_color=("#1f2937", "#fef3c7"),
+            command=self._on_update_open_notes,
+            font=ctk.CTkFont(size=theme.FONT_SIZE_SMALL),
+        )
+        self._update_banner_notes_btn.grid(row=0, column=3, padx=(s, s), pady=s)
+
+        self._update_banner_dismiss_btn = ctk.CTkButton(
+            self._update_banner,
+            text="✕",
+            width=28,
+            fg_color="transparent",
+            text_color=("#1f2937", "#fef3c7"),
+            command=self._on_update_dismiss,
+            font=ctk.CTkFont(size=theme.FONT_SIZE_BODY, weight="bold"),
+        )
+        self._update_banner_dismiss_btn.grid(row=0, column=4, padx=(0, s), pady=s)
+
+    def _build_updates_card(self, *, row: int) -> None:
+        """Construct the persistent 'Updates' card with manual controls."""
+        p = theme.PAD_OUTER
+        g = theme.PAD_GROUP
+        s = theme.PAD_SMALL
+
+        uc = ctk.CTkFrame(self._root, corner_radius=8)
+        uc.grid(row=row, column=0, sticky="ew", padx=p, pady=(s, 0))
+        uc.grid_columnconfigure(3, weight=1)
+
+        ctk.CTkLabel(
+            uc,
+            text="Updates",
+            font=ctk.CTkFont(size=theme.FONT_SIZE_SMALL, weight="bold"),
+        ).grid(row=0, column=0, columnspan=2, sticky="w", padx=g, pady=(g, s))
+
+        ctk.CTkLabel(
+            uc,
+            text="Status",
+            font=ctk.CTkFont(size=theme.FONT_SIZE_SMALL),
+            text_color=("gray40", "gray60"),
+        ).grid(row=1, column=0, sticky="w", padx=(g, s), pady=(0, g))
+
+        self._update_status_var = tk.StringVar(value="—")
+        ctk.CTkEntry(
+            uc,
+            textvariable=self._update_status_var,
+            state="readonly",
+            border_width=0,
+            corner_radius=0,
+            fg_color="transparent",
+            font=ctk.CTkFont(size=theme.FONT_SIZE_SMALL, weight="bold"),
+        ).grid(row=1, column=1, columnspan=3, sticky="ew", padx=(0, s), pady=(0, g))
+
+        self._update_check_btn = ctk.CTkButton(
+            uc,
+            text="Check for Updates",
+            width=140,
+            command=self._on_update_check_now,
+            font=ctk.CTkFont(size=theme.FONT_SIZE_SMALL),
+        )
+        self._update_check_btn.grid(row=1, column=4, padx=(s, g), pady=(0, g))
+
+        from src.config import Settings  # noqa: PLC0415
+
+        try:
+            auto = bool(Settings().RCFLOW_UPDATE_AUTO_CHECK)
+        except Exception:
+            auto = True
+        self._update_auto_var = tk.BooleanVar(value=auto)
+        ctk.CTkCheckBox(
+            uc,
+            text="Check for updates automatically",
+            variable=self._update_auto_var,
+            command=self._on_update_auto_toggle,
+            font=ctk.CTkFont(size=theme.FONT_SIZE_SMALL),
+        ).grid(row=2, column=0, columnspan=5, sticky="w", padx=g, pady=(0, g))
+
+    # ── Update event handlers ────────────────────────────────────────────
+
+    def _on_updater_change(self) -> None:
+        """Listener invoked from the updater worker thread.
+
+        Schedules a UI refresh on the Tk main thread — the only safe place to
+        touch CTk widgets, StringVars, or the pystray menu.
+        """
+        self._root.after(0, self._refresh_update_ui)
+
+    def _refresh_update_ui(self) -> None:
+        if self._quitting:
+            return
+        latest = self._updater.latest
+        current = self._updater.current_version or "—"
+
+        if self._updater.show_banner and latest is not None:
+            text = f"Update available: v{latest.version} (you have v{current})"
+            self._update_banner_label.configure(text=text)
+            install_state = "normal" if latest.download_url else "disabled"
+            self._update_banner_install_btn.configure(state=install_state)
+            self._update_banner.grid()
+        else:
+            self._update_banner.grid_remove()
+
+        self._update_available_mirror = self._updater.show_banner
+        self._update_latest_mirror = latest.version if latest is not None else ""
+        self._update_status_var.set(self._format_update_status())
+
+        if self._updater.is_checking or self._updater.is_downloading:
+            self._update_check_btn.configure(state="disabled")
+        else:
+            self._update_check_btn.configure(state="normal")
+
+        self._update_tray_status()
+
+    def _format_update_status(self) -> str:
+        if self._updater.is_downloading:
+            return "Downloading update…"
+        if self._updater.is_checking:
+            return "Checking…"
+        err = self._updater.last_error
+        if err:
+            return f"Error: {err}"
+        latest = self._updater.latest
+        current = self._updater.current_version or "unknown"
+        if latest is None:
+            return f"Installed v{current} — no check yet"
+        if self._updater.update_available:
+            return f"Latest v{latest.version} available — installed v{current}"
+        return f"Up to date (v{current})"
+
+    def _on_update_check_now(self) -> None:
+        self._updater.check_now()
+
+    def _on_update_install(self) -> None:
+        self._set_status("Downloading update…", sticky=True)
+
+        def _on_progress(received: int, total: int) -> None:
+            pct = int(received * 100 / total) if total else 0
+            self._root.after(0, lambda: self._set_status(f"Downloading update… {pct}%", sticky=True))
+
+        def _on_done(path: Path) -> None:
+            def _ui() -> None:
+                self._set_status(f"Downloaded to {path.name}", sticky=True)
+                self._prompt_launch_installer(path)
+
+            self._root.after(0, _ui)
+
+        def _on_error(msg: str) -> None:
+            self._root.after(0, lambda: self._set_status(f"Update download failed: {msg}", error=True, sticky=True))
+
+        self._updater.download(on_progress=_on_progress, on_done=_on_done, on_error=_on_error)
+
+    def _prompt_launch_installer(self, path: Path) -> None:
+        """Modal: ask the user whether to launch the installer now."""
+        from tkinter import messagebox  # noqa: PLC0415
+
+        choice = messagebox.askyesnocancel(
+            "Update downloaded",
+            f"The installer was saved to:\n{path}\n\nLaunch it now?\n\n"
+            "Yes — open the installer\nNo — show the file in your file manager\nCancel — keep the download for later",
+        )
+        if choice is True:
+            try:
+                self._updater.launch_installer(path)
+                self._set_status("Installer launched", sticky=True)
+            except Exception as exc:
+                self._set_status(f"Failed to launch installer: {exc}", error=True, sticky=True)
+        elif choice is False:
+            self._reveal_in_explorer(path)
+
+    @staticmethod
+    def _reveal_in_explorer(path: Path) -> None:
+        """Open the OS file manager focused on *path* (best-effort)."""
+        import subprocess  # noqa: PLC0415
+
+        with contextlib.suppress(Exception):
+            if sys.platform == "win32":
+                subprocess.Popen(["explorer", "/select,", str(path)])
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", "-R", str(path)])
+            else:
+                # Most Linux file managers don't support file selection;
+                # opening the parent directory is the broadly-compatible choice.
+                subprocess.Popen(["xdg-open", str(path.parent)])
+
+    def _on_update_open_notes(self) -> None:
+        self._updater.open_release_page()
+
+    def _on_update_dismiss(self) -> None:
+        self._updater.dismiss_current()
+
+    def _on_update_auto_toggle(self) -> None:
+        from src.config import update_settings_file  # noqa: PLC0415
+
+        update_settings_file({"RCFLOW_UPDATE_AUTO_CHECK": "true" if self._update_auto_var.get() else "false"})
 
     # ── Settings I/O ─────────────────────────────────────────────────────
 
@@ -727,6 +977,11 @@ class RCFlowGUI:
                 enabled=False,
                 visible=lambda item: self._upnp_enabled_mirror or self._natpmp_enabled_mirror,
             ),
+            pystray.MenuItem(
+                lambda item: f"Update available — install v{self._update_latest_mirror}",
+                self._on_tray_install_update,
+                visible=lambda item: self._update_available_mirror,
+            ),
             pystray.MenuItem("Dashboard", self._on_tray_open, default=True),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem(
@@ -743,6 +998,7 @@ class RCFlowGUI:
                 checked=lambda item: _is_autostart_enabled(),
                 visible=sys.platform == "win32",
             ),
+            pystray.MenuItem("Check for Updates", self._on_tray_check_updates),
             pystray.MenuItem("Quit", self._on_tray_quit),
         )
         icon = pystray.Icon("rcflow", icon_image, "RCFlow Worker", menu)
@@ -797,6 +1053,15 @@ class RCFlowGUI:
 
     def _on_tray_add_to_client(self, icon: object = None, item: object = None) -> None:
         self._root.after(0, self._on_add_to_client)
+
+    def _on_tray_install_update(self, icon: object = None, item: object = None) -> None:
+        # Reveal the dashboard so progress + the install prompt are visible,
+        # then kick off the download.
+        self._root.after(0, self._show_window)
+        self._root.after(0, self._on_update_install)
+
+    def _on_tray_check_updates(self, icon: object = None, item: object = None) -> None:
+        self._root.after(0, self._on_update_check_now)
 
     def _on_toggle_autostart(self, icon: object, item: object) -> None:
         _set_autostart(not _is_autostart_enabled())
@@ -859,6 +1124,14 @@ class RCFlowGUI:
             self._start_server()
         else:
             self._on_adopted_server()
+
+        # Render any cached update state restored at construction time, then
+        # kick off a background check if auto-check is on and the cache TTL
+        # has expired.  Both are safe in dev mode (no-op when version unknown).
+        self._refresh_update_ui()
+        if self._update_auto_var.get() and self._updater.current_version:
+            self._updater.maybe_check()
+
         self._root.after(POLL_MS, self._update_ui)
 
         def _status_loop() -> None:

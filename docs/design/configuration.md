@@ -58,6 +58,13 @@ All configuration is via environment variables, loaded from a `settings.json` fi
 | `NATPMP_GATEWAY`        | no       | `auto`          | VPN gateway IP that speaks NAT-PMP. `auto` tries the ProtonVPN default `10.2.0.1`, then the system default route. Override with an IPv4 literal for other providers. |
 | `NATPMP_LEASE_SECONDS`  | no       | `60`            | Mapping lease the gateway should hold. Renewed at 50%. ProtonVPN enforces 60. |
 | `NATPMP_INITIAL_TIMEOUT_MS` | no   | `250`           | Per-request timeout for the RFC 6886 retry ladder (doubled each retry, max 5 attempts). |
+| `RCFLOW_UPDATE_AUTO_CHECK` | no  | `true`          | Worker GUI: poll the GitHub Releases API for newer versions on launch (subject to the 24-hour cache). Headless `rcflow run` ignores this. Set to `false` to disable all network update checks; manual "Check for Updates" buttons remain. |
+| `RCFLOW_UPDATE_LAST_CHECK` | no  |                 | Worker GUI internal: ISO-8601 UTC timestamp of the last successful update check. Managed automatically; manual edits are overwritten. |
+| `RCFLOW_UPDATE_CACHED_VERSION` | no |             | Worker GUI internal: latest version string returned by the most recent check. |
+| `RCFLOW_UPDATE_CACHED_RELEASE_URL` | no |          | Worker GUI internal: GitHub release page URL for the cached version. |
+| `RCFLOW_UPDATE_CACHED_DOWNLOAD_URL` | no |         | Worker GUI internal: platform-matched asset download URL for the cached version. |
+| `RCFLOW_UPDATE_CACHED_ASSET_NAME` | no |           | Worker GUI internal: asset filename used to derive the local download path. |
+| `RCFLOW_UPDATE_DISMISSED_VERSION` | no |           | Worker GUI internal: most recently dismissed version. The "Update available" banner stays hidden until a strictly newer version is observed. |
 
 ## Remote Configuration (Client-Side Editing)
 

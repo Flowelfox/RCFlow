@@ -252,6 +252,15 @@ class Settings(BaseSettings):
     # Logging
     LOG_LEVEL: str = "INFO"
 
+    # Worker GUI auto-update (GitHub Releases)
+    RCFLOW_UPDATE_AUTO_CHECK: bool = True
+    RCFLOW_UPDATE_LAST_CHECK: str = ""
+    RCFLOW_UPDATE_CACHED_VERSION: str = ""
+    RCFLOW_UPDATE_CACHED_RELEASE_URL: str = ""
+    RCFLOW_UPDATE_CACHED_DOWNLOAD_URL: str = ""
+    RCFLOW_UPDATE_CACHED_ASSET_NAME: str = ""
+    RCFLOW_UPDATE_DISMISSED_VERSION: str = ""
+
     @property
     def projects_dirs(self) -> list[Path]:
         """Parse PROJECTS_DIR into a list of expanded, resolved Path objects."""

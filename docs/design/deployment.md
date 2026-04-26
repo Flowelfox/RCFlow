@@ -161,6 +161,22 @@ sudo systemctl start rcflow
 sudo journalctl -u rcflow -f     # View logs
 ```
 
+### Auto-Update (Worker GUI Only)
+
+The worker GUI (Windows tray, macOS menu bar, future Linux dashboard) polls the GitHub Releases API on launch to surface newer versions. The headless `rcflow run` entry point — including systemd, Docker, and any other non-GUI deployment — never instantiates the updater and never makes outbound HTTP calls for update discovery; package managers handle those installs.
+
+**How it works:**
+
+- On launch, the GUI calls `GET https://api.github.com/repos/Flowelfox/RCFlow/releases/latest` once per 24-hour TTL (cached in `settings.json`). Manual "Check for Updates" buttons in the dashboard and tray bypass the cache.
+- The fetcher picks the asset whose name ends in the platform/arch suffix produced by the bundle pipeline: `linux-worker-amd64.deb`, `linux-worker-arm64.deb`, `windows-worker-amd64.exe`, `macos-worker-arm64.dmg`, `macos-worker-x86_64.dmg`. macOS arch is taken from `platform.machine()` so a Rosetta 2 install of the x86_64 binary correctly fetches the x86_64 update.
+- When a newer version is available, an amber banner appears above the status pill and a "Update available — install vX.Y.Z" item appears near the top of the tray/menu-bar menu. The user clicks **Download & Install**, the installer is streamed to a per-platform cache dir (`%TEMP%\rcflow-updates`, `~/Library/Caches/rcflow/updates`, `~/.cache/rcflow/updates`), and a modal asks whether to launch it (`os.startfile` / `open` / `xdg-open`) or reveal it in the file manager.
+- The worker process keeps running during the download. The installer is responsible for prompting the user to close the worker before overwriting the binary.
+- Auto-checks can be turned off from the dashboard's **Updates** card or by setting `RCFLOW_UPDATE_AUTO_CHECK=false`. Manual checks still work in either case.
+- Versions are normalized (`v1.2.3+45` → `1.2.3`) and compared by numeric dot-segments, so `1.10.0` is correctly newer than `1.9.0`. Dismissing a version hides the banner until a strictly newer version appears.
+- Dev (unfrozen) builds skip the auto-check on launch when no `rcflow` package version is resolvable, but the manual "Check for Updates" button still works for testing.
+
+No checksum or signature verification is performed beyond TLS — the user-facing install flow matches the existing Flutter client. Stalled `*.partial` downloads older than one day are garbage-collected on each GUI startup.
+
 ---
 
 ## Bundling & Distribution
