@@ -694,7 +694,7 @@ class _SetupWizardState extends State<_SetupWizard> {
             items: const [
               DropdownMenuItem(
                 value: null,
-                child: Text('None (let LLM decide)'),
+                child: Text('No preference'),
               ),
               DropdownMenuItem(
                 value: 'claude_code',

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import logging
 import os
@@ -170,6 +171,68 @@ def _parse_version(name: str, raw: str) -> str | None:
     return None
 
 
+def _atomic_install_binary(tmp_path: Path, binary_path: Path) -> None:
+    """Atomically swap *binary_path* with the freshly-downloaded *tmp_path*.
+
+    POSIX:  ``Path.replace`` is atomic and works even when the target is
+    executing — overwriting an in-use binary just unlinks the old inode while
+    the running process keeps its file descriptor open.
+
+    Windows:  ``os.replace`` (and Win32 ``MoveFileExW(MOVEFILE_REPLACE_EXISTING)``)
+    refuses to overwrite a target that any process holds open, including the
+    *kernel-loaded image* of a running ``.exe``.  Updating Claude Code
+    immediately after using it therefore raises
+    ``PermissionError: [WinError 5] Access is denied``.
+
+    Workaround that actually works on Windows: a directory-entry rename of
+    the live ``.exe`` to a sibling name **is** allowed by NTFS even while the
+    image is loaded.  We move the old binary aside to ``<name>.<pid>.old``,
+    drop the new file into place, and best-effort-delete the parked file.
+    Anything we can't delete now (still mapped) is swept up by
+    :meth:`ToolManager._cleanup_stale_binaries` on the next operation.
+    """
+    if sys.platform != "win32":
+        tmp_path.replace(binary_path)
+        return
+
+    # Fast path: no existing binary, nothing to evict.
+    if not binary_path.exists():
+        tmp_path.replace(binary_path)
+        return
+
+    # Try the simple replace first — if no other process holds the binary,
+    # this is the cheapest path and leaves no parked file behind.
+    try:
+        tmp_path.replace(binary_path)
+        return
+    except PermissionError:
+        pass
+
+    # The binary is in use.  Move it aside, drop the new one in, sweep later.
+    parked = binary_path.with_name(f"{binary_path.name}.{os.getpid()}.old")
+    # Another concurrent install might have already created this name; pick
+    # something definitely unique.
+    counter = 0
+    while parked.exists():
+        counter += 1
+        parked = binary_path.with_name(f"{binary_path.name}.{os.getpid()}.{counter}.old")
+
+    binary_path.rename(parked)
+    try:
+        tmp_path.replace(binary_path)
+    except Exception:
+        # Roll back the rename so the user is left with a working binary.
+        with contextlib.suppress(OSError):
+            parked.rename(binary_path)
+        raise
+
+    # Best-effort cleanup of the parked copy.  The file is still memory-mapped
+    # by the running process; deletion will only succeed once that handle is
+    # closed.  We retry on next install via ``_cleanup_stale_binaries``.
+    with contextlib.suppress(OSError, PermissionError):
+        parked.unlink()
+
+
 # ---------------------------------------------------------------------------
 # ToolManager
 # ---------------------------------------------------------------------------
@@ -214,6 +277,9 @@ class ToolManager:
         results: dict[str, ManagedTool] = {}
         for name in ("claude_code", "codex", "opencode"):
             try:
+                # Sweep any ``<binary>.<pid>.old`` files left by a previous
+                # in-place update on Windows.  Cheap no-op on POSIX.
+                self._cleanup_parked_binaries(name)
                 tool = await self.detect_tool(name)
                 results[name] = tool
                 if tool.binary_path:
@@ -293,30 +359,6 @@ class ToolManager:
         self._tools[name] = updated
         return updated
 
-    async def switch_source(self, name: str, use_managed: bool) -> ManagedTool:
-        """Switch a tool between managed and external (PATH) source."""
-        tool = self._tools.get(name)
-        if not tool:
-            raise ValueError(f"Unknown tool: {name}")
-
-        if use_managed:
-            if not tool.managed_path:
-                raise ValueError(f"No managed installation found for {name}")
-            version = await self._get_installed_version(tool.managed_path, name)
-            tool.binary_path = tool.managed_path
-            tool.current_version = version
-            tool.managed = True
-        else:
-            if not tool.external_path:
-                raise ValueError(f"No external installation found for {name}")
-            version = await self._get_installed_version(tool.external_path, name)
-            tool.binary_path = tool.external_path
-            tool.current_version = version
-            tool.managed = False
-
-        self._tools[name] = tool
-        return tool
-
     async def run_update_loop(self) -> None:
         """Periodically check for updates.  Runs as a background asyncio task."""
         interval = self._settings.TOOL_UPDATE_INTERVAL_HOURS * 3600
@@ -346,20 +388,19 @@ class ToolManager:
     async def detect_tool(self, name: str) -> ManagedTool:
         """Detect whether a tool is installed and resolve its binary path.
 
-        Priority: RCFlow managed directory first, then PATH lookup.
+        Only the RCFlow-managed install is honoured.  External binaries on
+        ``PATH`` are intentionally **not** picked up: every coding-agent
+        invocation must run under RCFlow's managed copy so the user's per-tool
+        config (``CLAUDE_CONFIG_DIR``, ``CODEX_HOME``, …) is the authoritative
+        source.  When no managed binary is on disk, the tool is reported as
+        not installed and the UI prompts the user to install it.
         """
         binary_names = {"claude_code": "claude", "codex": "codex", "opencode": "opencode"}
         binary_name = binary_names.get(name, name)
 
-        # Probe both sources so the UI can offer a switch
         mp = self._managed_binary_path(name)
         managed_str = str(mp) if mp.is_file() and _is_executable(mp) else None
-        which_str = shutil.which(binary_name)
-        # Don't report PATH hit if it points at the managed binary
-        if which_str and managed_str and Path(which_str).resolve() == mp.resolve():
-            which_str = None
 
-        # 1. RCFlow managed directory (preferred)
         if managed_str:
             version = await self._get_installed_version(managed_str, name)
             # Fall back to persisted .version file or in-memory cache when
@@ -377,23 +418,10 @@ class ToolManager:
                 current_version=version,
                 managed=True,
                 managed_path=managed_str,
-                external_path=which_str,
+                external_path=None,
             )
 
-        # 2. PATH lookup (external)
-        if which_str:
-            version = await self._get_installed_version(which_str, name)
-            return ManagedTool(
-                name=name,
-                binary_name=binary_name,
-                binary_path=which_str,
-                current_version=version,
-                managed=False,
-                managed_path=managed_str,
-                external_path=which_str,
-            )
-
-        # 3. Not found
+        # Not installed (managed binary not on disk).
         return ManagedTool(name=name, binary_name=binary_name)
 
     # ------------------------------------------------------------------
@@ -464,7 +492,7 @@ class ToolManager:
                 # 5. Set executable (POSIX only) and atomic replace
                 if sys.platform != "win32":
                     tmp_path.chmod(0o755)
-                tmp_path.rename(binary_path)
+                _atomic_install_binary(tmp_path, binary_path)
             finally:
                 tmp_path.unlink(missing_ok=True)
 
@@ -540,7 +568,7 @@ class ToolManager:
                 tmp_path = install_dir / f".codex-{version}.tmp"
                 try:
                     tmp_path.write_bytes(resp.content)
-                    tmp_path.rename(binary_path)
+                    _atomic_install_binary(tmp_path, binary_path)
                 finally:
                     tmp_path.unlink(missing_ok=True)
         else:
@@ -662,6 +690,7 @@ class ToolManager:
         Final event has ``step="done"`` with the tool dict.
         """
         async with self._lock:
+            self._cleanup_parked_binaries(name)
             if name == "claude_code":
                 async for event in self._install_claude_code_streaming():
                     yield event
@@ -673,6 +702,20 @@ class ToolManager:
                     yield event
             else:
                 yield {"step": "error", "message": f"Unknown tool: {name}"}
+
+    def _cleanup_parked_binaries(self, name: str) -> None:
+        """Best-effort delete of ``<binary>.<pid>.old`` files left over from prior in-place
+        Windows updates.  Files still memory-mapped by a running process stay on disk and
+        are retried at the next call.  No-op on POSIX where ``replace`` already overwrites.
+        """
+        if sys.platform != "win32":
+            return
+        mp = self._managed_binary_path(name)
+        if not mp.parent.exists():
+            return
+        for stale in mp.parent.glob(f"{mp.name}.*.old"):
+            with contextlib.suppress(OSError, PermissionError):
+                stale.unlink()
 
     async def _install_claude_code_streaming(self) -> AsyncGenerator[dict[str, Any], None]:
         """Download Claude Code with streaming progress."""
@@ -740,7 +783,7 @@ class ToolManager:
                 yield {"step": "installing", "message": "Installing..."}
                 if sys.platform != "win32":
                     tmp_path.chmod(0o755)
-                tmp_path.rename(binary_path)
+                _atomic_install_binary(tmp_path, binary_path)
             finally:
                 tmp_path.unlink(missing_ok=True)
 
@@ -850,7 +893,7 @@ class ToolManager:
             tmp_path = install_dir / f".codex-{version}.tmp"
             try:
                 tmp_path.write_bytes(content)
-                tmp_path.rename(binary_path)
+                _atomic_install_binary(tmp_path, binary_path)
             finally:
                 tmp_path.unlink(missing_ok=True)
         else:

@@ -59,8 +59,8 @@ class TestFilePathRegex:
     """Tests for the _FILE_PATH_RE regex that extracts file paths from text."""
 
     def test_absolute_path_in_sentence(self):
-        text = "I edited /home/user/Projects/RCFlow/Design.md today"
-        assert _FILE_PATH_RE.findall(text) == ["/home/user/Projects/RCFlow/Design.md"]
+        text = "I edited /home/user/Projects/RCFlow/README.md today"
+        assert _FILE_PATH_RE.findall(text) == ["/home/user/Projects/RCFlow/README.md"]
 
     def test_absolute_path_standalone(self):
         text = "/home/user/file.py"
@@ -146,7 +146,7 @@ class TestShouldIncludeFile:
 
     def test_include_md_only(self, md_only_settings: Settings):
         scanner = _make_scanner(md_only_settings)
-        assert scanner._should_include_file(Path("/home/user/project/Design.md"))
+        assert scanner._should_include_file(Path("/home/user/project/README.md"))
         assert scanner._should_include_file(Path("/home/user/project/README.MD"))
         assert not scanner._should_include_file(Path("/home/user/project/main.py"))
         assert not scanner._should_include_file(Path("/home/user/project/style.css"))
@@ -174,7 +174,7 @@ class TestShouldIncludeFile:
     def test_normal_file_not_excluded(self, settings: Settings):
         scanner = _make_scanner(settings)
         assert scanner._should_include_file(Path("/home/user/project/src/main.py"))
-        assert scanner._should_include_file(Path("/home/user/project/Design.md"))
+        assert scanner._should_include_file(Path("/home/user/project/README.md"))
 
     def test_exclude_pattern_strips_glob_suffixes(self, settings: Settings):
         """Verify that /**  and /* suffixes are stripped during init."""
@@ -370,7 +370,7 @@ class TestIncludeExcludeIntegration:
 
     def test_md_file_in_project_root_included(self, md_only_settings: Settings, tmp_path: Path):
         scanner = _make_scanner(md_only_settings)
-        f = tmp_path / "Design.md"
+        f = tmp_path / "README.md"
         f.write_text("# Design")
         assert scanner._should_include_file(f)
 

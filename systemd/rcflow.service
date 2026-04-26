@@ -7,7 +7,7 @@ Type=simple
 User=rcflow
 WorkingDirectory=/opt/rcflow
 # Settings loaded from /opt/rcflow/settings.json by the application
-ExecStart=/opt/rcflow/rcflow
+ExecStart=/opt/rcflow/rcflow run
 Restart=on-failure
 RestartSec=5
 

@@ -1,7 +1,7 @@
 /// Tests for [PaneState] queued-message reconciliation.
 ///
 /// Covers the protocol flows defined in ``Queued User Messages`` in
-/// ``Design.md``: ack promotion, message_queued upsert, message_dequeued
+/// ``docs/design/sessions.md``: ack promotion, message_queued upsert, message_dequeued
 /// removal with renumbering, message_queued_updated edit, and
 /// applyQueueSnapshot reconnect reconcile.
 library;
@@ -66,7 +66,6 @@ class _StubHost implements PaneHost {
   String? getLastProjectForWorker(String workerId) => null;
 
   @override
-  String? getLastAgentForWorker(String workerId) => null;
 
   @override
   Future<String?> resolveProjectOnWorker(

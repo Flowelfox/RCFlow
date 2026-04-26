@@ -16,7 +16,7 @@ Mutation order for every public method is:
 The DB is the source of truth — the mirror exists only to avoid round-trips
 when building ``session_update.queued_messages`` snapshots.
 
-See ``Queued User Messages`` in ``Design.md`` for the full lifecycle.
+See ``Queued User Messages`` in ``docs/design/sessions.md`` for the full lifecycle.
 """
 
 from __future__ import annotations
@@ -30,9 +30,9 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import CursorResult, delete, select, update
 
 from src.core.buffer import MessageType
 from src.core.session import PendingMessage
@@ -158,13 +158,16 @@ class SessionPendingMessageStore:
         """Update text fields of a queued message. Returns None if not found."""
         now = datetime.now(UTC)
         async with self._session_factory() as db:
-            result = await db.execute(
-                update(SessionPendingMessageModel)
-                .where(SessionPendingMessageModel.queued_id == queued_id)
-                .values(content=content, display_content=display_content, updated_at=now)
-                .execution_options(synchronize_session=False)
+            result = cast(
+                "CursorResult[Any]",
+                await db.execute(
+                    update(SessionPendingMessageModel)
+                    .where(SessionPendingMessageModel.queued_id == queued_id)
+                    .values(content=content, display_content=display_content, updated_at=now)
+                    .execution_options(synchronize_session=False)
+                ),
             )
-            if result.rowcount == 0:  # ty:ignore[unresolved-attribute]
+            if result.rowcount == 0:
                 return None
             await db.commit()
 
@@ -290,12 +293,15 @@ class SessionPendingMessageStore:
         reason: str,
     ) -> PendingMessage | None:
         async with self._session_factory() as db:
-            result = await db.execute(
-                delete(SessionPendingMessageModel)
-                .where(SessionPendingMessageModel.queued_id == queued_id)
-                .execution_options(synchronize_session=False)
+            result = cast(
+                "CursorResult[Any]",
+                await db.execute(
+                    delete(SessionPendingMessageModel)
+                    .where(SessionPendingMessageModel.queued_id == queued_id)
+                    .execution_options(synchronize_session=False)
+                ),
             )
-            if result.rowcount == 0:  # ty:ignore[unresolved-attribute]
+            if result.rowcount == 0:
                 return None
             # Densely renumber remaining rows in one UPDATE pass.
             remaining = await db.execute(

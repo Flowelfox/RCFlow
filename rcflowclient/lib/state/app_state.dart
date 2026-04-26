@@ -1118,6 +1118,11 @@ class AppState extends ChangeNotifier implements PaneHost {
 
   void addWorker(WorkerConfig config) => _registry.add(config);
 
+  /// Look up a worker matching the host+port+token triple from a deep link.
+  /// Returns null when no duplicate exists.
+  WorkerConfig? findWorkerByHostPortToken(String host, int port, String token) =>
+      _registry.findByHostPortToken(host, port, token);
+
   void updateWorker(WorkerConfig config) => _registry.update(config);
 
   Future<void> removeWorker(String id) => _registry.remove(id);
@@ -1196,6 +1201,20 @@ class AppState extends ChangeNotifier implements PaneHost {
     return _registry[id]?.supportsImageAttachments ?? true;
   }
 
+  /// Reverse of [kAgentMentionNames]: 'ClaudeCode' → 'claude_code'.
+  static const _agentMentionToInternal = <String, String>{
+    'ClaudeCode': 'claude_code',
+    'Codex': 'codex',
+    'OpenCode': 'opencode',
+  };
+
+  /// Returns the internal agent name (e.g. ``"claude_code"``) for a given
+  /// mention or internal label, or ``null`` when [name] is not a coding agent.
+  static String? agentInternalName(String name) {
+    if (kAgentMentionNames.containsKey(name)) return name;
+    return _agentMentionToInternal[name];
+  }
+
   @override
   String? defaultAgentForWorker(String? workerId) {
     if (workerId == null) return null;
@@ -1213,10 +1232,6 @@ class AppState extends ChangeNotifier implements PaneHost {
   @override
   String? getLastProjectForWorker(String workerId) =>
       _settings.getLastProjectForWorker(workerId);
-
-  @override
-  String? getLastAgentForWorker(String workerId) =>
-      _settings.getLastAgentForWorker(workerId);
 
   @override
   ({String content, DateTime? cachedAt}) getDraft(String key) =>
@@ -1806,15 +1821,14 @@ class AppState extends ChangeNotifier implements PaneHost {
           worker.subscribe(sessionId);
         }
         _settings.setLastSessionId(workerId, sessionId);
-        // Persist per-worker last-used project and agent so new sessions on
-        // the same worker can restore these as defaults.
+        // Persist the per-worker last-used project so new sessions on the
+        // same worker can restore it as a default.  Last-used agent is *not*
+        // persisted: the per-worker default agent (or "No preference") is
+        // the single source of truth, and silent auto-resurrection of an
+        // earlier choice surprises the user.
         final projectName = pane.selectedProjectName;
         if (projectName != null) {
           _settings.setLastProjectForWorker(workerId, projectName);
-        }
-        final agentName = pane.selectedToolMention;
-        if (agentName != null) {
-          _settings.setLastAgentForWorker(workerId, agentName);
         }
         _registry[workerId]?.refreshSessions();
         break;

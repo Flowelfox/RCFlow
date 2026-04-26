@@ -18,8 +18,9 @@ from src.core.prompt_router import PromptRouter
 from src.core.session import SessionManager
 from src.database.engine import check_connection, dispose_engine, get_session_factory, init_engine
 from src.logs import setup_logging
-from src.paths import get_data_dir
+from src.paths import get_data_dir, is_frozen
 from src.services.artifact_scanner import ArtifactScanner
+from src.services.model_catalog import ModelCatalog
 from src.services.telemetry_service import TelemetryService
 from src.services.tool_manager import ToolManager
 from src.services.tool_settings import ToolSettingsManager
@@ -124,6 +125,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         llm_client = LLMClient(settings, tool_registry)
     app.state.llm_client = llm_client
 
+    # Dynamic model catalog (TTL-cached provider model lists)
+    app.state.model_catalog = ModelCatalog(get_data_dir())
+
     # Telemetry service
     telemetry_service = TelemetryService(
         db_factory=db_session_factory,
@@ -133,7 +137,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     app.state.telemetry_service = telemetry_service
 
     # Pending message store — persists queued user prompts to DB + disk
-    # (see ``Queued User Messages`` in ``Design.md``).  Attachments are
+    # (see ``Queued User Messages`` in ``docs/design/sessions.md``).  Attachments are
     # spilled under ``<data>/pending_attachments/`` and the table survives
     # backend restarts so clients see their queue restored on reconnect.
     pending_store = SessionPendingMessageStore(
@@ -200,6 +204,63 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     telemetry_task = asyncio.create_task(_run_telemetry_loop())
 
+    # UPnP and NAT-PMP are mutually exclusive — when a VPN tunnel captures
+    # the default route, an inbound packet via UPnP arrives via the LAN NIC
+    # but the reply egresses via the VPN, breaking the connection with
+    # asymmetric routing.  The GUI mutex prevents both from being toggled
+    # on, but a hand-edited ``settings.json`` or simultaneous CLI flags can
+    # still produce that state — defend in depth by skipping UPnP when
+    # NAT-PMP wins out.
+    upnp_enabled = settings.UPNP_ENABLED
+    if upnp_enabled and settings.NATPMP_ENABLED:
+        logger.warning(
+            "UPnP and NAT-PMP are both enabled — VPN routing makes the UPnP path unreachable. "
+            "Disabling UPnP for this run; NAT-PMP wins.",
+        )
+        upnp_enabled = False
+
+    # UPnP port forwarding — optional, non-fatal.  Runs inside the server
+    # process so CLI-only / systemd installs get it too; the GUI reads its
+    # state through ``/api/info``.
+    upnp_service = None
+    if upnp_enabled:
+        from src.services.upnp_service import UpnpService  # noqa: PLC0415
+
+        upnp_service = UpnpService(
+            internal_port=settings.RCFLOW_PORT,
+            lease_seconds=settings.UPNP_LEASE_SECONDS,
+            discovery_timeout_ms=settings.UPNP_DISCOVERY_TIMEOUT_MS,
+            description=f"RCFlow worker ({settings.RCFLOW_BACKEND_ID[:8]})",
+        )
+        try:
+            await upnp_service.start()
+        except Exception:
+            # Belt-and-braces: start() is designed never to raise, but we don't
+            # want a bug in it to tear down the whole worker.
+            logger.exception("UPnP service start failed (non-fatal)")
+            upnp_service = None
+    app.state.upnp_service = upnp_service
+
+    # NAT-PMP (RFC 6886) for VPN-provided port forwarding — lets workers
+    # behind ISP CGNAT expose a public address through the VPN gateway.
+    # Independent of UPnP; both can be enabled at once.
+    natpmp_service = None
+    if settings.NATPMP_ENABLED:
+        from src.services.natpmp_service import NatPmpService  # noqa: PLC0415
+
+        natpmp_service = NatPmpService(
+            internal_port=settings.RCFLOW_PORT,
+            gateway=settings.NATPMP_GATEWAY,
+            lease_seconds=settings.NATPMP_LEASE_SECONDS,
+            initial_timeout_ms=settings.NATPMP_INITIAL_TIMEOUT_MS,
+        )
+        try:
+            await natpmp_service.start()
+        except Exception:
+            logger.exception("NAT-PMP service start failed (non-fatal)")
+            natpmp_service = None
+    app.state.natpmp_service = natpmp_service
+
     # Background task set — keeps strong references so tasks are not GC'd
     _bg_tasks: set[asyncio.Task[None]] = set()
 
@@ -242,17 +303,38 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     async with db_session_factory() as db:
         await session_manager.save_all_sessions(db)
 
+    if upnp_service is not None:
+        try:
+            await asyncio.wait_for(upnp_service.stop(), timeout=5.0)
+        except Exception:
+            logger.exception("UPnP service stop failed (non-fatal)")
+
+    if natpmp_service is not None:
+        try:
+            await asyncio.wait_for(natpmp_service.stop(), timeout=5.0)
+        except Exception:
+            logger.exception("NAT-PMP service stop failed (non-fatal)")
+
     await dispose_engine()
     logger.info("RCFlow server stopped")
 
 
 def create_app() -> FastAPI:
-    """Create and configure the FastAPI application."""
+    """Create and configure the FastAPI application.
+
+    Swagger UI, ReDoc, and the OpenAPI schema endpoint are only exposed when
+    running from source (e.g. via ``just run``). Released/frozen builds disable
+    them so production deployments do not expose API documentation.
+    """
+    docs_enabled = not is_frozen()
     app = FastAPI(
         title="RCFlow",
         description="WebSocket action server: natural language prompts to tool executions via LLM",
         version="0.1.0",
         lifespan=lifespan,
+        docs_url="/docs" if docs_enabled else None,
+        redoc_url="/redoc" if docs_enabled else None,
+        openapi_url="/openapi.json" if docs_enabled else None,
     )
 
     app.include_router(http_router)

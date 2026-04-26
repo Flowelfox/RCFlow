@@ -34,19 +34,72 @@ async def health() -> dict[str, str]:
 @router.get(
     "/info",
     summary="Server information",
-    description="Returns server metadata including operating system and platform details.",
+    description=(
+        "Returns server metadata including operating system, platform details, and the "
+        "current state of both port-forwarding services.  The ``upnp`` object reports "
+        "the LAN-router (UPnP-IGD) mapping; the ``natpmp`` object reports the VPN-gateway "
+        "(NAT-PMP / RFC 6886) mapping used to escape ISP CGNAT.  Each object's ``status`` "
+        "is one of ``disabled``, ``discovering``, ``mapped``, ``failed`` or ``closing``; "
+        "clients should surface ``public_ip:external_port`` (NAT-PMP) or "
+        "``external_ip:external_port`` (UPnP) when ``status == 'mapped'``."
+    ),
     dependencies=[Depends(verify_http_api_key)],
 )
 async def server_info(request: Request) -> dict[str, Any]:
     """Return server metadata so clients can display OS and platform info."""
     settings: Settings = request.app.state.settings
     session_manager: SessionManager = request.app.state.session_manager
-    llm_client: LLMClient = request.app.state.llm_client
+    # ``llm_client`` is None in direct-tool mode (``LLM_PROVIDER=none``) — the
+    # worker runs without an LLM and exposes an empty attachment-capability map.
+    llm_client: LLMClient | None = request.app.state.llm_client
+    attachment_capabilities = llm_client.attachment_capabilities if llm_client is not None else {}
 
     try:
         worker_version: str | None = _pkg_version("rcflow")
     except PackageNotFoundError:
         worker_version = None
+
+    upnp_service = getattr(request.app.state, "upnp_service", None)
+    if upnp_service is not None:
+        snap = upnp_service.snapshot()
+        upnp_payload: dict[str, Any] = {
+            "enabled": True,
+            "status": snap.status.value,
+            "external_ip": snap.external_ip,
+            "external_port": snap.external_port,
+            "error": snap.error,
+        }
+    else:
+        upnp_payload = {
+            "enabled": settings.UPNP_ENABLED,
+            "status": "disabled",
+            "external_ip": None,
+            "external_port": None,
+            "error": None,
+        }
+
+    natpmp_service = getattr(request.app.state, "natpmp_service", None)
+    if natpmp_service is not None:
+        nsnap = natpmp_service.snapshot()
+        natpmp_payload: dict[str, Any] = {
+            "enabled": True,
+            "status": nsnap.status.value,
+            "gateway": nsnap.gateway,
+            "public_ip": nsnap.public_ip,
+            "external_port": nsnap.external_port,
+            "internal_port": nsnap.internal_port,
+            "error": nsnap.error,
+        }
+    else:
+        natpmp_payload = {
+            "enabled": settings.NATPMP_ENABLED,
+            "status": "disabled",
+            "gateway": None,
+            "public_ip": None,
+            "external_port": None,
+            "internal_port": None,
+            "error": None,
+        }
 
     return {
         "os": platform.system(),
@@ -56,7 +109,9 @@ async def server_info(request: Request) -> dict[str, Any]:
         # Text files are always accepted, so the attachment button is always
         # available.  Fine-grained per-type support lives in attachment_capabilities.
         "supports_attachments": True,
-        "attachment_capabilities": llm_client.attachment_capabilities,
+        "attachment_capabilities": attachment_capabilities,
+        "upnp": upnp_payload,
+        "natpmp": natpmp_payload,
     }
 
 
@@ -170,21 +225,51 @@ async def update_config(body: UpdateConfigRequest, request: Request) -> dict[str
     request.app.state.settings = new_settings
 
     _reload_components(request, new_settings)
+    _invalidate_global_model_cache(request, set(body.updates.keys()))
 
     logger.info("Config updated: %s", ", ".join(sorted(body.updates.keys())))
     return {"options": get_config_schema(new_settings)}
+
+
+_GLOBAL_MODEL_CACHE_TRIGGERS: dict[str, tuple[str, ...]] = {
+    "ANTHROPIC_API_KEY": ("anthropic", "openrouter"),
+    "OPENAI_API_KEY": ("openai",),
+    "AWS_ACCESS_KEY_ID": ("bedrock",),
+    "AWS_SECRET_ACCESS_KEY": ("bedrock",),
+    "AWS_REGION": ("bedrock",),
+    "LLM_PROVIDER": ("anthropic", "openai", "bedrock", "openrouter"),
+}
+
+
+def _invalidate_global_model_cache(request: Request, changed_keys: set[str]) -> None:
+    """Drop cached model lists for ``scope='global'`` whose creds just changed.
+
+    Each credential update only invalidates the providers it actually
+    affects. ``LLM_PROVIDER`` flips invalidate everything global-scoped
+    so the UI re-fetches against the newly active provider's key.
+    """
+    catalog = getattr(request.app.state, "model_catalog", None)
+    if catalog is None:
+        return
+    providers: set[str] = set()
+    for key in changed_keys:
+        providers.update(_GLOBAL_MODEL_CACHE_TRIGGERS.get(key, ()))
+    for provider in providers:
+        catalog.invalidate(provider=provider, scope="global")
 
 
 def _reload_components(request: Request, settings: Settings) -> None:
     """Hot-reload server components that depend on settings.
 
     Recreates the LLM client from the new settings and patches the prompt
-    router to use it.
+    router to use it. When ``LLM_PROVIDER`` is ``"none"`` the router runs in
+    direct-tool mode with no LLM client (matches startup semantics in
+    ``src/main.py``).
     """
     tool_registry = request.app.state.tool_registry
 
-    old_llm: LLMClient = request.app.state.llm_client
-    new_llm = LLMClient(settings, tool_registry)
+    old_llm: LLMClient | None = request.app.state.llm_client
+    new_llm: LLMClient | None = LLMClient(settings, tool_registry) if settings.LLM_PROVIDER != "none" else None
     request.app.state.llm_client = new_llm
 
     prompt_router = request.app.state.prompt_router

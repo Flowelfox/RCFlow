@@ -33,6 +33,7 @@ PROVIDER_MODELS: dict[str, dict[str, Any]] = {
     },
     "openai": {
         "options": [
+            {"value": "gpt-5.5", "label": "ChatGPT 5.5"},
             {"value": "gpt-5.4", "label": "GPT-5.4"},
             {"value": "gpt-4.1", "label": "GPT-4.1"},
             {"value": "gpt-4.1-mini", "label": "GPT-4.1 Mini"},
@@ -236,8 +237,29 @@ class Settings(BaseSettings):
     # Telemetry
     TELEMETRY_RETENTION_DAYS: int = 90
 
+    # UPnP IGD port forwarding (off by default; non-fatal if router lacks UPnP)
+    UPNP_ENABLED: bool = False
+    UPNP_LEASE_SECONDS: int = 3600
+    UPNP_DISCOVERY_TIMEOUT_MS: int = 2000
+
+    # NAT-PMP (RFC 6886) for VPN-provided port forwarding (ProtonVPN Plus, Mullvad, etc.)
+    # Lets workers behind ISP CGNAT expose a public port via the VPN gateway.
+    NATPMP_ENABLED: bool = False
+    NATPMP_GATEWAY: str = "auto"  # "auto" | IPv4 literal (e.g. "10.2.0.1")
+    NATPMP_LEASE_SECONDS: int = 60  # ProtonVPN default; renewed at 50%
+    NATPMP_INITIAL_TIMEOUT_MS: int = 250  # RFC 6886 retry base (doubles each attempt)
+
     # Logging
     LOG_LEVEL: str = "INFO"
+
+    # Worker GUI auto-update (GitHub Releases)
+    RCFLOW_UPDATE_AUTO_CHECK: bool = True
+    RCFLOW_UPDATE_LAST_CHECK: str = ""
+    RCFLOW_UPDATE_CACHED_VERSION: str = ""
+    RCFLOW_UPDATE_CACHED_RELEASE_URL: str = ""
+    RCFLOW_UPDATE_CACHED_DOWNLOAD_URL: str = ""
+    RCFLOW_UPDATE_CACHED_ASSET_NAME: str = ""
+    RCFLOW_UPDATE_DISMISSED_VERSION: str = ""
 
     @property
     def projects_dirs(self) -> list[Path]:
@@ -319,7 +341,7 @@ CONFIG_OPTIONS: list[dict[str, Any]] = [
         "group": "LLM",
         "description": "LLM backend for inference. 'None' bypasses the LLM — use #tool_name to invoke tools directly.",
         "required": True,
-        "restart_required": True,
+        "restart_required": False,
     },
     {
         "key": "ANTHROPIC_API_KEY",
@@ -328,7 +350,7 @@ CONFIG_OPTIONS: list[dict[str, Any]] = [
         "group": "LLM",
         "description": "API key for direct Anthropic API access",
         "required": False,
-        "restart_required": True,
+        "restart_required": False,
         "visible_when": {"key": "LLM_PROVIDER", "value": "anthropic"},
     },
     {
@@ -338,13 +360,16 @@ CONFIG_OPTIONS: list[dict[str, Any]] = [
         "group": "LLM",
         "description": "Model ID (e.g. claude-sonnet-4-6). For Bedrock use Bedrock model IDs.",
         "required": False,
-        "restart_required": True,
+        "restart_required": False,
         "visible_when": {"key": "LLM_PROVIDER", "value_in": ["anthropic", "bedrock"]},
         "provider_key": "LLM_PROVIDER",
         "models": {
             "anthropic": PROVIDER_MODELS["anthropic"],
             "bedrock": PROVIDER_MODELS["bedrock"],
         },
+        "dynamic": True,
+        "fetch_endpoint": "/api/models",
+        "fetch_scope": "global",
     },
     {
         "key": "AWS_REGION",
@@ -353,7 +378,7 @@ CONFIG_OPTIONS: list[dict[str, Any]] = [
         "group": "LLM",
         "description": "AWS region for Bedrock (e.g. us-east-1)",
         "required": False,
-        "restart_required": True,
+        "restart_required": False,
         "visible_when": {"key": "LLM_PROVIDER", "value": "bedrock"},
     },
     {
@@ -363,7 +388,7 @@ CONFIG_OPTIONS: list[dict[str, Any]] = [
         "group": "LLM",
         "description": "AWS access key for Bedrock authentication",
         "required": False,
-        "restart_required": True,
+        "restart_required": False,
         "visible_when": {"key": "LLM_PROVIDER", "value": "bedrock"},
     },
     {
@@ -373,7 +398,7 @@ CONFIG_OPTIONS: list[dict[str, Any]] = [
         "group": "LLM",
         "description": "AWS secret key for Bedrock authentication",
         "required": False,
-        "restart_required": True,
+        "restart_required": False,
         "visible_when": {"key": "LLM_PROVIDER", "value": "bedrock"},
     },
     {
@@ -383,7 +408,7 @@ CONFIG_OPTIONS: list[dict[str, Any]] = [
         "group": "LLM",
         "description": "API key for OpenAI API access",
         "required": False,
-        "restart_required": True,
+        "restart_required": False,
         "visible_when": {"key": "LLM_PROVIDER", "value": "openai"},
     },
     {
@@ -393,12 +418,15 @@ CONFIG_OPTIONS: list[dict[str, Any]] = [
         "group": "LLM",
         "description": "OpenAI model ID (e.g. gpt-5.4, gpt-4.1, o3)",
         "required": False,
-        "restart_required": True,
+        "restart_required": False,
         "visible_when": {"key": "LLM_PROVIDER", "value": "openai"},
         "provider_key": "LLM_PROVIDER",
         "models": {
             "openai": PROVIDER_MODELS["openai"],
         },
+        "dynamic": True,
+        "fetch_endpoint": "/api/models",
+        "fetch_scope": "global",
     },
     {
         "key": "TITLE_MODEL",
@@ -407,7 +435,7 @@ CONFIG_OPTIONS: list[dict[str, Any]] = [
         "group": "LLM",
         "description": "Model for session title generation (blank = use main model)",
         "required": False,
-        "restart_required": True,
+        "restart_required": False,
         "visible_when": {"key": "LLM_PROVIDER", "value_not": "none"},
         "provider_key": "LLM_PROVIDER",
         "models": {
@@ -415,6 +443,9 @@ CONFIG_OPTIONS: list[dict[str, Any]] = [
             "bedrock": PROVIDER_MODELS["bedrock"],
             "openai": PROVIDER_MODELS["openai"],
         },
+        "dynamic": True,
+        "fetch_endpoint": "/api/models",
+        "fetch_scope": "global",
     },
     {
         "key": "TASK_MODEL",
@@ -423,7 +454,7 @@ CONFIG_OPTIONS: list[dict[str, Any]] = [
         "group": "LLM",
         "description": "Model for task extraction and status evaluation (blank = use main model)",
         "required": False,
-        "restart_required": True,
+        "restart_required": False,
         "visible_when": {"key": "LLM_PROVIDER", "value_not": "none"},
         "provider_key": "LLM_PROVIDER",
         "models": {
@@ -431,6 +462,9 @@ CONFIG_OPTIONS: list[dict[str, Any]] = [
             "bedrock": PROVIDER_MODELS["bedrock"],
             "openai": PROVIDER_MODELS["openai"],
         },
+        "dynamic": True,
+        "fetch_endpoint": "/api/models",
+        "fetch_scope": "global",
     },
     # --- Prompt ---
     {
@@ -597,6 +631,72 @@ CONFIG_OPTIONS: list[dict[str, Any]] = [
         "description": "Automatically sync Linear issues when the server starts",
         "required": False,
         "restart_required": False,
+    },
+    # --- Networking ---
+    {
+        "key": "UPNP_ENABLED",
+        "label": "UPnP Port Forwarding",
+        "type": "boolean",
+        "group": "Networking",
+        "description": (
+            "Ask the local router (via UPnP IGD) to forward an external port to this "
+            "worker so remote clients can reach it without manual port forwarding. "
+            "Silently skipped if the router does not support UPnP."
+        ),
+        "required": False,
+        "restart_required": True,
+    },
+    {
+        "key": "UPNP_LEASE_SECONDS",
+        "label": "UPnP Lease Duration (seconds)",
+        "type": "number",
+        "group": "Networking",
+        "description": (
+            "How long the router should hold the mapping before expiry. "
+            "0 = permanent (not all routers accept 0). Default 3600. "
+            "The mapping is auto-renewed at 50% of this value."
+        ),
+        "required": False,
+        "restart_required": True,
+    },
+    {
+        "key": "NATPMP_ENABLED",
+        "label": "VPN Port Forwarding (NAT-PMP)",
+        "type": "boolean",
+        "group": "Networking",
+        "description": (
+            "Ask the VPN gateway (e.g. ProtonVPN Plus on a P2P server, Mullvad) to forward "
+            "an external port to this worker via NAT-PMP (RFC 6886).  Lets workers behind "
+            "ISP CGNAT expose a public address through the VPN.  Silently skipped if no "
+            "gateway responds."
+        ),
+        "required": False,
+        "restart_required": True,
+    },
+    {
+        "key": "NATPMP_GATEWAY",
+        "label": "NAT-PMP Gateway",
+        "type": "string",
+        "group": "Networking",
+        "description": (
+            "VPN gateway IP that speaks NAT-PMP.  'auto' tries the ProtonVPN default "
+            "(10.2.0.1), then the system default route.  Override with an explicit IPv4 "
+            "for other providers (e.g. Mullvad)."
+        ),
+        "required": False,
+        "restart_required": True,
+    },
+    {
+        "key": "NATPMP_LEASE_SECONDS",
+        "label": "NAT-PMP Lease Duration (seconds)",
+        "type": "number",
+        "group": "Networking",
+        "description": (
+            "How long the gateway should hold the mapping before expiry.  ProtonVPN "
+            "enforces 60 s; the service renews at 50% of this value."
+        ),
+        "required": False,
+        "restart_required": True,
     },
     # --- Logging ---
     {

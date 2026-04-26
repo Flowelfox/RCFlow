@@ -996,6 +996,47 @@ class WebSocketService {
     }
   }
 
+  /// Fetch the dynamic model catalog for a given provider/scope.
+  ///
+  /// Returns a payload mirroring ``GET /api/models``:
+  /// ```
+  /// {
+  ///   "provider": str, "scope": str,
+  ///   "options": [{"value": str, "label": str}, ...],
+  ///   "allow_custom": bool,
+  ///   "source": "live"|"cached"|"fallback",
+  ///   "fetched_at": ISO8601 | null,
+  ///   "ttl_seconds": int,
+  ///   "error": str | null
+  /// }
+  /// ```
+  Future<Map<String, dynamic>> fetchModels({
+    required String provider,
+    required String scope,
+    bool refresh = false,
+  }) async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final params = <String, String>{
+      'provider': provider,
+      'scope': scope,
+      if (refresh) 'refresh': 'true',
+    };
+    final url = _serverUrl!.http('/api/models', params);
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.getUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      final response = await request.close();
+      final body = await response.transform(utf8.decoder).join();
+      if (response.statusCode != 200) {
+        throw Exception('Server returned ${response.statusCode}: $body');
+      }
+      return jsonDecode(body) as Map<String, dynamic>;
+    } finally {
+      client.close();
+    }
+  }
+
   Future<List<Map<String, dynamic>>> updateConfig(
     Map<String, dynamic> updates,
   ) async {
@@ -1100,6 +1141,30 @@ class WebSocketService {
   Future<Map<String, dynamic>> fetchToolStatus() async {
     if (_serverUrl == null) throw StateError('Not connected');
     final url = _serverUrl!.http('/api/tools/status');
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.getUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      final response = await request.close();
+      final body = await response
+          .transform(utf8.decoder)
+          .join();
+      if (response.statusCode != 200) {
+        throw Exception('Server returned ${response.statusCode}: $body');
+      }
+      return jsonDecode(body) as Map<String, dynamic>;
+    } finally {
+      client.close();
+    }
+  }
+
+  /// Fetches the per-agent auth-readiness preflight from the worker so the
+  /// client can warn the user when they pick an agent chip whose CLI has no
+  /// API key or login configured. Returns a map shaped like
+  /// ``{"agents": {"claude_code": {"ready": bool, "issue": String?}, ...}}``.
+  Future<Map<String, dynamic>> fetchCodingAgentAuthPreflight() async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url = _serverUrl!.http('/api/tools/auth/preflight');
     final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
     try {
       final request = await client.getUrl(url);
@@ -1378,31 +1443,6 @@ class WebSocketService {
     try {
       final request = await client.deleteUrl(url);
       request.headers.set('X-API-Key', _serverUrl!.apiKey);
-      final response = await request.close();
-      final body = await response
-          .transform(utf8.decoder)
-          .join();
-      if (response.statusCode != 200) {
-        throw Exception('Server returned ${response.statusCode}: $body');
-      }
-      return jsonDecode(body) as Map<String, dynamic>;
-    } finally {
-      client.close();
-    }
-  }
-
-  Future<Map<String, dynamic>> switchToolSource(
-    String toolName,
-    bool useManaged,
-  ) async {
-    if (_serverUrl == null) throw StateError('Not connected');
-    final url = _serverUrl!.http('/api/tools/$toolName/source');
-    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
-    try {
-      final request = await client.postUrl(url);
-      request.headers.set('X-API-Key', _serverUrl!.apiKey);
-      request.headers.contentType = io.ContentType.json;
-      request.write(jsonEncode({'use_managed': useManaged}));
       final response = await request.close();
       final body = await response
           .transform(utf8.decoder)

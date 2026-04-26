@@ -187,7 +187,9 @@ class BackgroundTasksMixin:
     async def _summarize_and_push(self, session: ActiveSession, text: str) -> None:
         """Generate a concise summary and push it to the session buffer. Never raises."""
         try:
-            summary = await self._llm.summarize(text)  # ty:ignore[unresolved-attribute]
+            summary = (await self._llm.summarize(text)).strip()  # ty:ignore[unresolved-attribute]
+            if not summary:
+                return
             session.buffer.push_text(
                 MessageType.SUMMARY,
                 {

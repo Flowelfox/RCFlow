@@ -48,6 +48,10 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file='scripts/rcflow_macos.entitlements' if _is_macos else None,
+    # Windows taskbar / Explorer pull the icon from the exe resources. Without
+    # this the frozen build shipped with the default PyInstaller icon, which
+    # looked like the Python interpreter icon to users.
+    icon='src/gui/assets/tray_icon.ico' if _is_windows else None,
 )
 coll = COLLECT(
     exe,

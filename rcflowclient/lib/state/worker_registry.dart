@@ -152,6 +152,16 @@ class WorkerRegistry extends ChangeNotifier {
     return null;
   }
 
+  /// Locate an already-configured worker matching the given host+port+token
+  /// triple. Used by the `rcflow://add-worker` deep-link flow to surface a
+  /// friendly "already added" message instead of creating a duplicate row.
+  WorkerConfig? findByHostPortToken(String host, int port, String token) {
+    for (final c in _configs) {
+      if (c.host == host && c.port == port && c.apiKey == token) return c;
+    }
+    return null;
+  }
+
   bool supportsAttachments(String? workerId) {
     final id = workerId ?? defaultWorkerId;
     if (id == null) return true;

@@ -38,7 +38,7 @@ def send_prompt(client: TestClient, text: str, session_id: str | None = None) ->
 def drain_output(
     client: TestClient,
     session_id: str,
-    stop_types: frozenset[str] = frozenset({"summary", "session_end", "error"}),
+    stop_types: frozenset[str] = frozenset({"summary", "turn_complete", "session_end", "error"}),
     stop_after: int = 1,
 ) -> list[dict]:
     """Subscribe to /ws/output/text and drain until a stop-type message arrives.

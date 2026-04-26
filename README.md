@@ -3,11 +3,11 @@
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/Python-3.12%2B-blue)](https://www.python.org/)
 [![Flutter](https://img.shields.io/badge/Flutter-client-54C5F8)](rcflowclient/)
-[![Coverage](docs/badges/coverage.svg)](https://github.com/Flowelfox/RCFlow/actions/workflows/ci.yml)
+[![Coverage](docs/assets/coverage.svg)](https://github.com/Flowelfox/RCFlow/actions/workflows/ci.yml)
 
-A self-hosted coding agent orchestration platform. Run a lightweight backend server on your development machine and control it from the companion Flutter app — on desktop, Android, or any other device on your network. Spin up Claude Code, OpenAI Codex, or OpenCode agents across multiple projects and git worktrees simultaneously, stream output in real time, and approve tool calls from anywhere.
+A self-hosted coding agent orchestration platform. Run a lightweight worker on your development machine and control it from the companion Flutter app — on desktop, Android, or any other device on your network. Spin up Claude Code, OpenAI Codex, or OpenCode agents across multiple projects and git worktrees simultaneously, stream output in real time, and approve tool calls from anywhere.
 
-![RCFlow screenshot](docs/rcflow.png)
+![RCFlow screenshot](docs/assets/rcflow.png)
 
 ---
 
@@ -39,7 +39,7 @@ For the Flutter client, pre-built binaries are available on the [Releases](../..
 
 ### Quick Install (Linux / macOS)
 
-Install the latest backend server (worker) with a single command:
+Install the latest worker with a single command:
 
 ```bash
 curl -fsSL https://rcflow.app/get-worker.sh | sh
@@ -122,7 +122,7 @@ Settings are read from `settings.json` in the server directory. Edit the file di
 | `TOOLS_DIR` | Directory containing tool JSON definitions | `./tools` |
 | `LOG_LEVEL` | Logging verbosity | `INFO` |
 
-For the full configuration reference (AWS Bedrock, TTS, Codex, worker settings, etc.) see `Design.md`.
+For the full configuration reference (AWS Bedrock, TTS, Codex, worker settings, etc.) see [`docs/design/configuration.md`](docs/design/configuration.md). The design index is at [`docs/design/README.md`](docs/design/README.md).
 
 ---
 
@@ -247,10 +247,10 @@ Add your own tools by dropping a JSON file into the `tools/` directory — no co
 
 Contributions are welcome. Before opening a pull request:
 
-1. Read `Design.md` — it is the source of truth for architecture, conventions, and design decisions.
+1. Read [`docs/design/README.md`](docs/design/README.md) — it is the source of truth for architecture, conventions, and design decisions, with topic-specific subdocs in `docs/design/`.
 2. Run `just check` to verify linting, formatting, and type checking pass.
 3. Run `just test` to ensure all tests pass.
-4. If your change modifies the architecture, adds endpoints, changes data models, or alters documented behavior, update `Design.md` as part of the same PR.
+4. If your change modifies the architecture, adds endpoints, changes data models, or alters documented behavior, update the matching subdoc under `docs/design/` (and bump its `updated:` frontmatter date) as part of the same PR.
 
 ---
 

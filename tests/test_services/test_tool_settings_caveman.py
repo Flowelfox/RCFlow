@@ -111,10 +111,6 @@ class TestCavemanSettingsIntegration:
             keys = {f["key"] for f in result["fields"]}
             assert "caveman_mode" in keys
 
-    def test_caveman_managed_only_rejected_when_external(self, manager: ToolSettingsManager) -> None:
-        with pytest.raises(ValueError, match="Cannot update managed-only"):
-            manager.update_settings("claude_code", {"caveman_mode": True}, managed=False)
-
     def test_unrelated_claude_md_does_not_report_enabled(self, manager: ToolSettingsManager) -> None:
         """A manually-created CLAUDE.md with different content must not show as enabled."""
         config_dir = manager.get_config_dir("claude_code")

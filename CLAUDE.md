@@ -2,12 +2,13 @@
 
 ## Critical Rules
 
-1. **Read `Design.md` before starting any new task in this project.** The design document is the single source of truth for architecture, conventions, and decisions.
+1. **Read `docs/design/README.md` before starting any new task in this project.** It is the design entry point and index — pick the relevant subdoc(s) under [`docs/design/`](docs/design/) for the area you're touching (HTTP API, WebSocket API, sessions, executors, database, mentions, slash commands, etc.). The design docs are the single source of truth for architecture, conventions, and decisions.
 2. **Never use the built-in `EnterWorktree` tool.** It is permanently denied in `.claude/settings.local.json`. Always use the `wt` CLI instead — it is bundled as a project dependency (`wtpython` in `pyproject.toml`) and available at `.venv/bin/wt` after `uv sync`. Use `wt new`, `wt attach`, `wt merge`, and `wt rm` for all worktree operations.
-3. **Any changes to the system design must be reflected in `Design.md`.** If a task modifies architecture, adds endpoints, changes data models, or alters any documented behavior, update `Design.md` as part of that task.
-4. Do not introduce new dependencies without documenting them in `Design.md` under the Technology Stack section.
-5. Do not add or remove WebSocket endpoints, tool definition fields, or database models without updating the corresponding sections in `Design.md`.
+3. **Any changes to the system design must be reflected in the matching subdoc under `docs/design/`.** If a task modifies architecture, adds endpoints, changes data models, or alters any documented behavior, update the relevant `docs/design/<topic>.md` file as part of that task. Bump the `updated:` frontmatter date on any subdoc you edit. Update `docs/design/README.md` only when adding or removing whole topics.
+4. Do not introduce new dependencies without documenting them in the Technology Stack table in `docs/design/README.md`.
+5. Do not add or remove WebSocket endpoints, tool definition fields, or database models without updating `docs/design/websocket-api.md`, `docs/design/tools.md`, or `docs/design/database.md` respectively.
 6. **Keep all endpoints well-documented with docstrings, type hints, and OpenAPI metadata** (summary, description, tags, response models) so that FastAPI can auto-generate accurate API documentation. Every endpoint must be self-documenting.
+7. **Save all coding-agent-produced plans under `docs/plans/`.** Any plan, design sketch, or implementation outline the agent generates for this project goes in `docs/plans/` (gitignored — local working notes only, not checked in).
 
 ## Project Conventions
 
@@ -30,6 +31,7 @@ Run targets with `just <target>`. Run `just` with no arguments to list all avail
 - `install` — install production dependencies (`uv sync`)
 - `dev` — install with dev dependencies and set up pre-commit hooks
 - `run` — start the server (`uv run rcflow`)
+- `run-gui` — start the worker GUI (dashboard + tray) in dev mode (`uv run rcflow gui`)
 
 ### Code Quality
 
@@ -52,16 +54,16 @@ Run targets with `just <target>`. Run `just` with no arguments to list all avail
 ### Bundling / Packaging
 
 - `bundle [FLAGS]` — build distributable package for the current platform
-- `bundle-linux-backend [FLAGS]` — build Linux backend `.deb` package
-- `bundle-linux-backend-install` — build and install Linux backend `.deb`
+- `bundle-linux-worker [FLAGS]` — build Linux worker `.deb` package
+- `bundle-linux-worker-install` — build and install Linux worker `.deb`
 - `bundle-linux-client` — build Linux Flutter client `.deb`
 - `bundle-linux-client-install` — build and install Linux Flutter client `.deb`
-- `bundle-macos-backend [FLAGS]` — build macOS backend DMG (macOS only)
-- `bundle-macos-backend-install` — build and install macOS backend DMG (macOS only)
+- `bundle-macos-worker [FLAGS]` — build macOS worker DMG (macOS only)
+- `bundle-macos-worker-install` — build and install macOS worker DMG (macOS only)
 - `bundle-macos-client` — build macOS Flutter client `.dmg` (macOS only)
 - `bundle-macos-client-install` — build and install macOS Flutter client (macOS only)
-- `bundle-windows-backend [FLAGS]` — build Windows backend installer (Windows only)
-- `bundle-windows-backend-install` — build and install Windows backend (Windows only)
+- `bundle-windows-worker [FLAGS]` — build Windows worker installer (Windows only)
+- `bundle-windows-worker-install` — build and install Windows worker (Windows only)
 - `bundle-windows-client` — build Windows Flutter client `.exe` installer (Windows only)
 - `bundle-windows-client-install` — build and install Windows Flutter client (Windows only)
 
@@ -86,9 +88,37 @@ This project uses [Semantic Versioning](https://semver.org/) (MAJOR.MINOR.PATCH)
 - **MINOR** — new features or significant enhancements (backward-compatible)
 - **PATCH** — bug fixes, small improvements, refactors (backward-compatible)
 
-When a new feature is implemented, the version **must** be bumped as part of that same task.
+Version bumps happen only when cutting a release, not per-feature.
 
 The backend and client are versioned independently.
 
 - **rcflow backend** — version lives in `pyproject.toml` → `version` field under `[project]`. Update this when backend code changes.
 - **rcflowclient** — version lives in `rcflowclient/pubspec.yaml` → `version` field. Update this when client code changes.
+
+## Changelog
+
+`CHANGELOG.md` is user-facing. Follow these rules whenever you add or update an entry.
+
+### What to compare
+
+- **Compare against the most recent published release**, not against unreleased work-in-progress. The `[Unreleased]` section accumulates everything that ships in the next release; entries should describe how that next release differs from the previous published version, not how the current commit differs from a few commits ago.
+- When cutting a release, rename `[Unreleased]` to the new version and date, then start a fresh empty `[Unreleased]` section above it.
+
+### How to write entries
+
+- **Audience is end users, not developers.** Describe behaviour and impact, not implementation.
+- Avoid: file paths, function/class names, variable names, env-var names (unless the user sets them), SQL table names, library names, framework internals, stack traces, line counts, and "this commit changes X" mechanics.
+- Prefer: what the user sees, what they can now do, what was broken before, what is fixed now.
+- One sentence per bullet when possible. If a longer explanation is needed, keep it to one short paragraph.
+- Lead with a short bold title, then a plain-language description.
+- Tag the affected component in parentheses at the end: `(Backend)`, `(Client)`, or `(Backend + Client)`.
+- Group entries under `### Added`, `### Changed`, `### Fixed`, `### Performance`, `### Removed`, `### Security` — in that order, omitting empty sections.
+- Order entries within a section roughly by user-visible significance, not by commit order.
+
+### Example
+
+Bad (too technical):
+> **Caveman mode not engaging for externally-installed Claude Code** — `_get_managed_config_overrides` gated caveman `--append-system-prompt` injection on `tool.managed`, so externally-installed Claude Code never received the system-prompt flag. Moved caveman injection outside the managed-only guard.
+
+Good:
+> **Caveman mode didn't engage for externally-installed Claude Code** — caveman now applies regardless of how Claude Code was installed (Backend).

@@ -25,9 +25,9 @@ format:
     uv run ruff format src/ tests/
     uv run ruff check --fix src/ tests/
 
-# Type checking
+# Type checking — use uvx so the resolver mirrors CI exactly
 typecheck:
-    ty check src/
+    uvx ty check src/
 
 # Run all tests (Python + Flutter)
 test:
@@ -41,12 +41,16 @@ coverage:
 # Run all static checks (ruff + ty + flutter analyze)
 check:
     uv run ruff check src/ tests/
-    ty check src/
+    uvx ty check src/
     cd rcflowclient && flutter analyze
 
 # Run the server
 run:
-    uv run rcflow
+    uv run rcflow run
+
+# Run the worker GUI (dashboard + tray) in dev mode
+run-gui:
+    uv run --extra tray rcflow gui
 
 # Generate a new Alembic migration
 migrate-gen msg:
@@ -64,28 +68,28 @@ migrate-down:
 bundle *FLAGS:
     uv run python scripts/bundle.py {{ FLAGS }}
 
-# Build Linux backend .deb package (must be on Linux)
-bundle-linux-backend *FLAGS:
+# Build Linux worker .deb package (must be on Linux)
+bundle-linux-worker *FLAGS:
     uv run --extra bundle python scripts/bundle.py --platform linux --installer {{ FLAGS }}
 
-# Build and install Linux backend .deb package (must be on Linux)
-bundle-linux-backend-install:
+# Build and install Linux worker .deb package (must be on Linux)
+bundle-linux-worker-install:
     uv run --extra bundle python scripts/bundle.py --platform linux --install
 
-# Build macOS backend DMG (.app bundle, must be on macOS)
+# Build macOS worker DMG (.app bundle, must be on macOS)
 # --extra tray installs pystray + Pillow for the menu bar UI and DMG background
 [macos]
-bundle-macos-backend *FLAGS:
+bundle-macos-worker *FLAGS:
     uv run --extra bundle --extra tray python scripts/bundle.py --platform macos --installer {{ FLAGS }}
 
-# Uninstall RCFlow backend worker from macOS (app bundle + CLI install + LaunchAgents + data)
+# Uninstall RCFlow worker from macOS (app bundle + CLI install + LaunchAgents + data)
 [macos]
 uninstall-macos *FLAGS:
     bash scripts/uninstall_macos.sh {{ FLAGS }}
 
-# Build and install macOS backend DMG (.app bundle, must be on macOS)
+# Build and install macOS worker DMG (.app bundle, must be on macOS)
 [macos]
-bundle-macos-backend-install:
+bundle-macos-worker-install:
     uv run --extra bundle --extra tray python scripts/bundle.py --platform macos --install
 
 # Build Linux Flutter client .deb (must be on Linux)
@@ -117,6 +121,10 @@ bundle-linux-client:
     cp -r rcflowclient/build/linux/x64/release/bundle/lib "$DEB_ROOT/opt/rcflowclient/"
     mkdir -p "$DEB_ROOT/usr/bin"
     ln -s /opt/rcflowclient/rcflowclient "$DEB_ROOT/usr/bin/rcflowclient"
+    # Register rcflow:// URL scheme via .desktop MimeType so xdg-open routes
+    # deep links from the worker GUI into this client.
+    install -Dm644 rcflowclient/linux/rcflow-client.desktop \
+      "$DEB_ROOT/usr/share/applications/rcflow-client.desktop"
     mkdir -p "$DEB_ROOT/DEBIAN"
     printf 'Package: rcflow-client\nVersion: %s\nArchitecture: amd64\nMaintainer: RCFlow <rcflow@localhost>\nDescription: RCFlow Desktop Client\n Self-contained RCFlow Flutter desktop client.\nSection: net\nPriority: optional\n' \
       "$CLIENT_VERSION" > "$DEB_ROOT/DEBIAN/control"
@@ -177,14 +185,14 @@ bundle-windows-client:
 bundle-windows-client-install: bundle-windows-client
     $appVersion = ((Get-Content rcflowclient/pubspec.yaml | Select-String '^version:').Line -replace 'version: ', '' -replace '\+.*', ''); $installer = "dist\rcflow-v${appVersion}-windows-client-amd64.exe"; Start-Process -FilePath $installer -Wait
 
-# Build Windows backend installer (setup.exe, must be on Windows)
+# Build Windows worker installer (setup.exe, must be on Windows)
 [windows]
-bundle-windows-backend *FLAGS:
+bundle-windows-worker *FLAGS:
     uv run --extra tray --extra bundle python scripts/bundle.py --platform windows --installer {{ FLAGS }}
 
-# Build and install Windows backend (setup.exe, must be on Windows)
+# Build and install Windows worker (setup.exe, must be on Windows)
 [windows]
-bundle-windows-backend-install:
+bundle-windows-worker-install:
     uv run --extra tray --extra bundle python scripts/bundle.py --platform windows --install
 
 # Start Windows Android emulator (cold boot)

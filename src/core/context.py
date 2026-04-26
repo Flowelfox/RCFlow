@@ -522,6 +522,8 @@ class ContextMixin:
                 tool_input["working_directory"] = str(self._settings.projects_dirs[0])  # ty:ignore[unresolved-attribute]
         elif tool_def.executor == "shell":
             tool_input["command"] = display_text
+            if working_dir:
+                tool_input["working_directory"] = working_dir
         else:
             params_schema = tool_def.parameters
             properties = params_schema.get("properties", {})
@@ -536,7 +538,7 @@ class ContextMixin:
                     f"be used in direct mode. Parameters: {', '.join(properties.keys())}"
                 )
 
-        return (tool_def, tool_input, text.strip())
+        return (tool_def, tool_input, display_text)
 
     async def _handle_direct_prompt(self, session: ActiveSession, text: str) -> None:
         """Handle a prompt in direct tool mode (no LLM)."""
@@ -554,6 +556,16 @@ class ContextMixin:
             return
 
         tool_def, tool_input, display_text = parsed
+
+        # Direct mode: if no @project mention, default the working directory
+        # to the session's selected project so commands run in the folder the
+        # user picked rather than the server's cwd.
+        if (
+            tool_def.executor in ("shell", "claude_code", "codex", "opencode")
+            and "working_directory" not in tool_input
+            and session.main_project_path
+        ):
+            tool_input["working_directory"] = session.main_project_path
 
         from src.core.llm import ToolCallRequest  # noqa: PLC0415
 
@@ -588,10 +600,18 @@ class ContextMixin:
                 title += "..."
             session.title = title
 
-        # If non-agent tool completed, set IDLE
+        # If non-agent tool completed, set IDLE and emit a turn-complete
+        # signal so the client can finalize the tool block (switch the
+        # spinner to the completed-state icon and stop the stream).
+        # Agent executors (claude_code/codex/opencode) emit their own
+        # terminal messages when their background streams finish.
         if (
             session.claude_code_executor is None
             and session.codex_executor is None
             and session.opencode_executor is None
         ):
             session.set_activity(ActivityState.IDLE)
+            session.buffer.push_text(
+                MessageType.TURN_COMPLETE,
+                {"session_id": session.id},
+            )

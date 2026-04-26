@@ -98,9 +98,8 @@ CLAUDE_CODE_SETTINGS_SCHEMA: list[dict[str, Any]] = [
         "label": "API Provider",
         "type": "select",
         "default": "",
-        "description": "LLM provider for Claude Code. 'Global' uses server-level config.",
+        "description": "Auth method for Claude Code. Pick a provider before using the agent.",
         "options": [
-            {"value": "", "label": "Global"},
             {"value": "anthropic", "label": "Anthropic Key"},
             {"value": "anthropic_login", "label": "Anthropic Login"},
             {"value": "bedrock", "label": "AWS Bedrock"},
@@ -157,6 +156,9 @@ CLAUDE_CODE_SETTINGS_SCHEMA: list[dict[str, Any]] = [
             "anthropic": PROVIDER_MODELS["anthropic"],
             "bedrock": PROVIDER_MODELS["bedrock"],
         },
+        "dynamic": True,
+        "fetch_endpoint": "/api/models",
+        "fetch_scope": "claude_code",
     },
     {
         "key": "default_permission_mode",
@@ -206,6 +208,7 @@ CLAUDE_CODE_SETTINGS_SCHEMA: list[dict[str, Any]] = [
         "default": False,
         "description": "Strip AI attribution from commits and PRs created by Claude Code.",
         "managed_only": True,
+        "coming_soon": True,
     },
 ]
 
@@ -215,9 +218,8 @@ CODEX_SETTINGS_SCHEMA: list[dict[str, Any]] = [
         "label": "API Provider",
         "type": "select",
         "default": "",
-        "description": "API key source for Codex. 'Global' uses server-level config.",
+        "description": "Auth method for Codex. Pick a provider before using the agent.",
         "options": [
-            {"value": "", "label": "Global"},
             {"value": "openai", "label": "OpenAI"},
             {"value": "chatgpt", "label": "ChatGPT (Subscription)"},
         ],
@@ -244,6 +246,9 @@ CODEX_SETTINGS_SCHEMA: list[dict[str, Any]] = [
             "openai": PROVIDER_MODELS["openai"],
             "chatgpt": PROVIDER_MODELS["openai"],
         },
+        "dynamic": True,
+        "fetch_endpoint": "/api/models",
+        "fetch_scope": "codex",
     },
     {
         "key": "approval_mode",
@@ -284,9 +289,8 @@ OPENCODE_SETTINGS_SCHEMA: list[dict[str, Any]] = [
         "label": "API Provider",
         "type": "select",
         "default": "",
-        "description": "API key source for OpenCode. 'Global' uses server-level config.",
+        "description": "Auth method for OpenCode. Pick a provider before using the agent.",
         "options": [
-            {"value": "", "label": "Global"},
             {"value": "anthropic", "label": "Anthropic"},
             {"value": "openai", "label": "OpenAI"},
         ],
@@ -322,6 +326,13 @@ OPENCODE_SETTINGS_SCHEMA: list[dict[str, Any]] = [
             "anthropic": PROVIDER_MODELS["anthropic"],
             "openai": PROVIDER_MODELS["openai"],
         },
+        "dynamic": True,
+        "fetch_endpoint": "/api/models",
+        "fetch_scope": "opencode",
+        # OpenCode model strings use the OpenRouter ``provider/model`` format,
+        # so always fetch from OpenRouter regardless of which auth provider
+        # the user has selected.
+        "fetch_provider": "openrouter",
     },
     {
         "key": "max_turns",
@@ -515,7 +526,7 @@ def _sync_caveman_mode(tool_name: str, settings: dict[str, Any], config_dir: Pat
             tmp = target.with_suffix(".tmp")
             try:
                 tmp.write_text(_CAVEMAN_CLAUDE_MD_TEXT, encoding="utf-8")
-                tmp.rename(target)
+                tmp.replace(target)
             except Exception:
                 tmp.unlink(missing_ok=True)
                 raise
@@ -617,7 +628,18 @@ class ToolSettingsManager:
                 "default": field_def["default"],
                 "description": field_def["description"],
             }
-            for extra_key in ("options", "visible_when", "hidden_when", "provider_key", "models"):
+            for extra_key in (
+                "options",
+                "visible_when",
+                "hidden_when",
+                "provider_key",
+                "models",
+                "coming_soon",
+                "dynamic",
+                "fetch_endpoint",
+                "fetch_scope",
+                "fetch_provider",
+            ):
                 if extra_key in field_def:
                     entry[extra_key] = field_def[extra_key]
             fields.append(entry)
@@ -660,7 +682,7 @@ class ToolSettingsManager:
         tmp_path = settings_path.with_suffix(".tmp")
         try:
             tmp_path.write_text(json.dumps(current, indent=2) + "\n")
-            tmp_path.rename(settings_path)
+            tmp_path.replace(settings_path)
             logger.info("Seeded default permissions into managed Claude Code settings")
         except Exception:
             tmp_path.unlink(missing_ok=True)
@@ -687,6 +709,27 @@ class ToolSettingsManager:
                 raise ValueError(
                     f"Cannot update managed-only settings when tool is external: {', '.join(sorted(rejected))}"
                 )
+
+        coming_soon_keys = {f["key"] for f in schema if f.get("coming_soon")}
+        rejected_cs = set(updates.keys()) & coming_soon_keys
+        if rejected_cs:
+            raise ValueError(f"Cannot update coming-soon settings: {', '.join(sorted(rejected_cs))}")
+
+        # Reject select fields whose value is not in the declared options.
+        # The empty string is allowed as the unconfigured sentinel even when
+        # not present in options (e.g. coding-agent ``provider`` no longer
+        # offers a Global choice but existing settings.json may still have it).
+        for field in schema:
+            if field.get("type") != "select" or field["key"] not in updates:
+                continue
+            new_value = updates[field["key"]]
+            allowed = {opt["value"] for opt in field.get("options", [])}
+            if new_value == "" or new_value in allowed:
+                continue
+            raise ValueError(
+                f"Invalid value for {field['key']}: {new_value!r}. "
+                f"Allowed: {', '.join(sorted(str(v) for v in allowed))}"
+            )
 
         # Build a lookup of secret-type keys for masked value detection.
         secret_keys = {f["key"] for f in schema if f["type"] == "secret"}
@@ -722,7 +765,7 @@ class ToolSettingsManager:
         tmp_path = settings_path.with_suffix(".tmp")
         try:
             tmp_path.write_text(json.dumps(current, indent=2) + "\n")
-            tmp_path.rename(settings_path)
+            tmp_path.replace(settings_path)
         except Exception:
             tmp_path.unlink(missing_ok=True)
             raise

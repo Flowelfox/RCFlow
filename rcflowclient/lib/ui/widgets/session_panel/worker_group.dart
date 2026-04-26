@@ -696,7 +696,7 @@ class _WorkerGroupState extends State<WorkerGroup> {
                 dense: true,
                 visualDensity: const VisualDensity(vertical: -4),
                 contentPadding: EdgeInsets.only(
-                  left: extraIndent ? 48 : 36,
+                  left: extraIndent ? 28 : 16,
                   right: 8,
                 ),
                 onTap: () {
@@ -1016,13 +1016,27 @@ class _WorkerGroupState extends State<WorkerGroup> {
     );
 
     if (projectName == null) {
-      return Text(dateStr ?? '', style: mutedStyle);
+      return Text(
+        dateStr ?? '',
+        style: mutedStyle,
+        maxLines: 1,
+        softWrap: false,
+        overflow: TextOverflow.ellipsis,
+      );
     }
 
     return Row(
       children: [
         if (dateStr != null) ...[
-          Text(dateStr, style: mutedStyle),
+          Flexible(
+            child: Text(
+              dateStr,
+              style: mutedStyle,
+              maxLines: 1,
+              softWrap: false,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 4),
             child: Text('\u00B7', style: mutedStyle),
@@ -1038,6 +1052,8 @@ class _WorkerGroupState extends State<WorkerGroup> {
           child: Text(
             projectName,
             style: mutedStyle,
+            maxLines: 1,
+            softWrap: false,
             overflow: TextOverflow.ellipsis,
           ),
         ),

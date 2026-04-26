@@ -117,19 +117,26 @@ class ToolBlock extends StatelessWidget {
                       ),
                       SizedBox(width: 8),
                     ],
-                    Icon(
-                      finished
-                          ? (isError
+                    finished
+                        ? Icon(
+                            isError
                                 ? Icons.error_outline_rounded
-                                : Icons.check_circle_outline_rounded)
-                          : Icons.sync_rounded,
-                      color: finished
-                          ? (isError
+                                : Icons.check_circle_outline_rounded,
+                            color: isError
                                 ? context.appColors.errorText
-                                : context.appColors.successText)
-                          : context.appColors.toolAccent,
-                      size: 14,
-                    ),
+                                : context.appColors.successText,
+                            size: 14,
+                          )
+                        : SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 1.6,
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                context.appColors.toolAccent,
+                              ),
+                            ),
+                          ),
                     SizedBox(width: 6),
                     Expanded(
                       child: Column(

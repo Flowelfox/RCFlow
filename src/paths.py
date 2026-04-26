@@ -93,7 +93,7 @@ def get_migrations_dir() -> Path:
     """
     if is_frozen():
         return get_install_dir() / "migrations"
-    return get_bundle_dir() / "src" / "db" / "migrations"
+    return get_bundle_dir() / "src" / "database" / "migrations"
 
 
 def get_alembic_ini() -> Path:

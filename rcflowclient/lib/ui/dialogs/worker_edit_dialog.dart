@@ -15,19 +15,34 @@ import '../screens/server_config_screen.dart';
 /// displays the server configuration; if disconnected it shows a prompt
 /// with a connect button.
 ///
+/// [prefilled] seeds initial values for an *add* flow (e.g. from an
+/// `rcflow://add-worker` deep link). Unlike [existing], the dialog still
+/// opens in "Add" mode and generates a fresh id on save.
+///
+/// [initialTabIndex] preselects a tab (0 = Main, 1 = Server). Ignored when
+/// [worker] is null (single-tab layout). [initialServerSection] preselects
+/// a sidebar section inside the Server tab (e.g. `'LLM'`) — useful for
+/// deep-linking from a "Configure" prompt.
+///
 /// Returns the resulting config on save, or `null` if cancelled.
 Future<WorkerConfig?> showWorkerEditDialog(
   BuildContext context, {
   WorkerConfig? existing,
+  WorkerConfig? prefilled,
   int sortOrder = 0,
   WorkerConnection? worker,
+  int initialTabIndex = 0,
+  String? initialServerSection,
 }) {
   return showDialog<WorkerConfig>(
     context: context,
     builder: (_) => _WorkerEditDialog(
       existing: existing,
+      prefilled: prefilled,
       sortOrder: sortOrder,
       worker: worker,
+      initialTabIndex: initialTabIndex,
+      initialServerSection: initialServerSection,
     ),
   );
 }
@@ -38,13 +53,19 @@ Future<WorkerConfig?> showWorkerEditDialog(
 
 class _WorkerEditDialog extends StatefulWidget {
   final WorkerConfig? existing;
+  final WorkerConfig? prefilled;
   final int sortOrder;
   final WorkerConnection? worker;
+  final int initialTabIndex;
+  final String? initialServerSection;
 
   const _WorkerEditDialog({
     required this.existing,
+    required this.prefilled,
     required this.sortOrder,
     this.worker,
+    this.initialTabIndex = 0,
+    this.initialServerSection,
   });
 
   @override
@@ -81,19 +102,26 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: _tabCount, vsync: this);
-    _nameCtrl = TextEditingController(text: widget.existing?.name ?? '');
-    _hostCtrl = TextEditingController(text: widget.existing?.host ?? '');
-    _portCtrl = TextEditingController(
-      text: widget.existing != null
-          ? widget.existing!.port.toString()
-          : '53890',
+    // Seed controllers from `existing` (edit mode) or `prefilled` (add mode
+    // with pre-filled values from a deep link). `existing` takes precedence.
+    final seed = widget.existing ?? widget.prefilled;
+    _tabController = TabController(
+      length: _tabCount,
+      vsync: this,
+      initialIndex: (_hasWorker && widget.initialTabIndex < _tabCount)
+          ? widget.initialTabIndex
+          : 0,
     );
-    _apiKeyCtrl = TextEditingController(text: widget.existing?.apiKey ?? '');
-    _useSSL = widget.existing?.useSSL ?? false;
-    _allowSelfSigned = widget.existing?.allowSelfSigned ?? true;
-    _autoConnect = widget.existing?.autoConnect ?? true;
-    _defaultAgent = widget.existing?.defaultAgent;
+    _nameCtrl = TextEditingController(text: seed?.name ?? '');
+    _hostCtrl = TextEditingController(text: seed?.host ?? '');
+    _portCtrl = TextEditingController(
+      text: seed != null ? seed.port.toString() : '53890',
+    );
+    _apiKeyCtrl = TextEditingController(text: seed?.apiKey ?? '');
+    _useSSL = seed?.useSSL ?? false;
+    _allowSelfSigned = seed?.allowSelfSigned ?? true;
+    _autoConnect = seed?.autoConnect ?? true;
+    _defaultAgent = seed?.defaultAgent;
 
     widget.worker?.addListener(_onWorkerChanged);
   }
@@ -604,7 +632,7 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
             items: const [
               DropdownMenuItem(
                 value: null,
-                child: Text('None (let LLM decide)'),
+                child: Text('No preference'),
               ),
               DropdownMenuItem(
                 value: 'claude_code',
@@ -626,8 +654,11 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
       return ServerConfigContent(
         key: _serverConfigKey,
         ws: worker.ws,
+        connection: worker,
         workerName: widget.existing?.name ?? '',
         embedded: true,
+        initialSection: widget.initialServerSection,
+        onSaved: worker.reloadDerivedConfig,
       );
     }
 

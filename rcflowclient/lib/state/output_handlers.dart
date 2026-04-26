@@ -87,10 +87,14 @@ void handleError(Map<String, dynamic> msg, PaneState pane) {
 
 void handleSummary(Map<String, dynamic> msg, PaneState pane) {
   pane.finalizeStream();
+  final content = (msg['content'] as String? ?? '').trim();
+  if (content.isEmpty) {
+    return;
+  }
   pane.addDisplayMessage(
     DisplayMessage(
       type: DisplayMessageType.summary,
-      content: msg['content'] as String? ?? '',
+      content: content,
       sessionId: msg['session_id'] as String?,
       finished: true,
     ),
@@ -309,6 +313,10 @@ void handleEditAck(Map<String, dynamic> msg, PaneState pane) {
   pane.applyEditAck(msg);
 }
 
+void handleTurnComplete(Map<String, dynamic> msg, PaneState pane) {
+  pane.finalizeStream();
+}
+
 // ---------------------------------------------------------------------------
 // Registry — per-pane handlers (routed by session_id in AppState)
 // ---------------------------------------------------------------------------
@@ -324,6 +332,7 @@ final Map<WsOutputType, OutputHandler> typedOutputHandlerRegistry = {
   WsOutputType.toolOutput: handleToolOutput,
   WsOutputType.error: handleError,
   WsOutputType.summary: handleSummary,
+  WsOutputType.turnComplete: handleTurnComplete,
   WsOutputType.sessionEnd: handleSessionEnd,
   WsOutputType.sessionPaused: handleSessionPaused,
   WsOutputType.sessionResumed: handleSessionResumed,
@@ -354,6 +363,7 @@ final Map<String, OutputHandler> outputHandlerRegistry = {
   'tool_output': handleToolOutput,
   'error': handleError,
   'summary': handleSummary,
+  'turn_complete': handleTurnComplete,
   'session_end': handleSessionEnd,
   'session_paused': handleSessionPaused,
   'session_resumed': handleSessionResumed,
@@ -496,10 +506,14 @@ void buildSummaryHistory(
   String sessionId,
   List<DisplayMessage> messages,
 ) {
+  final content = (msg['content'] as String? ?? '').trim();
+  if (content.isEmpty) {
+    return;
+  }
   messages.add(
     DisplayMessage(
       type: DisplayMessageType.summary,
-      content: msg['content'] as String? ?? '',
+      content: content,
       sessionId: sessionId,
       finished: true,
     ),

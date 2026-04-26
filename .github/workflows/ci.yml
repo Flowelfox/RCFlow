@@ -42,11 +42,13 @@ jobs:
       - name: Set up Python 3.12
         run: uv python install 3.12
 
-      # Install production dependencies + the optional "dev" extras
-      # (ruff, pytest, pytest-cov, httpx).  The [dependency-groups].dev
-      # group (pytest >= 9) is included automatically by uv sync.
+      # Install production dependencies + the "dev" and "tray" extras.
+      # Dev gives ruff/pytest/pytest-cov/httpx; tray pulls in
+      # customtkinter, pystray, and Pillow so the type-checker can
+      # resolve the GUI imports.  The [dependency-groups].dev group
+      # (pytest >= 9) is included automatically by uv sync.
       - name: Install dependencies
-        run: uv sync --extra dev
+        run: uv sync --extra dev --extra tray
 
       # ── Code quality ────────────────────────────────────────────────────
 
@@ -68,7 +70,7 @@ jobs:
       - name: Generate coverage badge
         run: |
           TOTAL=$(uv run coverage report --format=total)
-          uv run anybadge --label=coverage --value="${TOTAL}%" --file=docs/badges/coverage.svg --overwrite \
+          uv run anybadge --label=coverage --value="${TOTAL}%" --file=docs/assets/coverage.svg --overwrite \
             --color=$([ "$TOTAL" -ge 90 ] && echo brightgreen || [ "$TOTAL" -ge 75 ] && echo green || [ "$TOTAL" -ge 60 ] && echo yellow || echo red)
 
       - name: Commit coverage badge
@@ -76,7 +78,7 @@ jobs:
         run: |
           git config user.name "Flowelfox"
           git config user.email "Flowelfox@users.noreply.github.com"
-          git add docs/badges/coverage.svg
+          git add docs/assets/coverage.svg
           if ! git diff --staged --quiet; then
             git commit -m "chore: update coverage badge [skip ci]"
             git push

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=RCFlow Client
+Comment=RCFlow desktop client
+Exec=rcflowclient %u
+Icon=rcflow-client
+Terminal=false
+Categories=Network;Utility;
+MimeType=x-scheme-handler/rcflow;
+StartupWMClass=rcflowclient

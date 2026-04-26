@@ -31,6 +31,11 @@ logger = logging.getLogger(__name__)
 # Sentinel used to push sessions with no sort_order to the end of the list.
 _SORT_ORDER_NULLS_LAST = 2**62
 
+# Message types that live in the session buffer (so reconnecting subscribers
+# replay them) but must NOT be persisted to ``session_messages``: pure
+# transient signals with no user-visible content.
+_NON_ARCHIVED_MESSAGE_TYPES: frozenset[MessageType] = frozenset({MessageType.TURN_COMPLETE})
+
 
 def session_sort_key(item: dict[str, Any]) -> tuple[int, float]:
     """Return a sort key for session dicts: sort_order ASC (nulls last), created_at DESC."""
@@ -74,7 +79,7 @@ class PendingMessage:
     Mirrors one row of the ``session_pending_messages`` DB table.  The
     authoritative store is the DB; this in-memory copy lets the server
     answer queue queries and broadcasts without a round-trip.  See
-    ``Queued User Messages`` in ``Design.md``.
+    ``Queued User Messages`` in ``docs/design/sessions.md``.
     """
 
     queued_id: str
@@ -182,7 +187,7 @@ class ActiveSession:
         # In-memory mirror of the ``session_pending_messages`` DB table for this
         # session.  Ordered by ``position`` ascending (FIFO).  Mutations go
         # through :class:`SessionPendingMessageStore` which writes the DB then
-        # updates this list.  See ``Queued User Messages`` in ``Design.md``.
+        # updates this list.  See ``Queued User Messages`` in ``docs/design/sessions.md``.
         self.pending_user_messages: list[PendingMessage] = []
 
     @property
@@ -257,7 +262,7 @@ class ActiveSession:
         * the prompt lock is held (LLM path mid-turn);
         * the activity state indicates the session is not idle.
 
-        See ``Queued User Messages`` in ``Design.md``.
+        See ``Queued User Messages`` in ``docs/design/sessions.md``.
         """
         if (
             self.claude_code_executor is not None
@@ -684,6 +689,8 @@ class SessionManager:
         await db.execute(delete(SessionMessageModel).where(SessionMessageModel.session_id == session_uuid))
 
         for msg in session.buffer.text_history:
+            if msg.message_type in _NON_ARCHIVED_MESSAGE_TYPES:
+                continue
             db.add(
                 SessionMessageModel(
                     session_id=session_uuid,
@@ -1168,7 +1175,11 @@ class SessionManager:
                 await db.flush()
                 if has_new_messages:
                     watermark = session._last_flush_sequence
-                    new_msgs = [m for m in session.buffer.text_history if m.sequence > watermark]
+                    new_msgs = [
+                        m
+                        for m in session.buffer.text_history
+                        if m.sequence > watermark and m.message_type not in _NON_ARCHIVED_MESSAGE_TYPES
+                    ]
                     for msg in new_msgs:
                         db.add(
                             SessionMessageModel(
@@ -1283,6 +1294,8 @@ class SessionManager:
                 await db.flush()
 
                 for msg in session.buffer.text_history:
+                    if msg.message_type in _NON_ARCHIVED_MESSAGE_TYPES:
+                        continue
                     db_msg = SessionMessageModel(
                         session_id=session_uuid,
                         sequence=msg.sequence,

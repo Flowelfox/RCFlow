@@ -3,10 +3,13 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../models/session_info.dart';
+import '../../services/worker_connection.dart';
 import '../../state/app_state.dart';
 import '../../state/pane_state.dart';
 import '../../theme.dart';
 import '../../tips.dart';
+import '../dialogs/worker_edit_dialog.dart';
 import '../utils/markdown_copy_menu.dart';
 import 'message_bubble.dart';
 import 'session_panel.dart';
@@ -172,7 +175,10 @@ class _OutputDisplayState extends State<OutputDisplay> {
               final connected = context.select<AppState, bool>(
                 (s) => s.connected,
               );
-              return Center(
+              return _withLlmBanner(
+                context,
+                pane,
+                Center(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -243,11 +249,15 @@ class _OutputDisplayState extends State<OutputDisplay> {
                       ),
                   ],
                 ),
+                ),
               );
             }
 
             if (msgs.isEmpty) {
-              return Center(
+              return _withLlmBanner(
+                context,
+                pane,
+                Center(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -290,46 +300,51 @@ class _OutputDisplayState extends State<OutputDisplay> {
                     ),
                   ],
                 ),
+                ),
               );
             }
 
             final hasMore = pane.hasMoreMessages;
             final loadingMore = pane.loadingMore;
 
-            return SelectionScope(
-              child: ListView.builder(
-                controller: _scrollController,
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-                itemCount: msgs.length + 1,
-                itemBuilder: (context, index) {
-                  if (index == 0) {
-                    if (hasMore) {
-                      return _buildLoadMoreIndicator(
-                        loading: loadingMore,
-                        remaining: pane.totalMessageCount - msgs.length,
-                      );
-                    }
-                    return Padding(
-                      padding: EdgeInsets.symmetric(vertical: 12),
-                      child: Center(
-                        child: Text(
-                          'Beginning of session',
-                          style: TextStyle(
-                            color: context.appColors.textMuted,
-                            fontSize: 12,
+            return _withLlmBanner(
+              context,
+              pane,
+              SelectionScope(
+                child: ListView.builder(
+                  controller: _scrollController,
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                  itemCount: msgs.length + 1,
+                  itemBuilder: (context, index) {
+                    if (index == 0) {
+                      if (hasMore) {
+                        return _buildLoadMoreIndicator(
+                          loading: loadingMore,
+                          remaining: pane.totalMessageCount - msgs.length,
+                        );
+                      }
+                      return Padding(
+                        padding: EdgeInsets.symmetric(vertical: 12),
+                        child: Center(
+                          child: Text(
+                            'Beginning of session',
+                            style: TextStyle(
+                              color: context.appColors.textMuted,
+                              fontSize: 12,
+                            ),
                           ),
                         ),
-                      ),
-                    );
-                  }
-                  final msg = msgs[index - 1];
-                  // ObjectKey by message identity — DisplayMessage instances
-                  // are stable across streaming (the same object grows in
-                  // place), so this lets Flutter reuse the existing element
-                  // and child state instead of treating each rebuild as a
-                  // brand-new list item.
-                  return MessageBubble(key: ObjectKey(msg), message: msg);
-                },
+                      );
+                    }
+                    final msg = msgs[index - 1];
+                    // ObjectKey by message identity — DisplayMessage instances
+                    // are stable across streaming (the same object grows in
+                    // place), so this lets Flutter reuse the existing element
+                    // and child state instead of treating each rebuild as a
+                    // brand-new list item.
+                    return MessageBubble(key: ObjectKey(msg), message: msg);
+                  },
+                ),
               ),
             );
           },
@@ -435,6 +450,205 @@ class _OutputDisplayState extends State<OutputDisplay> {
           ),
         ),
       ],
+    );
+  }
+
+  /// Wrap an empty-state layout so the LLM-missing banner pins to the top of
+  /// the pane while the existing content stays vertically centred in the
+  /// remaining space. Returns [child] unchanged when no banner applies.
+  Widget _withLlmBanner(BuildContext context, PaneState pane, Widget child) {
+    final workerId = pane.workerId;
+    if (workerId == null) return child;
+    final worker = context.read<AppState>().getWorker(workerId);
+    if (worker == null) return child;
+    return ListenableBuilder(
+      listenable: worker,
+      builder: (context, _) {
+        if (!worker.isConnected) return child;
+        final banners = <Widget>[];
+        if (!worker.hasLlmConfigured) {
+          banners.add(_LlmNotConfiguredBanner(worker: worker));
+        }
+        final agentBanner = _buildAgentBanner(context, pane, worker);
+        if (agentBanner != null) banners.add(agentBanner);
+        if (banners.isEmpty) return child;
+        return Column(
+          children: [
+            ...banners,
+            Expanded(child: child),
+          ],
+        );
+      },
+    );
+  }
+
+  /// Build the agent-not-configured banner for [pane] when an agent badge is
+  /// active and that agent has an unresolved auth issue. Active agent comes
+  /// from the session's ``agent_type`` (live or archived sessions) or the
+  /// pre-session ``selectedToolMention`` chip (new-chat panes).
+  Widget? _buildAgentBanner(
+    BuildContext context,
+    PaneState pane,
+    WorkerConnection worker,
+  ) {
+    String? internal;
+    final sessionId = pane.sessionId;
+    if (sessionId != null) {
+      final session = context.read<AppState>().sessions
+          .cast<SessionInfo?>()
+          .firstWhere((s) => s!.sessionId == sessionId, orElse: () => null);
+      final agentType = session?.agentType;
+      if (agentType != null) {
+        internal = AppState.agentInternalName(agentType) ?? agentType;
+      }
+    }
+    if (internal == null) {
+      final mention = pane.selectedToolMention;
+      if (mention != null) {
+        internal = AppState.agentInternalName(mention);
+      }
+    }
+    if (internal == null) return null;
+    final ready = worker.agentReady[internal];
+    if (ready == null || ready) return null;
+    final issue = worker.agentIssues[internal] ??
+        '$internal has no API key or login configured.';
+    return _AgentNotConfiguredBanner(
+      worker: worker,
+      agentInternal: internal,
+      issue: issue,
+    );
+  }
+}
+
+class _LlmNotConfiguredBanner extends StatelessWidget {
+  final WorkerConnection worker;
+
+  const _LlmNotConfiguredBanner({required this.worker});
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF7CC),
+        border: Border(
+          bottom: BorderSide(color: colors.divider, width: 1),
+        ),
+      ),
+      child: Row(
+        children: [
+          const Icon(
+            Icons.warning_amber_rounded,
+            size: 18,
+            color: Color(0xFF8A6D1A),
+          ),
+          const SizedBox(width: 8),
+          const Expanded(
+            child: Text(
+              'LLM key is not configured.',
+              style: TextStyle(
+                color: Color(0xFF5C4A0E),
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          TextButton(
+            onPressed: () => showWorkerEditDialog(
+              context,
+              existing: worker.config,
+              worker: worker,
+              initialTabIndex: 1,
+              initialServerSection: 'LLM',
+            ),
+            style: TextButton.styleFrom(
+              foregroundColor: const Color(0xFF8A6D1A),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            child: const Text(
+              'Configure',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Banner shown above a pane when the active coding-agent badge points at a
+/// CLI that has no API key or login configured on this worker. Carries a
+/// "Configure" button that opens the worker edit dialog at the matching tool
+/// section so the user can fix it without leaving the chat.
+class _AgentNotConfiguredBanner extends StatelessWidget {
+  final WorkerConnection worker;
+  final String agentInternal;
+  final String issue;
+
+  const _AgentNotConfiguredBanner({
+    required this.worker,
+    required this.agentInternal,
+    required this.issue,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF7CC),
+        border: Border(
+          bottom: BorderSide(color: colors.divider, width: 1),
+        ),
+      ),
+      child: Row(
+        children: [
+          const Icon(
+            Icons.warning_amber_rounded,
+            size: 18,
+            color: Color(0xFF8A6D1A),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              issue,
+              style: const TextStyle(
+                color: Color(0xFF5C4A0E),
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          TextButton(
+            onPressed: () => showWorkerEditDialog(
+              context,
+              existing: worker.config,
+              worker: worker,
+              initialTabIndex: 1,
+              initialServerSection: agentInternal,
+            ),
+            style: TextButton.styleFrom(
+              foregroundColor: const Color(0xFF8A6D1A),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            child: const Text(
+              'Configure',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

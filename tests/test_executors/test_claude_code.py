@@ -167,8 +167,13 @@ class TestExecuteStreaming:
 
         assert len(chunks) == 2
         assert all(c.stream == "stdout" for c in chunks)
-        # Initial prompt is passed as CLI arg, not via stdin
-        mock_process.stdin.write.assert_not_called()
+        # Pipe mode delivers the initial prompt via stdin (the CLI ignores
+        # the positional argument under --input-format stream-json on a non-TTY pipe).
+        mock_process.stdin.write.assert_called_once()
+        written = mock_process.stdin.write.call_args.args[0]
+        decoded = written.decode("utf-8")
+        assert '"type": "user"' in decoded
+        assert '"content": "test task"' in decoded
 
     @pytest.mark.asyncio
     async def test_handles_non_json_output(self, executor: ClaudeCodeExecutor, claude_code_tool: ToolDefinition):
@@ -312,8 +317,11 @@ class TestRestartWithPrompt:
         assert len(chunks) == 2
         # Same session-id is reused
         assert executor.session_id == original_session_id
-        # Restart prompt is passed as CLI arg, not via stdin
-        mock_process2.stdin.write.assert_not_called()
+        # Pipe mode delivers the restart prompt via stdin (positional arg
+        # is dropped under --input-format stream-json on a non-TTY pipe).
+        mock_process2.stdin.write.assert_called_once()
+        decoded = mock_process2.stdin.write.call_args.args[0].decode("utf-8")
+        assert '"content": "do more work"' in decoded
 
     @pytest.mark.asyncio
     async def test_restart_raises_without_previous_tool_def(self, executor: ClaudeCodeExecutor):
@@ -454,8 +462,9 @@ class TestFollowUpViaStdin:
             follow_chunks.append(chunk)
 
         assert len(follow_chunks) == 2
-        # Follow-up is sent via stdin (initial prompt was a CLI arg, so this is the first stdin write)
-        assert mock_process.stdin.write.call_count == 1
+        # Two stdin writes total in pipe mode: the initial prompt (delivered
+        # via stdin under stream-json) and the follow-up.
+        assert mock_process.stdin.write.call_count == 2
         last_written = mock_process.stdin.write.call_args[0][0]
         msg = json.loads(last_written.decode("utf-8").strip())
         assert msg["type"] == "user"
@@ -576,6 +585,11 @@ class TestGotResult:
         mock_process.stderr.readline = AsyncMock(return_value=b"")
         mock_process.returncode = None  # still running
         mock_process.pid = 12345
+        # _start_process_pipe now sends the initial prompt over stdin; the
+        # mock has to accept the write+drain so the spawn path completes
+        # before the cancellable read begins.
+        mock_process.stdin = MagicMock()
+        mock_process.stdin.drain = AsyncMock()
 
         with (
             patch("asyncio.create_subprocess_exec", AsyncMock(return_value=mock_process)),

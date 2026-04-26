@@ -87,9 +87,15 @@ class OpenCodeExecutor(BaseExecutor):
         if working_dir:
             cmd.extend(["--dir", working_dir])
 
-        # Model override
+        # Model override. opencode --model expects ``provider/model`` (e.g.
+        # ``openai/gpt-5.4``); a bare model name is parsed as a provider with
+        # an empty model and yields "Model not found: <name>/".
         model = parameters.get("model") or config.get("model")
         if model:
+            if "/" not in model:
+                provider = parameters.get("provider") or config.get("provider")
+                if provider:
+                    model = f"{provider}/{model}"
             cmd.extend(["--model", model])
 
         # Resume existing session

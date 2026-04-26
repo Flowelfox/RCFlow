@@ -74,7 +74,7 @@ class ArtifactScanner:
         First tries standard resolution (absolute, expanduser, resolve against CWD).
         If that fails and *project_path* is provided, also tries resolving the path
         relative to the project directory.  This handles cases where tool outputs
-        contain bare or dot-relative paths (e.g. ``./Design.md``) whose CWD is
+        contain bare or dot-relative paths (e.g. ``./README.md``) whose CWD is
         the project root rather than the server's working directory.
         """
         try:

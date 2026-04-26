@@ -61,13 +61,29 @@ async def codex_login(
     config_dir = tool_settings.get_config_dir("codex")
     config_dir.mkdir(parents=True, exist_ok=True)
 
+    catalog = getattr(request.app.state, "model_catalog", None)
+
+    async def _invalidate_on_complete(gen: AsyncGenerator[str, None]) -> AsyncGenerator[str, None]:
+        """Drop the Codex model cache once the login stream finishes.
+
+        Whether the run actually succeeded or not, the safer behaviour is
+        to evict the entry so the next dropdown open re-fetches with
+        whatever credentials the CLI now has on disk.
+        """
+        try:
+            async for line in gen:
+                yield line
+        finally:
+            if catalog is not None:
+                catalog.invalidate(scope="codex")
+
     if device_code:
         return StreamingResponse(
-            _stream_device_auth(binary_path, config_dir),
+            _invalidate_on_complete(_stream_device_auth(binary_path, config_dir)),
             media_type="application/x-ndjson",
         )
     return StreamingResponse(
-        _stream_browser_auth(binary_path, config_dir),
+        _invalidate_on_complete(_stream_browser_auth(binary_path, config_dir)),
         media_type="application/x-ndjson",
     )
 
@@ -423,7 +439,16 @@ async def claude_code_login_code(request: Request, body: _ClaudeCodeLoginBody) -
         "code_verifier": verifier,
         "state": state or "",
     }
-    # Exchange authorization code for tokens (Anthropic expects JSON, not form-encoded)
+    # Exchange authorization code for tokens (Anthropic expects JSON, not form-encoded).
+    #
+    # The PKCE verifier is **not** cleared on failure: the verifier is bound to
+    # the auth-url session opened by POST /login, not to the one-shot
+    # authorization code, so it stays valid across multiple /code attempts as
+    # long as the user has not started a new /login.  Clearing it on every
+    # error meant a single typo in the pasted code wiped the session and the
+    # next attempt failed with 409 "No active login" — forcing the user back to
+    # /login even though their browser tab was still authenticated.  Only a
+    # successful token exchange consumes the verifier.
     try:
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.post(
@@ -433,15 +458,15 @@ async def claude_code_login_code(request: Request, body: _ClaudeCodeLoginBody) -
             )
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Token exchange failed: {exc}") from exc
-    finally:
-        # Clear verifier regardless of outcome
-        request.app.state._claude_login_verifier = None
-        request.app.state._claude_login_state = None
 
     if resp.status_code != 200:
         detail = resp.text[:500] if resp.text else f"HTTP {resp.status_code}"
         logger.warning("Claude Code OAuth token exchange failed (%d): %s", resp.status_code, detail)
         raise HTTPException(status_code=502, detail=f"Token exchange returned {resp.status_code}: {detail}")
+
+    # Successful exchange — verifier has been consumed, retire it.
+    request.app.state._claude_login_verifier = None
+    request.app.state._claude_login_state = None
 
     token_data = resp.json()
     access_token = token_data.get("access_token", "")
@@ -474,6 +499,13 @@ async def claude_code_login_code(request: Request, body: _ClaudeCodeLoginBody) -
 
     # Auto-set provider to anthropic_login on successful login
     tool_settings.update_settings("claude_code", {"provider": "anthropic_login"})
+
+    # Drop the cached model list for the Claude Code scope so the next
+    # ``GET /api/models?scope=claude_code`` re-fetches against the freshly
+    # logged-in identity instead of serving the pre-login (or empty) cache.
+    catalog = getattr(request.app.state, "model_catalog", None)
+    if catalog is not None:
+        catalog.invalidate(scope="claude_code")
 
     # Verify login via CLI to get subscription info
     tool_manager: ToolManager = request.app.state.tool_manager

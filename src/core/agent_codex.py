@@ -17,6 +17,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from src.core.agent_auth import agent_configuration_issue
 from src.core.buffer import MessageType
 from src.core.session import ActivityState, SessionStatus, SessionType
 from src.executors.codex import CodexExecutor
@@ -68,8 +69,6 @@ class CodexAgentMixin:
             tool_env = tool_settings.get("env", {})
             if isinstance(tool_env, dict):
                 extra_env.update(tool_env)
-        elif self._settings and self._settings.CODEX_API_KEY:  # ty:ignore[unresolved-attribute]
-            extra_env["CODEX_API_KEY"] = self._settings.CODEX_API_KEY  # ty:ignore[unresolved-attribute]
 
         if self._tool_settings:  # ty:ignore[unresolved-attribute]
             config_dir = self._tool_settings.get_config_dir("codex")  # ty:ignore[unresolved-attribute]
@@ -124,6 +123,25 @@ class CodexAgentMixin:
         tool_call: ToolCallRequest,
     ) -> str:
         """Start a Codex CLI session: spawn subprocess, begin background streaming."""
+        auth_issue = agent_configuration_issue(
+            "codex",
+            self._settings,  # ty:ignore[unresolved-attribute]
+            self._tool_settings,  # ty:ignore[unresolved-attribute]
+            self._tool_manager,  # ty:ignore[unresolved-attribute]
+        )
+        if auth_issue is not None:
+            session.buffer.push_text(
+                MessageType.ERROR,
+                {
+                    "session_id": session.id,
+                    "content": auth_issue,
+                    "code": "AGENT_CONFIG_ERROR",
+                    "agent_type": "codex",
+                },
+            )
+            session.set_activity(ActivityState.IDLE)
+            return auth_issue
+
         working_dir = tool_call.tool_input.get("working_directory", ".")
         # Override with the session's selected worktree path when explicitly set.
         selected_wt = session.metadata.get("selected_worktree_path")

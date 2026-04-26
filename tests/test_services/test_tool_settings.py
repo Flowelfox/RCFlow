@@ -21,8 +21,9 @@ def manager(tmp_path: Path) -> ToolSettingsManager:
 
 
 class TestSchemaFiltering:
-    def test_managed_true_returns_all_fields(self, manager: ToolSettingsManager):
-        result = manager.get_settings_with_schema("claude_code", managed=True)
+    def test_returns_all_fields(self, manager: ToolSettingsManager):
+        """All schema fields are returned for an installed (managed) tool."""
+        result = manager.get_settings_with_schema("claude_code")
         keys = {f["key"] for f in result["fields"]}
         assert "permissions.allow" in keys
         assert "model" in keys
@@ -30,66 +31,24 @@ class TestSchemaFiltering:
         assert "max_turns" in keys
         assert "timeout" in keys
 
-    def test_managed_false_excludes_managed_only_fields(self, manager: ToolSettingsManager):
-        result = manager.get_settings_with_schema("claude_code", managed=False)
-        keys = {f["key"] for f in result["fields"]}
-        assert "permissions.allow" in keys
-        assert "permissions.deny" in keys
-        assert "enableAllProjectMcpServers" in keys
-        # managed_only fields should be excluded
-        assert "model" not in keys
-        assert "default_permission_mode" not in keys
-        assert "max_turns" not in keys
-        assert "timeout" not in keys
-
-    def test_codex_managed_true_returns_timeout(self, manager: ToolSettingsManager):
-        result = manager.get_settings_with_schema("codex", managed=True)
+    def test_codex_returns_all_fields(self, manager: ToolSettingsManager):
+        result = manager.get_settings_with_schema("codex")
         keys = {f["key"] for f in result["fields"]}
         assert "model" in keys
         assert "approval_mode" in keys
-        assert "timeout" in keys
-
-    def test_codex_managed_false_excludes_timeout(self, manager: ToolSettingsManager):
-        result = manager.get_settings_with_schema("codex", managed=False)
-        keys = {f["key"] for f in result["fields"]}
-        assert "model" in keys
-        assert "approval_mode" in keys
-        assert "timeout" not in keys
-
-    def test_default_managed_is_true(self, manager: ToolSettingsManager):
-        """When managed kwarg is omitted, all fields are returned."""
-        result = manager.get_settings_with_schema("claude_code")
-        keys = {f["key"] for f in result["fields"]}
-        assert "model" in keys
         assert "timeout" in keys
 
 
 # ---------------------------------------------------------------------------
-# Update validation by managed status
+# Update validation
 # ---------------------------------------------------------------------------
 
 
 class TestUpdateValidation:
-    def test_update_managed_only_key_when_managed(self, manager: ToolSettingsManager):
-        """Managed-only keys should be accepted when managed=True."""
-        result = manager.update_settings("claude_code", {"model": "claude-sonnet-4-5-20250514"}, managed=True)
+    def test_update_known_key(self, manager: ToolSettingsManager):
+        result = manager.update_settings("claude_code", {"model": "claude-sonnet-4-5-20250514"})
         model_field = next(f for f in result["fields"] if f["key"] == "model")
         assert model_field["value"] == "claude-sonnet-4-5-20250514"
-
-    def test_update_managed_only_key_when_external_rejected(self, manager: ToolSettingsManager):
-        """Managed-only keys should be rejected when managed=False."""
-        with pytest.raises(ValueError, match="Cannot update managed-only settings"):
-            manager.update_settings("claude_code", {"model": "claude-sonnet-4-5-20250514"}, managed=False)
-
-    def test_update_normal_key_when_external_allowed(self, manager: ToolSettingsManager):
-        """Non-managed-only keys should be accepted regardless of managed status."""
-        result = manager.update_settings(
-            "claude_code",
-            {"enableAllProjectMcpServers": True},
-            managed=False,
-        )
-        field = next(f for f in result["fields"] if f["key"] == "enableAllProjectMcpServers")
-        assert field["value"] is True
 
     def test_update_unknown_key_rejected(self, manager: ToolSettingsManager):
         with pytest.raises(ValueError, match="Unknown settings keys"):
@@ -104,7 +63,7 @@ class TestUpdateValidation:
 class TestSettingsPersistence:
     def test_round_trip(self, manager: ToolSettingsManager):
         """Settings should survive write → read cycle."""
-        manager.update_settings("claude_code", {"max_turns": "100"}, managed=True)
+        manager.update_settings("claude_code", {"max_turns": "100"})
         settings = manager.get_settings("claude_code")
         assert settings["max_turns"] == "100"
 
@@ -120,7 +79,7 @@ class TestSettingsPersistence:
 
 class TestProviderSettings:
     def test_provider_fields_present_when_managed(self, manager: ToolSettingsManager):
-        result = manager.get_settings_with_schema("claude_code", managed=True)
+        result = manager.get_settings_with_schema("claude_code")
         keys = {f["key"] for f in result["fields"]}
         assert "provider" in keys
         assert "anthropic_api_key" in keys
@@ -128,17 +87,8 @@ class TestProviderSettings:
         assert "aws_access_key_id" in keys
         assert "aws_secret_access_key" in keys
 
-    def test_provider_fields_excluded_when_not_managed(self, manager: ToolSettingsManager):
-        result = manager.get_settings_with_schema("claude_code", managed=False)
-        keys = {f["key"] for f in result["fields"]}
-        assert "provider" not in keys
-        assert "anthropic_api_key" not in keys
-        assert "aws_region" not in keys
-        assert "aws_access_key_id" not in keys
-        assert "aws_secret_access_key" not in keys
-
     def test_visible_when_present_on_conditional_fields(self, manager: ToolSettingsManager):
-        result = manager.get_settings_with_schema("claude_code", managed=True)
+        result = manager.get_settings_with_schema("claude_code")
         fields_by_key = {f["key"]: f for f in result["fields"]}
 
         assert "visible_when" in fields_by_key["anthropic_api_key"]
@@ -154,9 +104,27 @@ class TestProviderSettings:
         }
 
     def test_provider_field_has_no_visible_when(self, manager: ToolSettingsManager):
-        result = manager.get_settings_with_schema("claude_code", managed=True)
+        result = manager.get_settings_with_schema("claude_code")
         provider = next(f for f in result["fields"] if f["key"] == "provider")
         assert "visible_when" not in provider
+
+    @pytest.mark.parametrize("tool_name", ["claude_code", "codex", "opencode"])
+    def test_provider_options_no_global_choice(self, manager: ToolSettingsManager, tool_name: str):
+        """The empty-value 'Global' option was removed — coding agents need an explicit pick."""
+        result = manager.get_settings_with_schema(tool_name)
+        provider = next(f for f in result["fields"] if f["key"] == "provider")
+        values = {opt["value"] for opt in provider["options"]}
+        assert "" not in values, f"Provider options for {tool_name} still include the empty 'Global' value: {values}"
+
+    def test_update_provider_to_invalid_value_rejected(self, manager: ToolSettingsManager):
+        """PATCH validates select fields against their options."""
+        with pytest.raises(ValueError, match="Invalid value for provider"):
+            manager.update_settings("claude_code", {"provider": "not_a_provider"})
+
+    def test_update_provider_empty_string_allowed_for_back_compat(self, manager: ToolSettingsManager):
+        """Empty string remains the unconfigured sentinel (legacy settings.json files)."""
+        # Should not raise — empty is the unset state, not a regular option.
+        manager.update_settings("claude_code", {"provider": ""})
 
 
 # ---------------------------------------------------------------------------
@@ -225,44 +193,26 @@ class TestProviderEnvSync:
 
 
 class TestUndercoverSetting:
-    def test_undercover_in_schema_when_managed(self, manager: ToolSettingsManager):
-        result = manager.get_settings_with_schema("claude_code", managed=True)
+    def test_undercover_in_schema(self, manager: ToolSettingsManager):
+        result = manager.get_settings_with_schema("claude_code")
         keys = {f["key"] for f in result["fields"]}
         assert "undercover" in keys
 
-    def test_undercover_excluded_when_not_managed(self, manager: ToolSettingsManager):
-        result = manager.get_settings_with_schema("claude_code", managed=False)
-        keys = {f["key"] for f in result["fields"]}
-        assert "undercover" not in keys
-
     def test_undercover_default_is_false(self, manager: ToolSettingsManager):
-        result = manager.get_settings_with_schema("claude_code", managed=True)
+        result = manager.get_settings_with_schema("claude_code")
         field = next(f for f in result["fields"] if f["key"] == "undercover")
         assert field["value"] is False
         assert field["default"] is False
         assert field["type"] == "boolean"
 
-    def test_undercover_update_round_trip(self, manager: ToolSettingsManager):
-        manager.update_settings("claude_code", {"undercover": True})
-        settings = manager.get_settings("claude_code")
-        assert settings["undercover"] is True
-
-        result = manager.get_settings_with_schema("claude_code", managed=True)
+    def test_undercover_marked_coming_soon(self, manager: ToolSettingsManager):
+        result = manager.get_settings_with_schema("claude_code")
         field = next(f for f in result["fields"] if f["key"] == "undercover")
-        assert field["value"] is True
+        assert field.get("coming_soon") is True
 
-    def test_undercover_toggle_off(self, manager: ToolSettingsManager):
-        """Enable then disable — value should revert to False."""
-        manager.update_settings("claude_code", {"undercover": True})
-        manager.update_settings("claude_code", {"undercover": False})
-        settings = manager.get_settings("claude_code")
-        assert settings["undercover"] is False
-
-    def test_undercover_does_not_affect_env_section(self, manager: ToolSettingsManager):
-        """Toggling undercover should not create or alter the env section."""
-        manager.update_settings("claude_code", {"undercover": True})
-        settings = manager.get_settings("claude_code")
-        assert "env" not in settings
+    def test_undercover_update_rejected(self, manager: ToolSettingsManager):
+        with pytest.raises(ValueError, match="coming-soon"):
+            manager.update_settings("claude_code", {"undercover": True})
 
 
 # ---------------------------------------------------------------------------

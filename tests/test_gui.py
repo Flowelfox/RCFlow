@@ -64,7 +64,13 @@ def _make_gui(tmp_path: Path) -> RCFlowGUI:  # type: ignore[name-defined]  # noq
         gui._ip_var = _Var("0.0.0.0")
         gui._port_var = _Var("53890")
         gui._wss_var = _Var(True)
+        gui._upnp_var = _Var(False)
+        gui._natpmp_var = _Var(False)
+        gui._upnp_enabled_mirror = False
+        gui._natpmp_enabled_mirror = False
+        gui._external_addr_mirror = "—"
         gui._quitting = False
+        gui._tray_icon = None
 
         # Use a real ServerManager so that persistence logic is exercised
         gui._log_buffer = LogBuffer()
@@ -75,6 +81,8 @@ def _make_gui(tmp_path: Path) -> RCFlowGUI:  # type: ignore[name-defined]  # noq
             "_ip_entry",
             "_port_entry",
             "_wss_check",
+            "_upnp_check",
+            "_natpmp_check",
             "_toggle_btn",
             "_status_label",
             "_uptime_var",
@@ -82,6 +90,7 @@ def _make_gui(tmp_path: Path) -> RCFlowGUI:  # type: ignore[name-defined]  # noq
             "_sessions_var",
             "_backend_id_var",
             "_version_var",
+            "_external_addr_var",
         ):
             setattr(gui, attr, MagicMock())
         gui._set_status = MagicMock()
@@ -161,12 +170,13 @@ def test_on_status_result_marshals_via_after(tmp_path: Path) -> None:
     gui._sessions_var = _Var()
     gui._backend_id_var = _Var()
     gui._version_var = _Var()
+    gui._external_addr_var = _Var()
 
     after_calls: list[tuple] = []
     gui._root = MagicMock()
     gui._root.after.side_effect = lambda delay, fn: after_calls.append((delay, fn))
 
-    gui._on_status_result(42, "abc123", "1.0.0")
+    gui._on_status_result(42, "abc123", "1.0.0", "203.0.113.5:53890")
 
     # after() must have been called exactly once with delay=0
     assert len(after_calls) == 1, f"expected 1 after() call, got {len(after_calls)}"
@@ -178,6 +188,7 @@ def test_on_status_result_marshals_via_after(tmp_path: Path) -> None:
     assert gui._sessions_var.get() == "42"
     assert gui._backend_id_var.get() == "abc123"
     assert gui._version_var.get() == "1.0.0"
+    assert gui._external_addr_var.get() == "203.0.113.5:53890"
 
 
 def test_on_status_result_none_values_not_set(tmp_path: Path) -> None:
@@ -186,19 +197,22 @@ def test_on_status_result_none_values_not_set(tmp_path: Path) -> None:
     gui._sessions_var = _Var("5")
     gui._backend_id_var = _Var("oldid")
     gui._version_var = _Var("0.9")
+    gui._external_addr_var = _Var("—")
 
     after_calls: list[tuple] = []
     gui._root = MagicMock()
     gui._root.after.side_effect = lambda delay, fn: after_calls.append((delay, fn))
 
-    gui._on_status_result(None, None, None)
+    gui._on_status_result(None, None, None, None)
     assert len(after_calls) == 1
     after_calls[0][1]()  # execute deferred function
 
-    # None inputs must not overwrite existing values
+    # None inputs for sessions/backend_id/version must not overwrite existing values;
+    # the external-address row falls back to the em-dash placeholder when off.
     assert gui._sessions_var.get() == "5"
     assert gui._backend_id_var.get() == "oldid"
     assert gui._version_var.get() == "0.9"
+    assert gui._external_addr_var.get() == "—"
 
 
 def test_copy_token_reads_from_file_not_env(tmp_path: Path) -> None:

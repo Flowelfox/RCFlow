@@ -436,6 +436,7 @@ JSONEOF
   <key>ProgramArguments</key>
   <array>
     <string>${install_prefix}/rcflow</string>
+    <string>run</string>
   </array>
   <key>WorkingDirectory</key>
   <string>${install_prefix}</string>
@@ -475,8 +476,9 @@ PLISTEOF
     printf "  Binary symlink:     ${bin_dir}/rcflow\n"
     printf "\n"
     if [ "$upgrading" = false ]; then
-        printf "  ${YELLOW}IMPORTANT: Edit ${install_prefix}/settings.json to set your ANTHROPIC_API_KEY${NC}\n"
-        printf "  ${YELLOW}before using the server.${NC}\n"
+        printf "  ${YELLOW}IMPORTANT: Configure an LLM provider before using the server.${NC}\n"
+        printf "  ${YELLOW}Set provider credentials in ${install_prefix}/settings.json${NC}\n"
+        printf "  ${YELLOW}or from the client UI (Worker settings).${NC}\n"
         printf "\n"
     fi
 }

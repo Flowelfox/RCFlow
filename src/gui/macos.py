@@ -30,7 +30,7 @@ import tkinter as tk
 from pathlib import Path
 from typing import IO
 
-import customtkinter as ctk  # ty:ignore[unresolved-import]
+import customtkinter as ctk
 
 from src.gui import theme
 from src.gui.core import (
@@ -38,7 +38,17 @@ from src.gui.core import (
     POLL_MS,
     LogBuffer,
     ServerManager,
+    attach_copy_context_menu,
+    make_text_readonly,
     poll_server_status,
+    remove_ipc_file,
+    send_show_to_existing,
+    start_ipc_server,
+)
+from src.gui.updater import (
+    UpdateService,
+    cleanup_partial_downloads,
+    resolve_current_version,
 )
 
 logger = logging.getLogger(__name__)
@@ -86,10 +96,13 @@ def _set_autostart(enabled: bool) -> None:
     """Write or remove the LaunchAgent plist for login autostart."""
     if enabled:
         _LAUNCHAGENT_PLIST.parent.mkdir(parents=True, exist_ok=True)
+        # "--minimized" keeps the dashboard window hidden on login so the
+        # user doesn't get a popup every time they boot; the tray icon is
+        # still visible and they can open the dashboard from there.
         prog_args = (
-            [str(Path(sys.executable).resolve()), "gui"]
+            [str(Path(sys.executable).resolve()), "gui", "--minimized"]
             if getattr(sys, "frozen", False)
-            else [sys.executable, "-m", "src", "gui"]
+            else [sys.executable, "-m", "src", "gui", "--minimized"]
         )
         plist: dict[str, object] = {
             "Label": _LAUNCHAGENT_LABEL,
@@ -135,6 +148,20 @@ class RCFlowMacOSGUI:
         self._show_window_requested: bool = False
         self._toggle_server_requested: bool = False
         self._copy_token_requested: bool = False
+        self._add_client_requested: bool = False
+        # Quit is driven through the same flag pattern so the NSMenu modal
+        # tracking loop returns before stop_sync() starts blocking — otherwise
+        # the menu bar freezes (stuck cursor) while the server child reaps.
+        self._quit_requested: bool = False
+        # Update flow flags — set by ObjC menu actions and by the updater
+        # listener thread; consumed on the Tk event loop tick.
+        self._install_update_requested: bool = False
+        self._check_updates_requested: bool = False
+        self._update_ui_dirty: bool = False
+
+        # Loopback IPC listener so a second `rcflow gui` launch reveals this
+        # instance's dashboard instead of silently failing the singleton check.
+        self._ipc_server: object | None = None
 
         # monotonic expiry for transient status messages (copy-token feedback).
         # _update_ui will not overwrite the status pill while this is in the
@@ -148,12 +175,24 @@ class RCFlowMacOSGUI:
         self._ns_status_text: object | None = None
         self._ns_toggle_item: object | None = None
         self._ns_copy_token_item: object | None = None
+        self._ns_add_client_item: object | None = None
         self._ns_autostart_item: object | None = None
+        self._ns_external_item: object | None = None
+        self._ns_update_item: object | None = None
+        self._ns_check_updates_item: object | None = None
+
+        cleanup_partial_downloads()
+        self._updater = UpdateService(current_version=resolve_current_version())
+        self._updater.restore_cached_state()
+        self._updater.add_listener(self._on_updater_change)
 
         self._root = ctk.CTk()
         self._root.title("RCFlow Worker")
-        self._root.geometry("860x700")
-        self._root.minsize(640, 500)
+        self._root.geometry("900x720")
+        # Settings card uses 2 rows (inputs + checkboxes) and Instance
+        # Details wraps to 2 rows of 3 fields, so the dashboard fits on
+        # narrower screens (1024-px laptops, half-screen splits).
+        self._root.minsize(720, 520)
         self._root.protocol("WM_DELETE_WINDOW", self._on_window_close)
         self._build_ui()
         self._load_settings()
@@ -166,7 +205,7 @@ class RCFlowMacOSGUI:
         s = theme.PAD_SMALL
 
         self._root.grid_columnconfigure(0, weight=1)
-        self._root.grid_rowconfigure(3, weight=1)  # log row expands
+        self._root.grid_rowconfigure(5, weight=1)  # log row expands
 
         # ── Settings + controls ──────────────────────────────────────
         top = ctk.CTkFrame(self._root, fg_color="transparent")
@@ -176,11 +215,14 @@ class RCFlowMacOSGUI:
         sc = ctk.CTkFrame(top, corner_radius=8)
         sc.grid(row=0, column=0, sticky="ew")
 
+        # Two-row settings layout — bind inputs (IP + port) on row 1,
+        # protocol toggles on row 2 — so the dashboard stays usable on
+        # narrower screens (1024-px laptops, half-screen splits, etc.).
         ctk.CTkLabel(
             sc,
             text="Server Settings",
             font=ctk.CTkFont(size=theme.FONT_SIZE_SMALL, weight="bold"),
-        ).grid(row=0, column=0, columnspan=6, sticky="w", padx=g, pady=(g, s))
+        ).grid(row=0, column=0, columnspan=4, sticky="w", padx=g, pady=(g, s))
 
         ctk.CTkLabel(sc, text="IP Address", font=ctk.CTkFont(size=theme.FONT_SIZE_BODY)).grid(
             row=1, column=0, sticky="w", padx=(g, s), pady=(0, g)
@@ -210,7 +252,27 @@ class RCFlowMacOSGUI:
             command=self._on_wss_toggle,
             font=ctk.CTkFont(size=theme.FONT_SIZE_BODY),
         )
-        self._wss_check.grid(row=1, column=4, sticky="w", padx=(0, g), pady=(0, g))
+        self._wss_check.grid(row=2, column=0, sticky="w", padx=(g, g), pady=(0, g))
+
+        self._upnp_var = tk.BooleanVar(value=False)
+        self._upnp_check = ctk.CTkCheckBox(
+            sc,
+            text="UPnP Port Forwarding",
+            variable=self._upnp_var,
+            command=self._on_upnp_toggle,
+            font=ctk.CTkFont(size=theme.FONT_SIZE_BODY),
+        )
+        self._upnp_check.grid(row=2, column=1, columnspan=2, sticky="w", padx=(0, g), pady=(0, g))
+
+        self._natpmp_var = tk.BooleanVar(value=False)
+        self._natpmp_check = ctk.CTkCheckBox(
+            sc,
+            text="VPN Port Forwarding (NAT-PMP)",
+            variable=self._natpmp_var,
+            command=self._on_natpmp_toggle,
+            font=ctk.CTkFont(size=theme.FONT_SIZE_BODY),
+        )
+        self._natpmp_check.grid(row=2, column=3, sticky="w", padx=(0, g), pady=(0, g))
 
         # Action buttons (right of settings card)
         btns = ctk.CTkFrame(top, fg_color="transparent")
@@ -238,7 +300,22 @@ class RCFlowMacOSGUI:
             font=ctk.CTkFont(size=theme.FONT_SIZE_BODY),
             command=self._on_copy_token,
         )
-        self._copy_token_btn.pack()
+        self._copy_token_btn.pack(pady=(0, s))
+
+        self._add_client_btn = ctk.CTkButton(
+            btns,
+            text="Add to Client",
+            width=104,
+            fg_color=theme.BTN_COPY_FG,
+            hover_color=theme.BTN_COPY_HOVER,
+            text_color=theme.BTN_COPY_TEXT,
+            font=ctk.CTkFont(size=theme.FONT_SIZE_BODY),
+            command=self._on_add_to_client,
+        )
+        self._add_client_btn.pack()
+
+        # ── Update banner (hidden unless update available) ───────────
+        self._build_update_banner(row=1)
 
         # ── Status pill ──────────────────────────────────────────────
         self._status_label = ctk.CTkLabel(
@@ -249,43 +326,75 @@ class RCFlowMacOSGUI:
             corner_radius=6,
             font=ctk.CTkFont(size=theme.FONT_SIZE_SMALL, weight="bold"),
         )
-        self._status_label.grid(row=1, column=0, sticky="w", padx=p, pady=(s + 2, 0))
+        self._status_label.grid(row=2, column=0, sticky="w", padx=p, pady=(s + 2, 0))
 
         # ── Instance details card ────────────────────────────────────
         dc = ctk.CTkFrame(self._root, corner_radius=8)
-        dc.grid(row=2, column=0, sticky="ew", padx=p, pady=(s, 0))
+        dc.grid(row=3, column=0, sticky="ew", padx=p, pady=(s, 0))
 
         ctk.CTkLabel(
             dc,
             text="Instance Details",
             font=ctk.CTkFont(size=theme.FONT_SIZE_SMALL, weight="bold"),
-        ).grid(row=0, column=0, columnspan=10, sticky="w", padx=g, pady=(g, s))
+        ).grid(row=0, column=0, columnspan=6, sticky="w", padx=g, pady=(g, s))
 
+        # 2-row \u00d7 3-field grid keeps the card width manageable on small
+        # screens.  Per-field widths target typical contents; users can
+        # scroll within the read-only entry to see / select longer values.
         detail_info = [
-            ("Bound Address", "_bound_addr_var"),
-            ("Uptime", "_uptime_var"),
-            ("Active Sessions", "_sessions_var"),
-            ("Backend ID", "_backend_id_var"),
-            ("Version", "_version_var"),
+            ("Bound Address", "_bound_addr_var", 130),
+            ("Uptime", "_uptime_var", 80),
+            ("Active Sessions", "_sessions_var", 50),
+            ("Backend ID", "_backend_id_var", 100),
+            ("Version", "_version_var", 70),
+            ("External Address", "_external_addr_var", 170),
         ]
-        for col, (label, var_name) in enumerate(detail_info):
+        # Tight 2-row layout: zero vertical pad between rows so the two
+        # stacked detail rows read as a single block.  Row 2 still gets
+        # ``g`` pad below for normal card-bottom breathing room.  Entry
+        # height is also pulled in to match the label baseline since
+        # CTkEntry defaults to 28 px which inflates the row.
+        for index, (label, var_name, value_width) in enumerate(detail_info):
+            row = 1 + index // 3
+            col_pair = index % 3
+            label_col = col_pair * 2
+            value_col = col_pair * 2 + 1
+            row_pady = (0, 0) if row == 1 else (0, g)
             ctk.CTkLabel(
                 dc,
                 text=label,
                 font=ctk.CTkFont(size=theme.FONT_SIZE_SMALL),
                 text_color=("gray40", "gray60"),
-            ).grid(row=1, column=col * 2, sticky="w", padx=(g if col == 0 else g // 2, s), pady=(0, g))
+            ).grid(
+                row=row,
+                column=label_col,
+                sticky="w",
+                padx=(g if col_pair == 0 else g // 2, s),
+                pady=row_pady,
+            )
             var = tk.StringVar(value="\u2014")
             setattr(self, var_name, var)
-            ctk.CTkLabel(
+            # Read-only Entry instead of Label so users can select + copy
+            # values (Cmd+C).  Borderless transparent styling keeps the
+            # visual treatment close to the original Label.
+            ctk.CTkEntry(
                 dc,
                 textvariable=var,
+                state="readonly",
+                width=value_width,
+                height=20,
+                border_width=0,
+                corner_radius=0,
+                fg_color="transparent",
                 font=ctk.CTkFont(size=theme.FONT_SIZE_SMALL, weight="bold"),
-            ).grid(row=1, column=col * 2 + 1, sticky="w", padx=(0, g), pady=(0, g))
+            ).grid(row=row, column=value_col, sticky="w", padx=(0, s), pady=row_pady)
+
+        # ── Updates card ─────────────────────────────────────────────
+        self._build_updates_card(row=4)
 
         # ── Log viewer card ──────────────────────────────────────────
         lc = ctk.CTkFrame(self._root, corner_radius=8)
-        lc.grid(row=3, column=0, sticky="nsew", padx=p, pady=(s, p))
+        lc.grid(row=5, column=0, sticky="nsew", padx=p, pady=(s, p))
         lc.grid_rowconfigure(1, weight=1)
         lc.grid_columnconfigure(0, weight=1)
 
@@ -295,7 +404,7 @@ class RCFlowMacOSGUI:
             font=ctk.CTkFont(size=theme.FONT_SIZE_SMALL, weight="bold"),
         ).grid(row=0, column=0, sticky="w", padx=g, pady=(g, s))
 
-        self._log_box = ctk.CTkTextbox(lc, state="disabled", wrap="word", font=(theme.mono_font(), theme.FONT_SIZE_LOG))
+        self._log_box = ctk.CTkTextbox(lc, wrap="word", font=(theme.mono_font(), theme.FONT_SIZE_LOG))
         self._log_box.grid(row=1, column=0, sticky="nsew", padx=s, pady=(0, s))
 
         # Apply syntax-highlight tags on the underlying tk.Text widget
@@ -303,6 +412,240 @@ class RCFlowMacOSGUI:
         self._log_widget = self._log_box._textbox
         self._log_widget.tag_configure("error", foreground=theme.LOG_DARK_ERROR if _dark else theme.LOG_LIGHT_ERROR)
         self._log_widget.tag_configure("warning", foreground=theme.LOG_DARK_WARN if _dark else theme.LOG_LIGHT_WARN)
+        # Keep the log viewer read-only while still allowing text selection and
+        # Cmd+C — ``state='disabled'`` blocks selection entirely on X11-style Tk.
+        make_text_readonly(self._log_widget)
+        attach_copy_context_menu(self._log_widget)
+
+    # ── Update banner / card ─────────────────────────────────────────────
+
+    def _build_update_banner(self, *, row: int) -> None:
+        """Construct the amber banner shown when a newer release is available."""
+        p = theme.PAD_OUTER
+        g = theme.PAD_GROUP
+        s = theme.PAD_SMALL
+
+        self._update_banner = ctk.CTkFrame(self._root, fg_color=("#fde68a", "#854d0e"), corner_radius=8)
+        self._update_banner.grid(row=row, column=0, sticky="ew", padx=p, pady=(s, 0))
+        self._update_banner.grid_columnconfigure(1, weight=1)
+        self._update_banner.grid_remove()
+
+        self._update_banner_label = ctk.CTkLabel(
+            self._update_banner,
+            text="",
+            text_color=("#1f2937", "#fef3c7"),
+            anchor="w",
+            font=ctk.CTkFont(size=theme.FONT_SIZE_BODY, weight="bold"),
+        )
+        self._update_banner_label.grid(row=0, column=1, sticky="ew", padx=(g, s), pady=s)
+
+        self._update_banner_install_btn = ctk.CTkButton(
+            self._update_banner,
+            text="Download & Install",
+            width=140,
+            command=self._on_update_install,
+            font=ctk.CTkFont(size=theme.FONT_SIZE_SMALL, weight="bold"),
+        )
+        self._update_banner_install_btn.grid(row=0, column=2, padx=(s, s), pady=s)
+
+        self._update_banner_notes_btn = ctk.CTkButton(
+            self._update_banner,
+            text="Release Notes",
+            width=110,
+            fg_color="transparent",
+            border_width=1,
+            text_color=("#1f2937", "#fef3c7"),
+            command=self._on_update_open_notes,
+            font=ctk.CTkFont(size=theme.FONT_SIZE_SMALL),
+        )
+        self._update_banner_notes_btn.grid(row=0, column=3, padx=(s, s), pady=s)
+
+        self._update_banner_dismiss_btn = ctk.CTkButton(
+            self._update_banner,
+            text="✕",
+            width=28,
+            fg_color="transparent",
+            text_color=("#1f2937", "#fef3c7"),
+            command=self._on_update_dismiss,
+            font=ctk.CTkFont(size=theme.FONT_SIZE_BODY, weight="bold"),
+        )
+        self._update_banner_dismiss_btn.grid(row=0, column=4, padx=(0, s), pady=s)
+
+    def _build_updates_card(self, *, row: int) -> None:
+        """Construct the persistent 'Updates' card with manual controls."""
+        p = theme.PAD_OUTER
+        g = theme.PAD_GROUP
+        s = theme.PAD_SMALL
+
+        uc = ctk.CTkFrame(self._root, corner_radius=8)
+        uc.grid(row=row, column=0, sticky="ew", padx=p, pady=(s, 0))
+        uc.grid_columnconfigure(3, weight=1)
+
+        ctk.CTkLabel(
+            uc,
+            text="Updates",
+            font=ctk.CTkFont(size=theme.FONT_SIZE_SMALL, weight="bold"),
+        ).grid(row=0, column=0, columnspan=2, sticky="w", padx=g, pady=(g, s))
+
+        ctk.CTkLabel(
+            uc,
+            text="Status",
+            font=ctk.CTkFont(size=theme.FONT_SIZE_SMALL),
+            text_color=("gray40", "gray60"),
+        ).grid(row=1, column=0, sticky="w", padx=(g, s), pady=(0, g))
+
+        self._update_status_var = tk.StringVar(value="—")
+        ctk.CTkEntry(
+            uc,
+            textvariable=self._update_status_var,
+            state="readonly",
+            border_width=0,
+            corner_radius=0,
+            fg_color="transparent",
+            font=ctk.CTkFont(size=theme.FONT_SIZE_SMALL, weight="bold"),
+        ).grid(row=1, column=1, columnspan=3, sticky="ew", padx=(0, s), pady=(0, g))
+
+        self._update_check_btn = ctk.CTkButton(
+            uc,
+            text="Check for Updates",
+            width=140,
+            command=self._on_update_check_now,
+            font=ctk.CTkFont(size=theme.FONT_SIZE_SMALL),
+        )
+        self._update_check_btn.grid(row=1, column=4, padx=(s, g), pady=(0, g))
+
+        from src.config import Settings  # noqa: PLC0415
+
+        try:
+            auto = bool(Settings().RCFLOW_UPDATE_AUTO_CHECK)
+        except Exception:
+            auto = True
+        self._update_auto_var = tk.BooleanVar(value=auto)
+        ctk.CTkCheckBox(
+            uc,
+            text="Check for updates automatically",
+            variable=self._update_auto_var,
+            command=self._on_update_auto_toggle,
+            font=ctk.CTkFont(size=theme.FONT_SIZE_SMALL),
+        ).grid(row=2, column=0, columnspan=5, sticky="w", padx=g, pady=(0, g))
+
+    # ── Update event handlers ────────────────────────────────────────────
+
+    def _on_updater_change(self) -> None:
+        """Listener invoked from the updater worker thread.
+
+        Sets a flag consumed on the next ``_update_ui`` tick — the only safe
+        place to mutate Tk widgets and AppKit objects on macOS.
+        """
+        self._update_ui_dirty = True
+
+    def _refresh_update_ui(self) -> None:
+        if self._quitting:
+            return
+        latest = self._updater.latest
+        current = self._updater.current_version or "—"
+
+        if self._updater.show_banner and latest is not None:
+            text = f"Update available: v{latest.version} (you have v{current})"
+            self._update_banner_label.configure(text=text)
+            install_state = "normal" if latest.download_url else "disabled"
+            self._update_banner_install_btn.configure(state=install_state)
+            self._update_banner.grid()
+        else:
+            self._update_banner.grid_remove()
+
+        self._update_status_var.set(self._format_update_status())
+
+        if self._updater.is_checking or self._updater.is_downloading:
+            self._update_check_btn.configure(state="disabled")
+        else:
+            self._update_check_btn.configure(state="normal")
+
+        self._refresh_update_menu_item()
+
+    def _format_update_status(self) -> str:
+        if self._updater.is_downloading:
+            return "Downloading update…"
+        if self._updater.is_checking:
+            return "Checking…"
+        err = self._updater.last_error
+        if err:
+            return f"Error: {err}"
+        latest = self._updater.latest
+        current = self._updater.current_version or "unknown"
+        if latest is None:
+            return f"Installed v{current} — no check yet"
+        if self._updater.update_available:
+            return f"Latest v{latest.version} available — installed v{current}"
+        return f"Up to date (v{current})"
+
+    def _refresh_update_menu_item(self) -> None:
+        if self._ns_update_item is None:
+            return
+        latest = self._updater.latest
+        with contextlib.suppress(Exception):
+            if self._updater.show_banner and latest is not None:
+                self._ns_update_item.setTitle_(f"Update available — install v{latest.version}")  # ty:ignore[unresolved-attribute]
+                self._ns_update_item.setHidden_(False)  # ty:ignore[unresolved-attribute]
+            else:
+                self._ns_update_item.setHidden_(True)  # ty:ignore[unresolved-attribute]
+
+    def _on_update_check_now(self) -> None:
+        self._updater.check_now()
+
+    def _on_update_install(self) -> None:
+        self._set_status("Downloading update…", sticky=True)
+
+        def _on_progress(received: int, total: int) -> None:
+            pct = int(received * 100 / total) if total else 0
+            self._root.after(0, lambda: self._set_status(f"Downloading update… {pct}%", sticky=True))
+
+        def _on_done(path: Path) -> None:
+            def _ui() -> None:
+                self._set_status(f"Downloaded to {path.name}", sticky=True)
+                self._prompt_launch_installer(path)
+
+            self._root.after(0, _ui)
+
+        def _on_error(msg: str) -> None:
+            self._root.after(0, lambda: self._set_status(f"Update download failed: {msg}", error=True, sticky=True))
+
+        self._updater.download(on_progress=_on_progress, on_done=_on_done, on_error=_on_error)
+
+    def _prompt_launch_installer(self, path: Path) -> None:
+        from tkinter import messagebox  # noqa: PLC0415
+
+        choice = messagebox.askyesnocancel(
+            "Update downloaded",
+            f"The installer was saved to:\n{path}\n\nLaunch it now?\n\n"
+            "Yes — open the .dmg in Finder\nNo — reveal the file in Finder\nCancel — keep the download for later",
+        )
+        if choice is True:
+            try:
+                self._updater.launch_installer(path)
+                self._set_status("Installer launched", sticky=True)
+            except Exception as exc:
+                self._set_status(f"Failed to launch installer: {exc}", error=True, sticky=True)
+        elif choice is False:
+            self._reveal_in_finder(path)
+
+    @staticmethod
+    def _reveal_in_finder(path: Path) -> None:
+        import subprocess  # noqa: PLC0415
+
+        with contextlib.suppress(Exception):
+            subprocess.Popen(["open", "-R", str(path)])
+
+    def _on_update_open_notes(self) -> None:
+        self._updater.open_release_page()
+
+    def _on_update_dismiss(self) -> None:
+        self._updater.dismiss_current()
+
+    def _on_update_auto_toggle(self) -> None:
+        from src.config import update_settings_file  # noqa: PLC0415
+
+        update_settings_file({"RCFLOW_UPDATE_AUTO_CHECK": "true" if self._update_auto_var.get() else "false"})
 
     # ── Settings I/O ─────────────────────────────────────────────────────
 
@@ -314,13 +657,57 @@ class RCFlowMacOSGUI:
             self._ip_var.set(s.RCFLOW_HOST)
             self._port_var.set(str(s.RCFLOW_PORT))
             self._wss_var.set(s.WSS_ENABLED)
+            self._upnp_var.set(s.UPNP_ENABLED)
+            self._natpmp_var.set(s.NATPMP_ENABLED)
         except Exception:
             pass
+        self._apply_forwarding_mutex()
 
     def _on_wss_toggle(self) -> None:
         from src.config import update_settings_file  # noqa: PLC0415
 
         update_settings_file({"WSS_ENABLED": str(self._wss_var.get())})
+
+    def _on_upnp_toggle(self) -> None:
+        from src.config import update_settings_file  # noqa: PLC0415
+
+        enabled = bool(self._upnp_var.get())
+        updates: dict[str, str] = {"UPNP_ENABLED": "true" if enabled else "false"}
+        # Mutex with NAT-PMP: enabling UPnP turns NAT-PMP off.  Both routes
+        # cannot coexist usefully — VPN captures the default route and
+        # routing asymmetry breaks the UPnP path while VPN is active.
+        if enabled and self._natpmp_var.get():
+            self._natpmp_var.set(False)
+            updates["NATPMP_ENABLED"] = "false"
+        update_settings_file(updates)
+        self._apply_forwarding_mutex()
+
+    def _on_natpmp_toggle(self) -> None:
+        from src.config import update_settings_file  # noqa: PLC0415
+
+        enabled = bool(self._natpmp_var.get())
+        updates: dict[str, str] = {"NATPMP_ENABLED": "true" if enabled else "false"}
+        # Mutex with UPnP — see ``_on_upnp_toggle`` for the rationale.
+        if enabled and self._upnp_var.get():
+            self._upnp_var.set(False)
+            updates["UPNP_ENABLED"] = "false"
+        update_settings_file(updates)
+        self._apply_forwarding_mutex()
+
+    def _apply_forwarding_mutex(self) -> None:
+        """Grey out the inactive port-forwarding checkbox to make the mutex visible.
+
+        Disables whichever of UPnP / NAT-PMP is currently unchecked while the
+        other is on, so users see at a glance that only one can run at a
+        time.  No-op while the server is running because both checkboxes are
+        already disabled by the start path.
+        """
+        if self._server.is_running():
+            return
+        upnp_on = bool(self._upnp_var.get())
+        natpmp_on = bool(self._natpmp_var.get())
+        self._upnp_check.configure(state="disabled" if natpmp_on else "normal")
+        self._natpmp_check.configure(state="disabled" if upnp_on else "normal")
 
     def _on_copy_token(self) -> None:
         try:
@@ -336,6 +723,33 @@ class RCFlowMacOSGUI:
             self._set_status("Token copied to clipboard", sticky=True)
         except Exception as exc:
             self._set_status(f"Failed to copy token: {exc}", error=True, sticky=True)
+
+    def _on_add_to_client(self) -> None:
+        try:
+            import webbrowser  # noqa: PLC0415
+
+            from src.config import read_token_from_file  # noqa: PLC0415
+            from src.gui.deeplink import build_add_worker_url  # noqa: PLC0415
+
+            host = self._ip_var.get().strip()
+            port_str = self._port_var.get().strip()
+            if not host or not port_str:
+                self._set_status("Set IP and port first", error=True, sticky=True)
+                return
+            try:
+                port = int(port_str)
+            except ValueError:
+                self._set_status("Invalid port number", error=True, sticky=True)
+                return
+            api_key = read_token_from_file()
+            if not api_key:
+                self._set_status("No API token configured", error=True, sticky=True)
+                return
+            url = build_add_worker_url(host, port, api_key, wss=bool(self._wss_var.get()))
+            webbrowser.open(url)
+            self._set_status("Opening in client...", sticky=True)
+        except Exception as exc:
+            self._set_status(f"Failed to launch client: {exc}", error=True, sticky=True)
 
     # ── Server controls ───────────────────────────────────────────────────
 
@@ -368,6 +782,8 @@ class RCFlowMacOSGUI:
         self._ip_entry.configure(state="disabled")
         self._port_entry.configure(state="disabled")
         self._wss_check.configure(state="disabled")
+        self._upnp_check.configure(state="disabled")
+        self._natpmp_check.configure(state="disabled")
         self._toggle_btn.configure(
             text="Stop", fg_color=theme.BTN_STOP_FG, hover_color=theme.BTN_STOP_HOVER, text_color=theme.BTN_STOP_TEXT
         )
@@ -392,6 +808,8 @@ class RCFlowMacOSGUI:
         self._ip_entry.configure(state="disabled")
         self._port_entry.configure(state="disabled")
         self._wss_check.configure(state="disabled")
+        self._upnp_check.configure(state="disabled")
+        self._natpmp_check.configure(state="disabled")
         self._toggle_btn.configure(
             text="Stop", fg_color=theme.BTN_STOP_FG, hover_color=theme.BTN_STOP_HOVER, text_color=theme.BTN_STOP_TEXT
         )
@@ -406,7 +824,6 @@ class RCFlowMacOSGUI:
         if not lines:
             return
 
-        self._log_box.configure(state="normal")
         at_bottom = self._log_widget.yview()[1] >= 0.95
 
         for line in lines:
@@ -424,7 +841,6 @@ class RCFlowMacOSGUI:
 
         if at_bottom:
             self._log_widget.see(tk.END)
-        self._log_box.configure(state="disabled")
 
     # ── Status & details ──────────────────────────────────────────────────
 
@@ -462,6 +878,22 @@ class RCFlowMacOSGUI:
         if self._copy_token_requested:
             self._copy_token_requested = False
             self._on_copy_token()
+        if self._add_client_requested:
+            self._add_client_requested = False
+            self._on_add_to_client()
+        if self._install_update_requested:
+            self._install_update_requested = False
+            self._on_update_install()
+        if self._check_updates_requested:
+            self._check_updates_requested = False
+            self._on_update_check_now()
+        if self._update_ui_dirty:
+            self._update_ui_dirty = False
+            self._refresh_update_ui()
+        if self._quit_requested:
+            self._quit_requested = False
+            self._on_tray_quit()
+            return
 
         self._drain_log_queue()
         running = self._server.is_running()
@@ -485,6 +917,12 @@ class RCFlowMacOSGUI:
                 self._ip_entry.configure(state="normal")
                 self._port_entry.configure(state="normal")
                 self._wss_check.configure(state="normal")
+                self._upnp_check.configure(state="normal")
+                self._natpmp_check.configure(state="normal")
+                # Re-apply mutex once the running-state lock is gone so the
+                # inactive forwarding checkbox returns to disabled if the
+                # other was the active choice.
+                self._apply_forwarding_mutex()
                 self._toggle_btn.configure(
                     text="Start",
                     fg_color=theme.BTN_START_FG,
@@ -501,6 +939,7 @@ class RCFlowMacOSGUI:
                 self._sessions_var.set("\u2014")  # ty:ignore[unresolved-attribute]
                 self._backend_id_var.set("\u2014")  # ty:ignore[unresolved-attribute]
                 self._version_var.set("\u2014")  # ty:ignore[unresolved-attribute]
+                self._external_addr_var.set("\u2014")  # ty:ignore[unresolved-attribute]
                 self._update_tray_status()
 
         self._root.after(POLL_MS, self._update_ui)
@@ -527,7 +966,33 @@ class RCFlowMacOSGUI:
         self._delegate = _TrayDelegate.new()
         self._delegate._gui = self
         self._init_status_item()
+        self._install_reopen_handler()
         return self._status_item is not None
+
+    def _install_reopen_handler(self) -> None:
+        """Install the ``kAEReopenApplication`` AppleEvent handler.
+
+        macOS fires this event on the running process when the user launches
+        the .app again via Finder / Dock / Launchpad / ``open``.  Without a
+        handler, the event is dropped and the dashboard never re-opens.
+        """
+        try:
+            from Foundation import NSAppleEventManager  # noqa: PLC0415  # ty:ignore[unresolved-import]
+        except ImportError:
+            return
+
+        # FourCharCodes:  'aevt' -> kCoreEventClass,  'rapp' -> kAEReopenApplication
+        core_event_class = int.from_bytes(b"aevt", "big")
+        reopen_event_id = int.from_bytes(b"rapp", "big")
+
+        with contextlib.suppress(Exception):
+            mgr = NSAppleEventManager.sharedAppleEventManager()
+            mgr.setEventHandler_andSelector_forEventClass_andEventID_(
+                self._delegate,
+                b"handleReopen:withReplyEvent:",
+                core_event_class,
+                reopen_event_id,
+            )
 
     def _init_status_item(self) -> None:
         """Create the NSStatusItem and its dropdown menu (main thread only).
@@ -589,6 +1054,22 @@ class RCFlowMacOSGUI:
             self._ns_status_text.setEnabled_(False)
             menu.addItem_(self._ns_status_text)
 
+            self._ns_external_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("External: —", None, "")
+            self._ns_external_item.setEnabled_(False)
+            self._ns_external_item.setHidden_(True)
+            menu.addItem_(self._ns_external_item)
+
+            self._ns_update_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+                "Update available", "installUpdate:", ""
+            )
+            self._ns_update_item.setTarget_(self._delegate)
+            self._ns_update_item.setHidden_(True)
+            menu.addItem_(self._ns_update_item)
+
+            dashboard_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Dashboard", "openSettings:", "")
+            dashboard_item.setTarget_(self._delegate)
+            menu.addItem_(dashboard_item)
+
             menu.addItem_(NSMenuItem.separatorItem())
 
             self._ns_toggle_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
@@ -599,17 +1080,17 @@ class RCFlowMacOSGUI:
 
             menu.addItem_(NSMenuItem.separatorItem())
 
-            open_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-                "Open Settings\u2026", "openSettings:", ""
-            )
-            open_item.setTarget_(self._delegate)
-            menu.addItem_(open_item)
-
             self._ns_copy_token_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
                 "Copy Token", "copyToken:", ""
             )
             self._ns_copy_token_item.setTarget_(self._delegate)
             menu.addItem_(self._ns_copy_token_item)
+
+            self._ns_add_client_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+                "Add to Client…", "addToClient:", ""
+            )
+            self._ns_add_client_item.setTarget_(self._delegate)
+            menu.addItem_(self._ns_add_client_item)
 
             menu.addItem_(NSMenuItem.separatorItem())
 
@@ -619,6 +1100,12 @@ class RCFlowMacOSGUI:
             self._ns_autostart_item.setTarget_(self._delegate)
             self._ns_autostart_item.setState_(1 if _is_autostart_enabled() else 0)
             menu.addItem_(self._ns_autostart_item)
+
+            self._ns_check_updates_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+                "Check for Updates", "checkUpdates:", ""
+            )
+            self._ns_check_updates_item.setTarget_(self._delegate)
+            menu.addItem_(self._ns_check_updates_item)
 
             quit_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Quit", "quitApp:", "")
             quit_item.setTarget_(self._delegate)
@@ -652,6 +1139,12 @@ class RCFlowMacOSGUI:
             with contextlib.suppress(Exception):
                 label = "Stop Server" if running else "Start Server"
                 self._ns_toggle_item.setTitle_(label)  # ty:ignore[unresolved-attribute]
+        if self._ns_external_item is not None:
+            with contextlib.suppress(Exception):
+                forwarding_on = bool(self._upnp_var.get()) or bool(self._natpmp_var.get())
+                self._ns_external_item.setHidden_(not forwarding_on)  # ty:ignore[unresolved-attribute]
+                display = self._external_addr_var.get() or "—"  # ty:ignore[unresolved-attribute]
+                self._ns_external_item.setTitle_(f"External: {display}")  # ty:ignore[unresolved-attribute]
 
     def _refresh_autostart_item(self) -> None:
         if self._ns_autostart_item is None:
@@ -670,6 +1163,17 @@ class RCFlowMacOSGUI:
 
     def _do_show_window(self) -> None:
         """Reveal and raise the settings panel.  Called only from _update_ui."""
+        # Promote to a regular foreground app while the window is visible:
+        # this gives the process a proper Dock icon + Cmd-Tab entry and lets
+        # Cocoa activate it correctly.  When the window closes we drop back
+        # to accessory so the Dock tile disappears (see _on_window_close).
+        with contextlib.suppress(Exception):
+            from AppKit import NSApplication  # noqa: PLC0415  # ty:ignore[unresolved-import]
+
+            ns_app = NSApplication.sharedApplication()
+            ns_app.setActivationPolicy_(0)  # NSApplicationActivationPolicyRegular
+            ns_app.activateIgnoringOtherApps_(True)
+
         self._root.deiconify()
         self._root.lift()
         # Float above all windows briefly so it is visible even when another
@@ -691,6 +1195,13 @@ class RCFlowMacOSGUI:
                 NSStatusBar.systemStatusBar().removeStatusItem_(self._status_item)
             self._status_item = None
 
+        # Tear down the IPC listener so the discovery file does not outlive us.
+        if self._ipc_server is not None:
+            with contextlib.suppress(Exception):
+                self._ipc_server.close()  # ty:ignore[unresolved-attribute]
+            self._ipc_server = None
+        remove_ipc_file()
+
         # Stop the server synchronously — blocks until the child process is
         # dead so it cannot be orphaned when we destroy the Tk root next.
         self._server.stop_sync()
@@ -706,6 +1217,13 @@ class RCFlowMacOSGUI:
         """
         if self._status_item is not None:
             self._root.withdraw()
+            # Drop back to accessory policy so the Dock tile that appeared
+            # while the window was visible disappears — menu-bar-only state
+            # is the expected "server running in the background" look.
+            with contextlib.suppress(Exception):
+                from AppKit import NSApplication  # noqa: PLC0415  # ty:ignore[unresolved-import]
+
+                NSApplication.sharedApplication().setActivationPolicy_(1)  # Accessory
         else:
             self._on_tray_quit()
 
@@ -718,10 +1236,15 @@ class RCFlowMacOSGUI:
         if self._quitting:
             return  # _on_tray_quit already handled cleanup
         self._quitting = True
+        remove_ipc_file()
         self._server.stop_sync(timeout=5)
 
-    def run(self) -> None:
-        """Start the menu bar icon and CTk event loop."""
+    def run(self, *, minimized: bool = False) -> None:
+        """Start the menu bar icon and CTk event loop.
+
+        When *minimized* is True (login autostart), the dashboard is kept
+        hidden and the process stays in accessory policy — tray icon only.
+        """
         import datetime  # noqa: PLC0415
 
         _trace_path = Path.home() / "Library" / "Logs" / "rcflow-worker-trace.log"
@@ -736,9 +1259,27 @@ class RCFlowMacOSGUI:
         atexit.register(self._cleanup)
 
         def _sigterm_handler(signum: int, frame: object) -> None:
-            self._on_tray_quit()
+            # Flag-based quit so the Tk event loop drains it safely.
+            self._quit_requested = True
 
         signal.signal(signal.SIGTERM, _sigterm_handler)
+
+        # Upgrade path: older builds installed the LaunchAgent plist without
+        # the ``--minimized`` flag, so login-time launches popped up the
+        # dashboard.  If autostart is currently enabled, rewrite the plist
+        # so the next login uses the new flag.  Idempotent for new plists.
+        if _is_autostart_enabled():
+            with contextlib.suppress(Exception):
+                _set_autostart(True)
+
+        # Start the singleton IPC listener; a second launch will connect here
+        # to ask us to reveal the dashboard window.  The accept thread sets a
+        # flag — Tk/AppKit APIs are never touched from the socket thread.
+        def _on_ipc_show() -> None:
+            self._show_window_requested = True
+
+        self._ipc_server = start_ipc_server(_on_ipc_show)
+        _t(f"IPC listener started: {self._ipc_server is not None}")
 
         tray_ok = self._setup_tray()
         _t(f"_setup_tray() → tray_ok={tray_ok}")
@@ -749,8 +1290,18 @@ class RCFlowMacOSGUI:
                     from AppKit import NSApplication  # noqa: PLC0415  # ty:ignore[unresolved-import]
 
                     NSApplication.sharedApplication().setActivationPolicy_(1)
-            self._root.withdraw()
-            _t("window withdrawn")
+
+            if minimized:
+                # Login autostart path: keep the dashboard hidden so we don't
+                # steal focus on boot.  Tray icon remains the entry point.
+                self._root.withdraw()
+                _t("window withdrawn (minimized autostart)")
+            else:
+                # Reveal the dashboard on launch.  Scheduled on the Tk event
+                # loop so AppKit is fully initialised; _do_show_window already
+                # activates the process (LSUIElement apps are not auto-frontmost).
+                self._root.after(0, self._do_show_window)
+                _t("window scheduled to show on launch")
         else:
             logger.warning("Menu bar icon unavailable — keeping settings window visible")
             _t("tray unavailable — window visible")
@@ -763,6 +1314,11 @@ class RCFlowMacOSGUI:
             self._root.after(0, self._start_server)
         else:
             self._root.after(0, self._on_adopted_server)
+
+        self._root.after(0, self._refresh_update_ui)
+        if self._update_auto_var.get() and self._updater.current_version:
+            self._updater.maybe_check()
+
         self._root.after(POLL_MS, self._update_ui)
 
         def _status_loop() -> None:
@@ -780,7 +1336,13 @@ class RCFlowMacOSGUI:
         self._root.mainloop()
         _t("mainloop() returned")
 
-    def _on_status_result(self, sessions: int | None, backend_id: str | None, version: str | None) -> None:
+    def _on_status_result(
+        self,
+        sessions: int | None,
+        backend_id: str | None,
+        version: str | None,
+        external_display: str | None,
+    ) -> None:
         # poll_server_status calls this from a daemon thread.  All StringVar
         # mutations must happen on the Tk main thread — on macOS, calling them
         # from a background thread while NSMenu is in its modal tracking loop
@@ -793,6 +1355,8 @@ class RCFlowMacOSGUI:
                 self._backend_id_var.set(backend_id)  # ty:ignore[unresolved-attribute]
             if version:
                 self._version_var.set(version)  # ty:ignore[unresolved-attribute]
+            self._external_addr_var.set(external_display or "—")  # ty:ignore[unresolved-attribute]
+            self._update_tray_status()
 
         self._root.after(0, _apply)
 
@@ -806,8 +1370,8 @@ class RCFlowMacOSGUI:
 _PYOBJC_AVAILABLE = False
 
 try:
-    import objc as _objc  # type: ignore[import-untyped]  # ty: ignore[unresolved-import]
-    from AppKit import NSObject  # type: ignore[assignment]  # ty: ignore[unresolved-import]
+    import objc as _objc  # type: ignore[import-untyped]
+    from AppKit import NSObject  # type: ignore[assignment]
 
     class _TrayDelegate(NSObject):
         """Objective-C action target for NSMenuItem callbacks."""
@@ -836,15 +1400,48 @@ try:
                 self._gui._copy_token_requested = True
 
         @_objc.IBAction
+        def addToClient_(self, sender: object) -> None:  # noqa: N802
+            if self._gui is not None:
+                self._gui._add_client_requested = True
+
+        @_objc.IBAction
         def toggleAutostart_(self, sender: object) -> None:  # noqa: N802
             if self._gui is not None:
                 _set_autostart(not _is_autostart_enabled())
                 self._gui._refresh_autostart_item()
 
         @_objc.IBAction
-        def quitApp_(self, sender: object) -> None:  # noqa: N802
+        def installUpdate_(self, sender: object) -> None:  # noqa: N802
             if self._gui is not None:
-                self._gui._on_tray_quit()
+                self._gui._install_update_requested = True
+                self._gui._show_window_requested = True
+
+        @_objc.IBAction
+        def checkUpdates_(self, sender: object) -> None:  # noqa: N802
+            if self._gui is not None:
+                self._gui._check_updates_requested = True
+
+        @_objc.IBAction
+        def quitApp_(self, sender: object) -> None:  # noqa: N802
+            # Defer the actual shutdown to the Tk event loop — running
+            # _on_tray_quit inside the NSMenu modal tracking loop blocks
+            # the AppKit run loop for the full duration of stop_sync(),
+            # which manifests as a stuck beachball cursor over the menu bar.
+            if self._gui is not None:
+                self._gui._quit_requested = True
+
+        def handleReopen_withReplyEvent_(self, event: object, reply: object) -> None:  # noqa: N802
+            """AppleEvent 'rapp' callback.
+
+            macOS LaunchServices routes a double-click on an already-running
+            .app (from Finder / Launchpad / Dock) to the existing process as
+            a ``kAEReopenApplication`` AppleEvent rather than spawning a new
+            process, so our singleton/IPC path never runs in that case.
+            Hooking the reopen event here makes the second launch reveal the
+            dashboard just like the IPC ``SHOW`` from a command-line launch.
+            """
+            if self._gui is not None:
+                self._gui._show_window_requested = True
 
     _PYOBJC_AVAILABLE = True
 
@@ -856,8 +1453,13 @@ def _get_crash_log_path() -> Path:
     return Path.home() / "Library" / "Logs" / "rcflow-worker-crash.log"
 
 
-def run_gui_macos() -> None:
-    """Entry point for the macOS menu bar + settings panel application."""
+def run_gui_macos(*, minimized: bool = False) -> None:
+    """Entry point for the macOS menu bar + settings panel application.
+
+    *minimized*: start with the dashboard hidden (tray-only).  The login
+    autostart LaunchAgent passes this flag so rebooting does not pop the
+    window; user-initiated launches leave it False and the dashboard shows.
+    """
     import datetime  # noqa: PLC0415
 
     _trace_path = Path.home() / "Library" / "Logs" / "rcflow-worker-trace.log"
@@ -879,32 +1481,38 @@ def run_gui_macos() -> None:
 
     # ── Singleton check ──────────────────────────────────────────────────
     if not _acquire_singleton_lock():
-        _trace("another instance already running — exiting")
-        print(
-            "RCFlow Worker is already running. Look for the bolt icon in the macOS menu bar.",
-            file=sys.stderr,
-        )
-        # Try to bring the existing instance's window forward via AppleScript.
-        # This is a best-effort convenience — if it fails, no harm done.
-        with contextlib.suppress(Exception):
-            import subprocess as _sp  # noqa: PLC0415
-
-            _sp.Popen(
-                [
-                    "osascript",
-                    "-e",
-                    'tell application "RCFlow Worker" to activate',
-                ],
-                stdout=_sp.DEVNULL,
-                stderr=_sp.DEVNULL,
+        _trace("another instance already running — asking it to show dashboard")
+        # Primary path: use the loopback IPC channel the running instance
+        # exposes.  Works regardless of LaunchServices registration and
+        # without spawning osascript.
+        delivered = send_show_to_existing()
+        _trace(f"send_show_to_existing() -> {delivered}")
+        if not delivered:
+            print(
+                "RCFlow Worker is already running. Look for the bolt icon in the macOS menu bar.",
+                file=sys.stderr,
             )
+            # Fallback: AppleScript activate.  Works only for a registered
+            # .app bundle, so it is best-effort.
+            with contextlib.suppress(Exception):
+                import subprocess as _sp  # noqa: PLC0415
+
+                _sp.Popen(
+                    [
+                        "osascript",
+                        "-e",
+                        'tell application "RCFlow Worker" to activate',
+                    ],
+                    stdout=_sp.DEVNULL,
+                    stderr=_sp.DEVNULL,
+                )
         sys.exit(0)
 
     try:
         _trace("creating RCFlowMacOSGUI()")
         gui = RCFlowMacOSGUI()
-        _trace("calling gui.run()")
-        gui.run()
+        _trace(f"calling gui.run(minimized={minimized})")
+        gui.run(minimized=minimized)
         _trace("gui.run() returned — mainloop exited cleanly")
     except Exception:
         import traceback  # noqa: PLC0415

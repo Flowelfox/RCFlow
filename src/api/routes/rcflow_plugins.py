@@ -100,7 +100,7 @@ class PluginStateManager:
             tmp = self._state_file.with_suffix(".tmp")
             try:
                 tmp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-                tmp.rename(self._state_file)
+                tmp.replace(self._state_file)
             except Exception:
                 tmp.unlink(missing_ok=True)
                 raise

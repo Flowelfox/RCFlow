@@ -46,9 +46,49 @@ class WorkerConnection extends ChangeNotifier {
   /// Whether this worker has a Linear API key configured.
   bool hasLinear = false;
 
+  /// Whether this worker has the API key required for its configured
+  /// ``LLM_PROVIDER``. ``true`` when the provider is ``none`` (direct tool
+  /// mode) or ``bedrock`` (AWS SDK resolves creds from its own chain).
+  /// Default ``true`` so no banner flashes during the initial config fetch;
+  /// flipped after `/api/config` returns.
+  bool hasLlmConfigured = true;
+
+  /// Per-coding-agent auth-readiness, populated from
+  /// ``GET /api/tools/auth/preflight``. Default empty so the banner stays
+  /// hidden during initial fetch; populated on connect and after settings
+  /// changes via [reloadDerivedConfig]. Keys are agent internal names
+  /// (``claude_code``, ``codex``, ``opencode``).
+  final Map<String, bool> agentReady = {};
+  final Map<String, String?> agentIssues = {};
+
   /// Token limits from server config (0 = unlimited).
   int inputTokenLimit = 0;
   int outputTokenLimit = 0;
+
+  /// Per-scope generation counter for the dynamic model catalog. Each
+  /// time credentials change for a scope (API key save, login completion,
+  /// provider switch), the matching counter is bumped and listeners are
+  /// notified — this is what `_DynamicModelInput` uses to know it should
+  /// re-fetch its options without waiting for the user to reopen the
+  /// dialog.
+  ///
+  /// Keys: ``global``, ``claude_code``, ``codex``, ``opencode``. Values
+  /// only ever increase; the absolute number is opaque, the change is
+  /// what matters.
+  final Map<String, int> modelCatalogGeneration = {
+    'global': 0,
+    'claude_code': 0,
+    'codex': 0,
+    'opencode': 0,
+  };
+
+  /// Increment the generation counter for *scope* and notify listeners so
+  /// any open dynamic-model dropdown re-fetches.
+  void bumpModelCatalog(String scope) {
+    modelCatalogGeneration[scope] =
+        (modelCatalogGeneration[scope] ?? 0) + 1;
+    notifyListeners();
+  }
 
   List<SessionInfo> sessions = [];
   final Set<String> subscribedSessions = {};
@@ -99,7 +139,7 @@ class WorkerConnection extends ChangeNotifier {
 
   /// Fires with the authoritative ``queued_messages`` snapshot from each
   /// ``session_update`` broadcast.  Consumers use this to rehydrate the
-  /// pinned queue on reconnect.  See ``Queued User Messages`` in ``Design.md``.
+  /// pinned queue on reconnect.  See ``Queued User Messages`` in ``docs/design/sessions.md``.
   void Function(String sessionId, List<Map<String, dynamic>> snapshot)?
       onQueuedMessagesSnapshot;
 
@@ -175,6 +215,7 @@ class WorkerConnection extends ChangeNotifier {
       ws.requestArtifacts();
       _fetchServerInfo();
       _fetchTokenLimits();
+      _fetchAgentAuthPreflight();
 
       final lastId = _settings.getLastSessionId(config.id);
       if (lastId != null) {
@@ -669,10 +710,54 @@ class WorkerConnection extends ChangeNotifier {
     return ws.fetchSessionTelemetry(sessionId);
   }
 
+  /// Fetch the dynamic model catalog for the given provider/scope.
+  ///
+  /// Result schema mirrors ``GET /api/models``: see
+  /// :meth:`WebSocketService.fetchModels`.
+  Future<Map<String, dynamic>> fetchModels({
+    required String provider,
+    required String scope,
+    bool refresh = false,
+  }) async {
+    return ws.fetchModels(provider: provider, scope: scope, refresh: refresh);
+  }
+
+  /// Re-fetch config-derived state (token limits, Linear presence, LLM
+  /// configuration). Called after the user edits server config via the
+  /// settings dialog so UI hints (e.g. the new-session LLM banner) refresh
+  /// without waiting for a reconnect.
+  void reloadDerivedConfig() {
+    _fetchTokenLimits();
+    _fetchAgentAuthPreflight();
+  }
+
+  void _fetchAgentAuthPreflight() {
+    ws
+        .fetchCodingAgentAuthPreflight()
+        .then((body) {
+          final agents = body['agents'];
+          if (agents is! Map) return;
+          agentReady.clear();
+          agentIssues.clear();
+          agents.forEach((key, value) {
+            if (value is! Map) return;
+            final ready = value['ready'] == true;
+            final issue = value['issue'];
+            agentReady[key.toString()] = ready;
+            agentIssues[key.toString()] = issue is String ? issue : null;
+          });
+          notifyListeners();
+        })
+        .catchError((_) {});
+  }
+
   void _fetchTokenLimits() {
     ws
         .fetchConfig()
         .then((configOptions) {
+          String? llmProvider;
+          String? anthropicKey;
+          String? openaiKey;
           for (final opt in configOptions) {
             final key = opt['key'] as String?;
             final value = opt['value'];
@@ -686,11 +771,43 @@ class WorkerConnection extends ChangeNotifier {
                   : int.tryParse('$value') ?? 0;
             } else if (key == 'LINEAR_API_KEY') {
               hasLinear = value is String && value.isNotEmpty;
+            } else if (key == 'LLM_PROVIDER') {
+              llmProvider = value is String ? value : null;
+            } else if (key == 'ANTHROPIC_API_KEY') {
+              anthropicKey = value is String ? value : null;
+            } else if (key == 'OPENAI_API_KEY') {
+              openaiKey = value is String ? value : null;
             }
           }
+          hasLlmConfigured = _computeLlmConfigured(
+            llmProvider,
+            anthropicKey,
+            openaiKey,
+          );
           notifyListeners();
         })
         .catchError((_) {});
+  }
+
+  /// Decide whether an LLM can actually run given the fetched config values.
+  ///
+  /// Secrets are returned masked from `/api/config` (empty string when unset,
+  /// "****xxxx" when set), so checking for non-empty is sufficient. Bedrock
+  /// is considered configured because the AWS SDK resolves creds from its
+  /// own provider chain (env, shared config, IAM role) and explicit keys are
+  /// not required.
+  static bool _computeLlmConfigured(
+    String? provider,
+    String? anthropicKey,
+    String? openaiKey,
+  ) {
+    final p = (provider ?? '').toLowerCase();
+    if (p == 'none' || p == 'bedrock') return true;
+    if (p == 'anthropic') return anthropicKey != null && anthropicKey.isNotEmpty;
+    if (p == 'openai') return openaiKey != null && openaiKey.isNotEmpty;
+    // Unknown provider — assume configured; server-side init will raise if
+    // it's actually wrong.
+    return true;
   }
 
   // --- Reconnection ---
@@ -747,6 +864,7 @@ class WorkerConnection extends ChangeNotifier {
         ws.listLinearIssues();
         _fetchServerInfo();
         _fetchTokenLimits();
+        _fetchAgentAuthPreflight();
 
         final lastId = _settings.getLastSessionId(config.id);
         if (lastId != null) {

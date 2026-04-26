@@ -3,6 +3,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../models/server_config.dart';
 import '../../services/websocket_service.dart';
+import '../../services/worker_connection.dart';
 import '../../theme.dart';
 import '../widgets/custom_title_bar.dart';
 
@@ -10,10 +11,15 @@ void showServerConfigScreen(
   BuildContext context, {
   required WebSocketService ws,
   required String workerName,
+  WorkerConnection? connection,
 }) {
   Navigator.of(context).push(
     MaterialPageRoute(
-      builder: (_) => _ServerConfigPage(ws: ws, workerName: workerName),
+      builder: (_) => _ServerConfigPage(
+        ws: ws,
+        workerName: workerName,
+        connection: connection,
+      ),
     ),
   );
 }
@@ -25,8 +31,13 @@ void showServerConfigScreen(
 class _ServerConfigPage extends StatelessWidget {
   final WebSocketService ws;
   final String workerName;
+  final WorkerConnection? connection;
 
-  const _ServerConfigPage({required this.ws, required this.workerName});
+  const _ServerConfigPage({
+    required this.ws,
+    required this.workerName,
+    this.connection,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -53,7 +64,11 @@ class _ServerConfigPage extends StatelessWidget {
             ),
           ),
           Expanded(
-            child: ServerConfigContent(ws: ws, workerName: workerName),
+            child: ServerConfigContent(
+              ws: ws,
+              connection: connection,
+              workerName: workerName,
+            ),
           ),
         ],
       ),
@@ -70,6 +85,14 @@ class ServerConfigContent extends StatefulWidget {
   final String workerName;
   final ScrollController? scrollController;
 
+  /// Optional reference to the host worker's [WorkerConnection]. When
+  /// supplied, dynamic model dropdowns subscribe to its
+  /// [WorkerConnection.modelCatalogGeneration] map and re-fetch the
+  /// catalog whenever credentials change in the same form (config save,
+  /// tool-settings save, login flow). Setup wizard runs without an
+  /// active connection so this stays optional.
+  final WorkerConnection? connection;
+
   /// When true, hides internal save buttons (used when embedded in a dialog
   /// that provides its own save action).
   final bool embedded;
@@ -78,6 +101,16 @@ class ServerConfigContent extends StatefulWidget {
   /// without the sidebar navigation.
   final String? sectionFilter;
 
+  /// Sidebar section to preselect on first build (e.g. 'LLM'). Ignored when
+  /// [sectionFilter] is set (filter mode has no sidebar). Falls back to the
+  /// first available section if the name doesn't match after config loads.
+  final String? initialSection;
+
+  /// Invoked after the user saves changes via the embedded Save button.
+  /// Useful for letting the host (e.g. worker edit dialog) refresh any
+  /// config-derived state cached on the connection.
+  final VoidCallback? onSaved;
+
   const ServerConfigContent({
     super.key,
     required this.ws,
@@ -85,6 +118,9 @@ class ServerConfigContent extends StatefulWidget {
     this.scrollController,
     this.embedded = false,
     this.sectionFilter,
+    this.initialSection,
+    this.onSaved,
+    this.connection,
   });
 
   @override
@@ -98,7 +134,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
   bool _saving = false;
   String? _saveMessage;
 
-  String _selectedSection = 'Tools';
+  late String _selectedSection = widget.initialSection ?? 'Tools';
 
   final Map<String, dynamic> _editedValues = {};
   final Map<String, TextEditingController> _textControllers = {};
@@ -110,7 +146,6 @@ class ServerConfigContentState extends State<ServerConfigContent> {
   final Set<String> _toolsUpdatingIndividual = {};
   final Set<String> _toolsInstalling = {};
   final Set<String> _toolsUninstalling = {};
-  final Set<String> _toolsSwitching = {};
   // Progress tracking for install/update operations (tool_name → progress data)
   final Map<String, Map<String, dynamic>> _toolProgress = {};
 
@@ -368,27 +403,6 @@ class ServerConfigContentState extends State<ServerConfigContent> {
     }
   }
 
-  Future<void> _switchToolSource(String toolName, bool useManaged) async {
-    setState(() => _toolsSwitching.add(toolName));
-    try {
-      final data = await widget.ws.switchToolSource(toolName, useManaged);
-      if (!mounted) return;
-      final updatedTool = data['tool'] as Map<String, dynamic>;
-      setState(() {
-        _tools![toolName] = updatedTool;
-        _toolsSwitching.remove(toolName);
-      });
-      // Reload settings — schema can change when switching between sources.
-      _loadToolSettings(toolName);
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _toolsError = e.toString();
-        _toolsSwitching.remove(toolName);
-      });
-    }
-  }
-
   Future<void> _loadToolSettings(String toolName) async {
     setState(() {
       _toolSettingsLoading[toolName] = true;
@@ -414,9 +428,42 @@ class ServerConfigContentState extends State<ServerConfigContent> {
     }
   }
 
+  /// Effective provider value for [toolName] = pending edit if any, else
+  /// the saved value. Empty when the user has not yet picked one.
+  String _effectiveToolProvider(String toolName) {
+    final edits = _toolSettingsEdited[toolName];
+    if (edits != null && edits.containsKey('provider')) {
+      return edits['provider']?.toString() ?? '';
+    }
+    final fields = _toolSettings[toolName];
+    if (fields == null) return '';
+    final field = fields.firstWhere(
+      (f) => f['key'] == 'provider',
+      orElse: () => const {},
+    );
+    return field['value']?.toString() ?? '';
+  }
+
+  /// Coding agents whose ``provider`` field is required. Mirrors the backend
+  /// preflight in ``src/core/agent_auth.py``.
+  static const _codingAgentToolNames = {'claude_code', 'codex', 'opencode'};
+
   Future<void> _saveToolSettings(String toolName) async {
     final edits = _toolSettingsEdited[toolName];
     if (edits == null || edits.isEmpty) return;
+
+    // Block save when a coding agent has no provider picked. The PATCH would
+    // succeed but the agent could not run, and the user's intent in opening
+    // this dialog was almost always to fix exactly that.
+    if (_codingAgentToolNames.contains(toolName) &&
+        _effectiveToolProvider(toolName).isEmpty) {
+      setState(() {
+        _toolSettingsError[toolName] =
+            'Pick a provider before saving.';
+      });
+      return;
+    }
+
     setState(() => _toolSettingsSaving[toolName] = true);
     try {
       final data = await widget.ws.updateToolSettings(toolName, edits);
@@ -427,8 +474,15 @@ class ServerConfigContentState extends State<ServerConfigContent> {
         _toolSettings[toolName] = fields;
         _toolSettingsEdited.remove(toolName);
         _toolSettingsSaving[toolName] = false;
+        _toolSettingsError.remove(toolName);
         _initToolSettingsControllers(toolName, fields);
       });
+      // Bump the catalog generation for this tool so any open dynamic
+      // model dropdown re-fetches against the new credentials.
+      widget.connection?.bumpModelCatalog(toolName);
+      // Refresh the host worker's derived state (agent-readiness preflight,
+      // token limits, …) so the warning banner disappears immediately.
+      widget.onSaved?.call();
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -495,6 +549,9 @@ class ServerConfigContentState extends State<ServerConfigContent> {
         _codexLoggingIn = false;
         _codexLoggedIn = true;
       });
+      // ChatGPT login completed — drop the Codex model cache so the next
+      // dropdown open re-fetches against the freshly authenticated identity.
+      widget.connection?.bumpModelCatalog('codex');
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -517,6 +574,13 @@ class ServerConfigContentState extends State<ServerConfigContent> {
         _claudeCodeSubscription = data['subscription'] as String?;
         _claudeCodeLoginError = null;
       });
+      // When the CLI is already authenticated via Anthropic Login (left over
+      // from a prior session) but the saved provider is still unset, propose
+      // ``anthropic_login`` as a pending edit so the user just clicks Save —
+      // no need to manually pick the matching dropdown option.
+      if (_claudeCodeLoggedIn == true) {
+        _proposeProviderEdit('claude_code', 'anthropic_login');
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -524,6 +588,28 @@ class ServerConfigContentState extends State<ServerConfigContent> {
         _claudeCodeLoginError = e.toString();
       });
     }
+  }
+
+  /// Stage [value] as a pending edit on the ``provider`` field for [toolName]
+  /// when the saved value is empty and the user hasn't already edited it.
+  /// Used to reflect detected OAuth-login state in the form so a single Save
+  /// closes the loop. Caller is already inside [setState] / a microtask.
+  void _proposeProviderEdit(String toolName, String value) {
+    final fields = _toolSettings[toolName];
+    if (fields == null) return;
+    final providerField = fields.firstWhere(
+      (f) => f['key'] == 'provider',
+      orElse: () => const {},
+    );
+    if (providerField.isEmpty) return;
+    final saved = providerField['value']?.toString() ?? '';
+    if (saved.isNotEmpty) return;
+    final edits = _toolSettingsEdited[toolName] ?? {};
+    if (edits.containsKey('provider')) return;
+    setState(() {
+      edits['provider'] = value;
+      _toolSettingsEdited[toolName] = edits;
+    });
   }
 
   Future<void> _startClaudeCodeLogin() async {
@@ -580,6 +666,11 @@ class ServerConfigContentState extends State<ServerConfigContent> {
           _claudeCodeLoginError = 'Login failed. Please try again.';
         }
       });
+      if (loggedIn) {
+        // Anthropic Login completed — drop the Claude Code model cache so
+        // the next dropdown open re-fetches with subscription credentials.
+        widget.connection?.bumpModelCatalog('claude_code');
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -716,6 +807,9 @@ class ServerConfigContentState extends State<ServerConfigContent> {
             ? 'Saved. Some changes may require a server restart.'
             : 'Saved successfully.';
       });
+      // Global LLM credentials may have changed — refresh dropdowns.
+      widget.connection?.bumpModelCatalog('global');
+      widget.onSaved?.call();
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -1029,6 +1123,11 @@ class ServerConfigContentState extends State<ServerConfigContent> {
     'opencode': 'Opencode',
   };
 
+  static const _kManagedTooltip =
+      'Managed by the RCFlow worker. This is a separate install bundled with '
+      'the worker — it does not interfere with any system-wide install you '
+      'may already have.';
+
   /// Config option groups that are absorbed into the Tools section body
   /// instead of appearing as standalone sidebar items.
   static const _mergedIntoTools = {'Tool Management'};
@@ -1112,8 +1211,9 @@ class ServerConfigContentState extends State<ServerConfigContent> {
 
   /// Body shown when a specific tool sub-item is selected in the sidebar.
   ///
-  /// Displays a section header with the tool name then delegates to
-  /// [_buildToolSubsectionBody] for the full install/settings content.
+  /// Renders a header row (icon + tool name + version + managed badge) then
+  /// delegates to [_buildToolSubsectionBody] for actions, errors, and the
+  /// settings panel.
   Widget _buildToolDetailSection(String key, Map<String, dynamic> tool) {
     // Kick off settings load the first time this tool's detail view is shown.
     if (_toolSettings[key] == null && !(_toolSettingsLoading[key] ?? false)) {
@@ -1122,44 +1222,75 @@ class ServerConfigContentState extends State<ServerConfigContent> {
 
     final displayName = _toolDisplayNames[key] ?? key;
     final installed = tool['installed'] as bool? ?? false;
-    final managed = tool['managed'] as bool? ?? false;
+    final currentVersion = tool['current_version'] as String?;
+    final latestVersion = tool['latest_version'] as String?;
     final updateAvailable = tool['update_available'] as bool? ?? false;
-    final managedPath = tool['managed_path'] as String?;
-    final externalPath = tool['external_path'] as String?;
-    final canSwitch = managedPath != null && externalPath != null;
-    final isUpdating = _toolsUpdatingIndividual.contains(key);
-    final isSwitching = _toolsSwitching.contains(key);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Header row: tool name + source badge + Update button
-        Row(
-          children: [
-            _SectionHeader(title: displayName, icon: Icons.handyman_outlined),
-            const Spacer(),
-            if (canSwitch)
-              _SourceToggle(
-                managed: managed,
-                switching: isSwitching,
-                onSwitch: (useManaged) => _switchToolSource(key, useManaged),
-              )
-            else if (managed)
-              _SourceBadge(label: 'managed', accent: true)
-            else if (installed)
-              _SourceBadge(label: 'external', accent: false),
-            if (updateAvailable && installed) ...[
-              const SizedBox(width: 8),
-              _ToolActionButton(
-                label: 'Update',
-                loading: isUpdating,
-                accent: true,
-                onPressed: isUpdating ? null : () => _updateSingleTool(key),
+        Padding(
+          padding: const EdgeInsets.only(bottom: 16),
+          child: Row(
+            children: [
+              Icon(
+                Icons.handyman_outlined,
+                color: context.appColors.accentLight,
+                size: 20,
               ),
+              const SizedBox(width: 8),
+              Text(
+                displayName,
+                style: TextStyle(
+                  color: context.appColors.textPrimary,
+                  fontSize: 17,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(width: 8),
+              if (!installed)
+                Text(
+                  'not installed',
+                  style: TextStyle(
+                    color: context.appColors.textMuted,
+                    fontSize: 13,
+                  ),
+                )
+              else ...[
+                Text(
+                  'v$currentVersion',
+                  style: TextStyle(
+                    color: context.appColors.textSecondary,
+                    fontSize: 13,
+                  ),
+                ),
+                if (updateAvailable && latestVersion != null) ...[
+                  const SizedBox(width: 4),
+                  Icon(
+                    Icons.arrow_forward_rounded,
+                    color: context.appColors.textMuted,
+                    size: 13,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    'v$latestVersion',
+                    style: TextStyle(
+                      color: context.appColors.accentLight,
+                      fontSize: 13,
+                    ),
+                  ),
+                ],
+              ],
+              const Spacer(),
+              if (installed)
+                Tooltip(
+                  message: _kManagedTooltip,
+                  triggerMode: TooltipTriggerMode.longPress,
+                  child: const _SourceBadge(label: 'managed', accent: true),
+                ),
             ],
-          ],
+          ),
         ),
-        const SizedBox(height: 12),
         _buildToolSubsectionBody(key, tool),
       ],
     );
@@ -1167,81 +1298,51 @@ class ServerConfigContentState extends State<ServerConfigContent> {
 
   /// Renders the body content for a tool detail view.
   ///
-  /// Shows version/status, install/uninstall actions, progress feedback,
-  /// errors, and the settings fields inline (always visible, no gear toggle).
+  /// Shows install/uninstall/update actions, progress feedback, errors, and
+  /// the settings fields inline (always visible, no gear toggle). The version
+  /// and tool name are rendered in the header above.
   Widget _buildToolSubsectionBody(String key, Map<String, dynamic> tool) {
     final installed = tool['installed'] as bool? ?? false;
-    final managed = tool['managed'] as bool? ?? false;
-    final currentVersion = tool['current_version'] as String?;
-    final latestVersion = tool['latest_version'] as String?;
     final updateAvailable = tool['update_available'] as bool? ?? false;
     final error = tool['error'] as String?;
     final managedPath = tool['managed_path'] as String?;
-    final externalPath = tool['external_path'] as String?;
-    final canSwitch = managedPath != null && externalPath != null;
     final isInstalling = _toolsInstalling.contains(key);
     final isUninstalling = _toolsUninstalling.contains(key);
+    final isUpdating = _toolsUpdatingIndividual.contains(key);
     final progress = _toolProgress[key];
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Version / status row with action buttons
+        // Action button row: Install / Uninstall + Update.
         Row(
           children: [
-            if (!installed)
-              Text(
-                'Not installed',
-                style: TextStyle(
-                  color: context.appColors.textMuted,
-                  fontSize: 12,
-                ),
+            const Spacer(),
+            if (managedPath == null)
+              _ToolActionButton(
+                label: 'Install',
+                loading: isInstalling,
+                accent: true,
+                onPressed: isInstalling ? null : () => _installManagedTool(key),
               )
             else ...[
-              Text(
-                'v$currentVersion',
-                style: TextStyle(
-                  color: context.appColors.textSecondary,
-                  fontSize: 12,
-                ),
-              ),
-              if (updateAvailable && latestVersion != null) ...[
-                const SizedBox(width: 6),
-                Icon(
-                  Icons.arrow_forward_rounded,
-                  color: context.appColors.textMuted,
-                  size: 12,
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  'v$latestVersion',
-                  style: TextStyle(
-                    color: context.appColors.accentLight,
-                    fontSize: 12,
-                  ),
-                ),
-              ],
-            ],
-            const Spacer(),
-            // Install when no managed binary exists
-            if (managedPath == null && !canSwitch) ...[
-              const SizedBox(width: 4),
-              _ToolActionButton(
-                label: installed ? 'Install managed' : 'Install',
-                loading: isInstalling,
-                accent: !installed,
-                onPressed: isInstalling ? null : () => _installManagedTool(key),
-              ),
-            ],
-            // Uninstall when a managed install exists
-            if (managed && managedPath != null) ...[
-              const SizedBox(width: 4),
               _ToolActionButton(
                 label: 'Uninstall',
                 loading: isUninstalling,
                 accent: false,
-                onPressed: isUninstalling ? null : () => _confirmUninstall(key),
+                onPressed: isUninstalling
+                    ? null
+                    : () => _confirmUninstall(key),
               ),
+              if (updateAvailable && installed) ...[
+                const SizedBox(width: 8),
+                _ToolActionButton(
+                  label: 'Update',
+                  loading: isUpdating,
+                  accent: true,
+                  onPressed: isUpdating ? null : () => _updateSingleTool(key),
+                ),
+              ],
             ],
           ],
         ),
@@ -1263,11 +1364,25 @@ class ServerConfigContentState extends State<ServerConfigContent> {
             padding: const EdgeInsets.only(top: 6),
             child: _ToolProgressBar(progress: progress),
           ),
-        // Settings fields — always visible, no gear toggle required
-        const SizedBox(height: 12),
-        Divider(color: context.appColors.divider, height: 1),
-        const SizedBox(height: 12),
-        _buildToolSettingsPanel(key),
+        // Settings fields — only shown after the tool is installed.  An
+        // un-installed coding agent has nothing meaningful to configure;
+        // showing the form would just confuse users.
+        if (installed) ...[
+          const SizedBox(height: 12),
+          Divider(color: context.appColors.divider, height: 1),
+          const SizedBox(height: 12),
+          _buildToolSettingsPanel(key),
+        ] else ...[
+          const SizedBox(height: 12),
+          Text(
+            'Install ${_toolDisplayNames[key] ?? key} to configure it.',
+            style: TextStyle(
+              color: context.appColors.textMuted,
+              fontSize: 12,
+              fontStyle: FontStyle.italic,
+            ),
+          ),
+        ],
       ],
     );
   }
@@ -1986,6 +2101,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
     final label = field['label'] as String;
     final type = field['type'] as String;
     final description = field['description'] as String? ?? '';
+    final comingSoon = field['coming_soon'] == true;
     final originalValue = field['value'];
     final edits = _toolSettingsEdited[toolName];
     final currentValue = edits != null && edits.containsKey(key)
@@ -2007,22 +2123,49 @@ class ServerConfigContentState extends State<ServerConfigContent> {
     Widget input;
     switch (type) {
       case 'boolean':
+        final titleColor = comingSoon
+            ? context.appColors.textMuted
+            : context.appColors.textPrimary;
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             SwitchListTile(
-              title: Text(
-                label,
-                style: TextStyle(
-                  color: context.appColors.textPrimary,
-                  fontSize: 13,
-                ),
+              title: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Flexible(
+                    child: Text(
+                      label,
+                      style: TextStyle(color: titleColor, fontSize: 13),
+                    ),
+                  ),
+                  if (comingSoon) ...[
+                    const SizedBox(width: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 5,
+                        vertical: 1,
+                      ),
+                      decoration: BoxDecoration(
+                        color: context.appColors.divider,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        'Coming soon',
+                        style: TextStyle(
+                          color: context.appColors.textMuted,
+                          fontSize: 10,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
               ),
               value: currentValue is bool ? currentValue : currentValue == true,
               activeTrackColor: context.appColors.accent,
               contentPadding: EdgeInsets.zero,
               dense: true,
-              onChanged: (v) => onChanged(v),
+              onChanged: comingSoon ? null : (v) => onChanged(v),
             ),
             if (description.isNotEmpty)
               Text(
@@ -2056,6 +2199,13 @@ class ServerConfigContentState extends State<ServerConfigContent> {
               style: TextStyle(
                 color: context.appColors.textPrimary,
                 fontSize: 13,
+              ),
+              hint: Text(
+                'Choose a provider',
+                style: TextStyle(
+                  color: context.appColors.textMuted,
+                  fontSize: 13,
+                ),
               ),
               items: options
                   .map(
@@ -2129,82 +2279,22 @@ class ServerConfigContentState extends State<ServerConfigContent> {
                   []
             : <Map<String, dynamic>>[];
         final allowCustom = providerModels?['allow_custom'] == true;
-
-        if (modelOptions.isEmpty && allowCustom) {
-          // No predefined options — plain text field.
-          final controller = _toolSettingsControllers[toolName]?[key];
-          input = TextField(
-            controller: controller,
-            style: TextStyle(
-              color: context.appColors.textPrimary,
-              fontSize: 13,
-            ),
-            textAlignVertical: TextAlignVertical.center,
-            onChanged: (v) => onChanged(v),
-            decoration: InputDecoration(
-              hintText: label,
-              hintStyle: TextStyle(
-                color: context.appColors.textMuted,
-                fontSize: 12,
-              ),
-              fillColor: context.appColors.bgElevated,
-              filled: true,
-              isDense: true,
-              border: OutlineInputBorder(
-                borderSide: BorderSide.none,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-            ),
-          );
-        } else {
-          // Dropdown with optional custom entry.
-          final entries = modelOptions
-              .map(
-                (o) => DropdownMenuEntry<String>(
-                  value: o['value'] as String,
-                  label: o['label'] as String,
-                ),
-              )
-              .toList();
-          input = DropdownMenu<String>(
-            initialSelection:
-                entries.any((e) => e.value == currentValue?.toString())
-                ? currentValue?.toString()
-                : null,
-            dropdownMenuEntries: entries,
-            enableFilter: true,
-            enableSearch: true,
-            requestFocusOnTap: true,
-            expandedInsets: EdgeInsets.zero,
-            textStyle: TextStyle(
-              color: context.appColors.textPrimary,
-              fontSize: 13,
-            ),
-            menuStyle: MenuStyle(
-              backgroundColor: WidgetStatePropertyAll(
-                context.appColors.bgSurface,
-              ),
-            ),
-            inputDecorationTheme: InputDecorationTheme(
-              fillColor: context.appColors.bgElevated,
-              filled: true,
-              border: OutlineInputBorder(
-                borderSide: BorderSide.none,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-              hintStyle: TextStyle(
-                color: context.appColors.textMuted,
-                fontSize: 12,
-              ),
-              isDense: true,
-            ),
-            onSelected: (v) {
-              if (v != null) onChanged(v);
-            },
-          );
-        }
+        final controller = _toolSettingsControllers[toolName]?[key];
+        input = _DynamicModelInput(
+          value: currentValue?.toString() ?? '',
+          seedOptions: modelOptions,
+          allowCustom: allowCustom,
+          controller: controller,
+          ws: widget.ws,
+          connection: widget.connection,
+          dynamicEnabled: field['dynamic'] == true,
+          fetchScope: field['fetch_scope'] as String?,
+          fetchProvider: field['fetch_provider'] as String?,
+          providerSelection: providerValue,
+          hintText: label,
+          compact: true,
+          onChanged: (v) => onChanged(v),
+        );
       default:
         final controller = _toolSettingsControllers[toolName]?[key];
         input = TextField(
@@ -2324,6 +2414,9 @@ class ServerConfigContentState extends State<ServerConfigContent> {
           modelOptions: modelOptions,
           allowCustom: allowCustom,
           controller: _textControllers[opt.key],
+          ws: widget.ws,
+          connection: widget.connection,
+          providerSelection: providerValue,
           onChanged: (v) => _onValueChanged(opt.key, v, opt.value),
         );
       case 'string_list':
@@ -2782,6 +2875,9 @@ class _ModelSelectField extends StatelessWidget {
   final bool allowCustom;
   final ValueChanged<String> onChanged;
   final TextEditingController? controller;
+  final WebSocketService ws;
+  final WorkerConnection? connection;
+  final String? providerSelection;
 
   const _ModelSelectField({
     required this.option,
@@ -2790,85 +2886,492 @@ class _ModelSelectField extends StatelessWidget {
     required this.modelOptions,
     required this.allowCustom,
     required this.onChanged,
+    required this.ws,
     this.controller,
+    this.connection,
+    this.providerSelection,
   });
 
   @override
   Widget build(BuildContext context) {
-    if (modelOptions.isEmpty) {
-      // No predefined options — plain text field.
-      return _FieldWrapper(
-        option: option,
-        isModified: isModified,
-        child: TextField(
-          controller: controller ?? TextEditingController(text: value),
-          style: TextStyle(color: context.appColors.textPrimary, fontSize: 14),
-          onChanged: onChanged,
-          decoration: InputDecoration(
-            hintText: option.label,
-            fillColor: context.appColors.bgElevated,
-            border: OutlineInputBorder(
-              borderSide: BorderSide.none,
-              borderRadius: BorderRadius.circular(10),
-            ),
-            contentPadding: const EdgeInsets.symmetric(
-              horizontal: 12,
-              vertical: 10,
+    return _FieldWrapper(
+      option: option,
+      isModified: isModified,
+      child: _DynamicModelInput(
+        value: value,
+        seedOptions: modelOptions,
+        allowCustom: allowCustom,
+        onChanged: onChanged,
+        controller: controller,
+        ws: ws,
+        connection: connection,
+        dynamicEnabled: option.isDynamic,
+        fetchScope: option.fetchScope,
+        fetchProvider: option.fetchProvider,
+        providerSelection: providerSelection,
+        hintText: option.label,
+        compact: false,
+      ),
+    );
+  }
+}
+
+/// Shared dropdown / text-field widget that knows how to fetch its own
+/// option list from ``GET /api/models`` when the schema marks the field
+/// as ``dynamic``. Used by both server-config and tool-settings render
+/// paths so they stay in sync on cache/refresh behaviour.
+class _DynamicModelInput extends StatefulWidget {
+  final String value;
+  final List<Map<String, dynamic>> seedOptions;
+  final bool allowCustom;
+  final ValueChanged<String> onChanged;
+  final TextEditingController? controller;
+  final WebSocketService ws;
+
+  /// Optional [WorkerConnection]; when supplied, the widget subscribes to
+  /// its [WorkerConnection.modelCatalogGeneration] map and re-fetches
+  /// whenever the host bumps the matching scope (e.g. after the user
+  /// saves new credentials in this same dialog or completes a login).
+  final WorkerConnection? connection;
+  final bool dynamicEnabled;
+  final String? fetchScope;
+  final String? fetchProvider;
+  final String? providerSelection;
+  final String hintText;
+  final bool compact;
+
+  const _DynamicModelInput({
+    required this.value,
+    required this.seedOptions,
+    required this.allowCustom,
+    required this.onChanged,
+    required this.ws,
+    required this.dynamicEnabled,
+    required this.hintText,
+    required this.compact,
+    this.controller,
+    this.connection,
+    this.fetchScope,
+    this.fetchProvider,
+    this.providerSelection,
+  });
+
+  @override
+  State<_DynamicModelInput> createState() => _DynamicModelInputState();
+}
+
+class _DynamicModelInputState extends State<_DynamicModelInput> {
+  List<Map<String, dynamic>> _liveOptions = const [];
+  bool _loading = false;
+  String _source = 'fallback';
+  String? _error;
+  DateTime? _fetchedAt;
+  String? _lastFetchProvider;
+
+  /// Controller passed to the inner DropdownMenu / TextField. We own it
+  /// when the parent didn't supply one. Listening to it lets typed text
+  /// (custom values not in the catalog) propagate to ``widget.onChanged``
+  /// — without the listener, DropdownMenu only fires ``onSelected`` on
+  /// entry pick and custom strings would silently disappear on save.
+  late final TextEditingController _textController;
+  bool _ownsController = false;
+  bool _suppressTextListener = false;
+
+  /// Last observed value of the host connection's catalog generation for
+  /// ``widget.fetchScope``. When the listener fires and the current
+  /// generation differs, we know credentials changed elsewhere in the
+  /// form (key save, tool save, login flow) and re-fetch the catalog.
+  int _seenCatalogGeneration = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.controller != null) {
+      _textController = widget.controller!;
+    } else {
+      _textController = TextEditingController(text: widget.value);
+      _ownsController = true;
+    }
+    _textController.addListener(_onTextChanged);
+    _seenCatalogGeneration = _currentCatalogGeneration();
+    widget.connection?.addListener(_onConnectionChanged);
+    _maybeFetch();
+  }
+
+  @override
+  void dispose() {
+    widget.connection?.removeListener(_onConnectionChanged);
+    _textController.removeListener(_onTextChanged);
+    if (_ownsController) {
+      _textController.dispose();
+    }
+    super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(covariant _DynamicModelInput oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.connection != widget.connection) {
+      oldWidget.connection?.removeListener(_onConnectionChanged);
+      widget.connection?.addListener(_onConnectionChanged);
+      _seenCatalogGeneration = _currentCatalogGeneration();
+    }
+    if (oldWidget.providerSelection != widget.providerSelection ||
+        oldWidget.fetchScope != widget.fetchScope ||
+        oldWidget.fetchProvider != widget.fetchProvider) {
+      _maybeFetch();
+    }
+  }
+
+  int _currentCatalogGeneration() {
+    final scope = widget.fetchScope;
+    if (scope == null) return 0;
+    return widget.connection?.modelCatalogGeneration[scope] ?? 0;
+  }
+
+  void _onConnectionChanged() {
+    final current = _currentCatalogGeneration();
+    if (current == _seenCatalogGeneration) return;
+    _seenCatalogGeneration = current;
+    _maybeFetch(refresh: true);
+  }
+
+  void _onTextChanged() {
+    if (_suppressTextListener) return;
+    final text = _textController.text;
+    if (text == widget.value) return;
+    // DropdownMenu writes the selected entry's *label* into the
+    // controller, but the saved value should be the entry's raw id.
+    // Map label → id when we can; otherwise treat the text as a custom
+    // free-form value.
+    final options = _mergedOptions();
+    for (final o in options) {
+      final lbl = (o['label'] as String?) ?? (o['value'] as String);
+      final v = o['value'] as String? ?? '';
+      if (v.isEmpty) continue;
+      if (lbl == text) {
+        if (v != widget.value) widget.onChanged(v);
+        return;
+      }
+    }
+    widget.onChanged(text);
+  }
+
+  String? _resolveProvider() {
+    if (widget.fetchProvider != null && widget.fetchProvider!.isNotEmpty) {
+      return widget.fetchProvider;
+    }
+    final p = widget.providerSelection;
+    if (p == null || p.isEmpty) return null;
+    return p;
+  }
+
+  Future<void> _maybeFetch({bool refresh = false}) async {
+    if (!widget.dynamicEnabled) return;
+    final scope = widget.fetchScope;
+    final provider = _resolveProvider();
+    if (scope == null || provider == null) {
+      setState(() {
+        _liveOptions = const [];
+        _loading = false;
+        _source = 'fallback';
+        _error = null;
+        _fetchedAt = null;
+      });
+      return;
+    }
+    // Skip duplicate fetch when nothing relevant changed.
+    if (!refresh &&
+        _lastFetchProvider == provider &&
+        _liveOptions.isNotEmpty &&
+        _source == 'live') {
+      return;
+    }
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final body = await widget.ws.fetchModels(
+        provider: provider,
+        scope: scope,
+        refresh: refresh,
+      );
+      final rawOptions = body['options'] as List<dynamic>? ?? [];
+      final options = rawOptions
+          .map((o) => Map<String, dynamic>.from(o as Map))
+          .toList();
+      DateTime? fetchedAt;
+      final fetchedAtRaw = body['fetched_at'];
+      if (fetchedAtRaw is String) {
+        fetchedAt = DateTime.tryParse(fetchedAtRaw);
+      }
+      if (!mounted) return;
+      setState(() {
+        _liveOptions = options;
+        _source = (body['source'] as String?) ?? 'fallback';
+        _fetchedAt = fetchedAt?.toLocal();
+        _error = body['error'] as String?;
+        _loading = false;
+        _lastFetchProvider = provider;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _liveOptions = const [];
+        _source = 'fallback';
+        _error = e.toString();
+        _loading = false;
+      });
+    }
+  }
+
+  /// Merge live options over the seed list. Live values win when both
+  /// list the same id; otherwise both sets show up (sorted: live first,
+  /// seed-only entries appended).
+  List<Map<String, dynamic>> _mergedOptions() {
+    if (_liveOptions.isEmpty) return widget.seedOptions;
+    final seenValues = <String>{};
+    final merged = <Map<String, dynamic>>[];
+    for (final o in _liveOptions) {
+      final v = o['value'] as String?;
+      if (v == null || v.isEmpty) continue;
+      seenValues.add(v);
+      merged.add(o);
+    }
+    for (final o in widget.seedOptions) {
+      final v = o['value'] as String?;
+      if (v == null || seenValues.contains(v)) continue;
+      merged.add(o);
+    }
+    return merged;
+  }
+
+  String _statusLabel() {
+    if (_loading) return 'Loading models…';
+    if (_error != null && _source == 'fallback') return 'Offline (fallback list)';
+    if (_source == 'fallback') return 'Fallback list';
+    final ts = _fetchedAt;
+    if (_source == 'live' && ts != null) {
+      return 'Live · ${_formatRelative(ts)}';
+    }
+    if (_source == 'cached' && ts != null) {
+      return 'Cached · ${_formatRelative(ts)}';
+    }
+    return _source;
+  }
+
+  Color _statusColor(BuildContext context) {
+    if (_error != null && _source == 'fallback') return Colors.amber.shade600;
+    if (_source == 'live') return context.appColors.successText;
+    if (_source == 'cached') return context.appColors.textSecondary;
+    return context.appColors.textMuted;
+  }
+
+  Widget _buildStatusRow(BuildContext context) {
+    if (!widget.dynamicEnabled) return const SizedBox.shrink();
+    final fontSize = widget.compact ? 10.0 : 11.0;
+    return Padding(
+      padding: EdgeInsets.only(bottom: widget.compact ? 4 : 6),
+      child: Row(
+        children: [
+          if (_loading)
+            SizedBox(
+              width: 12,
+              height: 12,
+              child: CircularProgressIndicator(
+                strokeWidth: 1.5,
+                color: context.appColors.textSecondary,
+              ),
+            )
+          else
+            Icon(Icons.circle, size: 8, color: _statusColor(context)),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Tooltip(
+              message: _error ?? '',
+              child: Text(
+                _statusLabel(),
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: context.appColors.textSecondary,
+                  fontSize: fontSize,
+                ),
+              ),
             ),
           ),
+          IconButton(
+            icon: Icon(
+              Icons.refresh,
+              size: widget.compact ? 14 : 16,
+              color: context.appColors.textSecondary,
+            ),
+            tooltip: 'Refresh model list',
+            onPressed: _loading ? null : () => _maybeFetch(refresh: true),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minHeight: 24, minWidth: 24),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInput(BuildContext context, List<Map<String, dynamic>> options) {
+    final colors = context.appColors;
+    final textSize = widget.compact ? 13.0 : 14.0;
+    final radius = widget.compact ? 8.0 : 10.0;
+    final padding = widget.compact
+        ? const EdgeInsets.symmetric(horizontal: 10, vertical: 8)
+        : const EdgeInsets.symmetric(horizontal: 12, vertical: 10);
+
+    if (options.isEmpty) {
+      return TextField(
+        controller: _textController,
+        style: TextStyle(color: colors.textPrimary, fontSize: textSize),
+        decoration: InputDecoration(
+          hintText: widget.hintText,
+          fillColor: colors.bgElevated,
+          filled: true,
+          isDense: widget.compact,
+          border: OutlineInputBorder(
+            borderSide: BorderSide.none,
+            borderRadius: BorderRadius.circular(radius),
+          ),
+          contentPadding: padding,
         ),
       );
     }
 
-    final entries = modelOptions
+    final entries = options
         .map(
           (o) => DropdownMenuEntry<String>(
             value: o['value'] as String,
-            label: o['label'] as String,
+            label: (o['label'] as String?) ?? (o['value'] as String),
           ),
         )
         .toList();
 
-    return _FieldWrapper(
-      option: option,
-      isModified: isModified,
-      child: DropdownMenu<String>(
-        initialSelection: entries.any((e) => e.value == value) ? value : null,
-        dropdownMenuEntries: entries,
-        enableFilter: true,
-        enableSearch: true,
-        requestFocusOnTap: true,
-        expandedInsets: EdgeInsets.zero,
-        textStyle: TextStyle(
-          color: context.appColors.textPrimary,
-          fontSize: 14,
-        ),
-        menuStyle: MenuStyle(
-          backgroundColor: WidgetStatePropertyAll(context.appColors.bgElevated),
-        ),
-        inputDecorationTheme: InputDecorationTheme(
-          fillColor: context.appColors.bgElevated,
-          filled: true,
-          border: OutlineInputBorder(
-            borderSide: BorderSide.none,
-            borderRadius: BorderRadius.circular(10),
-          ),
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: 12,
-            vertical: 10,
-          ),
-          hintStyle: TextStyle(
-            color: context.appColors.textMuted,
-            fontSize: 14,
-          ),
-          isDense: true,
-        ),
-        onSelected: (v) {
-          if (v != null) onChanged(v);
-        },
+    // Show a warning glyph on the dropdown when the saved value is a
+    // custom string the catalog does not list. The user can still save —
+    // this is purely informational so they know the value isn't one we
+    // got from the upstream provider.
+    final value = widget.value;
+    final isCustomValue =
+        value.isNotEmpty && !entries.any((e) => e.value == value);
+    final iconSize = widget.compact ? 16.0 : 18.0;
+    final Widget? warningIcon = isCustomValue
+        ? Tooltip(
+            message:
+                'Model "$value" is not listed in the catalog. '
+                'It will still be saved as-is.',
+            triggerMode: TooltipTriggerMode.tap,
+            waitDuration: const Duration(milliseconds: 200),
+            showDuration: const Duration(seconds: 4),
+            child: Icon(
+              Icons.warning_amber_rounded,
+              size: iconSize,
+              color: Colors.amber.shade600,
+            ),
+          )
+        : null;
+
+    return DropdownMenu<String>(
+      controller: _textController,
+      initialSelection:
+          entries.any((e) => e.value == widget.value) ? widget.value : null,
+      dropdownMenuEntries: entries,
+      enableFilter: true,
+      enableSearch: true,
+      requestFocusOnTap: true,
+      leadingIcon: warningIcon,
+      // Substring match on BOTH the human label and the raw model id, so
+      // typing "5.5" surfaces every entry containing that fragment instead
+      // of only those whose label starts with "5.5". When nothing
+      // matches, return a single disabled "no matches" entry so the
+      // dropdown doesn't render as a blank empty box — the user keeps
+      // their typed text and can still save it as a custom value.
+      filterCallback: (List<DropdownMenuEntry<String>> entries, String filter) {
+        if (filter.isEmpty) return entries;
+        final needle = filter.toLowerCase();
+        final matches = entries.where((e) {
+          final label = e.label.toLowerCase();
+          final value = e.value.toLowerCase();
+          return label.contains(needle) || value.contains(needle);
+        }).toList();
+        if (matches.isEmpty) {
+          return [
+            DropdownMenuEntry<String>(
+              value: '__no_match__',
+              label: 'No models match "$filter" — value will save as custom',
+              enabled: false,
+            ),
+          ];
+        }
+        return matches;
+      },
+      // Default `searchCallback` selects the first prefix-matching entry to
+      // highlight while typing. Keep that behaviour off so the cursor
+      // doesn't jump while the user is filtering — they can pick from the
+      // menu themselves.
+      searchCallback: (entries, query) => null,
+      expandedInsets: EdgeInsets.zero,
+      textStyle: TextStyle(color: colors.textPrimary, fontSize: textSize),
+      menuStyle: MenuStyle(
+        backgroundColor: WidgetStatePropertyAll(colors.bgElevated),
       ),
+      inputDecorationTheme: InputDecorationTheme(
+        fillColor: colors.bgElevated,
+        filled: true,
+        border: OutlineInputBorder(
+          borderSide: BorderSide.none,
+          borderRadius: BorderRadius.circular(radius),
+        ),
+        contentPadding: padding,
+        hintStyle: TextStyle(
+          color: colors.textMuted,
+          fontSize: textSize,
+        ),
+        isDense: true,
+      ),
+      onSelected: (v) {
+        // Suppress the listener while we sync the controller text to the
+        // selected entry's id, then re-fire onChanged ourselves. Without
+        // the suppression DropdownMenu's own ``controller.text = label``
+        // write would briefly mark the value as "custom" and flicker the
+        // warning icon between the keystroke and our resync.
+        if (v == null || v == '__no_match__') return;
+        _suppressTextListener = true;
+        try {
+          if (_textController.text != v) _textController.text = v;
+        } finally {
+          _suppressTextListener = false;
+        }
+        widget.onChanged(v);
+      },
     );
   }
+
+  @override
+  Widget build(BuildContext context) {
+    final options = _mergedOptions();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildStatusRow(context),
+        _buildInput(context, options),
+      ],
+    );
+  }
+}
+
+String _formatRelative(DateTime ts) {
+  final now = DateTime.now();
+  final diff = now.difference(ts);
+  if (diff.inSeconds < 30) return 'just now';
+  if (diff.inMinutes < 1) return '${diff.inSeconds}s ago';
+  if (diff.inHours < 1) return '${diff.inMinutes}m ago';
+  if (diff.inDays < 1) return '${diff.inHours}h ago';
+  return '${diff.inDays}d ago';
 }
 
 class _BoolField extends StatelessWidget {
@@ -3374,78 +3877,6 @@ class _SourceBadge extends StatelessWidget {
               ? context.appColors.accentLight
               : context.appColors.textMuted,
           fontSize: 9,
-        ),
-      ),
-    );
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Source toggle (managed <-> external)
-// ---------------------------------------------------------------------------
-
-class _SourceToggle extends StatelessWidget {
-  final bool managed;
-  final bool switching;
-  final ValueChanged<bool> onSwitch;
-
-  const _SourceToggle({
-    required this.managed,
-    required this.switching,
-    required this.onSwitch,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    if (switching) {
-      return SizedBox(
-        width: 14,
-        height: 14,
-        child: CircularProgressIndicator(
-          strokeWidth: 2,
-          color: context.appColors.accentLight,
-        ),
-      );
-    }
-    return Container(
-      height: 22,
-      decoration: BoxDecoration(
-        color: context.appColors.bgOverlay,
-        borderRadius: BorderRadius.circular(4),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _toggleOption(context, 'managed', managed, () => onSwitch(true)),
-          _toggleOption(context, 'external', !managed, () => onSwitch(false)),
-        ],
-      ),
-    );
-  }
-
-  Widget _toggleOption(
-    BuildContext context,
-    String label,
-    bool active,
-    VoidCallback onTap,
-  ) {
-    return GestureDetector(
-      onTap: active ? null : onTap,
-      child: Container(
-        padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-        decoration: BoxDecoration(
-          color: active ? context.appColors.accentDim : Colors.transparent,
-          borderRadius: BorderRadius.circular(4),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            color: active
-                ? context.appColors.accentLight
-                : context.appColors.textMuted,
-            fontSize: 9,
-            fontWeight: active ? FontWeight.w600 : FontWeight.normal,
-          ),
         ),
       ),
     );

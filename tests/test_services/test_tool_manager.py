@@ -13,6 +13,7 @@ from src.config import Settings
 from src.services.tool_manager import (
     ManagedTool,
     ToolManager,
+    _atomic_install_binary,
     _detect_claude_platform,
     _detect_codex_target,
     _detect_opencode_asset,
@@ -164,29 +165,11 @@ class TestDetection:
         assert tool.managed is True
 
     @pytest.mark.asyncio
-    async def test_detect_from_path(self, tool_manager: ToolManager):
-        """When binary is found on PATH, detect it as unmanaged."""
-        with (
-            patch("src.services.tool_manager.shutil.which", return_value="/usr/bin/codex"),
-            patch.object(
-                ToolManager,
-                "_get_installed_version",
-                new_callable=AsyncMock,
-                return_value="0.91.0",
-            ),
-        ):
-            tool = await tool_manager.detect_tool("codex")
-            assert tool.binary_path == "/usr/bin/codex"
-            assert tool.managed is False
-            assert tool.current_version == "0.91.0"
-
-    @pytest.mark.asyncio
     async def test_detect_not_found(self, tool_manager: ToolManager):
-        """When binary is not found anywhere, return empty tool."""
-        with patch("src.services.tool_manager.shutil.which", return_value=None):
-            tool = await tool_manager.detect_tool("codex")
-            assert tool.binary_path is None
-            assert tool.managed is False
+        """When the managed binary is not on disk, return empty tool."""
+        tool = await tool_manager.detect_tool("codex")
+        assert tool.binary_path is None
+        assert tool.managed is False
 
 
 # ---------------------------------------------------------------------------
@@ -641,3 +624,65 @@ class TestInstallOpenCode:
         assert tool is not None
         assert tool.managed is True
         assert tool.current_version == "1.3.7"
+
+
+# ---------------------------------------------------------------------------
+# Atomic install helper (Windows-in-use fallback)
+# ---------------------------------------------------------------------------
+
+
+class TestAtomicInstallBinary:
+    def test_overwrites_existing_target(self, tmp_path: Path) -> None:
+        """Standard path: target exists, replace works directly."""
+        tmp_src = tmp_path / "new.tmp"
+        tmp_src.write_bytes(b"new")
+        target = tmp_path / "binary"
+        target.write_bytes(b"old")
+
+        _atomic_install_binary(tmp_src, target)
+
+        assert target.read_bytes() == b"new"
+        assert not tmp_src.exists()
+
+    def test_creates_when_target_missing(self, tmp_path: Path) -> None:
+        tmp_src = tmp_path / "new.tmp"
+        tmp_src.write_bytes(b"new")
+        target = tmp_path / "binary"
+
+        _atomic_install_binary(tmp_src, target)
+
+        assert target.read_bytes() == b"new"
+        assert not tmp_src.exists()
+
+    def test_windows_park_path_used_when_replace_denied(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """When ``replace`` raises PermissionError on Windows, fall back to rename-aside."""
+        monkeypatch.setattr("src.services.tool_manager.sys.platform", "win32")
+        tmp_src = tmp_path / "new.tmp"
+        tmp_src.write_bytes(b"new")
+        target = tmp_path / "binary.exe"
+        target.write_bytes(b"old")
+
+        # First Path.replace() call (the fast-path try) raises PermissionError;
+        # second call (after the rename-aside) succeeds.
+        original_replace = Path.replace
+        calls: dict[str, int] = {"n": 0}
+
+        def fake_replace(self: Path, dst: Path) -> None:
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise PermissionError(5, "Access is denied")
+            original_replace(self, dst)
+
+        monkeypatch.setattr(Path, "replace", fake_replace)
+
+        _atomic_install_binary(tmp_src, target)
+
+        assert target.read_bytes() == b"new"
+        # The old file must have been parked aside; either still on disk
+        # (if the test fs holds it) or already cleaned up.  Either way, it
+        # must not be at the target name.
+        parked = list(target.parent.glob(f"{target.name}.*.old"))
+        # Best-effort cleanup may have removed it; don't assert presence,
+        # just assert that nothing broke.
+        for p in parked:
+            assert p != target
