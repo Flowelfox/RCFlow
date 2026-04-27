@@ -451,17 +451,44 @@ class ServerManager:
         # pid is gone, preventing orphaned backends after GUI crashes.
         env[_PARENT_PID_ENV] = str(os.getpid())
 
-        if getattr(sys, "frozen", False):
+        # ``RCFLOW_SERVER_BIN`` lets a non-frozen launcher (e.g. the Linux
+        # system-python GUI launcher) point the manager at the frozen
+        # ``rcflow`` binary that owns the FastAPI server.  Without this
+        # the dev branch below would invoke the launcher's interpreter
+        # with ``-m src run`` — system python doesn't have the project
+        # deps installed.
+        server_bin = os.environ.get("RCFLOW_SERVER_BIN")
+        if server_bin and Path(server_bin).exists():
             from src.paths import get_data_dir  # noqa: PLC0415
 
             data_dir = get_data_dir()
             data_dir.mkdir(parents=True, exist_ok=True)
             cwd: str | None = str(data_dir)
+            migrate_cmd: list[str] = [server_bin, "migrate"]
+            try:
+                subprocess.run(
+                    migrate_cmd,
+                    cwd=cwd,
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                    check=False,
+                )
+            except Exception as exc:
+                logger.warning("Migration via %s failed: %s", server_bin, exc)
+            cmd: list[str] = [server_bin, "run"]
+        elif getattr(sys, "frozen", False):
+            from src.paths import get_data_dir  # noqa: PLC0415
+
+            data_dir = get_data_dir()
+            data_dir.mkdir(parents=True, exist_ok=True)
+            cwd = str(data_dir)
 
             # Run migrations before starting the server so the database
             # schema is always up-to-date (handles first launch, version
             # upgrades, and data-dir relocations).
-            migrate_cmd: list[str] = [sys.executable, "migrate"]
+            migrate_cmd = [sys.executable, "migrate"]
             try:
                 result = subprocess.run(
                     migrate_cmd,
@@ -482,7 +509,7 @@ class ServerManager:
                 logger.error("Migration error: %s", exc)
                 self._log.append(f"Migration error: {exc}")
 
-            cmd: list[str] = [sys.executable, "run"]
+            cmd = [sys.executable, "run"]
         else:
             # Run migrations in dev mode too
             migrate_cmd = [sys.executable, "-m", "src", "migrate"]

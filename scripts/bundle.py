@@ -465,10 +465,10 @@ def assemble_bundle(pyinstaller_dir: Path, target_platform: str, version: str, a
     if target_platform == "linux":
         tray_png_dest = bundle_dir / "tray_icon.png"
         ensure_tray_png(tray_png_dest)
-        # Ship the GTK + WebKit launcher script alongside the binary so
-        # `rcflow gui` can spawn it under the system Python interpreter
-        # (the frozen interpreter cannot load the C-based PyGObject /
-        # WebKit2 GIR bindings).
+        # Ship the launcher script alongside the binary so `rcflow gui`
+        # can spawn it under the host's system Python interpreter — the
+        # frozen interpreter's tcl/tk aborts on libxcb 1.17 (Ubuntu 25.04+)
+        # and cannot load PyGObject's GIR bindings cleanly.
         gui_dir = bundle_dir / "gui"
         gui_dir.mkdir(parents=True, exist_ok=True)
         gui_launcher_src = PROJECT_ROOT / "scripts" / "linux_gui_window.py"
@@ -476,6 +476,10 @@ def assemble_bundle(pyinstaller_dir: Path, target_platform: str, version: str, a
             shutil.copy2(gui_launcher_src, gui_dir / "linux_gui_window.py")
             os.chmod(gui_dir / "linux_gui_window.py", 0o755)
             print("Copied scripts/linux_gui_window.py → gui/")
+        # Vendor the launcher's pure-Python deps so system python3 can
+        # import them without touching pip at install time.  CustomTkinter
+        # is pure Python; the `src/` tree is shipped as plain sources too.
+        _vendor_linux_launcher_deps(bundle_dir)
 
     # Make the main executable executable on Linux
     if target_platform in {"linux", "macos"}:
@@ -484,6 +488,57 @@ def assemble_bundle(pyinstaller_dir: Path, target_platform: str, version: str, a
             os.chmod(exe, 0o755)
 
     return bundle_dir
+
+
+def _vendor_linux_launcher_deps(bundle_dir: Path) -> None:
+    """Stage pure-Python deps the system-python launcher imports.
+
+    Layout (matches ``scripts/linux_gui_window.py``'s sys.path order):
+
+        bundle_dir/lib/python/customtkinter/   — vendored CustomTkinter
+        bundle_dir/lib/python/src/             — RCFlow Python sources
+                                                  (gui modules, config, paths)
+
+    The frozen rcflow binary keeps its own embedded copy of ``src/`` —
+    this vendored tree only feeds the system-python launcher.  System
+    distro packages are expected to satisfy the rest (python3-tk,
+    python3-pil, python3-gi, python3-pydantic, python3-pydantic-settings,
+    python3-jeepney) and are listed in the ``.deb`` ``Depends:``.
+    """
+    lib_dir = bundle_dir / "lib" / "python"
+    lib_dir.mkdir(parents=True, exist_ok=True)
+
+    src_root = PROJECT_ROOT / "src"
+    if src_root.exists():
+        dest_src = lib_dir / "src"
+        if dest_src.exists():
+            shutil.rmtree(dest_src)
+        shutil.copytree(
+            src_root,
+            dest_src,
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo"),
+        )
+        print(f"Vendored src/ tree to {dest_src.relative_to(bundle_dir)}")
+
+    # Locate the customtkinter package in the build env's site-packages.
+    try:
+        import customtkinter  # noqa: PLC0415
+    except ImportError:
+        print(
+            "WARNING: customtkinter not importable in the build env — Linux .deb will be missing the launcher dep.",
+            file=sys.stderr,
+        )
+        return
+    ctk_src = Path(customtkinter.__file__).resolve().parent
+    dest_ctk = lib_dir / "customtkinter"
+    if dest_ctk.exists():
+        shutil.rmtree(dest_ctk)
+    shutil.copytree(
+        ctk_src,
+        dest_ctk,
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo"),
+    )
+    print(f"Vendored customtkinter to {dest_ctk.relative_to(bundle_dir)}")
 
 
 def install_hicolor_icon(source_png: Path, pkg_root: Path, icon_name: str) -> None:
@@ -662,6 +717,40 @@ def build_deb(bundle_dir: Path, version: str, arch: str) -> Path | None:
     usr_bin.mkdir(parents=True)
     (usr_bin / "rcflow").symlink_to("/opt/rcflow/rcflow")
 
+    # Install a tiny shell wrapper that ensures the systemd worker is up
+    # before invoking ``rcflow gui``.  Without it the dispatcher would try
+    # to spawn ``rcflow run`` as the desktop user, which then fails because
+    # the SQLite database under ``/opt/rcflow/data`` is owned by the
+    # ``rcflow`` service user.  ``systemctl start`` is allowed without a
+    # password thanks to ``50-rcflow.rules`` (see postinst).
+    gui_install_dir = install_dir / "gui"
+    gui_install_dir.mkdir(parents=True, exist_ok=True)
+    wrapper_path = gui_install_dir / "rcflow-gui-wrapper.sh"
+    wrapper_path.write_text(
+        "#!/bin/sh\n"
+        "# Ensure the systemd worker is up *and* serving its configured port\n"
+        "# before invoking ``rcflow gui``.  Without it the dispatcher races\n"
+        "# the systemd ExecStart and may try to spawn ``rcflow run`` as the\n"
+        "# desktop user (which then fails because the SQLite database under\n"
+        "# /opt/rcflow/data is owned by the rcflow service user).\n"
+        "# ``systemctl start`` is allowed without a password thanks to\n"
+        "# ``50-rcflow.rules`` (see postinst).\n"
+        "set -e\n"
+        "PORT=$(grep -E '\"RCFLOW_PORT\"' /opt/rcflow/settings.json 2>/dev/null \\\n"
+        "    | head -1 \\\n"
+        "    | sed -e 's/[^0-9]*//' -e 's/[^0-9].*$//')\n"
+        ': "${PORT:=8765}"\n'
+        "systemctl start rcflow.service >/dev/null 2>&1 || true\n"
+        "for _ in $(seq 1 50); do\n"
+        "    if ss -ltn 2>/dev/null | awk '{print $4}' | grep -qE \":${PORT}$\"; then\n"
+        "        break\n"
+        "    fi\n"
+        "    sleep 0.2\n"
+        "done\n"
+        'exec /opt/rcflow/rcflow gui "$@"\n'
+    )
+    os.chmod(wrapper_path, 0o755)
+
     # Install XDG desktop entry so the worker GUI shows up in the application
     # menu / GNOME Activities search alongside the rcflow-client entry.
     apps_dir = pkg_root / "usr" / "share" / "applications"
@@ -672,12 +761,13 @@ def build_deb(bundle_dir: Path, version: str, arch: str) -> Path | None:
         "Name=RCFlow Worker\n"
         "GenericName=RCFlow Worker\n"
         "Comment=RCFlow background worker — dashboard and tray\n"
-        "Exec=/opt/rcflow/rcflow gui\n"
+        "Exec=/opt/rcflow/gui/rcflow-gui-wrapper.sh\n"
         "Icon=rcflow-worker\n"
         "Terminal=false\n"
         "Categories=Network;Development;Utility;\n"
-        # Matches the WM_CLASS instance set by scripts/linux_gui_window.py
-        # (Gtk.Window.set_wmclass("rcflow", "RCFlow Worker")).
+        # Matches the WM_CLASS the launcher sets via ``ctk.CTk(className="rcflow")``
+        # in src/gui/_dashboard_ctk.py so GNOME / KDE associate the running
+        # window with this .desktop entry and show the rcflow-worker icon.
         "StartupWMClass=rcflow\n"
         "Keywords=rcflow;worker;automation;\n"
     )
@@ -737,29 +827,24 @@ WantedBy=multi-user.target
     debian_dir.mkdir(parents=True)
 
     # Headless `rcflow run` (the systemd service) only needs the bundled
-    # binary and standard glibc.  The optional GUI mode (`rcflow gui`,
-    # invoked by the .desktop launcher) opens a GTK + WebKit window via
-    # the system Python interpreter — the bundled tcl/tk path is unsafe
-    # on modern libxcb (Ubuntu 25.04+).  Headless installs (servers,
-    # containers, WSL without X) can ignore the recommends; desktop
-    # installs already pull them in via the default GNOME / KDE
-    # meta-packages.
-    recommends = [
-        # Native GTK dashboard launcher (Linux GUI)
+    # The frozen rcflow binary itself is self-contained and only needs glibc.
+    # The native GUI (`rcflow gui`) runs the CustomTkinter dashboard under
+    # the host's system Python interpreter — distro-shipped tcl/tk passes
+    # libxcb's threading checks where the bundled stack does not (the
+    # PyInstaller-bundled tcl/tk aborts on Ubuntu 25.04 / libxcb 1.17).
+    # The launcher's Python deps therefore live in distro packages:
+    depends_gui = [
         "python3 (>= 3.10)",
+        "python3-tk",
+        "python3-pil",
+        "python3-pil.imagetk",
         "python3-gi",
+        "python3-pydantic",
+        "python3-pydantic-settings",
+        "python3-jeepney",
         "gir1.2-gtk-3.0",
-        "gir1.2-webkit2-4.1 | gir1.2-webkit-6.0",
-        # Browser-fallback dashboard
-        "xdg-utils",
-        # Tk parity dashboard (kept as fallback for non-Ubuntu-25.04 hosts)
-        "libtcl9.0 | libtcl8.6",
-        "libtk9.0 | libtk8.6",
-        "libxcb1",
-        "libxft2",
-        "libxss1",
-        "libfontconfig1",
         "gir1.2-ayatanaappindicator3-0.1",
+        "xdg-utils",
     ]
     (debian_dir / "control").write_text(
         f"""\
@@ -773,7 +858,7 @@ Description: RCFlow Action Server
  GUI dashboard (`rcflow gui`, also available from the application menu).
 Section: net
 Priority: optional
-Recommends: {", ".join(recommends)}
+Depends: {", ".join(depends_gui)}
 Installed-Size: {sum(f.stat().st_size for f in install_dir.rglob("*") if f.is_file()) // 1024}
 """
     )
@@ -939,6 +1024,24 @@ fi
 if command -v gtk-update-icon-cache >/dev/null 2>&1; then
     gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor 2>/dev/null || true
 fi
+
+# Install a polkit rule that lets locally-logged-in active sessions
+# manage the rcflow.service unit without re-prompting for a password.
+# The dashboard's Stop button calls
+# org.freedesktop.systemd1.Manager.StopUnit over the system bus, and
+# without this rule polkit denies the action — pkexec then fails because
+# a stripped GNOME session may not be running an authentication agent.
+mkdir -p /etc/polkit-1/rules.d
+cat > /etc/polkit-1/rules.d/50-rcflow.rules <<'POLKIT'
+polkit.addRule(function(action, subject) {
+    if (action.id == "org.freedesktop.systemd1.manage-units" &&
+        action.lookup("unit") == "rcflow.service" &&
+        subject.local && subject.active) {
+        return polkit.Result.YES;
+    }
+});
+POLKIT
+chmod 644 /etc/polkit-1/rules.d/50-rcflow.rules
 
 echo ""
 echo "============================================"

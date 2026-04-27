@@ -322,7 +322,7 @@ def _resolve_running_worker_api_key(*, default: str) -> str:
 
 
 def _resolve_linux_gui_window_script() -> Path | None:
-    """Locate the GTK + WebKit launcher script shipped alongside the binary.
+    """Locate the system-python launcher shim shipped alongside the binary.
 
     Frozen builds ship the script under ``<install_dir>/gui/linux_gui_window.py``;
     dev runs use ``<repo>/scripts/linux_gui_window.py``.
@@ -337,22 +337,21 @@ def _resolve_linux_gui_window_script() -> Path | None:
     return None
 
 
-def _run_linux_browser_dashboard(*, minimized: bool) -> None:
+def _run_linux_native_dashboard(*, minimized: bool) -> None:
     """Open the worker dashboard as a native Linux app window.
 
     Starts the worker as a child subprocess if the systemd service is not
     already serving the configured port, polls until ``/health`` responds,
-    then launches a small GTK + WebKit window (``scripts/linux_gui_window.py``,
-    invoked via the system Python interpreter) that hosts the existing
-    ``/dashboard`` HTML so the worker presents a real desktop window with
-    the RCFlow icon in the dock — the same UX users get from the
-    CustomTkinter window on Windows and the NSStatusBar app on macOS.
+    then spawns ``scripts/linux_gui_window.py`` under the host's system
+    Python interpreter to host the CustomTkinter dashboard + AppIndicator
+    tray.  System Python is required because PyInstaller's bundled tcl/tk
+    aborts on Ubuntu 25.04 with a libxcb 1.17 sequence-number assertion;
+    distro-shipped python3-tk does not.
 
-    Falls back to launching the URL in a stand-alone browser
-    (firefox / chrome / chromium / epiphany), and finally to ``xdg-open``,
-    if the GTK/WebKit launcher cannot be loaded (system ``python3-gi`` /
-    ``gir1.2-webkit2-4.x`` missing — declared as deb Recommends, so this
-    only happens on stripped-down installs).
+    Falls back to ``xdg-open`` on the dashboard URL when the launcher
+    script is missing or the system Python is unavailable, so installs
+    without ``python3-tk`` / ``gir1.2-ayatanaappindicator3-0.1`` still get
+    a working dashboard tab.
     """
     import shutil  # noqa: PLC0415
     import socket  # noqa: PLC0415
@@ -428,38 +427,24 @@ def _run_linux_browser_dashboard(*, minimized: bool) -> None:
                 started_child.terminate()
             sys.exit(1)
 
-    if minimized:
-        # Login-autostart path — server is up, do not pop a browser tab.
-        print(f"Worker running at {scheme}://{dashboard_host}:{port}/dashboard", file=sys.stderr)
-        return
-
     # When the systemd worker is already on the port it uses its OWN
     # ``/opt/rcflow/settings.json`` (owned by the ``rcflow`` service user),
     # which usually holds a different ``RCFLOW_API_KEY`` than the per-user
     # ``~/.local/share/rcflow/settings.json`` ``get_settings()`` resolved
-    # for the launcher.  Send the user the *running* worker's key so the
-    # dashboard authenticates instead of greeting them with "API key
-    # rejected".  Falls back to the user-level key when the system file
-    # is unreadable (no install-time grant) — same UX as before.
+    # for the launcher.  Read the running worker's key so the dashboard
+    # authenticates instead of greeting the user with "API key rejected".
     api_key = _resolve_running_worker_api_key(default=settings.RCFLOW_API_KEY or "")
-    url = f"{scheme}://{dashboard_host}:{port}/dashboard"
-    if api_key:
-        url = f"{url}#key={api_key}"
 
-    # Prefer the native GTK + WebKit window (matches Win/macOS UX — the user
-    # sees a real desktop window with the RCFlow icon, not a browser tab).
-    # Spawn it under the *system* Python so the python3-gi / WebKit2 GIR
-    # bindings are available; the frozen interpreter cannot load those C
-    # extensions.
+    # Prefer the native CustomTkinter dashboard launched under the host's
+    # system Python interpreter — distro-shipped tcl/tk passes libxcb's
+    # threading checks, the bundled stack does not.
     system_python = shutil.which("python3") or shutil.which("python")
     launcher_script = _resolve_linux_gui_window_script()
     if system_python and launcher_script and launcher_script.exists():
         # Scrub PyInstaller bootloader env so the system python3 process
-        # loads the host's libgio / libgirepository / WebKit GObject types
-        # cleanly.  Inheriting LD_LIBRARY_PATH from the frozen runtime
-        # makes ``WebKit2.WebView()`` raise ``TypeError: could not get a
-        # reference to type class`` because it pulls bundled .so files
-        # built against an older libgobject ABI.
+        # loads the host's libtcl / libtk / libgobject cleanly.  Inheriting
+        # LD_LIBRARY_PATH from the frozen runtime pulls bundled .so files
+        # built against an older ABI which makes Tk and PyGObject fail.
         clean_env = {
             k: v
             for k, v in os.environ.items()
@@ -475,9 +460,32 @@ def _run_linux_browser_dashboard(*, minimized: bool) -> None:
                 "GTK_EXE_PREFIX",
             }
         }
+        # Tell the launcher who its parent worker is so the parent-death
+        # watchdog (``_install_parent_death_watchdog`` in ``rcflow run``)
+        # keeps doing the right thing across the two-process arch.
+        clean_env.setdefault("RCFLOW_PARENT_PID", str(os.getpid()))
+        # ``ServerManager.start`` honours this when present so the
+        # dashboard's Start/Stop button respawns the frozen worker
+        # instead of the launcher's system-python interpreter.
+        if getattr(sys, "frozen", False):
+            clean_env["RCFLOW_SERVER_BIN"] = sys.executable
+        argv = [
+            system_python,
+            str(launcher_script),
+            "--host",
+            host,
+            "--port",
+            str(port),
+            "--scheme",
+            scheme,
+        ]
+        if api_key:
+            argv.extend(["--api-key", api_key])
+        if minimized:
+            argv.append("--minimized")
         try:
             subprocess.Popen(
-                [system_python, str(launcher_script), url],
+                argv,
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
@@ -487,40 +495,25 @@ def _run_linux_browser_dashboard(*, minimized: bool) -> None:
             return
         except OSError as exc:
             print(
-                f"Failed to launch native GTK dashboard ({exc}); falling back to a browser tab.",
+                f"Failed to launch native CustomTkinter dashboard ({exc}); falling back to xdg-open.",
                 file=sys.stderr,
             )
 
-    # Browser fallback for installs missing python3-gi / WebKit GIR bindings.
-    direct_browsers = (
-        "firefox",
-        "google-chrome",
-        "google-chrome-stable",
-        "chromium",
-        "chromium-browser",
-        "epiphany-browser",
+    if minimized:
+        # No GUI surface available and login-autostart asked us to stay quiet —
+        # the worker is already running, so just exit.
+        print(f"Worker running at {scheme}://{dashboard_host}:{port}/dashboard", file=sys.stderr)
+        return
+
+    url = f"{scheme}://{dashboard_host}:{port}/dashboard"
+    if api_key:
+        url = f"{url}#key={api_key}"
+    print(
+        "RCFlow Worker GUI dependencies missing — install python3-tk, "
+        "python3-gi, gir1.2-ayatanaappindicator3-0.1 (and python3-jeepney) "
+        "for the native dashboard.  Opening the browser dashboard for now.",
+        file=sys.stderr,
     )
-    browser_path = next((p for p in (shutil.which(b) for b in direct_browsers) if p), None)
-    if browser_path is not None:
-        try:
-            subprocess.Popen(
-                [browser_path, "--new-window", url],
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                start_new_session=True,
-            )
-            if scheme == "https":
-                print(
-                    "Opened RCFlow dashboard in a browser. The browser will "
-                    "show a self-signed certificate warning the first time — "
-                    "click Advanced → Accept the Risk and Continue once and "
-                    "the dashboard will load.",
-                    file=sys.stderr,
-                )
-            return
-        except OSError as exc:
-            print(f"Failed to launch {browser_path} ({exc}); falling back to xdg-open.", file=sys.stderr)
     opener = shutil.which("xdg-open") or shutil.which("gio") or shutil.which("gnome-open")
     if opener is None:
         print(f"Open this URL in your browser: {url}", file=sys.stderr)
@@ -541,10 +534,10 @@ def _cmd_gui(args: argparse.Namespace) -> None:
 
     On macOS: launches the native menu bar icon + settings panel (Aqua theme).
     On Windows: launches the CustomTkinter dashboard + system tray icon.
-    On Linux: launches the browser-based dashboard at ``/dashboard`` because
-    PyInstaller's bundled tcl/tk fails the libxcb 1.17+ sequence-number
-    assertion on Ubuntu 25.04.  The browser dashboard offers the same
-    status / token / log surface as the native windows.
+    On Linux: launches the same CustomTkinter dashboard under the host's
+    system Python interpreter (the PyInstaller-bundled tcl/tk aborts on
+    Ubuntu 25.04 with a libxcb 1.17 sequence-number assertion that
+    distro-shipped python3-tk does not).
 
     The ``--minimized`` flag starts the app with the dashboard hidden (tray
     only).  Used by the login autostart entries so rebooting does not pop a
@@ -554,7 +547,7 @@ def _cmd_gui(args: argparse.Namespace) -> None:
     _check_not_root()
     minimized = bool(getattr(args, "minimized", False))
     if sys.platform.startswith("linux"):
-        _run_linux_browser_dashboard(minimized=minimized)
+        _run_linux_native_dashboard(minimized=minimized)
         return
     if sys.platform == "darwin":
         import datetime  # noqa: PLC0415
@@ -592,7 +585,7 @@ def _cmd_tray(args: argparse.Namespace) -> None:
     _check_not_root()
     minimized = bool(getattr(args, "minimized", False))
     if sys.platform.startswith("linux"):
-        _run_linux_browser_dashboard(minimized=minimized)
+        _run_linux_native_dashboard(minimized=minimized)
         return
     if sys.platform == "darwin":
         from src.gui.macos import run_gui_macos  # noqa: PLC0415

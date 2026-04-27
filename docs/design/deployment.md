@@ -1,5 +1,5 @@
 ---
-updated: 2026-04-27
+updated: 2026-04-28
 ---
 
 # Platform Support, Deployment & Bundling
@@ -134,31 +134,50 @@ uv run rcflow                    # or: uv run rcflow run — starts the server
 1. **Parent-death watchdog in the server** — `ServerManager.start()` passes `RCFLOW_PARENT_PID=<gui_pid>` to the child. `_cmd_run` in `src/__main__.py` starts a daemon thread (`_install_parent_death_watchdog`) that polls `os.kill(parent_pid, 0)` every 2 s and sends `SIGTERM` to its own pid when the parent is gone, letting uvicorn shut down gracefully. The env var is absent for systemd / launchd daemon installs, in which case the watchdog is disabled.
 2. **Pidfile-based adoption on GUI relaunch** — `ServerManager.start()` writes the child PID to `<data_dir>/.worker.pid` (resolved to `~/Library/Application Support/rcflow/.worker.pid` on macOS frozen builds). `stop_sync()` / `clear()` delete it on graceful shutdown. On launch, both GUIs call `ServerManager.adopt_if_running()` *before* attempting to spawn a new server: if the pidfile references a live pid, the manager records it as **adopted** (no `Popen` handle — the process is not our child). `is_running()` / `stop()` / `stop_sync()` all handle the adopted path by tracking the pid directly and terminating it via raw signals (`_kill_pid` falls back to `TerminateProcess` on Windows). The GUI shows "Running (WSS) — recovered" in the status pill so the user knows the backend was picked up from a previous crashed session and can stop it normally from the menu.
 
-### Production (Linux — Native GTK + WebKit Dashboard)
+### Production (Linux — Native CustomTkinter Dashboard + AppIndicator Tray)
 
-`rcflow gui` (or `rcflow tray`, which delegates to it) opens a native GTK + WebKit window titled "RCFlow Worker" that hosts the dashboard (`scripts/linux_gui_window.py`, shipped under `/opt/rcflow/gui/linux_gui_window.py` in the `.deb`).  The launcher script runs under the **system** Python interpreter — not the frozen one — so it can load the `python3-gi` / `gir1.2-webkit2-4.x` C extensions that bundle Cairo, GLib, and WebKit.  The frozen interpreter cannot satisfy those imports, which is why we delegate to the host Python instead of bundling them.
+`rcflow gui` (or `rcflow tray`, which delegates to it) opens the same CustomTkinter dashboard the worker uses on Windows and macOS, but launched under the **host's system Python interpreter** rather than the frozen rcflow binary.  The frozen worker stays in charge of the FastAPI server; the launcher process owns the window + tray + portal helpers.  Dispatch lives in `src/__main__._run_linux_native_dashboard`, the launcher entry in `src/gui/linux_app.py`, and the system-python bootstrap shim in `scripts/linux_gui_window.py` (installed at `/opt/rcflow/gui/linux_gui_window.py`).
 
-The browser-based dashboard at `/dashboard` is served by the FastAPI worker itself and is what the GTK window actually renders, so the entire UI lives in `src/api/routes/dashboard.py` (one HTML+JS file).  This means the same dashboard surface is reachable from any browser the user prefers — useful for remote management — while the user-facing default still feels like a native desktop window.
+**Why two processes:** PyInstaller-bundled tcl/tk aborts on Ubuntu 25.04 with libxcb 1.17's strict sequence-number check (`xcb_io.c:157 ... !xcb_xlib_unknown_seq_number`) even when `XInitThreads()` is called early.  Distro-shipped `python3-tk` is built against the system libxcb at build time and does not exhibit the crash.  Running the dashboard under `/usr/bin/python3` therefore sidesteps the upstream incompat without rewriting the UI for GTK.
 
-The `.deb` ships an XDG `.desktop` entry (`/usr/share/applications/rcflow-worker.desktop`) with `StartupWMClass=rcflow` matching `Gtk.Window.set_wmclass("rcflow", "RCFlow Worker")` in the launcher, so GNOME maps the running window back to the launcher entry and shows the RCFlow icon in the dock.  The `rcflow-worker` icon is installed into the hicolor theme at standard sizes (48 / 64 / 128 / 256 / 512 px).
+```
+┌─────────────────────────────────┐        ┌────────────────────────────────────────┐
+│  frozen /opt/rcflow/rcflow      │        │  /usr/bin/python3                      │
+│  ────────────────────────────   │        │  /opt/rcflow/gui/linux_gui_window.py   │
+│  src/__main__.py                │        │   imports src.gui.linux_app            │
+│   _run_linux_native_dashboard:  │        │  imports (system site-packages):       │
+│     start `rcflow run` child   ─┼──TCP──▶│   tkinter, PIL, gi, jeepney            │
+│     wait /api/health           ─┼─HTTP──▶│  imports (vendored at /opt/rcflow      │
+│     Popen(system_python,                  │   /lib/python/):                       │
+│           launcher_script,                 │   customtkinter, src.* sources        │
+│           --host --port --token,           │  builds CTk window + AppIndicator     │
+│           env=cleaned)                     │  IPC singleton + portal subscriber    │
+└─────────────────────────────────┘          └────────────────────────────────────────┘
+```
 
-If the system is missing `python3-gi` / WebKit GIR bindings (declared as `.deb` Recommends, so this should not happen on a desktop install), `rcflow gui` falls back to launching the dashboard URL in `firefox` / `google-chrome` / `chromium` / `epiphany`, then finally `xdg-open`, then prints the URL to stderr.
+**Tray** — `gi.require_version("AyatanaAppIndicator3", "0.1")` driven from a daemon `GLib.MainLoop` thread.  Menu callbacks marshal back to the Tk thread via `root.after(0, …)`, the same indirection `macos.py` uses for PyObjC actions.  Stock GNOME requires the user-facing AppIndicator/KStatusNotifierItem extension; KDE Plasma, XFCE, Cinnamon, MATE, and Sway/waybar all host SNI natively.  When `gir1.2-ayatanaappindicator3-0.1` is unreachable the dashboard runs window-only with a logged warning; `RCFLOW_DISABLE_TRAY=1` forces the same mode unconditionally.
 
-#### CustomTkinter dashboard + tray (legacy fallback path)
+**Notifications** — `org.freedesktop.Notifications.Notify` via `jeepney` (pure-Python D-Bus, no `libdbus` runtime dep).  Used for the updater "Update available" toast; modal confirms (e.g. installer prompt) keep using `tkinter.messagebox`.
 
-The same CustomTkinter dashboard + pystray tray icon used on Windows is *also* reachable on Linux via `src/gui/windows.py` and remains the structure used by Win/macOS.  It is **not** the default Linux path because PyInstaller's bundled tcl/tk fails the libxcb 1.17+ sequence-number assertion on Ubuntu 25.04 (`xcb_io.c:157 ... !xcb_xlib_unknown_seq_number`).  All the platform-aware bits (Linux autostart, AppIndicator gating, PNG iconphoto fallback) are kept in the file so the path can be re-enabled if the upstream incompat is resolved.
+**Theme detection** — `xdg-desktop-portal` `org.freedesktop.portal.Settings.Read("org.freedesktop.appearance", "color-scheme")` at startup, with a `SettingChanged` signal subscriber thread that flips `ctk.set_appearance_mode("dark"/"light")` live.  Falls back to CTk's `"system"` auto-detect when the portal is unreachable.
 
-The Windows GUI codebase is platform-aware so most of the dashboard, log viewer, IPC singleton, and updater logic is shared verbatim across the Win / Linux branches:
+**URL scheme `rcflow://`** — `.desktop` MimeType handler shipped under `/usr/share/applications/rcflow-worker.desktop`, registered via `update-desktop-database` in postinst.  Second-launch dashboards reveal the running instance via `start_ipc_server` / `send_show_to_existing` in `src/gui/core.py`.
 
-- **Tray backend** — `pystray` chooses `AyatanaAppIndicator3` first and `_xorg` last.  The `_xorg` backend opens its own Xlib connection from a daemon thread and races Tk on `xcb_io.c:157 ... !xcb_xlib_unknown_seq_number`, so we skip the tray entirely when AppIndicator GI bindings are unreachable (`_linux_appindicator_available()` in `src/gui/windows.py`).  Closing the window in window-only mode quits the app, mirroring the no-tray fallback that already exists on Windows when `pystray` is missing.
-- **Window icon** — Tk's `iconbitmap` accepts the Windows `.ico` only on Windows; on Linux we install a PNG copy (`tray_icon.png`, generated from the same `.ico` at bundle time) via `iconphoto`.
-- **Autostart** — Mirrors Windows' `HKCU\...\Run` value with an XDG `~/.config/autostart/rcflow-worker.desktop` file that runs `rcflow gui --minimized` at login.  Toggled from the tray menu's **Start with Linux** entry.
-- **`XInitThreads` shim** — Called via `ctypes.CDLL("libX11.so.6").XInitThreads()` before any X traffic, since modern libxcb (Ubuntu 25.04+) aborts the process unless threading is initialised before the first request.
-- **Headless escape hatch** — `RCFLOW_DISABLE_TRAY=1` forces window-only mode at runtime; useful when the user has not installed an AppIndicator extension or wants to suppress the tray icon entirely.
+**Autostart** — XDG `~/.config/autostart/rcflow-worker.desktop`, lifted from `windows.py` into `_dashboard_ctk.py` so the helpers are shared.  Toggle from the tray menu's **Start with Linux** entry.
 
-**Recommends (deb control)** — `libtcl9.0 | libtcl8.6`, `libtk9.0 | libtk8.6`, `libxcb1`, `libxft2`, `libxss1`, `libfontconfig1`, `gir1.2-ayatanaappindicator3-0.1`.  Headless installs (servers, containers, WSL without X) can ignore the recommends; desktop installs already pull them in via the default GNOME / KDE meta-packages.
+**Bundling** — `scripts/bundle.py` installs:
 
-**Note on Ubuntu 25.04 + bundled tk** — PyInstaller's bundled tcl/tk on some Linux hosts fails the libxcb 1.17+ sequence-number assertion even with `XInitThreads()` called early; this is a known upstream interaction.  The systemd-managed headless mode is unaffected and remains the recommended deployment for headless servers.
+- `/opt/rcflow/rcflow` — frozen FastAPI worker (no Tk inside the binary; the GUI path no longer needs it).
+- `/opt/rcflow/gui/linux_gui_window.py` — system-python shim (chmod 755) that prepends `/opt/rcflow/lib/python` and `/opt/rcflow` to `sys.path` and dispatches into `src.gui.linux_app.main`.
+- `/opt/rcflow/lib/python/customtkinter/` — vendored pure-Python CustomTkinter.
+- `/opt/rcflow/lib/python/src/` — RCFlow Python sources (gui modules, config, paths) the launcher imports under system Python.
+- `/usr/share/applications/rcflow-worker.desktop` and the hicolor `rcflow-worker` icon.
+
+**Depends (deb control)** — `python3 (>= 3.10)`, `python3-tk`, `python3-pil`, `python3-pil.imagetk`, `python3-gi`, `python3-pydantic`, `python3-pydantic-settings`, `python3-jeepney`, `gir1.2-gtk-3.0`, `gir1.2-ayatanaappindicator3-0.1`, `xdg-utils`.  The frozen worker remains self-contained — these deps cover only the launcher's imports.  Headless installs (servers, containers) can install the frozen binary path manually if they want to avoid the GUI deps; the systemd service mode does not invoke the launcher.
+
+**Environment plumbing** — the dispatcher passes a scrubbed environment to the launcher (`LD_LIBRARY_PATH`, `LD_PRELOAD`, `PYTHONPATH`, `PYTHONHOME`, `GI_TYPELIB_PATH`, `GIO_MODULE_DIR`, `GTK_PATH`, `GTK_EXE_PREFIX` removed) so the host loaders pick up `/usr/lib/...` cleanly.  `RCFLOW_PARENT_PID` is set so the worker's parent-death watchdog still reaps the FastAPI process if the launcher dies.  `RCFLOW_SERVER_BIN` is set to the frozen rcflow binary so the dashboard's Start/Stop button respawns the worker via the frozen entry point rather than the launcher's interpreter.
+
+**Fallback** — when `python3-tk` or the AppIndicator GI bindings are missing the dispatcher falls back to opening the dashboard URL via `xdg-open` and prints an apt-install hint to stderr; the worker stays running.
 
 ### Production (systemd — Linux)
 

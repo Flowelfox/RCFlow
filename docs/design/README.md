@@ -86,6 +86,9 @@ This file is the **index**. Detailed sections live in sibling files (`./architec
 | macOS Menu Bar       | PyObjC (NSStatusBar / NSStatusItem, main thread via tkinter after()) |
 | GUI Shared Core      | src.gui_core (ServerManager, LogBuffer, poll_server_status) |
 | GUI Design Tokens    | src.theme (colours, typography, spacing constants) |
+| Linux GUI            | CustomTkinter dashboard run under host system Python (`/usr/bin/python3` + `python3-tk`); avoids the bundled-tk × libxcb 1.17 abort |
+| Linux Tray           | PyGObject + AyatanaAppIndicator3 (SNI under the hood, Wayland-clean) on a daemon GLib mainloop |
+| Linux Notifications + Theme | jeepney (pure-Python D-Bus) → `org.freedesktop.Notifications` and `xdg-desktop-portal` `org.freedesktop.appearance.color-scheme` |
 | macOS Distribution   | PyInstaller `.app` bundle wrapped in a styled DMG        |
 | macOS Entitlements   | `scripts/rcflow_macos.entitlements` (hardened runtime, no sandbox) |
 | Worktree Manager     | wtpython (WorktreeManager library)         |
