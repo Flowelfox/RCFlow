@@ -236,7 +236,6 @@ if (-not (Test-Path $jsonFile)) {
     $ApiKey = Generate-ApiKey
 
     $dbPath = (Join-Path $InstallDir "data\rcflow.db") -replace '\\', '/'
-    $toolsPath = (Join-Path $InstallDir "tools") -replace '\\', '/'
 
     $jsonContent = @"
 {
@@ -249,7 +248,7 @@ if (-not (Test-Path $jsonFile)) {
   "WSS_ENABLED": "true",
   "SSL_CERTFILE": "",
   "SSL_KEYFILE": "",
-  "LLM_PROVIDER": "anthropic",
+  "LLM_PROVIDER": "none",
   "ANTHROPIC_API_KEY": "",
   "ANTHROPIC_MODEL": "claude-sonnet-4-6",
   "AWS_REGION": "us-east-1",
@@ -262,7 +261,6 @@ if (-not (Test-Path $jsonFile)) {
   "TASK_MODEL": "",
   "GLOBAL_PROMPT": "",
   "PROJECTS_DIR": "~\Projects",
-  "TOOLS_DIR": "$toolsPath",
   "TOOL_AUTO_UPDATE": "true",
   "TOOL_UPDATE_INTERVAL_HOURS": "6",
   "SESSION_INPUT_TOKEN_LIMIT": "0",

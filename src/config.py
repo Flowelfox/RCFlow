@@ -175,7 +175,9 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite+aiosqlite:///./data/rcflow.db"
 
     # LLM provider: "anthropic" (direct API), "bedrock" (AWS Bedrock), "openai", or "none" (direct tool mode)
-    LLM_PROVIDER: str = "anthropic"
+    # Default is "none" so a fresh install (Linux, macOS, Windows) starts in
+    # direct-tool mode and the user explicitly opts into a paid LLM provider.
+    LLM_PROVIDER: str = "none"
 
     # Anthropic LLM (used when LLM_PROVIDER = "anthropic")
     ANTHROPIC_API_KEY: str = ""
@@ -271,13 +273,23 @@ class Settings(BaseSettings):
         return [Path(p).expanduser().resolve() for p in parts]
 
 
+# Settings whose default is derived from the install location (resolved at
+# launch from ``sys.executable``). Persisting them would freeze the path at
+# first launch and break if the user moves the bundle — notably macOS .app
+# bundles, which can be launched from /Volumes (DMG), /Applications, or
+# anywhere else the user drops them.
+_INSTALL_RELATIVE_FIELDS: frozenset[str] = frozenset({"TOOLS_DIR"})
+
+
 def _populate_missing_defaults(settings: Settings) -> None:
     """Write any Settings fields absent from settings.json with their current values.
 
     Called from :func:`get_settings` after security keys have been generated so
     that a fresh install produces a fully-populated settings.json on first run.
     Only keys that are not already present in the file are written; existing
-    values are never overwritten.
+    values are never overwritten. Install-relative fields
+    (``_INSTALL_RELATIVE_FIELDS``) are deliberately skipped so they re-resolve
+    each launch.
     """
     path = _get_settings_path()
     existing: dict[str, Any] = {}
@@ -290,14 +302,15 @@ def _populate_missing_defaults(settings: Settings) -> None:
     missing: dict[str, str] = {}
     for field_name in Settings.model_fields:
         key = field_name.upper()
-        if key not in existing:
-            value = getattr(settings, field_name)
-            if isinstance(value, Path):
-                missing[key] = str(value)
-            elif isinstance(value, bool):
-                missing[key] = "true" if value else "false"
-            else:
-                missing[key] = str(value) if value is not None else ""
+        if key in existing or key in _INSTALL_RELATIVE_FIELDS:
+            continue
+        value = getattr(settings, field_name)
+        if isinstance(value, Path):
+            missing[key] = str(value)
+        elif isinstance(value, bool):
+            missing[key] = "true" if value else "false"
+        else:
+            missing[key] = str(value) if value is not None else ""
 
     if missing:
         update_settings_file(missing)

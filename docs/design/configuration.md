@@ -1,5 +1,5 @@
 ---
-updated: 2026-04-26
+updated: 2026-04-27
 ---
 
 # Configuration
@@ -34,7 +34,7 @@ All configuration is via environment variables, loaded from a `settings.json` fi
 | `OPENAI_API_KEY`        | cond.    |                 | OpenAI API key (required when `LLM_PROVIDER=openai`) |
 | `OPENAI_MODEL`          | no       | `gpt-5.4`       | OpenAI model ID (e.g. gpt-5.4, gpt-4.1, o3) |
 | `PROJECTS_DIR`          | no       | `~/Projects`    | Comma-separated list of project directories (used in system prompt, path resolution, and `/api/projects` endpoint) |
-| `TOOLS_DIR`             | no       | `./tools`       | Path to tool definitions directory   |
+| `TOOLS_DIR`             | no       | `<install_dir>/tools` (frozen) / `./tools` (dev) | Path to tool definitions directory. Resolved each launch from `sys.executable`; deliberately **not** persisted to `settings.json` so movable bundles (macOS `.app` from DMG, `/Applications`, etc.) keep working when relocated. Set explicitly to override. |
 | `CODEX_API_KEY`         | no       |                 | OpenAI API key for Codex CLI         |
 | `TITLE_MODEL`           | no       | _(main model)_  | Model for session title generation. When blank, falls back to the main model. |
 | `TASK_MODEL`            | no       | _(main model)_  | Model for task extraction and status evaluation. When blank, falls back to the main model. |

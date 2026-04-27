@@ -362,7 +362,7 @@ install_macos_inline() {
   "RCFLOW_PORT": "${rcflow_port}",
   "RCFLOW_API_KEY": "${api_key}",
   "DATABASE_URL": "sqlite+aiosqlite:///${install_prefix}/data/rcflow.db",
-  "LLM_PROVIDER": "anthropic",
+  "LLM_PROVIDER": "none",
   "ANTHROPIC_API_KEY": "",
   "ANTHROPIC_MODEL": "claude-sonnet-4-6",
   "OPENAI_API_KEY": "",
