@@ -17,6 +17,7 @@ from src.core.agent_prompt import (
     _CONTENT_MARKER,
     _DESC_MARKER,
     _TASK_MARKER,
+    extract_code_blocks,
     format_agent_prompt,
 )
 
@@ -189,3 +190,79 @@ class TestFormatAgentPromptEdgeCases:
         assert _DESC_MARKER in result
         assert _CONTENT_MARKER in result
         assert "retry(fn)" in result
+
+
+class TestExtractCodeBlocks:
+    def test_finds_single_block(self) -> None:
+        blocks = extract_code_blocks("Here:\n```python\ndef f(): pass\n```\n")
+        assert blocks == ["```python\ndef f(): pass\n```"]
+
+    def test_finds_multiple_blocks(self) -> None:
+        raw = "First:\n```js\na;\n```\n\nSecond:\n```py\nb\n```"
+        blocks = extract_code_blocks(raw)
+        assert len(blocks) == 2
+        assert "a;" in blocks[0]
+        assert "b" in blocks[1]
+
+    def test_no_blocks_returns_empty(self) -> None:
+        assert extract_code_blocks("Plain text only") == []
+
+
+class TestFormatAgentPromptExtraCodeBlocks:
+    def test_extra_blocks_added_to_additional_content(self) -> None:
+        block = "```python\ndef helper():\n    return 1\n```"
+        result = format_agent_prompt(
+            "Refactor the helper",
+            extra_code_blocks=[block],
+        )
+        assert _CONTENT_MARKER in result
+        content_section = result[result.index(_CONTENT_MARKER) :]
+        assert "def helper():" in content_section
+
+    def test_extra_blocks_merged_with_existing_blocks(self) -> None:
+        existing = "```js\nconsole.log(1);\n```"
+        extra = "```python\nprint(2)\n```"
+        result = format_agent_prompt(f"Update both\n\n{existing}", extra_code_blocks=[extra])
+        content_section = result[result.index(_CONTENT_MARKER) :]
+        assert "console.log(1);" in content_section
+        assert "print(2)" in content_section
+
+    def test_extra_blocks_not_duplicated(self) -> None:
+        block = "```python\ndef foo(): pass\n```"
+        result = format_agent_prompt(
+            f"Fix this\n\n{block}",
+            extra_code_blocks=[block],
+        )
+        # Block must appear exactly once.
+        assert result.count("def foo(): pass") == 1
+
+    def test_extra_blocks_appended_to_already_structured_prompt(self) -> None:
+        raw = "## Task\nFix bug\n\n## Description\nA description.\n"
+        block = "```python\ndef extra(): pass\n```"
+        result = format_agent_prompt(raw, extra_code_blocks=[block])
+        assert _CONTENT_MARKER in result
+        content_section = result[result.index(_CONTENT_MARKER) :]
+        assert "def extra():" in content_section
+
+    def test_extra_blocks_appended_to_existing_additional_content(self) -> None:
+        raw = "## Task\nFix bug\n\n## Description\nA description.\n\n## Additional Content\n```js\noriginal();\n```\n"
+        block = "```python\ndef appended(): pass\n```"
+        result = format_agent_prompt(raw, extra_code_blocks=[block])
+        # Both the original block and the appended block are present, and
+        # there is still only a single Additional Content section header.
+        assert result.count(_CONTENT_MARKER) == 1
+        assert "original();" in result
+        assert "def appended():" in result
+
+    def test_extra_blocks_already_present_in_structured_prompt_not_duplicated(self) -> None:
+        block = "```python\ndef once(): pass\n```"
+        raw = f"## Task\nFix bug\n\n## Description\nA description.\n\n## Additional Content\n{block}\n"
+        result = format_agent_prompt(raw, extra_code_blocks=[block])
+        assert result == raw
+
+    def test_extra_blocks_only_no_raw_prompt(self) -> None:
+        block = "```python\nprint('only-extra')\n```"
+        result = format_agent_prompt("", extra_code_blocks=[block])
+        assert _TASK_MARKER in result
+        assert _CONTENT_MARKER in result
+        assert "print('only-extra')" in result

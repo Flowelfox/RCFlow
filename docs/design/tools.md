@@ -1,5 +1,5 @@
 ---
-updated: 2026-04-26
+updated: 2026-04-27
 ---
 
 # Pluggable Tool Definitions
@@ -169,6 +169,8 @@ Every prompt dispatched to a coding agent (Claude Code, Codex, OpenCode) is norm
 - An empty or whitespace-only prompt falls back to the task title `"Complete the requested task."`.
 
 **Interception point:** `PromptRouter._execute_tool()` in `src/core/prompt_router.py` applies `format_agent_prompt` to `tool_call.tool_input["prompt"]` for all three agent executors (`claude_code`, `codex`, `opencode`) before forwarding to `_start_claude_code / _start_codex / _start_opencode`. This covers both LLM-generated tool calls and direct-mode tool invocations (`#claude_code …`).
+
+**Verbatim user code-block preservation:** On the LLM-mediated path, `PromptRouter.handle_prompt()` extracts fenced code blocks from the user's raw text (`extract_code_blocks` in `src/core/agent_prompt.py`) and stashes them on `ActiveSession._pending_user_code_blocks` before running the agentic loop. When `_execute_tool` later fires for an agent executor it consumes that list and passes the blocks to `format_agent_prompt` via the `extra_code_blocks` keyword, which merges them into the `## Additional Content` section (deduplicated against any blocks the LLM already copied across). This guarantees that a code block the user pastes when starting a new session reaches Claude Code / Codex / OpenCode even if the LLM paraphrased it away while constructing the tool call. The pending list is cleared on first agent invocation and again at turn-end, so blocks never leak into a subsequent prompt.
 
 ## Tool Definition Fields
 

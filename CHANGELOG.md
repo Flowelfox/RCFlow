@@ -12,6 +12,9 @@ and note which component is affected where it matters.
 
 ## [Unreleased]
 
+### Fixed
+- **Code blocks pasted into a new prompt now reach the coding agent** — when you started a new session and included a fenced code block in your message, the block was sometimes dropped before being handed off to the coding agent (Claude Code, Codex, or OpenCode). The agent received only the LLM's paraphrased task description without the verbatim code. Code blocks from your message are now always preserved and attached to the agent task under the **Additional Content** section (Backend)
+
 ---
 
 ## [Backend 0.42.0 / Client 1.45.0] — 2026-04-27

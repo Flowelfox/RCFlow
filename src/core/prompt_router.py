@@ -30,7 +30,7 @@ from src.config import Settings
 from src.core.agent_claude_code import ClaudeCodeAgentMixin
 from src.core.agent_codex import CodexAgentMixin
 from src.core.agent_opencode import OpenCodeAgentMixin
-from src.core.agent_prompt import format_agent_prompt
+from src.core.agent_prompt import extract_code_blocks, format_agent_prompt
 from src.core.attachment_store import ResolvedAttachment
 from src.core.background_tasks import BackgroundTasksMixin
 from src.core.buffer import MessageType
@@ -974,6 +974,12 @@ class PromptRouter(
             # Attachment metadata is included so clients can display file names.
             session.buffer.push_text(MessageType.TEXT_CHUNK, _make_user_buffer_data())
 
+            # Capture verbatim fenced code blocks from the user's message so
+            # they survive the LLM's reformulation when it constructs an agent
+            # tool call. ``_execute_tool`` consumes this list when an agent
+            # tool fires, merging the blocks into ``Additional Content``.
+            session._pending_user_code_blocks = extract_code_blocks(text)
+
             # Define tool execution callback
             agent_started = False
 
@@ -1131,6 +1137,11 @@ class PromptRouter(
                 session.fail(err_content)
                 self._fire_plan_finalization_task(session)
                 self._fire_archive_task(session.id)
+            finally:
+                # Drop any unconsumed user code blocks so they cannot leak
+                # into the next turn (e.g. if the LLM responded with text
+                # only and never invoked an agent tool).
+                session._pending_user_code_blocks = []
 
         # LLM-path turn complete: deliver any queued user message.
         self.schedule_pending_drain(session)
@@ -1147,11 +1158,15 @@ class PromptRouter(
         # Format agent prompts into the structured Task/Description/Additional Content
         # sections BEFORE pushing AGENT_SESSION_START so the banner and the executor
         # both receive the same structured text.  Raw code blocks from the user's
-        # message are preserved in the Additional Content section.
+        # message are preserved in the Additional Content section — both the ones
+        # the LLM copied into ``tool_input["prompt"]`` and any pending blocks
+        # captured from the user's verbatim message that the LLM dropped.
         if tool_def is not None and tool_def.executor in ("claude_code", "codex", "opencode"):
             raw_prompt = tool_call.tool_input.get("prompt", "")
-            if raw_prompt:
-                tool_call.tool_input["prompt"] = format_agent_prompt(raw_prompt)
+            extra_blocks = list(session._pending_user_code_blocks)
+            session._pending_user_code_blocks = []
+            if raw_prompt or extra_blocks:
+                tool_call.tool_input["prompt"] = format_agent_prompt(raw_prompt, extra_code_blocks=extra_blocks)
 
         # For agent tools, push AGENT_SESSION_START (visible banner) then
         # AGENT_GROUP_START (collapsible sub-message group) so the frontend

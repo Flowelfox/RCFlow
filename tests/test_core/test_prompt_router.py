@@ -1791,3 +1791,88 @@ class TestNewSessionStructuredPrompt:
         start_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.AGENT_SESSION_START]
         assert len(start_msgs) == 1
         assert start_msgs[0].data["prompt"] == ""
+
+
+class TestPendingUserCodeBlocks:
+    """Verify that fenced code blocks in the user's verbatim message reach the
+    agent's ``Additional Content`` section even when the LLM omits them when
+    constructing the tool call ``prompt``.
+    """
+
+    @pytest.mark.asyncio
+    async def test_user_code_block_merged_when_llm_omits_it(self, session_manager: SessionManager) -> None:
+        router = _make_router(session_manager)
+        session = session_manager.create_session(SessionType.CONVERSATIONAL)
+        session.set_active()
+        # Simulate handle_prompt having captured the user's verbatim code block
+        # before invoking the agentic loop.
+        session._pending_user_code_blocks = ["```python\ndef broken():\n    return None\n```"]
+
+        mock_td = _make_agent_tool_def("claude_code", "claude_code")
+        router._tool_registry.get.return_value = mock_td  # type: ignore[attr-defined]
+
+        # The LLM dropped the code block — only a paraphrased task description
+        # is in the tool call's prompt argument.
+        tool_call = ToolCallRequest(
+            tool_use_id="codeblk-1",
+            tool_name="claude_code",
+            tool_input={"prompt": "Fix the broken helper function."},
+        )
+        with patch.object(router, "_start_claude_code", AsyncMock(return_value="started")):
+            await router._execute_tool(session, tool_call)
+
+        forwarded = tool_call.tool_input["prompt"]
+        assert "## Additional Content" in forwarded
+        content_idx = forwarded.index("## Additional Content")
+        assert "```python" in forwarded[content_idx:]
+        assert "def broken():" in forwarded[content_idx:]
+        # Pending list is consumed so blocks don't leak into the next agent call.
+        assert session._pending_user_code_blocks == []
+
+    @pytest.mark.asyncio
+    async def test_user_code_block_not_duplicated_when_llm_kept_it(self, session_manager: SessionManager) -> None:
+        router = _make_router(session_manager)
+        session = session_manager.create_session(SessionType.CONVERSATIONAL)
+        session.set_active()
+        block = "```python\ndef broken():\n    return None\n```"
+        session._pending_user_code_blocks = [block]
+
+        mock_td = _make_agent_tool_def("claude_code", "claude_code")
+        router._tool_registry.get.return_value = mock_td  # type: ignore[attr-defined]
+
+        tool_call = ToolCallRequest(
+            tool_use_id="codeblk-2",
+            tool_name="claude_code",
+            tool_input={"prompt": f"Fix this function\n\n{block}"},
+        )
+        with patch.object(router, "_start_claude_code", AsyncMock(return_value="started")):
+            await router._execute_tool(session, tool_call)
+
+        forwarded = tool_call.tool_input["prompt"]
+        # Block appears exactly once in Additional Content.
+        assert forwarded.count("def broken():") == 1
+
+    @pytest.mark.asyncio
+    async def test_pending_blocks_consumed_only_by_agent_executor(self, session_manager: SessionManager) -> None:
+        router = _make_router(session_manager)
+        session = session_manager.create_session(SessionType.CONVERSATIONAL)
+        session.set_active()
+        session._pending_user_code_blocks = ["```python\nprint('hi')\n```"]
+
+        # Non-agent executor (e.g. shell): pending blocks must be left alone so
+        # a subsequent agent call in the same turn still picks them up.
+        mock_td = _make_agent_tool_def("shell", "shell_tool")
+        router._tool_registry.get.return_value = mock_td  # type: ignore[attr-defined]
+
+        tool_call = ToolCallRequest(
+            tool_use_id="codeblk-3",
+            tool_name="shell_tool",
+            tool_input={"command": "echo hi"},
+        )
+        # Stub out the shell executor lookup so we never actually run anything.
+        mock_executor = MagicMock()
+        mock_executor.execute = AsyncMock(return_value=MagicMock(exit_code=0, output="hi", error=""))
+        with patch.object(router, "_get_executor", return_value=mock_executor):
+            await router._execute_tool(session, tool_call)
+
+        assert session._pending_user_code_blocks == ["```python\nprint('hi')\n```"]

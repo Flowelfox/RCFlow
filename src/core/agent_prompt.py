@@ -24,7 +24,18 @@ _DESC_MARKER = "## Description"
 _CONTENT_MARKER = "## Additional Content"
 
 
-def format_agent_prompt(raw: str) -> str:
+def extract_code_blocks(text: str) -> list[str]:
+    """Return all fenced code blocks (`` ``` … ``` ``) found in *text*.
+
+    Used by the prompt router to capture verbatim code blocks from the user's
+    original message so they can be merged into an agent tool call's
+    ``Additional Content`` section even when the LLM omits them when
+    constructing the tool's ``prompt`` argument.
+    """
+    return _CODE_FENCE_RE.findall(text)
+
+
+def format_agent_prompt(raw: str, *, extra_code_blocks: list[str] | None = None) -> str:
     """Return *raw* normalised as a structured agent prompt.
 
     Sections produced (only when non-empty):
@@ -34,12 +45,34 @@ def format_agent_prompt(raw: str) -> str:
     - ``## Additional Content`` — fenced code blocks extracted from *raw*; omitted when empty
 
     Already-structured prompts that contain both ``## Task`` and
-    ``## Description`` are returned unchanged.
+    ``## Description`` are returned unchanged unless *extra_code_blocks*
+    contains blocks not already present in the prompt — those are appended
+    to (or used to create) the ``## Additional Content`` section.
+
+    *extra_code_blocks* is an optional list of fenced code blocks captured from
+    the user's original message that the caller wants preserved in the agent's
+    ``Additional Content`` section regardless of what the LLM chose to put in
+    *raw*. Blocks already present in *raw* are not duplicated.
     """
+    extra = list(extra_code_blocks or [])
+
     if _TASK_MARKER in raw and _DESC_MARKER in raw:
-        return raw
+        if not extra:
+            return raw
+        existing = set(_CODE_FENCE_RE.findall(raw))
+        new_blocks = [b for b in extra if b not in existing]
+        if not new_blocks:
+            return raw
+        joined = "\n\n".join(new_blocks)
+        body = raw.rstrip("\n")
+        if _CONTENT_MARKER in body:
+            return f"{body}\n\n{joined}\n"
+        return f"{body}\n\n{_CONTENT_MARKER}\n{joined}\n"
 
     code_blocks = _CODE_FENCE_RE.findall(raw)
+    for block in extra:
+        if block not in code_blocks:
+            code_blocks.append(block)
     plain = _CODE_FENCE_RE.sub("", raw)
 
     plain_lines = [ln for ln in plain.splitlines() if ln.strip()]

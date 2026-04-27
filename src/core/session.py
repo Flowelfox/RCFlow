@@ -178,6 +178,12 @@ class ActiveSession:
         # Per-stream stack of pre-snapshots for Edit/Write diff computation.
         # Reset at the start of each stream; populated by agent_claude_code.
         self._pending_snapshots: list[tuple[str, str | None] | None] = []
+        # Fenced code blocks extracted from the latest user prompt on the
+        # LLM-mediated path. Consumed by ``PromptRouter._execute_tool`` when an
+        # agent tool is invoked so verbatim code blocks always reach the
+        # agent's ``Additional Content`` section even when the LLM omits them
+        # in the tool's ``prompt`` argument. Cleared after the turn ends.
+        self._pending_user_code_blocks: list[str] = []
         # Dirty tracking for incremental flush.
         # True when in-memory metadata has drifted from the DB row.
         self._dirty: bool = False
