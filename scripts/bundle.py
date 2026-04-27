@@ -830,6 +830,15 @@ fi
 # Fix ownership
 chown -R rcflow:rcflow /opt/rcflow
 
+# Grant the installing user read access to the worker's settings.json so
+# `rcflow gui` (running as the user) can hand the running systemd worker's
+# API key to the browser dashboard.  Without this the dashboard launches
+# with the per-user key and the server rejects it as 401.
+if [ -n "$OWNER_USER" ] && id "$OWNER_USER" &>/dev/null; then
+    chgrp "$OWNER_USER" /opt/rcflow/settings.json 2>/dev/null || true
+    chmod 0640 /opt/rcflow/settings.json 2>/dev/null || true
+fi
+
 # Run database migrations
 echo "Running database migrations..."
 if su -s /bin/bash rcflow -c "cd /opt/rcflow && ./rcflow migrate"; then

@@ -156,8 +156,12 @@ button:disabled { opacity: .5; cursor: not-allowed; }
     try {
       const info = await fetchJson("/api/info");
       showError("");
-      document.getElementById("bind").textContent = info.bind || "—";
-      document.getElementById("port").textContent = info.port ?? "—";
+      // /api/info does not expose the worker's bind/port; derive both
+      // from the window URL we were loaded from.  This is always the
+      // running worker's listen address since the page is served by the
+      // same FastAPI app.
+      document.getElementById("bind").textContent = location.hostname;
+      document.getElementById("port").textContent = location.port || (location.protocol === "https:" ? 443 : 80);
       document.getElementById("backend").textContent = info.backend_id || "—";
       document.getElementById("sessions").textContent =
         info.active_sessions ?? 0;

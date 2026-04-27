@@ -290,6 +290,37 @@ def _cmd_migrate(args: argparse.Namespace) -> None:
     print("Migrations complete.")
 
 
+def _resolve_running_worker_api_key(*, default: str) -> str:
+    """Return the API key in use by whichever worker owns the configured port.
+
+    The bundled deb installs a systemd worker that runs as the dedicated
+    ``rcflow`` user and stores its API key in ``/opt/rcflow/settings.json``;
+    interactive ``rcflow ...`` invocations by other users use a per-user
+    settings file under ``~/.local/share/rcflow/`` with a *different* key.
+    The launcher must hand the dashboard the running worker's key so it
+    authenticates against the actual server.
+
+    Order of preference:
+      1. ``/opt/rcflow/settings.json`` if readable (system-wide install).
+      2. The ``default`` provided by the caller — usually
+         ``settings.RCFLOW_API_KEY`` from ``get_settings()``.
+    """
+    import json  # noqa: PLC0415
+
+    candidates = [
+        Path("/opt/rcflow/settings.json"),
+    ]
+    for path in candidates:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        key = data.get("RCFLOW_API_KEY")
+        if isinstance(key, str) and key:
+            return key
+    return default
+
+
 def _resolve_linux_gui_window_script() -> Path | None:
     """Locate the GTK + WebKit launcher script shipped alongside the binary.
 
@@ -402,7 +433,15 @@ def _run_linux_browser_dashboard(*, minimized: bool) -> None:
         print(f"Worker running at {scheme}://{dashboard_host}:{port}/dashboard", file=sys.stderr)
         return
 
-    api_key = settings.RCFLOW_API_KEY or ""
+    # When the systemd worker is already on the port it uses its OWN
+    # ``/opt/rcflow/settings.json`` (owned by the ``rcflow`` service user),
+    # which usually holds a different ``RCFLOW_API_KEY`` than the per-user
+    # ``~/.local/share/rcflow/settings.json`` ``get_settings()`` resolved
+    # for the launcher.  Send the user the *running* worker's key so the
+    # dashboard authenticates instead of greeting them with "API key
+    # rejected".  Falls back to the user-level key when the system file
+    # is unreadable (no install-time grant) — same UX as before.
+    api_key = _resolve_running_worker_api_key(default=settings.RCFLOW_API_KEY or "")
     url = f"{scheme}://{dashboard_host}:{port}/dashboard"
     if api_key:
         url = f"{url}#key={api_key}"

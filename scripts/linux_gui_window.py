@@ -50,13 +50,15 @@ def _accept_self_signed(webview: WebKit2.WebView) -> None:
     certificate when ``WSS_ENABLED=true`` (default).  Without this hook
     WebKit shows an opaque "Cannot verify connection" page; the dashboard
     is local-only so we whitelist the loopback host instead of requiring
-    the user to install a CA cert.
+    the user to install a CA cert.  Re-issues the load after the host is
+    whitelisted because WebKit does not retry the failed request itself.
     """
     context = webview.get_context()
 
-    def _on_failed(_view: WebKit2.WebView, _failing_uri: str, certificate: object, _errors: object) -> bool:
+    def _on_failed(view: WebKit2.WebView, failing_uri: str, certificate: object, _errors: object) -> bool:
         # Always trust — local URL only, never a remote host.
         context.allow_tls_certificate_for_host(certificate, "127.0.0.1")
+        view.load_uri(failing_uri)
         return True
 
     webview.connect("load-failed-with-tls-errors", _on_failed)
@@ -83,6 +85,11 @@ def main(argv: list[str]) -> int:
         enable_smooth_scrolling=True,
         javascript_can_access_clipboard=True,
     )
+    # VM environments without OpenGL passthrough render the page to a
+    # composited layer that never reaches the screen, leaving the window
+    # blank.  Force the software path so the dashboard always paints.
+    # No-op on hosts with working DRI / GLX.
+    settings.set_hardware_acceleration_policy(WebKit2.HardwareAccelerationPolicy.NEVER)
     webview = WebKit2.WebView.new_with_settings(settings)
     _accept_self_signed(webview)
     webview.load_uri(url)
