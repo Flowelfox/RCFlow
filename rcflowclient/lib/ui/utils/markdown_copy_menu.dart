@@ -79,18 +79,24 @@ void _writeNode(
 /// descendants (e.g. [MarkdownCopyMenu]) can read it when the user right-clicks.
 ///
 /// [SelectableRegionState] keeps its `selectedContent` private, so we cache the
-/// latest selection via the public `onSelectionChanged` callback instead.
+/// latest selection via the public `onSelectionChanged` callback instead. The
+/// last non-empty value is also retained — a right-click inside the selection
+/// makes [SelectableRegion] fire `onSelectionChanged(null)` before our menu
+/// handler runs, so reading the live value would lose the user's selection.
 class SelectionScope extends StatefulWidget {
   final Widget child;
 
   const SelectionScope({super.key, required this.child});
 
-  /// Returns the current plain-text selection tracked by the nearest ancestor
-  /// [SelectionScope], or an empty string if none is active.
+  /// Returns the most recent non-empty plain-text selection tracked by the
+  /// nearest ancestor [SelectionScope], or an empty string if none has been
+  /// made. Used by right-click handlers that need the user's selection even
+  /// after [SelectableRegion] has just cleared it as a side effect of the
+  /// pointer-down or focus loss when the menu opens.
   static String currentSelection(BuildContext context) {
     final scope = context
         .getInheritedWidgetOfExactType<_SelectionScopeProvider>();
-    return scope?.notifier.value ?? '';
+    return scope?.state._lastNonEmpty ?? '';
   }
 
   @override
@@ -98,21 +104,17 @@ class SelectionScope extends StatefulWidget {
 }
 
 class _SelectionScopeState extends State<SelectionScope> {
-  final ValueNotifier<String> _notifier = ValueNotifier('');
-
-  @override
-  void dispose() {
-    _notifier.dispose();
-    super.dispose();
-  }
+  String _lastNonEmpty = '';
 
   @override
   Widget build(BuildContext context) {
     return _SelectionScopeProvider(
-      notifier: _notifier,
+      state: this,
       child: SelectionArea(
-        onSelectionChanged: (content) =>
-            _notifier.value = content?.plainText ?? '',
+        onSelectionChanged: (content) {
+          final text = content?.plainText ?? '';
+          if (text.trim().isNotEmpty) _lastNonEmpty = text;
+        },
         child: widget.child,
       ),
     );
@@ -120,11 +122,11 @@ class _SelectionScopeState extends State<SelectionScope> {
 }
 
 class _SelectionScopeProvider extends InheritedWidget {
-  final ValueNotifier<String> notifier;
+  final _SelectionScopeState state;
 
-  const _SelectionScopeProvider({required this.notifier, required super.child});
+  const _SelectionScopeProvider({required this.state, required super.child});
 
-  // Subscribers read .value on demand; no rebuild-on-change.
+  // Subscribers read state on demand; no rebuild-on-change.
   @override
   bool updateShouldNotify(_SelectionScopeProvider oldWidget) => false;
 }
