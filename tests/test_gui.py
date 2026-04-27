@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import queue
 import subprocess
 import sys
 import threading
@@ -71,6 +72,7 @@ def _make_gui(tmp_path: Path) -> Any:
         gui._external_addr_mirror = "—"
         gui._quitting = False
         gui._tray_icon = None
+        gui._pending_ui: queue.Queue[object] = queue.Queue()
 
         # Use a real ServerManager so that persistence logic is exercised
         gui._log_buffer = LogBuffer()
@@ -157,33 +159,33 @@ class _Var:
         self._v = v
 
 
-def test_on_status_result_marshals_via_after(tmp_path: Path) -> None:
-    """_on_status_result must schedule StringVar updates via root.after(0, …).
+def test_on_status_result_marshals_via_pending_ui(tmp_path: Path) -> None:
+    """_on_status_result must queue StringVar updates via _pending_ui, not root.after().
 
-    poll_server_status invokes the callback from a daemon thread.  On macOS,
-    calling StringVar.set() from a background thread while NSMenu is in its
-    modal tracking loop accesses AppKit off the main thread and produces a
-    deadlock / spinning-beachball cursor.  The fix routes all mutations through
-    self._root.after(0, apply_fn) so they always execute on the Tk main thread.
+    poll_server_status invokes the callback from a daemon thread.  Calling
+    root.after() from a background thread is not thread-safe: it calls into the
+    Tcl interpreter concurrently with the main thread's event loop, corrupting
+    interpreter state (TEOV_SwitchVarFrame null-deref / Tkapp_Call PC=0x1).
+    The fix enqueues a callable into _pending_ui; _update_ui drains it on the
+    main thread each 300 ms tick.
     """
     gui = _make_gui(tmp_path)
     gui._sessions_var = _Var()
     gui._backend_id_var = _Var()
     gui._version_var = _Var()
     gui._external_addr_var = _Var()
-
-    after_calls: list[tuple] = []
     gui._root = MagicMock()
-    gui._root.after.side_effect = lambda delay, fn: after_calls.append((delay, fn))
 
     gui._on_status_result(42, "abc123", "1.0.0", "203.0.113.5:53890")
 
-    # after() must have been called exactly once with delay=0
-    assert len(after_calls) == 1, f"expected 1 after() call, got {len(after_calls)}"
-    delay, apply_fn = after_calls[0]
-    assert delay == 0, f"expected after(0, …), got after({delay}, …)"
+    # root.after() must NOT have been called from the background thread
+    gui._root.after.assert_not_called()
 
-    # The deferred function must actually apply the values
+    # Exactly one callable must have been queued
+    assert gui._pending_ui.qsize() == 1, f"expected 1 pending callback, got {gui._pending_ui.qsize()}"
+    apply_fn = gui._pending_ui.get_nowait()
+
+    # The queued function must apply the values when called on the main thread
     apply_fn()
     assert gui._sessions_var.get() == "42"
     assert gui._backend_id_var.get() == "abc123"
@@ -198,14 +200,11 @@ def test_on_status_result_none_values_not_set(tmp_path: Path) -> None:
     gui._backend_id_var = _Var("oldid")
     gui._version_var = _Var("0.9")
     gui._external_addr_var = _Var("—")
-
-    after_calls: list[tuple] = []
     gui._root = MagicMock()
-    gui._root.after.side_effect = lambda delay, fn: after_calls.append((delay, fn))
 
     gui._on_status_result(None, None, None, None)
-    assert len(after_calls) == 1
-    after_calls[0][1]()  # execute deferred function
+    assert gui._pending_ui.qsize() == 1
+    gui._pending_ui.get_nowait()()  # execute deferred function
 
     # None inputs for sessions/backend_id/version must not overwrite existing values;
     # the external-address row falls back to the em-dash placeholder when off.
@@ -213,6 +212,35 @@ def test_on_status_result_none_values_not_set(tmp_path: Path) -> None:
     assert gui._backend_id_var.get() == "oldid"
     assert gui._version_var.get() == "0.9"
     assert gui._external_addr_var.get() == "—"
+
+
+def test_update_ui_drains_pending_ui_queue(tmp_path: Path) -> None:
+    """_update_ui must drain _pending_ui and execute each callable on the main thread.
+
+    If the drain is removed or broken, background-thread callbacks silently
+    stop applying and the UI freezes on status/updater updates — harder to
+    notice than a crash but equally broken.
+    """
+    gui = _make_gui(tmp_path)
+    gui._root = MagicMock()
+    gui._server = MagicMock()
+    gui._server.is_running.return_value = False
+
+    results: list[str] = []
+    gui._pending_ui.put_nowait(lambda: results.append("first"))
+    gui._pending_ui.put_nowait(lambda: results.append("second"))
+
+    # Stub the parts of _update_ui that need real widgets
+    gui._drain_log_queue = MagicMock()
+    gui._toggle_btn = MagicMock()
+    gui._toggle_btn.cget.return_value = "Start"
+
+    import src.gui._dashboard_ctk as gui_mod  # noqa: PLC0415
+
+    gui_mod.RCFlowDashboard._update_ui(gui)
+
+    assert results == ["first", "second"], f"pending callbacks not drained: {results}"
+    assert gui._pending_ui.empty(), "queue not empty after _update_ui"
 
 
 def test_copy_token_reads_from_file_not_env(tmp_path: Path) -> None:
