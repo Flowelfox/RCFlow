@@ -6,7 +6,7 @@ import json
 import subprocess
 import sys
 import threading
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock, patch
 
 if TYPE_CHECKING:
@@ -20,8 +20,8 @@ _ctk_mock = MagicMock()
 sys.modules.setdefault("customtkinter", _ctk_mock)
 
 
-def _make_gui(tmp_path: Path) -> RCFlowGUI:  # type: ignore[name-defined]  # noqa: F821
-    """Construct an RCFlowGUI with all tkinter/pystray/subprocess pieces mocked out."""
+def _make_gui(tmp_path: Path) -> Any:
+    """Construct an RCFlowDashboard with all tkinter/pystray/subprocess pieces mocked out."""
     # Patch tkinter so no real window is created
     tk_mock = MagicMock()
 
@@ -52,14 +52,14 @@ def _make_gui(tmp_path: Path) -> RCFlowGUI:  # type: ignore[name-defined]  # noq
         # Keep the real config module but redirect settings.json to tmp_path
         patch("src.paths.get_install_dir", return_value=tmp_path),
         # Prevent auto-start side effects
-        patch("src.gui.windows.RCFlowGUI._setup_tray", return_value=False),
-        patch("src.gui.windows.RCFlowGUI._start_server"),
-        patch("src.gui.windows.RCFlowGUI._set_window_icon"),
+        patch("src.gui._dashboard_ctk.RCFlowDashboard._setup_tray", return_value=False),
+        patch("src.gui._dashboard_ctk.RCFlowDashboard._start_server"),
+        patch("src.gui._dashboard_ctk.RCFlowDashboard._install_platform_icon"),
     ):
+        from src.gui._dashboard_ctk import RCFlowDashboard  # noqa: PLC0415
         from src.gui.core import LogBuffer, ServerManager  # noqa: PLC0415
-        from src.gui.windows import RCFlowGUI  # noqa: PLC0415
 
-        gui = RCFlowGUI.__new__(RCFlowGUI)
+        gui = RCFlowDashboard.__new__(RCFlowDashboard)
         # Manually initialise only the attributes touched by _start_server
         gui._ip_var = _Var("0.0.0.0")
         gui._port_var = _Var("53890")
@@ -133,9 +133,9 @@ def test_start_server_persists_host_and_port(tmp_path: Path) -> None:
         mock_run.return_value = MagicMock(returncode=0, stderr="")
 
         # Temporarily restore the real _start_server (it was stubbed during __new__)
-        import src.gui.windows as gui_mod  # noqa: PLC0415
+        import src.gui._dashboard_ctk as gui_mod  # noqa: PLC0415
 
-        gui._start_server = gui_mod.RCFlowGUI._start_server.__get__(gui)
+        gui._start_server = gui_mod.RCFlowDashboard._start_server.__get__(gui)
         gui._start_server()
 
     assert settings_path.exists(), "settings.json was not created"
@@ -236,9 +236,9 @@ def test_copy_token_reads_from_file_not_env(tmp_path: Path) -> None:
     gui._root.clipboard_append.side_effect = clipboard_contents.append
 
     with patch("src.config._get_settings_path", return_value=settings_path):
-        import src.gui.windows as gui_mod  # noqa: PLC0415
+        import src.gui._dashboard_ctk as gui_mod  # noqa: PLC0415
 
-        gui._on_copy_token = gui_mod.RCFlowGUI._on_copy_token.__get__(gui)
+        gui._on_copy_token = gui_mod.RCFlowDashboard._on_copy_token.__get__(gui)
         gui._on_copy_token()
 
     gui._set_status.assert_called_with("Token copied to clipboard", sticky=True)
@@ -253,9 +253,9 @@ def test_copy_token_error_when_file_missing(tmp_path: Path) -> None:
     assert not nonexistent.exists()
 
     with patch("src.config._get_settings_path", return_value=nonexistent):
-        import src.gui.windows as gui_mod  # noqa: PLC0415
+        import src.gui._dashboard_ctk as gui_mod  # noqa: PLC0415
 
-        gui._on_copy_token = gui_mod.RCFlowGUI._on_copy_token.__get__(gui)
+        gui._on_copy_token = gui_mod.RCFlowDashboard._on_copy_token.__get__(gui)
         gui._on_copy_token()
 
     gui._set_status.assert_called_with("No API token configured", error=True, sticky=True)
@@ -280,9 +280,9 @@ def test_start_server_persists_default_host_and_port(tmp_path: Path) -> None:
         mock_popen.return_value.poll.return_value = None
         mock_run.return_value = MagicMock(returncode=0, stderr="")
 
-        import src.gui.windows as gui_mod  # noqa: PLC0415
+        import src.gui._dashboard_ctk as gui_mod  # noqa: PLC0415
 
-        gui._start_server = gui_mod.RCFlowGUI._start_server.__get__(gui)
+        gui._start_server = gui_mod.RCFlowDashboard._start_server.__get__(gui)
         gui._start_server()
 
     assert settings_path.exists()
