@@ -12,6 +12,10 @@ and note which component is affected where it matters.
 
 ## [Unreleased]
 
+---
+
+## [Backend 0.42.0 / Client 1.45.0] — 2026-04-27
+
 ### Added
 - **Native Linux worker dashboard window** — `rcflow gui` on Linux now opens the same CustomTkinter dashboard the worker uses on Windows and macOS, with a system tray icon that respects the desktop's light/dark theme and surfaces toast notifications when a new version is available.  Closing the window minimises to the tray; second launches reveal the running window instead of opening a new one.  The dashboard runs under your system's `python3` so it sidesteps the libxcb 1.17 crash that affected the previous bundled-Tk path on Ubuntu 25.04.  Stock GNOME still needs the AppIndicator/KStatusNotifierItem extension for the tray; KDE Plasma, XFCE, Cinnamon, MATE, and Sway/waybar host the tray natively.  When the GUI dependencies are missing the dispatcher falls back to opening the dashboard URL via `xdg-open` and prints an apt-install hint (Backend)
 - **RCFlow Client shows up in the Linux app menu** — the client `.deb` now ships an `rcflow-client.desktop` launcher and an icon, plus a postinst that refreshes the desktop / icon caches so the entry surfaces immediately without a logout cycle (Client)
@@ -235,7 +239,8 @@ and note which component is affected where it matters.
 - Linux systemd install/uninstall scripts
 - `justfile` with dev, test, lint, format, and bundle targets
 
-[Unreleased]: https://github.com/Flowelfox/RCFlow/compare/v0.41.0...HEAD
+[Unreleased]: https://github.com/Flowelfox/RCFlow/compare/v0.42.0...HEAD
+[Backend 0.42.0 / Client 1.45.0]: https://github.com/Flowelfox/RCFlow/compare/v0.41.0...v0.42.0
 [Backend 0.41.0 / Client 1.44.0]: https://github.com/Flowelfox/RCFlow/compare/v0.40.1...v0.41.0
 [Backend 0.40.1 / Client 1.43.2]: https://github.com/Flowelfox/RCFlow/compare/v0.31.4...v0.40.1
 [Backend 0.31.4 / Client 1.33.4]: https://github.com/Flowelfox/RCFlow/compare/v0.21.0...v0.31.4
