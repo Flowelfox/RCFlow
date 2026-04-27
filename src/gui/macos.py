@@ -23,12 +23,16 @@ import contextlib
 import fcntl
 import logging
 import plistlib
+import queue
 import signal
 import sys
 import time
 import tkinter as tk
 from pathlib import Path
-from typing import IO
+from typing import IO, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 import customtkinter as ctk
 
@@ -133,6 +137,14 @@ class RCFlowMacOSGUI:
         self._log_buffer = LogBuffer()
         self._server = ServerManager(self._log_buffer)
         self._quitting = False
+        # Thread-safe queue for UI callbacks posted from background threads.
+        # Background threads must NEVER call self._root.after() directly —
+        # doing so calls into the Tcl interpreter from a non-Tcl thread, which
+        # races with the main thread's Tcl event loop and corrupts interpreter
+        # state (TEOV_SwitchVarFrame null-deref, Tkapp_Call PC=0x1 crashes).
+        # Instead they put a callable here; _update_ui drains it on the main
+        # thread once per 300 ms tick.
+        self._pending_ui: queue.Queue[Callable[[], None]] = queue.Queue()
 
         # CTk global settings — deferred here (not module-level) so an error
         # finding the bundled theme JSON in a frozen build doesn't prevent the
@@ -598,17 +610,19 @@ class RCFlowMacOSGUI:
 
         def _on_progress(received: int, total: int) -> None:
             pct = int(received * 100 / total) if total else 0
-            self._root.after(0, lambda: self._set_status(f"Downloading update… {pct}%", sticky=True))
+            self._pending_ui.put_nowait(lambda p=pct: self._set_status(f"Downloading update… {p}%", sticky=True))
 
         def _on_done(path: Path) -> None:
             def _ui() -> None:
                 self._set_status(f"Downloaded to {path.name}", sticky=True)
                 self._prompt_launch_installer(path)
 
-            self._root.after(0, _ui)
+            self._pending_ui.put_nowait(_ui)
 
         def _on_error(msg: str) -> None:
-            self._root.after(0, lambda: self._set_status(f"Update download failed: {msg}", error=True, sticky=True))
+            self._pending_ui.put_nowait(
+                lambda m=msg: self._set_status(f"Update download failed: {m}", error=True, sticky=True)
+            )
 
         self._updater.download(on_progress=_on_progress, on_done=_on_done, on_error=_on_error)
 
@@ -894,6 +908,13 @@ class RCFlowMacOSGUI:
             self._quit_requested = False
             self._on_tray_quit()
             return
+
+        try:
+            while True:
+                cb = self._pending_ui.get_nowait()
+                cb()
+        except queue.Empty:
+            pass
 
         self._drain_log_queue()
         running = self._server.is_running()
@@ -1358,7 +1379,7 @@ class RCFlowMacOSGUI:
             self._external_addr_var.set(external_display or "—")  # ty:ignore[unresolved-attribute]
             self._update_tray_status()
 
-        self._root.after(0, _apply)
+        self._pending_ui.put_nowait(_apply)
 
 
 # ── NSStatusItem action delegate (PyObjC) ────────────────────────────────────
