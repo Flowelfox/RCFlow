@@ -160,7 +160,15 @@ class _InputAreaState extends State<InputArea> {
   /// Ctrl/Alt/Shift are still held. Reconciler only clears on actual
   /// drift vs OS — won't break a user genuinely holding Ctrl.
   void _onFocusChanged() {
-    if (!_focusNode.hasFocus) return;
+    if (!_focusNode.hasFocus) {
+      // Dismiss the mention/autocomplete overlay whenever the input loses
+      // focus — otherwise it keeps floating on top of dialogs, popup menus
+      // and worker-settings panels that the user just opened, blocking
+      // their buttons. Mention items use a plain GestureDetector with no
+      // Focus widget, so picking a suggestion does not defocus the input.
+      _dismissOverlay();
+      return;
+    }
     KeyboardStateReconciler.reconcile();
   }
 
