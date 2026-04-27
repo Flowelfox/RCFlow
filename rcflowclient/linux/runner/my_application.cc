@@ -21,6 +21,15 @@ static void first_frame_cb(MyApplication* self, FlView* view) {
 
 // Implements GApplication::activate.
 static void my_application_activate(GApplication* application) {
+  // Re-activations on a unique app come back here when the user opens the
+  // launcher again — surface the running window instead of building a
+  // second one.
+  GtkWindow* existing = gtk_application_get_active_window(GTK_APPLICATION(application));
+  if (existing != nullptr) {
+    gtk_window_present(existing);
+    return;
+  }
+
   MyApplication* self = MY_APPLICATION(application);
   GtkWindow* window =
       GTK_WINDOW(gtk_application_window_new(GTK_APPLICATION(application)));
@@ -45,11 +54,11 @@ static void my_application_activate(GApplication* application) {
   if (use_header_bar) {
     GtkHeaderBar* header_bar = GTK_HEADER_BAR(gtk_header_bar_new());
     gtk_widget_show(GTK_WIDGET(header_bar));
-    gtk_header_bar_set_title(header_bar, "rcflowandroid");
+    gtk_header_bar_set_title(header_bar, "RCFlow Client");
     gtk_header_bar_set_show_close_button(header_bar, TRUE);
     gtk_window_set_titlebar(window, GTK_WIDGET(header_bar));
   } else {
-    gtk_window_set_title(window, "rcflowandroid");
+    gtk_window_set_title(window, "RCFlow Client");
   }
 
   gtk_window_set_default_size(window, 1280, 720);
@@ -78,25 +87,31 @@ static void my_application_activate(GApplication* application) {
   gtk_widget_grab_focus(GTK_WIDGET(view));
 }
 
-// Implements GApplication::local_command_line.
-static gboolean my_application_local_command_line(GApplication* application,
-                                                  gchar*** arguments,
-                                                  int* exit_status) {
+// Implements GApplication::command_line.
+//
+// With ``G_APPLICATION_HANDLES_COMMAND_LINE`` the second-launch process
+// (e.g. the worker's "Add to Client" button shelling
+// ``rcflowclient rcflow://add-worker?…``) becomes a remote and forwards
+// its argv to the running primary instance over D-Bus.  The primary
+// receives the args here and emits the ``command-line`` GApplication
+// signal — the ``gtk`` Flutter plugin (which ``app_links_linux`` plugs
+// into) listens for that signal and forwards the URL to the Dart side
+// through the ``gtk/application`` method channel.
+static int my_application_command_line(GApplication* application,
+                                       GApplicationCommandLine* command_line) {
   MyApplication* self = MY_APPLICATION(application);
-  // Strip out the first argument as it is the binary name.
-  self->dart_entrypoint_arguments = g_strdupv(*arguments + 1);
-
-  g_autoptr(GError) error = nullptr;
-  if (!g_application_register(application, nullptr, &error)) {
-    g_warning("Failed to register: %s", error->message);
-    *exit_status = 1;
-    return TRUE;
+  gint argc = 0;
+  gchar** argv = g_application_command_line_get_arguments(command_line, &argc);
+  // Hold onto args so the primary's first activate can pass them through to
+  // the Dart entrypoint.  Subsequent remote command-lines update the value
+  // but the entrypoint args only matter on cold start.
+  g_clear_pointer(&self->dart_entrypoint_arguments, g_strfreev);
+  if (argc > 1) {
+    self->dart_entrypoint_arguments = g_strdupv(argv + 1);
   }
-
+  g_strfreev(argv);
   g_application_activate(application);
-  *exit_status = 0;
-
-  return TRUE;
+  return 0;
 }
 
 // Implements GApplication::startup.
@@ -126,8 +141,7 @@ static void my_application_dispose(GObject* object) {
 
 static void my_application_class_init(MyApplicationClass* klass) {
   G_APPLICATION_CLASS(klass)->activate = my_application_activate;
-  G_APPLICATION_CLASS(klass)->local_command_line =
-      my_application_local_command_line;
+  G_APPLICATION_CLASS(klass)->command_line = my_application_command_line;
   G_APPLICATION_CLASS(klass)->startup = my_application_startup;
   G_APPLICATION_CLASS(klass)->shutdown = my_application_shutdown;
   G_OBJECT_CLASS(klass)->dispose = my_application_dispose;
@@ -142,7 +156,17 @@ MyApplication* my_application_new() {
   // the application to be recognized beyond its binary name.
   g_set_prgname(APPLICATION_ID);
 
+  // Use the GApplication uniqueness machinery (D-Bus) so a second launch
+  // — including ``rcflowclient rcflow://add-worker?…`` from the URL
+  // handler — is routed back to the running primary instead of spawning
+  // a fresh process that swallows the deep-link.
+  // ``HANDLES_COMMAND_LINE`` makes GApplication forward the remote argv
+  // to the primary's ``command-line`` signal; the bundled ``gtk`` /
+  // ``app_links_linux`` plugins listen there and dispatch the URL into
+  // Dart.  ``HANDLES_OPEN`` is *not* used because the older
+  // ``app_links_linux`` plugin (1.x) only subscribes to ``command-line``.
   return MY_APPLICATION(g_object_new(my_application_get_type(),
                                      "application-id", APPLICATION_ID, "flags",
-                                     G_APPLICATION_NON_UNIQUE, nullptr));
+                                     G_APPLICATION_HANDLES_COMMAND_LINE,
+                                     nullptr));
 }
