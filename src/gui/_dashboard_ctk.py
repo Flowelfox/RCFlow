@@ -16,10 +16,14 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
+import queue
 import sys
 import tkinter as tk
 from pathlib import Path
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 import customtkinter as ctk
 
@@ -74,6 +78,10 @@ class RCFlowDashboard:
         self._ipc_server: object | None = None
         # monotonic expiry for transient status messages (copy-token feedback).
         self._status_sticky_until: float = 0.0
+        # Thread-safe queue for UI callbacks from background threads.
+        # Background threads must never call self._root.after() directly —
+        # it is not thread-safe and causes Tcl interpreter corruption.
+        self._pending_ui: queue.Queue[Callable[[], None]] = queue.Queue()
         # Thread-safe mirrors of Tk vars consulted from background tray
         # threads.  Reading ``tk.BooleanVar.get()`` / ``StringVar.get()`` off
         # the Tk main thread raises ``RuntimeError: main thread is not in
@@ -440,7 +448,7 @@ class RCFlowDashboard:
 
     def _on_updater_change(self) -> None:
         """Listener invoked from the updater worker thread."""
-        self._root.after(0, self._refresh_update_ui)
+        self._pending_ui.put_nowait(self._refresh_update_ui)
 
     def _refresh_update_ui(self) -> None:
         if self._quitting:
@@ -492,17 +500,19 @@ class RCFlowDashboard:
 
         def _on_progress(received: int, total: int) -> None:
             pct = int(received * 100 / total) if total else 0
-            self._root.after(0, lambda: self._set_status(f"Downloading update… {pct}%", sticky=True))
+            self._pending_ui.put_nowait(lambda p=pct: self._set_status(f"Downloading update… {p}%", sticky=True))
 
         def _on_done(path: Path) -> None:
             def _ui() -> None:
                 self._set_status(f"Downloaded to {path.name}", sticky=True)
                 self._prompt_launch_installer(path)
 
-            self._root.after(0, _ui)
+            self._pending_ui.put_nowait(_ui)
 
         def _on_error(msg: str) -> None:
-            self._root.after(0, lambda: self._set_status(f"Update download failed: {msg}", error=True, sticky=True))
+            self._pending_ui.put_nowait(
+                lambda m=msg: self._set_status(f"Update download failed: {m}", error=True, sticky=True)
+            )
 
         self._updater.download(on_progress=_on_progress, on_done=_on_done, on_error=_on_error)
 
@@ -755,6 +765,13 @@ class RCFlowDashboard:
         if self._quitting:
             return
 
+        try:
+            while True:
+                cb = self._pending_ui.get_nowait()
+                cb()
+        except queue.Empty:
+            pass
+
         self._drain_log_queue()
         running = self._server.is_running()
 
@@ -805,7 +822,7 @@ class RCFlowDashboard:
     # ── Tray callback shims (used by subclass tray menus) ─────────────────
 
     def _on_tray_open(self, *_args: object) -> None:
-        self._root.after(0, self._show_window)
+        self._pending_ui.put_nowait(self._show_window)
 
     def _show_window(self) -> None:
         self._root.deiconify()
@@ -870,7 +887,7 @@ class RCFlowDashboard:
                 set_autostart(True)
 
         def _on_ipc_show() -> None:
-            self._root.after(0, self._show_window)
+            self._pending_ui.put_nowait(self._show_window)
 
         self._ipc_server = start_ipc_server(_on_ipc_show)
 
@@ -918,7 +935,7 @@ class RCFlowDashboard:
             self._external_addr_mirror = ext_text
             self._update_tray_status()
 
-        self._root.after(0, _apply)
+        self._pending_ui.put_nowait(_apply)
 
 
 # ── Autostart helpers (Windows + Linux) ───────────────────────────────────────
