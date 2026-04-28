@@ -451,6 +451,7 @@ async def reorder_session(
                 )
 
     # Build the current ordered list of all sessions (in-memory + archived)
+    all_sessions: list[dict[str, Any]]
     if db_session_factory is not None:
         async with db_session_factory() as db:
             all_sessions = await session_manager.list_all_with_archived(db)
@@ -466,7 +467,7 @@ async def reorder_session(
         all_sessions.sort(key=session_sort_key)
 
     # Find current index and remove target from list
-    ordered_ids = [s["session_id"] for s in all_sessions]
+    ordered_ids: list[str] = [s["session_id"] for s in all_sessions]
     if session_id not in ordered_ids:
         ordered_ids.append(session_id)
     ordered_ids.remove(session_id)
