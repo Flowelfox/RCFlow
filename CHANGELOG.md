@@ -12,6 +12,10 @@ and note which component is affected where it matters.
 
 ## [Unreleased]
 
+---
+
+## [Backend 0.42.1] — 2026-04-28
+
 ### Fixed
 - **Code blocks pasted into a new prompt now reach the coding agent** — when you started a new session and included a fenced code block in your message, the block was sometimes dropped before being handed off to the coding agent (Claude Code, Codex, or OpenCode). The agent received only the LLM's paraphrased task description without the verbatim code. Code blocks from your message are now always preserved and attached to the agent task under the **Additional Content** section (Backend)
 
@@ -242,7 +246,8 @@ and note which component is affected where it matters.
 - Linux systemd install/uninstall scripts
 - `justfile` with dev, test, lint, format, and bundle targets
 
-[Unreleased]: https://github.com/Flowelfox/RCFlow/compare/v0.42.0...HEAD
+[Unreleased]: https://github.com/Flowelfox/RCFlow/compare/v0.42.1...HEAD
+[Backend 0.42.1]: https://github.com/Flowelfox/RCFlow/compare/v0.42.0...v0.42.1
 [Backend 0.42.0 / Client 1.45.0]: https://github.com/Flowelfox/RCFlow/compare/v0.41.0...v0.42.0
 [Backend 0.41.0 / Client 1.44.0]: https://github.com/Flowelfox/RCFlow/compare/v0.40.1...v0.41.0
 [Backend 0.40.1 / Client 1.43.2]: https://github.com/Flowelfox/RCFlow/compare/v0.31.4...v0.40.1
