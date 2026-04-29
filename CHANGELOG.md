@@ -12,8 +12,21 @@ and note which component is affected where it matters.
 
 ## [Unreleased]
 
+---
+
+## [Backend 0.43.0 / Client 1.46.0] — 2026-04-29
+
+### Added
+- **About RCFlow Worker panel on macOS** — the worker's App menu now opens a populated About panel with the app icon, current version, and a short credits paragraph instead of an empty placeholder dialog. Click the leftmost menu (left of "File") and pick **About RCFlow Worker** (Backend)
+- **Status dot in the macOS tray menu** — the first menu row ("RCFlow Worker: Running" / "Stopped") now shows a green or grey dot at a glance, so you can tell whether the daemon is up without reading the text (Backend)
+
 ### Changed
-- **macOS menu bar uses a custom RCFlow icon** — the worker's menu bar now shows a monochrome RC + flow-arrow mark instead of the generic lightning bolt. The icon is a template image, so it auto-tints to match light or dark menu bar themes. The app icon picks up the same RC mark (blocky 5-segment C, horizontal flow arrows) so the brand reads consistently between the menu bar and the Dock / Launchpad (Backend)
+- **Branded macOS menu bar icon** — replaces the generic SF Symbol bolt with a monochrome RC + flow-arrows mark. The icon is a template image, so macOS auto-tints it to match the active menu bar theme (light, dark, or transparent backgrounds) (Backend)
+- **Redesigned app icon across all platforms** — blocky 5-segment "C", horizontal flow-arrows, and a centered composition, applied to the Worker app's Dock/Finder icon, the Flutter client's icons (Android, iOS, web, macOS, Windows), and the Linux indicator. The macOS App menu, Dock tooltip, and window title now read "RCFlow Worker" rather than "Python3.12" when running unfrozen (Backend + Client)
+- **Tray menu entries get leading icons** — Dashboard, Start/Stop server, Copy Token, Add to Client, Update available, Check for Updates, and Quit each show an SF Symbol next to the title for faster scanning. The "Start with macOS" toggle uses an inline checkmark icon instead of macOS's built-in state column, so toggling it no longer shifts the rest of the menu rightward (Backend)
+
+### Fixed
+- **macOS worker startup no longer flashes through three icons** — when launching `rcflow gui` on macOS, the Dock used to show the Python launcher icon, then a "killed" gap, then a generic white-document placeholder before settling on the colored RC icon. The dashboard window now appears in one frame with the right Dock icon already painted (Backend)
 
 ---
 
