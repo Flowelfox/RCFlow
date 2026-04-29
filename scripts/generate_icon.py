@@ -14,6 +14,7 @@ Rendered at 4x (4096x4096) and downscaled for crisp results.
 
 import math
 import os
+import random
 from pathlib import Path
 
 from PIL import Image, ImageDraw
@@ -171,10 +172,19 @@ def draw_thick_arc(
     draw.arc(bbox, start=start_deg, end=end_deg, fill=color, width=width)
 
 
-def draw_letter_r(img: Image.Image, size: int, x: float, y: float, h: float, w: float, stroke: int) -> Image.Image:
+def draw_letter_r(
+    img: Image.Image,
+    size: int,
+    x: float,
+    y: float,
+    h: float,
+    w: float,
+    stroke: int,
+    color: tuple[int, int, int] | None = None,
+) -> Image.Image:
     """Draw a bold geometric R."""
     draw = ImageDraw.Draw(img)
-    c = (*ACCENT_1, 255)
+    c = (*(color if color is not None else ACCENT_1), 255)
     half_s = stroke // 2
 
     # Vertical spine
@@ -222,10 +232,19 @@ def draw_letter_r(img: Image.Image, size: int, x: float, y: float, h: float, w: 
     return img
 
 
-def draw_letter_c(img: Image.Image, size: int, x: float, y: float, h: float, w: float, stroke: int) -> Image.Image:
+def draw_letter_c(
+    img: Image.Image,
+    size: int,
+    x: float,
+    y: float,
+    h: float,
+    w: float,
+    stroke: int,
+    color: tuple[int, int, int] | None = None,
+) -> Image.Image:
     """Draw a bold geometric C."""
     draw = ImageDraw.Draw(img)
-    c = (*ACCENT_2, 255)
+    c = (*(color if color is not None else ACCENT_2), 255)
 
     # C as a thick arc (~270 degrees, open on right)
     c_bbox = [x, y, x + w, y + h]
@@ -249,20 +268,35 @@ def generate_master_icon() -> Image.Image:
     letter_h = area * 0.50
     letter_w = area * 0.30
 
-    # Position: R on left, C next to it, both vertically centered
-    letters_total_w = letter_w + area * 0.04 + letter_w * 0.95
-    base_x = pad + (area * 0.50 - letters_total_w) / 2
+    # Geometry:
+    #   R (letter_w) | gap_rc | C (c_w) | gap_cf | flow body | chevron arm
+    # Computed first so the whole composition can be centred horizontally.
+    c_size_ratio = 0.80
+    c_w = letter_w * c_size_ratio
+    c_h = letter_h * c_size_ratio
+    gap_rc = area * 0.02
+    gap_cf = size * 0.012
+    flow_body_len = letter_w * 1.55
+    chevron_arm = stroke * 0.72 * 2.5  # matches arm_len calc below for outer flows
+    composition_w = letter_w + gap_rc + c_w + gap_cf + flow_body_len + chevron_arm * 0.5
+
+    base_x = pad + (area - composition_w) / 2
     base_y = (size - letter_h) / 2
 
     img = draw_letter_r(img, size, base_x, base_y, letter_h, letter_w, stroke)
 
-    c_x = base_x + letter_w + area * 0.02
-    c_w = letter_w * 0.95
-    img = draw_letter_c(img, size, c_x, base_y, letter_h, c_w, stroke)
+    # C: blocky 5-segment bracket sized to ~80% of R, vertically centred.
+    # Same shape as the menu-bar template so the brand reads consistently
+    # across the app icon and the macOS tray.
+    c_y = base_y + (letter_h - c_h) / 2
+    c_x = base_x + letter_w + gap_rc
+    master_rng = random.Random(TRAY_TEMPLATE_SEED)
+    img = draw_letter_c_5seg(img, c_x, c_y, c_h, c_w, stroke, ACCENT_2, master_rng)
 
-    # 3. Flowing stream lines (3 bezier curves flowing right)
-    flow_start_x = c_x + c_w * 0.65
-    flow_end_x = size - pad * 0.6
+    # 3. Flowing stream lines (3 bezier curves flowing right). Anchor past the
+    # C's right edge plus a small gap so wave bulges don't cross the C bracket.
+    flow_start_x = c_x + c_w + gap_cf
+    flow_end_x = flow_start_x + flow_body_len
 
     # Each flow line: start from near C, wave rightward
     flow_configs = [
@@ -307,14 +341,13 @@ def generate_master_icon() -> Image.Image:
             cfg["alpha"],
         )
 
-        # Arrowhead at end
-        tang = bezier_tangent(p0, p1, p2, p3, 0.95)
-        angle = math.atan2(tang[1], tang[0])
-        tip_pt = bezier_point(p0, p1, p2, p3, 0.92)
+        # Horizontal chevron — forced to angle 0 so arrows read as ">" instead
+        # of following the bezier tangent (which slopes upward at the curve end).
+        tip_pt = (flow_end_x + size * 0.005, yc)
         img = draw_chevron(
             img,
             tip_pt,
-            angle,
+            angle=0.0,
             arm_len=cfg["thickness"] * 2.5,
             thickness=cfg["thickness"] * 0.65,
             color=cfg["color"],
@@ -329,6 +362,157 @@ def generate_master_icon() -> Image.Image:
     # 5. Downscale
     master = img.resize((MASTER_SIZE, MASTER_SIZE), Image.Resampling.LANCZOS)
     return master
+
+
+def _thick_segment(
+    draw: ImageDraw.ImageDraw,
+    p1: tuple[float, float],
+    p2: tuple[float, float],
+    thickness: float,
+    color: tuple[int, int, int],
+) -> None:
+    """Draw a filled rectangle along the axis from p1 to p2 (any angle)."""
+    dx = p2[0] - p1[0]
+    dy = p2[1] - p1[1]
+    length = math.sqrt(dx * dx + dy * dy)
+    if length < 1e-6:
+        return
+    half = thickness / 2
+    nx, ny = -dy / length * half, dx / length * half
+    draw.polygon(
+        [
+            (p1[0] + nx, p1[1] + ny),
+            (p1[0] - nx, p1[1] - ny),
+            (p2[0] - nx, p2[1] - ny),
+            (p2[0] + nx, p2[1] + ny),
+        ],
+        fill=(*color, 255),
+    )
+
+
+def draw_letter_c_5seg(
+    img: Image.Image,
+    x: float,
+    y: float,
+    h: float,
+    w: float,
+    stroke: int,
+    color: tuple[int, int, int],
+    rng: "random.Random",
+    j_mag: float = 0.10,
+    chamfer_ratio: float = 0.30,
+) -> Image.Image:
+    """Blocky C built from 5 straight segments, open on the right.
+
+    Hexagonal bracket: top → top-left chamfer → left → bottom-left chamfer →
+    bottom. Slight per-vertex jitter gives the letter a hand-drawn imperfect
+    feel that matches the rest of the tray template.
+    """
+    draw = ImageDraw.Draw(img)
+    j = stroke * j_mag
+
+    def jitter(base: float) -> float:
+        return base + rng.uniform(-j, j)
+
+    cx = chamfer_ratio
+    pts = [
+        (x + w + jitter(0),       y + jitter(0)),
+        (x + w * cx + jitter(0),  y + jitter(0)),
+        (x + jitter(0),           y + h * cx + jitter(0)),
+        (x + jitter(0),           y + h * (1 - cx) + jitter(0)),
+        (x + w * cx + jitter(0),  y + h + jitter(0)),
+        (x + w + jitter(0),       y + h + jitter(0)),
+    ]
+    for i in range(len(pts) - 1):
+        _thick_segment(draw, pts[i], pts[i + 1], stroke, color)
+    # Square caps at each vertex so segment joins don't show gaps.
+    half = stroke / 2
+    for px, py in pts:
+        draw.rectangle([px - half, py - half, px + half, py + half], fill=(*color, 255))
+    return img
+
+
+# Fixed seed for the tray template's jitter so regenerated PNGs are byte-stable
+# across runs (no git churn on every `generate_icon.py` invocation).
+TRAY_TEMPLATE_SEED = 13
+
+
+def generate_tray_template(width: int = 2048, height: int = 1024) -> Image.Image:
+    """Render a monochrome menu-bar template image: RC monogram + flow waves.
+
+    Wide 2:1 aspect (matches macOS menu-bar non-square layout). Black + alpha
+    only — AppKit auto-tints the visible pixels for light/dark mode when the
+    image is marked as a template via ``setTemplate_(True)``. Caller downscales
+    to the menu-bar pt grid (36×18 / 72×36 / 108×54).
+
+    Layout: original curved-bowl R + blocky 5-segment C (sized to ~80% of R)
+    on the left half; three flowing waves with horizontal chevron arrowheads
+    on the right. Per-vertex jitter on C is seeded so output is deterministic.
+    """
+    img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    black = (0, 0, 0)
+    rng = random.Random(TRAY_TEMPLATE_SEED)
+
+    # Vertical padding intentionally generous — macOS menu-bar icons read best
+    # when content occupies ~70-75% of the bounding box. Without this, the
+    # template fills the full 18 pt slot and looks visually larger than every
+    # SF-Symbol-based app icon next to it.
+    pad_x = width * 0.04
+    pad_y = height * 0.18
+    stroke = int(height * 0.10)
+
+    letter_h = height - 2 * pad_y
+    letter_w = letter_h * 0.62
+
+    # R: original curved-bowl design, black.
+    img = draw_letter_r(img, max(width, height), pad_x, pad_y, letter_h, letter_w, stroke, color=black)
+
+    # C: blocky 5-segment bracket, ~80% of R's bounding box, vertically centred.
+    c_size_ratio = 0.80
+    c_h = letter_h * c_size_ratio
+    c_w = letter_w * c_size_ratio
+    c_y = pad_y + (letter_h - c_h) / 2
+    c_x = pad_x + letter_w + width * 0.025
+    img = draw_letter_c_5seg(img, c_x, c_y, c_h, c_w, stroke, black, rng)
+
+    # Right half: 3 flow waves with horizontal arrowheads. Chevrons forced
+    # horizontal (not aligned to the bezier tangent) so they read as arrows
+    # at 18 px instead of blending into the wave's upward-sloping tail.
+    # Y / amplitude scaled to letter_h so waves stay inside the same vertical
+    # padding as the letters.
+    flow_start_x = c_x + (letter_w * 0.95) + width * 0.04
+    flow_end_x = width - pad_x
+    wave_stroke = stroke * 0.85
+    cy = height / 2
+    flow_configs = [
+        {"y_center": cy - letter_h * 0.40, "amplitude": letter_h * 0.27},
+        {"y_center": cy,                    "amplitude": letter_h * 0.22},
+        {"y_center": cy + letter_h * 0.40, "amplitude": letter_h * 0.27},
+    ]
+
+    chevron_offset_x = letter_h * 0.015
+    for cfg in flow_configs:
+        yc = cfg["y_center"]
+        amp = cfg["amplitude"]
+        p0 = (flow_start_x, yc)
+        p1 = (flow_start_x + (flow_end_x - flow_start_x) * 0.3, yc - amp)
+        p2 = (flow_start_x + (flow_end_x - flow_start_x) * 0.7, yc + amp)
+        p3 = (flow_end_x, yc)
+
+        img = draw_smooth_wave(img, black, wave_stroke, [p0, p1, p2, p3], alpha=255)
+
+        tip_pt = (flow_end_x + chevron_offset_x, yc)
+        img = draw_chevron(
+            img,
+            tip_pt,
+            angle=0.0,
+            arm_len=wave_stroke * 3.0,
+            thickness=wave_stroke * 1.0,
+            color=black,
+            alpha=255,
+        )
+
+    return img
 
 
 def generate_maskable_icon(master: Image.Image, target_size: int) -> Image.Image:
@@ -408,9 +592,33 @@ def main():
     for sz in [16, 32, 64, 128, 256, 512, 1024]:
         save_png(master, str(macos / f"app_icon_{sz}.png"), sz)
 
-    # Backend tray icon (used by system tray on Windows)
+    # Backend tray icon — Windows .ico, macOS .icns, Linux .png all share
+    # the colored master so the Worker.app's Dock/Finder icon stays in sync
+    # with the Windows tray icon and the Linux indicator.
     print("\nBackend tray icon:")
-    save_ico(master, str(project_root / "src" / "gui" / "assets" / "tray_icon.ico"), [16, 32, 48, 64, 128, 256])
+    backend_assets = project_root / "src" / "gui" / "assets"
+    save_ico(master, str(backend_assets / "tray_icon.ico"), [16, 32, 48, 64, 128, 256])
+    save_png(master, str(backend_assets / "tray_icon.png"), 512)
+    icns_path = backend_assets / "tray_icon.icns"
+    master.convert("RGBA").save(icns_path, format="ICNS")
+    print(f"  {icns_path} (ICNS)")
+
+    # macOS menu-bar template icon (monochrome RC + flow waves, alpha mask).
+    # Wide 2:1 aspect — menu-bar height is 18 pt, width can be larger.
+    # Three resolutions for 1x / 2x / 3x retina; AppKit picks the closest match
+    # via the @2x / @3x suffix convention.
+    print("\nmacOS tray template:")
+    template = generate_tray_template()
+    tray_assets = project_root / "src" / "gui" / "assets"
+    for path, w, h in [
+        (tray_assets / "tray_icon_template.png", 36, 18),
+        (tray_assets / "tray_icon_template@2x.png", 72, 36),
+        (tray_assets / "tray_icon_template@3x.png", 108, 54),
+    ]:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        resized = template.resize((w, h), Image.Resampling.LANCZOS)
+        resized.convert("RGBA").save(path, "PNG")
+        print(f"  {path} ({w}x{h})")
 
     print("\nDone!")
 
