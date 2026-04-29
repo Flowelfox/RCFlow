@@ -1,6 +1,6 @@
 [project]
 name = "rcflow"
-version = "0.42.1"
+version = "0.43.0"
 description = "WebSocket-based action server that translates natural language prompts into tool executions via LLM"
 readme = "README.md"
 license = "AGPL-3.0-or-later"
