@@ -592,9 +592,16 @@ def main():
     for sz in [16, 32, 64, 128, 256, 512, 1024]:
         save_png(master, str(macos / f"app_icon_{sz}.png"), sz)
 
-    # Backend tray icon (used by system tray on Windows)
+    # Backend tray icon — Windows .ico, macOS .icns, Linux .png all share
+    # the colored master so the Worker.app's Dock/Finder icon stays in sync
+    # with the Windows tray icon and the Linux indicator.
     print("\nBackend tray icon:")
-    save_ico(master, str(project_root / "src" / "gui" / "assets" / "tray_icon.ico"), [16, 32, 48, 64, 128, 256])
+    backend_assets = project_root / "src" / "gui" / "assets"
+    save_ico(master, str(backend_assets / "tray_icon.ico"), [16, 32, 48, 64, 128, 256])
+    save_png(master, str(backend_assets / "tray_icon.png"), 512)
+    icns_path = backend_assets / "tray_icon.icns"
+    master.convert("RGBA").save(icns_path, format="ICNS")
+    print(f"  {icns_path} (ICNS)")
 
     # macOS menu-bar template icon (monochrome RC + flow waves, alpha mask).
     # Wide 2:1 aspect — menu-bar height is 18 pt, width can be larger.

@@ -20,15 +20,20 @@ from __future__ import annotations
 
 import atexit
 import contextlib
+import datetime
 import fcntl
 import logging
 import plistlib
 import queue
 import signal
+import subprocess
 import sys
 import time
 import tkinter as tk
+import traceback
+import webbrowser
 from pathlib import Path
+from tkinter import messagebox
 from typing import IO, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -36,6 +41,12 @@ if TYPE_CHECKING:
 
 import customtkinter as ctk
 
+from src.config import (
+    _DEFAULT_PORT,
+    Settings,
+    read_token_from_file,
+    update_settings_file,
+)
 from src.gui import theme
 from src.gui.core import (
     MAX_LOG_LINES,
@@ -49,11 +60,58 @@ from src.gui.core import (
     send_show_to_existing,
     start_ipc_server,
 )
+from src.gui.deeplink import build_add_worker_url
 from src.gui.updater import (
     UpdateService,
     cleanup_partial_downloads,
     resolve_current_version,
 )
+from src.paths import is_frozen
+
+# AppKit / Foundation imports — only available on macOS with PyObjC. Wrap
+# in a single try/except so the module still imports on other platforms
+# (where this file should never run, but keeps tooling happy) and so each
+# function below can use the symbols at module scope without re-importing.
+try:
+    from AppKit import (  # ty:ignore[unresolved-import]
+        NSApplication,
+        NSBezierPath,
+        NSColor,
+        NSImage,
+        NSImageRep,
+        NSMenu,
+        NSMenuItem,
+        NSObject,
+        NSStatusBar,
+        NSVariableStatusItemLength,
+    )
+    from Foundation import (  # ty:ignore[unresolved-import]
+        NSAppleEventManager,
+        NSAttributedString,
+        NSBundle,
+        NSMakeRect,
+        NSMakeSize,
+        NSProcessInfo,
+    )
+
+    _APPKIT_AVAILABLE = True
+except ImportError:
+    NSApplication = None  # ty:ignore[invalid-assignment]
+    NSBezierPath = None  # ty:ignore[invalid-assignment]
+    NSColor = None  # ty:ignore[invalid-assignment]
+    NSImage = None  # ty:ignore[invalid-assignment]
+    NSImageRep = None  # ty:ignore[invalid-assignment]
+    NSMenu = None  # ty:ignore[invalid-assignment]
+    NSMenuItem = None  # ty:ignore[invalid-assignment]
+    NSStatusBar = None  # ty:ignore[invalid-assignment]
+    NSVariableStatusItemLength = None  # ty:ignore[invalid-assignment]
+    NSAppleEventManager = None  # ty:ignore[invalid-assignment]
+    NSAttributedString = None  # ty:ignore[invalid-assignment]
+    NSBundle = None  # ty:ignore[invalid-assignment]
+    NSMakeRect = None  # ty:ignore[invalid-assignment]
+    NSMakeSize = None  # ty:ignore[invalid-assignment]
+    NSProcessInfo = None  # ty:ignore[invalid-assignment]
+    _APPKIT_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -198,7 +256,31 @@ class RCFlowMacOSGUI:
         self._updater.restore_cached_state()
         self._updater.add_listener(self._on_updater_change)
 
+        # Override NSProcessInfo's processName BEFORE ctk.CTk() — Tk reads
+        # the name once during init to populate the macOS menu bar and the
+        # Dock tooltip. NSProcessInfo is a Foundation class independent of
+        # NSApp, so this doesn't trigger the "macOSVersion unrecognized
+        # selector" crash that pre-initialising NSApplication causes.
+        self._set_app_name("RCFlow Worker")
+
         self._root = ctk.CTk()
+        # Apply the Dock icon as soon as Tk's NSApp subclass is installed.
+        self._install_app_icon()
+        # Tk has now built its default main menu using the process name it
+        # captured before we could override it; rename the leftmost item
+        # so the menu bar reads "RCFlow Worker" instead of "Python3.12".
+        self._rename_app_menu_item("RCFlow Worker")
+        # Tk 9 dispatches the App menu's About click to the Tcl proc
+        # ``tkAboutDialog`` (renamed from Tk 8.x's ``tk::mac::standardAboutPanel``).
+        # Registering our Python handler under that name routes the click to
+        # the populated NSApp standard About panel built by _show_about_panel.
+        with contextlib.suppress(Exception):
+            self._root.createcommand("tkAboutDialog", self._show_about_panel)
+        # Withdraw immediately — CTk() maps the window by default, which paints
+        # a Dock tile with Tk's blank-document icon before _do_show_window
+        # fires. _do_show_window deiconifies after the activation policy and
+        # the colored icon are in place.
+        self._root.withdraw()
         self._root.title("RCFlow Worker")
         self._root.geometry("900x720")
         # Settings card uses 2 rows (inputs + checkboxes) and Instance
@@ -206,8 +288,31 @@ class RCFlowMacOSGUI:
         # narrower screens (1024-px laptops, half-screen splits).
         self._root.minsize(720, 520)
         self._root.protocol("WM_DELETE_WINDOW", self._on_window_close)
+        self._set_tk_window_icon()
         self._build_ui()
         self._load_settings()
+
+    def _set_tk_window_icon(self) -> None:
+        """Set the Tk root window's icon photo from the colored worker PNG.
+
+        Without this, Tk paints a generic blank-document icon in the Dock tile
+        the first time the window is mapped, before NSApp's
+        ``applicationIconImage`` repaints over it. Setting Tk's iconphoto
+        prevents the brief white-file flash.
+        """
+        png_dir = (
+            Path(sys.executable).resolve().parent.parent / "Resources"
+            if getattr(sys, "frozen", False)
+            else Path(__file__).resolve().parent / "assets"
+        )
+        png_path = png_dir / "tray_icon.png"
+        if not png_path.exists():
+            return
+        with contextlib.suppress(Exception):
+            photo = tk.PhotoImage(file=str(png_path))
+            # Keep a reference so Tk doesn't garbage-collect the image.
+            self._tk_window_icon = photo
+            self._root.iconphoto(True, photo)
 
     # ── UI construction ───────────────────────────────────────────────────
 
@@ -248,7 +353,6 @@ class RCFlowMacOSGUI:
         ctk.CTkLabel(sc, text="Port", font=ctk.CTkFont(size=theme.FONT_SIZE_BODY)).grid(
             row=1, column=2, sticky="w", padx=(0, s), pady=(0, g)
         )
-        from src.config import _DEFAULT_PORT  # noqa: PLC0415
 
         self._port_var = tk.StringVar(value=str(_DEFAULT_PORT))
         self._port_entry = ctk.CTkEntry(
@@ -526,7 +630,6 @@ class RCFlowMacOSGUI:
         )
         self._update_check_btn.grid(row=1, column=4, padx=(s, g), pady=(0, g))
 
-        from src.config import Settings  # noqa: PLC0415
 
         try:
             auto = bool(Settings().RCFLOW_UPDATE_AUTO_CHECK)
@@ -627,7 +730,6 @@ class RCFlowMacOSGUI:
         self._updater.download(on_progress=_on_progress, on_done=_on_done, on_error=_on_error)
 
     def _prompt_launch_installer(self, path: Path) -> None:
-        from tkinter import messagebox  # noqa: PLC0415
 
         choice = messagebox.askyesnocancel(
             "Update downloaded",
@@ -645,7 +747,6 @@ class RCFlowMacOSGUI:
 
     @staticmethod
     def _reveal_in_finder(path: Path) -> None:
-        import subprocess  # noqa: PLC0415
 
         with contextlib.suppress(Exception):
             subprocess.Popen(["open", "-R", str(path)])
@@ -657,7 +758,6 @@ class RCFlowMacOSGUI:
         self._updater.dismiss_current()
 
     def _on_update_auto_toggle(self) -> None:
-        from src.config import update_settings_file  # noqa: PLC0415
 
         update_settings_file({"RCFLOW_UPDATE_AUTO_CHECK": "true" if self._update_auto_var.get() else "false"})
 
@@ -665,7 +765,6 @@ class RCFlowMacOSGUI:
 
     def _load_settings(self) -> None:
         try:
-            from src.config import Settings  # noqa: PLC0415
 
             s = Settings()
             self._ip_var.set(s.RCFLOW_HOST)
@@ -678,12 +777,10 @@ class RCFlowMacOSGUI:
         self._apply_forwarding_mutex()
 
     def _on_wss_toggle(self) -> None:
-        from src.config import update_settings_file  # noqa: PLC0415
 
         update_settings_file({"WSS_ENABLED": str(self._wss_var.get())})
 
     def _on_upnp_toggle(self) -> None:
-        from src.config import update_settings_file  # noqa: PLC0415
 
         enabled = bool(self._upnp_var.get())
         updates: dict[str, str] = {"UPNP_ENABLED": "true" if enabled else "false"}
@@ -697,7 +794,6 @@ class RCFlowMacOSGUI:
         self._apply_forwarding_mutex()
 
     def _on_natpmp_toggle(self) -> None:
-        from src.config import update_settings_file  # noqa: PLC0415
 
         enabled = bool(self._natpmp_var.get())
         updates: dict[str, str] = {"NATPMP_ENABLED": "true" if enabled else "false"}
@@ -725,7 +821,6 @@ class RCFlowMacOSGUI:
 
     def _on_copy_token(self) -> None:
         try:
-            from src.config import read_token_from_file  # noqa: PLC0415
 
             api_key = read_token_from_file()
             if not api_key:
@@ -740,10 +835,7 @@ class RCFlowMacOSGUI:
 
     def _on_add_to_client(self) -> None:
         try:
-            import webbrowser  # noqa: PLC0415
 
-            from src.config import read_token_from_file  # noqa: PLC0415
-            from src.gui.deeplink import build_add_worker_url  # noqa: PLC0415
 
             host = self._ip_var.get().strip()
             port_str = self._port_var.get().strip()
@@ -988,7 +1080,149 @@ class RCFlowMacOSGUI:
         self._delegate._gui = self
         self._init_status_item()
         self._install_reopen_handler()
+        self._install_app_icon()
         return self._status_item is not None
+
+    def _app_icon_image(self) -> object | None:
+        """Load the colored worker icon as NSImage. Tries .icns then .png.
+
+        Frozen .app builds pick the Dock icon up from Info.plist's
+        CFBundleIconFile, but `rcflow gui` run via `uv run` (i.e. unfrozen)
+        has no bundle, so macOS falls back to a generic blank-document Dock
+        icon when the dashboard activation policy switches to Regular. Loading
+        the icon and assigning it explicitly fixes the unfrozen path.
+
+        Tries .icns first; some platforms / older PyObjC builds reject the
+        Pillow-generated TOC variant, so falls back to the same-design PNG.
+        """
+        if NSImage is None:
+            return None
+
+        if is_frozen():
+            res_dir = Path(sys.executable).resolve().parent.parent / "Resources"
+        else:
+            res_dir = Path(__file__).resolve().parent / "assets"
+
+        for fname in ("tray_icon.icns", "tray_icon.png"):
+            candidate = res_dir / fname
+            if not candidate.exists():
+                continue
+            with contextlib.suppress(Exception):
+                img = NSImage.alloc().initWithContentsOfFile_(str(candidate))
+                if img is not None:
+                    return img
+        return None
+
+    def _show_about_panel(self) -> None:
+        """Open the macOS standard About panel populated with worker info.
+
+        Registered as the Tcl ``tkAboutDialog`` proc; Tk 9 calls it when
+        the user clicks the App menu's About item. ``Credits`` must be an
+        ``NSAttributedString`` — passing a plain Python str breaks the panel
+        rendering on macOS.
+        """
+        if NSApplication is None:
+            return
+        version = self._updater.current_version or "unknown"
+        credits_text = (
+            "Manage Claude Code, Codex, and OpenCode sessions across machines.\n"
+            "Source and issues: github.com/Flowelfox/RCFlow"
+        )
+        credits = (
+            NSAttributedString.alloc().initWithString_(credits_text)
+            if NSAttributedString is not None
+            else None
+        )
+        options: dict[str, object] = {
+            "ApplicationName": "RCFlow Worker",
+            "ApplicationVersion": version,
+            "Copyright": "Self-hosted coding-agent orchestration server.",
+            "ApplicationIcon": self._app_icon_image(),
+            "Credits": credits,
+        }
+        # Strip Nones — orderFrontStandardAboutPanelWithOptions_ rejects nil.
+        options = {k: v for k, v in options.items() if v is not None}
+        with contextlib.suppress(Exception):
+            ns_app = NSApplication.sharedApplication()
+            ns_app.orderFrontStandardAboutPanelWithOptions_(options)
+            ns_app.activateIgnoringOtherApps_(True)
+
+    @staticmethod
+    def _set_app_name(name: str) -> None:
+        """Override the macOS menu-bar / Dock app name from ``Python3.12``.
+
+        Three layers cooperate:
+
+        1. ``NSProcessInfo.processName`` — what Tk reads to name itself.
+        2. ``NSBundle.mainBundle().infoDictionary``'s ``CFBundleName`` —
+           what the Dock tooltip shows. PyObjC exposes the dictionary as
+           a mutable proxy on ``Foundation``, so it can be patched in
+           place even though Foundation's documentation says it's
+           read-only.
+        3. The leftmost mainMenu item title — set after Tk has created
+           the menu (see ``_rename_app_menu_item``).
+        """
+        if NSProcessInfo is not None:
+            with contextlib.suppress(Exception):
+                NSProcessInfo.processInfo().setProcessName_(name)
+        if NSBundle is not None:
+            with contextlib.suppress(Exception):
+                bundle = NSBundle.mainBundle()
+                info = None
+                if bundle is not None:
+                    info = bundle.localizedInfoDictionary() or bundle.infoDictionary()
+                if info is not None:
+                    info["CFBundleName"] = name
+                    info["CFBundleDisplayName"] = name
+
+    def _rename_app_menu_item(self, name: str) -> None:
+        """Rename the leftmost main-menu item Tk creates after CTk() init.
+
+        Tk grabs the application name from NSProcessInfo at the moment it
+        builds NSApp's main menu. If we set the name after that point, the
+        leftmost menu still says "Python3.12" until we override the title
+        on the menu item directly. Also retitles the About item so it
+        reads "About RCFlow Worker" instead of "About Python3.12".
+        """
+        if NSApplication is None:
+            return
+        with contextlib.suppress(Exception):
+            ns_app = NSApplication.sharedApplication()
+            main_menu = ns_app.mainMenu()
+            if main_menu is None or main_menu.numberOfItems() == 0:
+                return
+            app_menu_item = main_menu.itemAtIndex_(0)
+            app_menu_item.setTitle_(name)
+            sub = app_menu_item.submenu()
+            if sub is None:
+                return
+            sub.setTitle_(name)
+            for i in range(sub.numberOfItems()):
+                item = sub.itemAtIndex_(i)
+                title = str(item.title()) if item.title() is not None else ""
+                if title.startswith("About"):
+                    item.setTitle_(f"About {name}")
+                    break
+
+    def _install_app_icon(self) -> None:
+        """Apply the colored worker icon to NSApp's Dock tile.
+
+        Force a Dock tile redraw afterwards — Tkinter creates Tk's own NSApp
+        delegate after we set the icon, which silently clears the Dock tile's
+        cached image on some macOS versions. ``dockTile.display()`` re-pulls
+        the current applicationIconImage and repaints.
+        """
+        if NSApplication is None:
+            return
+        img = self._app_icon_image()
+        if img is None:
+            return
+        with contextlib.suppress(Exception):
+            ns_app = NSApplication.sharedApplication()
+            ns_app.setApplicationIconImage_(img)
+            tile = ns_app.dockTile()
+            if tile is not None:
+                tile.display()
 
     def _install_reopen_handler(self) -> None:
         """Install the ``kAEReopenApplication`` AppleEvent handler.
@@ -997,9 +1231,7 @@ class RCFlowMacOSGUI:
         the .app again via Finder / Dock / Launchpad / ``open``.  Without a
         handler, the event is dropped and the dashboard never re-opens.
         """
-        try:
-            from Foundation import NSAppleEventManager  # noqa: PLC0415  # ty:ignore[unresolved-import]
-        except ImportError:
+        if NSAppleEventManager is None:
             return
 
         # FourCharCodes:  'aevt' -> kCoreEventClass,  'rapp' -> kAEReopenApplication
@@ -1022,25 +1254,15 @@ class RCFlowMacOSGUI:
         the only visible UI).  On failure, the window stays visible as a
         fallback so the app is not completely invisible.
         """
-        try:
-            from AppKit import (  # noqa: PLC0415  # ty:ignore[unresolved-import]
-                NSImage,
-                NSImageRep,
-                NSMenu,
-                NSMenuItem,
-                NSStatusBar,
-                NSVariableStatusItemLength,
-            )
-            from Foundation import NSMakeSize  # noqa: PLC0415  # ty:ignore[unresolved-import]
-        except ImportError:
-            logger.warning("AppKit import failed in _init_status_item — keeping window visible")
+        if not _APPKIT_AVAILABLE:
+            logger.warning("AppKit not available in _init_status_item — keeping window visible")
             return
 
         try:
             status_bar = NSStatusBar.systemStatusBar()
             self._status_item = status_bar.statusItemWithLength_(NSVariableStatusItemLength)
 
-            img: object | None = self._load_tray_template_image(NSImage, NSImageRep, NSMakeSize)
+            img: object | None = self._load_tray_template_image()
 
             # Fall back to the bundled .icns app icon (full-color, non-template).
             if img is None:
@@ -1143,7 +1365,6 @@ class RCFlowMacOSGUI:
 
             self._status_item.setMenu_(menu)
         except Exception as _exc:
-            import traceback  # noqa: PLC0415
 
             msg = traceback.format_exc()
             print(f"RCFlow: NSStatusItem setup failed — {_exc}\n{msg}", file=sys.stderr)
@@ -1152,7 +1373,6 @@ class RCFlowMacOSGUI:
 
     @staticmethod
     def _get_icon_path() -> Path:
-        from src.paths import is_frozen  # noqa: PLC0415
 
         if is_frozen():
             # PyInstaller --icon places the .icns at Contents/Resources/
@@ -1162,23 +1382,19 @@ class RCFlowMacOSGUI:
     @staticmethod
     def _tray_template_dir() -> Path:
         """Directory holding the monochrome menu-bar template PNGs."""
-        from src.paths import is_frozen  # noqa: PLC0415
 
         if is_frozen():
             return Path(sys.executable).resolve().parent.parent / "Resources"
         return Path(__file__).resolve().parent / "assets"
 
-    def _load_tray_template_image(
-        self,
-        ns_image_cls: object,
-        ns_image_rep_cls: object,
-        ns_make_size: object,
-    ) -> object | None:
+    def _load_tray_template_image(self) -> object | None:
         """Build a multi-rep NSImage from the 1x/2x/3x template PNGs.
 
         Returns a template-flagged NSImage sized to 18x18 pt with full-resolution
         backing reps for retina, or None if no rep file could be loaded.
         """
+        if NSImage is None or NSImageRep is None or NSMakeSize is None:
+            return None
         base_dir = self._tray_template_dir()
         rep_files = [
             base_dir / "tray_icon_template.png",
@@ -1188,13 +1404,13 @@ class RCFlowMacOSGUI:
 
         # Wide 2:1 menu-bar template (36x18 pt). NSStatusItem with
         # NSVariableStatusItemLength expands the slot to fit non-square images.
-        img = ns_image_cls.alloc().initWithSize_(ns_make_size(36, 18))  # ty:ignore[unresolved-attribute]
+        img = NSImage.alloc().initWithSize_(NSMakeSize(36, 18))
         added = 0
         for rep_path in rep_files:
             if not rep_path.exists():
                 continue
             with contextlib.suppress(Exception):
-                rep = ns_image_rep_cls.imageRepWithContentsOfFile_(str(rep_path))  # ty:ignore[unresolved-attribute]
+                rep = NSImageRep.imageRepWithContentsOfFile_(str(rep_path))
                 if rep is not None:
                     img.addRepresentation_(rep)
                     added += 1
@@ -1211,14 +1427,7 @@ class RCFlowMacOSGUI:
         Used as the leading icon on the "RCFlow Worker: Running/Stopped" menu
         item to surface daemon state at a glance.
         """
-        try:
-            from AppKit import (  # noqa: PLC0415  # ty:ignore[unresolved-import]
-                NSBezierPath,
-                NSColor,
-                NSImage,
-            )
-            from Foundation import NSMakeRect, NSMakeSize  # noqa: PLC0415  # ty:ignore[unresolved-import]
-        except ImportError:
+        if NSImage is None or NSColor is None or NSBezierPath is None or NSMakeRect is None or NSMakeSize is None:
             return None
 
         size = 12.0
@@ -1271,9 +1480,7 @@ class RCFlowMacOSGUI:
     @staticmethod
     def _sf_symbol_image(name: str, accessibility: str, *, template: bool = True) -> object | None:
         """Load an SF Symbol as an NSImage. Returns None on macOS < 11 or symbol miss."""
-        try:
-            from AppKit import NSImage  # noqa: PLC0415  # ty:ignore[unresolved-import]
-        except ImportError:
+        if NSImage is None:
             return None
         with contextlib.suppress(Exception):
             init = getattr(NSImage, "imageWithSystemSymbolName_accessibilityDescription_", None)
@@ -1329,15 +1536,24 @@ class RCFlowMacOSGUI:
         # this gives the process a proper Dock icon + Cmd-Tab entry and lets
         # Cocoa activate it correctly.  When the window closes we drop back
         # to accessory so the Dock tile disappears (see _on_window_close).
-        with contextlib.suppress(Exception):
-            from AppKit import NSApplication  # noqa: PLC0415  # ty:ignore[unresolved-import]
-
-            ns_app = NSApplication.sharedApplication()
-            ns_app.setActivationPolicy_(0)  # NSApplicationActivationPolicyRegular
-            ns_app.activateIgnoringOtherApps_(True)
+        # ORDER MATTERS: set the icon BEFORE the policy switch so the Dock
+        # tile is created with the colored RC icon already cached. Setting it
+        # after the switch causes a brief white-file placeholder flash.
+        self._install_app_icon()
+        if NSApplication is not None:
+            with contextlib.suppress(Exception):
+                ns_app = NSApplication.sharedApplication()
+                ns_app.setActivationPolicy_(0)  # NSApplicationActivationPolicyRegular
+                ns_app.activateIgnoringOtherApps_(True)
 
         self._root.deiconify()
         self._root.lift()
+        # One defensive re-apply after deiconify covers the re-show-from-tray
+        # path (where we have just left accessory mode and Tk's window-mapping
+        # may repaint the Dock tile with its default icon). The first-launch
+        # path already has the icon in place from _preinit_app_icon and never
+        # leaves Regular policy, so this is a no-op there.
+        self._install_app_icon()
         # Float above all windows briefly so it is visible even when another
         # app is in front; normal layering is restored after 300 ms.
         self._root.attributes("-topmost", True)
@@ -1348,12 +1564,18 @@ class RCFlowMacOSGUI:
             return
         self._quitting = True
 
+        # Hide the window. Don't toggle activation policy here — switching to
+        # accessory mid-quit forces an async Dock-tile transition that paints
+        # a white-document placeholder while the policy change settles. Keeping
+        # NSApp in Regular with the colored icon assigned means the Dock tile
+        # blinks out with the right image when the process actually exits.
+        with contextlib.suppress(Exception):
+            self._root.withdraw()
+
         # Remove the menu bar icon immediately so it disappears while we wait
         # for the server subprocess to shut down.
-        if self._status_item is not None:
+        if self._status_item is not None and NSStatusBar is not None:
             with contextlib.suppress(Exception):
-                from AppKit import NSStatusBar  # noqa: PLC0415  # ty:ignore[unresolved-import]
-
                 NSStatusBar.systemStatusBar().removeStatusItem_(self._status_item)
             self._status_item = None
 
@@ -1382,10 +1604,9 @@ class RCFlowMacOSGUI:
             # Drop back to accessory policy so the Dock tile that appeared
             # while the window was visible disappears — menu-bar-only state
             # is the expected "server running in the background" look.
-            with contextlib.suppress(Exception):
-                from AppKit import NSApplication  # noqa: PLC0415  # ty:ignore[unresolved-import]
-
-                NSApplication.sharedApplication().setActivationPolicy_(1)  # Accessory
+            if NSApplication is not None:
+                with contextlib.suppress(Exception):
+                    NSApplication.sharedApplication().setActivationPolicy_(1)  # Accessory
         else:
             self._on_tray_quit()
 
@@ -1407,7 +1628,6 @@ class RCFlowMacOSGUI:
         When *minimized* is True (login autostart), the dashboard is kept
         hidden and the process stays in accessory policy — tray icon only.
         """
-        import datetime  # noqa: PLC0415
 
         _trace_path = Path.home() / "Library" / "Logs" / "rcflow-worker-trace.log"
 
@@ -1447,21 +1667,25 @@ class RCFlowMacOSGUI:
         _t(f"_setup_tray() → tray_ok={tray_ok}")
 
         if tray_ok:
-            if not getattr(sys, "frozen", False):
-                with contextlib.suppress(Exception):
-                    from AppKit import NSApplication  # noqa: PLC0415  # ty:ignore[unresolved-import]
-
-                    NSApplication.sharedApplication().setActivationPolicy_(1)
-
             if minimized:
                 # Login autostart path: keep the dashboard hidden so we don't
                 # steal focus on boot.  Tray icon remains the entry point.
+                # Switch to accessory only on this branch — when the dashboard
+                # is about to be shown immediately, leaving NSApp in Regular
+                # avoids a Regular → Accessory → Regular flip that paints a
+                # white-document Dock tile during the brief accessory window.
                 self._root.withdraw()
+                if not getattr(sys, "frozen", False) and NSApplication is not None:
+                    with contextlib.suppress(Exception):
+                        NSApplication.sharedApplication().setActivationPolicy_(1)
                 _t("window withdrawn (minimized autostart)")
             else:
                 # Reveal the dashboard on launch.  Scheduled on the Tk event
                 # loop so AppKit is fully initialised; _do_show_window already
                 # activates the process (LSUIElement apps are not auto-frontmost).
+                # NSApp stays in its default Regular policy and the colored
+                # icon set in _preinit_app_icon already paints the Dock tile,
+                # so the window appears in one frame with the right icon.
                 self._root.after(0, self._do_show_window)
                 _t("window scheduled to show on launch")
         else:
@@ -1532,8 +1756,7 @@ class RCFlowMacOSGUI:
 _PYOBJC_AVAILABLE = False
 
 try:
-    import objc as _objc  # type: ignore[import-untyped]
-    from AppKit import NSObject  # type: ignore[assignment]
+    import objc as _objc  # ty:ignore[unresolved-import]
 
     class _TrayDelegate(NSObject):
         """Objective-C action target for NSMenuItem callbacks."""
@@ -1622,7 +1845,6 @@ def run_gui_macos(*, minimized: bool = False) -> None:
     autostart LaunchAgent passes this flag so rebooting does not pop the
     window; user-initiated launches leave it False and the dashboard shows.
     """
-    import datetime  # noqa: PLC0415
 
     _trace_path = Path.home() / "Library" / "Logs" / "rcflow-worker-trace.log"
 
@@ -1657,16 +1879,14 @@ def run_gui_macos(*, minimized: bool = False) -> None:
             # Fallback: AppleScript activate.  Works only for a registered
             # .app bundle, so it is best-effort.
             with contextlib.suppress(Exception):
-                import subprocess as _sp  # noqa: PLC0415
-
-                _sp.Popen(
+                subprocess.Popen(
                     [
                         "osascript",
                         "-e",
                         'tell application "RCFlow Worker" to activate',
                     ],
-                    stdout=_sp.DEVNULL,
-                    stderr=_sp.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
                 )
         sys.exit(0)
 
@@ -1677,7 +1897,6 @@ def run_gui_macos(*, minimized: bool = False) -> None:
         gui.run(minimized=minimized)
         _trace("gui.run() returned — mainloop exited cleanly")
     except Exception:
-        import traceback  # noqa: PLC0415
 
         crash_msg = traceback.format_exc()
         _trace(f"EXCEPTION:\n{crash_msg}")
@@ -1692,12 +1911,9 @@ def run_gui_macos(*, minimized: bool = False) -> None:
             pass
 
         try:
-            import tkinter as _tk  # noqa: PLC0415
-            from tkinter import messagebox as _mb  # noqa: PLC0415
-
-            _hidden = _tk.Tk()
+            _hidden = tk.Tk()
             _hidden.withdraw()
-            _mb.showerror(
+            messagebox.showerror(
                 "RCFlow Worker \u2014 Startup Error",
                 f"RCFlow failed to start.\n\n{crash_msg[:500]}\n\nFull log: {_get_crash_log_path()}",
             )
