@@ -12,6 +12,9 @@ and note which component is affected where it matters.
 
 ## [Unreleased]
 
+### Changed
+- **macOS menu bar uses a custom RCFlow icon** — the worker's menu bar now shows a monochrome RC + flow-arrow mark instead of the generic lightning bolt. The icon is a template image, so it auto-tints to match light or dark menu bar themes. The app icon picks up the same RC mark (blocky 5-segment C, horizontal flow arrows) so the brand reads consistently between the menu bar and the Dock / Launchpad (Backend)
+
 ---
 
 ## [Backend 0.42.1] — 2026-04-28

@@ -1025,6 +1025,7 @@ class RCFlowMacOSGUI:
         try:
             from AppKit import (  # noqa: PLC0415  # ty:ignore[unresolved-import]
                 NSImage,
+                NSImageRep,
                 NSMenu,
                 NSMenuItem,
                 NSStatusBar,
@@ -1039,30 +1040,17 @@ class RCFlowMacOSGUI:
             status_bar = NSStatusBar.systemStatusBar()
             self._status_item = status_bar.statusItemWithLength_(NSVariableStatusItemLength)
 
-            img: object | None = None
+            img: object | None = self._load_tray_template_image(NSImage, NSImageRep, NSMakeSize)
 
-            # Prefer an SF Symbol — guaranteed visible in both light and dark mode.
-            # imageWithSystemSymbolName:accessibilityDescription: requires macOS 11+;
-            # guard with getattr so the code runs on older systems without crashing.
-            _sym_init = getattr(
-                NSImage,
-                "imageWithSystemSymbolName_accessibilityDescription_",
-                None,
-            )
-            if _sym_init is not None:
-                img = _sym_init("bolt.fill", "RCFlow Worker")
-
-            # Fall back to the bundled .icns file.
+            # Fall back to the bundled .icns app icon (full-color, non-template).
             if img is None:
                 icon_path = self._get_icon_path()
                 if icon_path.exists():
                     img = NSImage.imageWithContentsOfFile_(str(icon_path))
+                    if img is not None:
+                        img.setSize_(NSMakeSize(18, 18))
 
-            # Explicitly size the image to the standard 18x18 pt menu-bar height
-            # so it renders at the correct scale on both standard and Retina displays.
             if img is not None:
-                img.setSize_(NSMakeSize(18, 18))
-                img.setTemplate_(True)
                 self._status_item.button().setImage_(img)
 
             if self._status_item.button().image() is None:
@@ -1075,6 +1063,8 @@ class RCFlowMacOSGUI:
             self._ns_status_text.setEnabled_(False)
             menu.addItem_(self._ns_status_text)
 
+            menu.addItem_(NSMenuItem.separatorItem())
+
             self._ns_external_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("External: —", None, "")
             self._ns_external_item.setEnabled_(False)
             self._ns_external_item.setHidden_(True)
@@ -1085,10 +1075,16 @@ class RCFlowMacOSGUI:
             )
             self._ns_update_item.setTarget_(self._delegate)
             self._ns_update_item.setHidden_(True)
+            _img = self._sf_symbol_image("arrow.down.circle.fill", "Install update")
+            if _img is not None:
+                self._ns_update_item.setImage_(_img)
             menu.addItem_(self._ns_update_item)
 
             dashboard_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Dashboard", "openSettings:", "")
             dashboard_item.setTarget_(self._delegate)
+            _img = self._sf_symbol_image("macwindow", "Open RCFlow dashboard")
+            if _img is not None:
+                dashboard_item.setImage_(_img)
             menu.addItem_(dashboard_item)
 
             menu.addItem_(NSMenuItem.separatorItem())
@@ -1097,6 +1093,7 @@ class RCFlowMacOSGUI:
                 "Start Server", "toggleServer:", ""
             )
             self._ns_toggle_item.setTarget_(self._delegate)
+            self._apply_toggle_icon(running=False)
             menu.addItem_(self._ns_toggle_item)
 
             menu.addItem_(NSMenuItem.separatorItem())
@@ -1105,12 +1102,18 @@ class RCFlowMacOSGUI:
                 "Copy Token", "copyToken:", ""
             )
             self._ns_copy_token_item.setTarget_(self._delegate)
+            _img = self._sf_symbol_image("key.fill", "Copy API token")
+            if _img is not None:
+                self._ns_copy_token_item.setImage_(_img)
             menu.addItem_(self._ns_copy_token_item)
 
             self._ns_add_client_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
                 "Add to Client…", "addToClient:", ""
             )
             self._ns_add_client_item.setTarget_(self._delegate)
+            _img = self._sf_symbol_image("plus.app", "Add to client")
+            if _img is not None:
+                self._ns_add_client_item.setImage_(_img)
             menu.addItem_(self._ns_add_client_item)
 
             menu.addItem_(NSMenuItem.separatorItem())
@@ -1119,17 +1122,23 @@ class RCFlowMacOSGUI:
                 "Start with macOS", "toggleAutostart:", ""
             )
             self._ns_autostart_item.setTarget_(self._delegate)
-            self._ns_autostart_item.setState_(1 if _is_autostart_enabled() else 0)
+            self._apply_autostart_icon(_is_autostart_enabled())
             menu.addItem_(self._ns_autostart_item)
 
             self._ns_check_updates_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
                 "Check for Updates", "checkUpdates:", ""
             )
             self._ns_check_updates_item.setTarget_(self._delegate)
+            _img = self._sf_symbol_image("arrow.triangle.2.circlepath", "Check for updates")
+            if _img is not None:
+                self._ns_check_updates_item.setImage_(_img)
             menu.addItem_(self._ns_check_updates_item)
 
             quit_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Quit", "quitApp:", "")
             quit_item.setTarget_(self._delegate)
+            _img = self._sf_symbol_image("power", "Quit RCFlow Worker")
+            if _img is not None:
+                quit_item.setImage_(_img)
             menu.addItem_(quit_item)
 
             self._status_item.setMenu_(menu)
@@ -1150,16 +1159,102 @@ class RCFlowMacOSGUI:
             return Path(sys.executable).resolve().parent.parent / "Resources" / "tray_icon.icns"
         return Path(__file__).resolve().parent / "assets" / "tray_icon.icns"
 
+    @staticmethod
+    def _tray_template_dir() -> Path:
+        """Directory holding the monochrome menu-bar template PNGs."""
+        from src.paths import is_frozen  # noqa: PLC0415
+
+        if is_frozen():
+            return Path(sys.executable).resolve().parent.parent / "Resources"
+        return Path(__file__).resolve().parent / "assets"
+
+    def _load_tray_template_image(
+        self,
+        ns_image_cls: object,
+        ns_image_rep_cls: object,
+        ns_make_size: object,
+    ) -> object | None:
+        """Build a multi-rep NSImage from the 1x/2x/3x template PNGs.
+
+        Returns a template-flagged NSImage sized to 18x18 pt with full-resolution
+        backing reps for retina, or None if no rep file could be loaded.
+        """
+        base_dir = self._tray_template_dir()
+        rep_files = [
+            base_dir / "tray_icon_template.png",
+            base_dir / "tray_icon_template@2x.png",
+            base_dir / "tray_icon_template@3x.png",
+        ]
+
+        # Wide 2:1 menu-bar template (36x18 pt). NSStatusItem with
+        # NSVariableStatusItemLength expands the slot to fit non-square images.
+        img = ns_image_cls.alloc().initWithSize_(ns_make_size(36, 18))  # ty:ignore[unresolved-attribute]
+        added = 0
+        for rep_path in rep_files:
+            if not rep_path.exists():
+                continue
+            with contextlib.suppress(Exception):
+                rep = ns_image_rep_cls.imageRepWithContentsOfFile_(str(rep_path))  # ty:ignore[unresolved-attribute]
+                if rep is not None:
+                    img.addRepresentation_(rep)
+                    added += 1
+
+        if added == 0:
+            return None
+        img.setTemplate_(True)
+        return img
+
+    @staticmethod
+    def _make_status_dot(rgb: tuple[float, float, float]) -> object | None:
+        """Return a small filled circle NSImage in the given color.
+
+        Used as the leading icon on the "RCFlow Worker: Running/Stopped" menu
+        item to surface daemon state at a glance.
+        """
+        try:
+            from AppKit import (  # noqa: PLC0415  # ty:ignore[unresolved-import]
+                NSBezierPath,
+                NSColor,
+                NSImage,
+            )
+            from Foundation import NSMakeRect, NSMakeSize  # noqa: PLC0415  # ty:ignore[unresolved-import]
+        except ImportError:
+            return None
+
+        size = 12.0
+        img = NSImage.alloc().initWithSize_(NSMakeSize(size, size))
+        img.lockFocus()
+        try:
+            r, g, b = rgb
+            NSColor.colorWithCalibratedRed_green_blue_alpha_(r, g, b, 1.0).setFill()
+            inset = 1.0
+            path = NSBezierPath.bezierPathWithOvalInRect_(
+                NSMakeRect(inset, inset, size - 2 * inset, size - 2 * inset)
+            )
+            path.fill()
+        finally:
+            img.unlockFocus()
+        # Don't flag as template — we want the actual color rendered, not auto-tinted.
+        return img
+
     def _update_tray_status(self) -> None:
         running = self._server.is_running()
         if self._ns_status_text is not None:
             with contextlib.suppress(Exception):
                 text = "RCFlow Worker: Running" if running else "RCFlow Worker: Stopped"
                 self._ns_status_text.setTitle_(text)  # ty:ignore[unresolved-attribute]
+                # Green dot when running, neutral grey when stopped.
+                dot_rgb: tuple[float, float, float] = (
+                    (0.30, 0.78, 0.40) if running else (0.55, 0.55, 0.55)
+                )
+                dot_img = self._make_status_dot(dot_rgb)
+                if dot_img is not None:
+                    self._ns_status_text.setImage_(dot_img)  # ty:ignore[unresolved-attribute]
         if self._ns_toggle_item is not None:
             with contextlib.suppress(Exception):
                 label = "Stop Server" if running else "Start Server"
                 self._ns_toggle_item.setTitle_(label)  # ty:ignore[unresolved-attribute]
+                self._apply_toggle_icon(running=running)
         if self._ns_external_item is not None:
             with contextlib.suppress(Exception):
                 forwarding_on = bool(self._upnp_var.get()) or bool(self._natpmp_var.get())
@@ -1171,7 +1266,53 @@ class RCFlowMacOSGUI:
         if self._ns_autostart_item is None:
             return
         with contextlib.suppress(Exception):
-            self._ns_autostart_item.setState_(1 if _is_autostart_enabled() else 0)  # ty:ignore[unresolved-attribute]
+            self._apply_autostart_icon(_is_autostart_enabled())
+
+    @staticmethod
+    def _sf_symbol_image(name: str, accessibility: str, *, template: bool = True) -> object | None:
+        """Load an SF Symbol as an NSImage. Returns None on macOS < 11 or symbol miss."""
+        try:
+            from AppKit import NSImage  # noqa: PLC0415  # ty:ignore[unresolved-import]
+        except ImportError:
+            return None
+        with contextlib.suppress(Exception):
+            init = getattr(NSImage, "imageWithSystemSymbolName_accessibilityDescription_", None)
+            if init is None:
+                return None
+            img = init(name, accessibility)
+            if img is not None and template:
+                img.setTemplate_(True)
+            return img
+        return None
+
+    def _apply_toggle_icon(self, *, running: bool) -> None:
+        """Set play/stop SF Symbol on the start/stop menu item."""
+        if self._ns_toggle_item is None:
+            return
+        with contextlib.suppress(Exception):
+            sym = "stop.fill" if running else "play.fill"
+            label = "Stop server" if running else "Start server"
+            img = self._sf_symbol_image(sym, label)
+            if img is not None:
+                self._ns_toggle_item.setImage_(img)  # ty:ignore[unresolved-attribute]
+
+    def _apply_autostart_icon(self, enabled: bool) -> None:
+        """Show a checkmark / empty-circle leading icon on the autostart item.
+
+        Replaces NSMenuItem.setState_ — the built-in state column reserves a
+        shared indent across the whole menu, which shifts every other row a
+        few pixels right whenever any item is checked. Using a per-item image
+        keeps the rest of the menu aligned with the dashboard / start-stop
+        icons next to them.
+        """
+        if self._ns_autostart_item is None:
+            return
+        with contextlib.suppress(Exception):
+            self._ns_autostart_item.setState_(0)  # ty:ignore[unresolved-attribute]
+            sym = "checkmark.circle.fill" if enabled else "circle"
+            img = self._sf_symbol_image(sym, "Start with macOS")
+            if img is not None:
+                self._ns_autostart_item.setImage_(img)  # ty:ignore[unresolved-attribute]
 
     def _show_window(self) -> None:
         """Request that the settings panel be shown.

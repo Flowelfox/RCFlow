@@ -1268,6 +1268,18 @@ def assemble_macos_app(pyinstaller_app: Path, version: str, arch: str) -> Path:
         shutil.copy2(icns_src, contents_resources / "tray_icon.icns")
         print("Copied tray_icon.icns → Contents/Resources/")
 
+    # 1b. Copy monochrome menu-bar template PNGs (1x / 2x / 3x) to Resources/.
+    # _load_tray_template_image looks here when the app is frozen.
+    for tmpl_name in (
+        "tray_icon_template.png",
+        "tray_icon_template@2x.png",
+        "tray_icon_template@3x.png",
+    ):
+        tmpl_src = PROJECT_ROOT / "src" / "gui" / "assets" / tmpl_name
+        if tmpl_src.exists():
+            shutil.copy2(tmpl_src, contents_resources / tmpl_name)
+            print(f"Copied {tmpl_name} → Contents/Resources/")
+
     # 2. Copy tool definitions, migrations, alembic.ini next to the executable
     for src_rel, dest_name in (
         ("tools", "tools"),
