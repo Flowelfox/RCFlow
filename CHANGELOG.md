@@ -12,6 +12,12 @@ and note which component is affected where it matters.
 
 ## [Unreleased]
 
+### Changed
+- **Sessions no longer auto-close by default** — sessions used to be automatically ended after 6 hours of idle time. The auto-close timeout is now configurable from Worker Settings → Session Limits, and **disabled by default**. Set "Inactivity Timeout (minutes)" to a positive number to opt in; set it to 0 (or leave it blank) to keep sessions open indefinitely. Changes take effect without restarting the worker (Backend)
+
+### Fixed
+- **Auto-generated session titles could disappear after a worker restart** — auto-generated session titles now save to the database the moment they are assigned, so they remain visible after an unclean restart and after the new inactivity-timeout auto-close. Previously, if the worker process was killed before a session reached a terminal state, its title was lost on the next start (Backend)
+
 ---
 
 ## [Backend 0.42.1] — 2026-04-28

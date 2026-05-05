@@ -223,6 +223,9 @@ class Settings(BaseSettings):
     SESSION_INPUT_TOKEN_LIMIT: int = 0
     SESSION_OUTPUT_TOKEN_LIMIT: int = 0
 
+    # Session inactivity reaper (0 = disabled / never auto-close)
+    SESSION_INACTIVITY_TIMEOUT_MINUTES: int = 0
+
     # Artifacts
     ARTIFACT_INCLUDE_PATTERN: str = "*.md"
     ARTIFACT_EXCLUDE_PATTERN: str = (
@@ -579,6 +582,17 @@ CONFIG_OPTIONS: list[dict[str, Any]] = [
         "required": False,
         "restart_required": False,
         "visible_when": {"key": "LLM_PROVIDER", "value_not": "none"},
+    },
+    {
+        "key": "SESSION_INACTIVITY_TIMEOUT_MINUTES",
+        "label": "Inactivity Timeout (minutes)",
+        "type": "number",
+        "group": "Session Limits",
+        "description": (
+            "Auto-close sessions that have been idle for this many minutes. 0 = never auto-close (default)."
+        ),
+        "required": False,
+        "restart_required": False,
     },
     # --- Artifacts ---
     {

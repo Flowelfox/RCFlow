@@ -599,6 +599,7 @@ class ContextMixin:
                     title = title[:space_idx]
                 title += "..."
             session.title = title
+            self._fire_persist_session_metadata(session)  # ty:ignore[unresolved-attribute]
 
         # If non-agent tool completed, set IDLE and emit a turn-complete
         # signal so the client can finalize the tool block (switch the

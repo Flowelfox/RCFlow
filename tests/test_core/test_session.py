@@ -1268,3 +1268,117 @@ class TestReloadStaleSessionsSQLiteIntegration:
             row = await db.get(SessionModel, session_uuid)
         assert row is not None
         assert row.sort_order == -5000
+
+
+# ---------------------------------------------------------------------------
+# Integration tests: persist_session_metadata writes title alongside metadata
+# ---------------------------------------------------------------------------
+
+
+class TestPersistSessionMetadataSQLiteIntegration:
+    """persist_session_metadata is the durable hop for auto-generated titles.
+
+    These tests pin the contract that the helper writes the *current* title
+    to the row alongside metadata + main_project_path, and that it is a no-op
+    when the row does not yet exist.
+    """
+
+    @pytest.fixture(autouse=True)
+    async def setup_db(self):
+        self.engine = _make_sqlite_engine()
+        await _create_tables(self.engine)
+        self.factory = _session_factory(self.engine)
+        yield
+        await self.engine.dispose()
+
+    @pytest.mark.asyncio
+    async def test_persist_writes_title_to_existing_row(self):
+        """A stub row exists; persist_session_metadata must update its title."""
+        manager = SessionManager("test-backend")
+        session = manager.create_session(SessionType.CONVERSATIONAL)
+        session.set_active()
+        session_uuid = uuid.UUID(session.id)
+
+        # Pre-create the stub row with title=None, mirroring what
+        # _ensure_session_row_in_db would do at the start of a turn.
+        async with self.factory() as db:
+            db.add(
+                SessionModel(
+                    id=session_uuid,
+                    backend_id="test-backend",
+                    created_at=session.created_at,
+                    session_type=session.session_type.value,
+                    status=session.status.value,
+                    title=None,
+                )
+            )
+            await db.commit()
+
+        # Title task assigns the title in memory.
+        session.title = "Refactor auth module"
+        session.metadata["selected_worktree_path"] = "/tmp/wt"
+
+        async with self.factory() as db:
+            await manager.persist_session_metadata(session, db)
+
+        # The row should now carry both title and metadata.
+        async with self.factory() as db:
+            row = await db.get(SessionModel, session_uuid)
+        assert row is not None
+        assert row.title == "Refactor auth module"
+        assert row.metadata_ == {"selected_worktree_path": "/tmp/wt"}
+
+    @pytest.mark.asyncio
+    async def test_persist_is_noop_when_row_missing(self):
+        """If the stub row hasn't been created yet (or was already archived
+        and deleted), persist_session_metadata is a silent no-op."""
+        manager = SessionManager("test-backend")
+        session = manager.create_session(SessionType.CONVERSATIONAL)
+        session.title = "Will not be saved"
+
+        async with self.factory() as db:
+            # No row pre-created — must not raise.
+            await manager.persist_session_metadata(session, db)
+
+        async with self.factory() as db:
+            row = await db.get(SessionModel, uuid.UUID(session.id))
+        assert row is None
+
+    @pytest.mark.asyncio
+    async def test_persisted_title_survives_simulated_restart(self):
+        """Auto-generated title written via persist_session_metadata should
+        be reloaded on the next start.  Regression test for the title-loss
+        bug behind the inactivity-reaper auto-close report."""
+        manager = SessionManager("test-backend")
+        session = manager.create_session(SessionType.CONVERSATIONAL)
+        session.set_active()
+        session_uuid = uuid.UUID(session.id)
+        session_id = session.id
+
+        # Stub row exists from _ensure_session_row_in_db (title=None).
+        async with self.factory() as db:
+            db.add(
+                SessionModel(
+                    id=session_uuid,
+                    backend_id="test-backend",
+                    created_at=session.created_at,
+                    session_type=session.session_type.value,
+                    status=session.status.value,
+                    title=None,
+                )
+            )
+            await db.commit()
+
+        # Title task fires and persist runs.
+        session.title = "Investigate flaky test"
+        async with self.factory() as db:
+            await manager.persist_session_metadata(session, db)
+
+        # Simulate an unclean restart: drop in-memory state, reload from DB.
+        manager2 = SessionManager("test-backend")
+        async with self.factory() as db:
+            await manager2.reload_stale_sessions(db, "test-backend")
+
+        reloaded = manager2.get_session(session_id)
+        assert reloaded is not None
+        assert reloaded.title == "Investigate flaky test"

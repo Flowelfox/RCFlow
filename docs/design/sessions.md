@@ -1,5 +1,5 @@
 ---
-updated: 2026-04-26
+updated: 2026-05-05
 ---
 
 # Session Management
@@ -47,8 +47,11 @@ Lifecycle, activity state, types, storage, queueing, and token tracking for sess
   All sessions remain ACTIVE until the user explicitly ends them
   (POST /api/sessions/{id}/end or end_session WebSocket message),
   the underlying process exits, the session is cancelled via
-  POST /api/sessions/{session_id}/cancel, or the session is
-  auto-ended after 6 hours of inactivity.
+  POST /api/sessions/{session_id}/cancel, or the inactivity reaper
+  auto-ends a session that has been idle past the configured timeout.
+  The reaper is opt-in: it is disabled by default
+  (SESSION_INACTIVITY_TIMEOUT_MINUTES = 0) and can be set to a
+  positive number of minutes via Worker Settings → Session Limits.
 
   Sessions can be PAUSED from ACTIVE or EXECUTING state via
   POST /api/sessions/{id}/pause. Pausing kills any running
@@ -158,6 +161,8 @@ Each active session tracks an in-memory list of todo items, updated whenever Cla
 ## Session Titles
 
 Sessions receive auto-generated human-readable titles (max 6 words) derived from the first user prompt and LLM response. After the agentic loop completes for the first turn of a session, a background task sends the user prompt and assistant response to the title model (`TITLE_MODEL`, falls back to main model) to generate a short title. The title is stored in the `title` column of the `sessions` table and included in all session list responses (HTTP and WebSocket). Title generation failures are logged but never break the session. The `title` field is `null` until generated. Users can also manually rename sessions at any time via `PATCH /api/sessions/{session_id}/title`. Setting the title to `null` clears it.
+
+Auto-generated titles are persisted to the database **immediately** after the title is assigned (success path, fallback path, or direct-tool path) — not just when the session reaches a terminal state. This is implemented via a fire-and-forget call to `SessionManager.persist_session_metadata`, which writes the current `title`, `metadata_`, and `main_project_path` onto the existing stub row. As a result, an auto-generated title survives an unclean backend restart even when the session never reaches `archive_session`.
 
 ## Concurrency
 

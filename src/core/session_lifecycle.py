@@ -57,11 +57,13 @@ class SessionLifecycleMixin:
 
         Should be called during shutdown before the DB engine is disposed.
 
-        Title tasks are given a grace period to finish naturally so that
-        session titles are persisted before ``save_all_sessions`` runs.
+        Title and metadata-persist tasks are given a grace period to finish
+        naturally so that session titles reach the DB before
+        ``save_all_sessions`` runs.  Persist tasks are spawned by completing
+        title tasks, so they are awaited *after* the title queue drains.
         All other background tasks are cancelled immediately.
         """
-        # --- 1. Let title tasks finish (they are short LLM calls) ---
+        # --- 1. Let title tasks finish (short LLM calls; they spawn persist tasks) ---
         title_tasks = set(self._pending_title_tasks)  # ty:ignore[unresolved-attribute]
         if title_tasks:
             logger.info("Awaiting %d pending title task(s) before shutdown", len(title_tasks))
@@ -72,7 +74,18 @@ class SessionLifecycleMixin:
                     task.cancel()
                 await asyncio.gather(*pending, return_exceptions=True)
 
-        # --- 2. Cancel everything else ---
+        # --- 2. Let metadata-persist tasks finish (short DB writes) ---
+        persist_tasks = set(self._pending_persist_tasks)  # ty:ignore[unresolved-attribute]
+        if persist_tasks:
+            logger.info("Awaiting %d pending persist task(s) before shutdown", len(persist_tasks))
+            _done, pending = await asyncio.wait(persist_tasks, timeout=10)
+            if pending:
+                logger.warning("Cancelling %d persist task(s) that did not finish in time", len(pending))
+                for task in pending:
+                    task.cancel()
+                await asyncio.gather(*pending, return_exceptions=True)
+
+        # --- 3. Cancel everything else ---
         all_pending: set[asyncio.Task[None]] = set()
         for task_set in (
             self._pending_log_tasks,  # ty:ignore[unresolved-attribute]
@@ -891,11 +904,16 @@ class SessionLifecycleMixin:
     # Inactivity reaper
     # ------------------------------------------------------------------
 
-    _INACTIVITY_TIMEOUT = timedelta(hours=6)
     _REAPER_CHECK_INTERVAL = 600  # seconds (10 minutes)
 
     async def run_inactivity_reaper(self) -> None:
-        """Periodically end sessions that have been inactive for too long."""
+        """Periodically end sessions that have been inactive for too long.
+
+        The timeout is read from ``Settings.SESSION_INACTIVITY_TIMEOUT_MINUTES``
+        on every tick so the reaper picks up live config changes
+        (``PATCH /api/config``) without a worker restart.  When the setting is
+        ``0`` (the default) reaping is disabled entirely.
+        """
         try:
             while True:
                 await asyncio.sleep(self._REAPER_CHECK_INTERVAL)
@@ -904,7 +922,17 @@ class SessionLifecycleMixin:
             pass
 
     async def _reap_inactive_sessions(self) -> None:
-        """End all active sessions that exceed the inactivity timeout."""
+        """End all active sessions that exceed the inactivity timeout.
+
+        No-op when ``Settings.SESSION_INACTIVITY_TIMEOUT_MINUTES`` is ``0``
+        or unset.
+        """
+        minutes = 0
+        if self._settings is not None:  # ty:ignore[unresolved-attribute]
+            minutes = self._settings.SESSION_INACTIVITY_TIMEOUT_MINUTES  # ty:ignore[unresolved-attribute]
+        if minutes <= 0:
+            return  # Reaper disabled.
+        timeout = timedelta(minutes=minutes)
         now = datetime.now(UTC)
         terminal = (SessionStatus.COMPLETED, SessionStatus.FAILED, SessionStatus.CANCELLED)
         for session in self._session_manager.list_all_sessions():  # ty:ignore[unresolved-attribute]
@@ -912,11 +940,13 @@ class SessionLifecycleMixin:
                 continue
             if session.status == SessionStatus.PAUSED:
                 continue  # Never reap paused sessions
-            if now - session.last_activity_at > self._INACTIVITY_TIMEOUT:
+            if now - session.last_activity_at > timeout:
+                idle_minutes = int((now - session.last_activity_at).total_seconds() / 60)
                 logger.info(
-                    "Auto-ending inactive session %s (last activity: %s)",
+                    "Auto-ending inactive session %s (idle %d min, limit %d min)",
                     session.id,
-                    session.last_activity_at.isoformat(),
+                    idle_minutes,
+                    minutes,
                 )
                 with contextlib.suppress(ValueError, RuntimeError):
                     await self.end_session(session.id)
