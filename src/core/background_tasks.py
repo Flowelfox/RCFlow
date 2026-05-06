@@ -213,6 +213,7 @@ class BackgroundTasksMixin:
                     title = title[:space_idx]
                 title += "..."
             session.title = title
+            self._fire_persist_session_metadata(session)
             return
         task = asyncio.create_task(self._generate_and_set_title(session, user_text, assistant_text))
         self._pending_title_tasks.add(task)  # ty:ignore[unresolved-attribute]
@@ -239,6 +240,35 @@ class BackgroundTasksMixin:
                     fallback += "..."
                 session.title = fallback
                 logger.info("Set fallback title for session %s: %s", session.id, fallback)
+            # Persist immediately so the title survives an unclean restart.
+            self._fire_persist_session_metadata(session)
+
+    # --- Session metadata persistence ---
+
+    def _fire_persist_session_metadata(self, session: ActiveSession) -> None:
+        """Schedule a fire-and-forget DB write of the session's title + metadata.
+
+        Used after auto-generated title assignment so the value reaches the DB
+        immediately rather than waiting for archive on terminal state.  Tracked
+        in its own task set (``_pending_persist_tasks``) so ``cancel_pending_tasks``
+        can give it the same shutdown grace period as title generation tasks —
+        title tasks create persist tasks at completion, so the persist queue
+        only finishes filling up after the title queue drains.
+        """
+        if self._db_session_factory is None:  # ty:ignore[unresolved-attribute]
+            return
+        task = asyncio.create_task(self._persist_session_metadata(session))
+        self._pending_persist_tasks.add(task)  # ty:ignore[unresolved-attribute]
+        task.add_done_callback(self._pending_persist_tasks.discard)  # ty:ignore[unresolved-attribute]
+
+    async def _persist_session_metadata(self, session: ActiveSession) -> None:
+        """Write the session's title + metadata to the DB. Never raises."""
+        assert self._db_session_factory is not None  # ty:ignore[unresolved-attribute]
+        try:
+            async with self._db_session_factory() as db:  # ty:ignore[unresolved-attribute]
+                await self._session_manager.persist_session_metadata(session, db)  # ty:ignore[unresolved-attribute]
+        except Exception:
+            logger.warning("Persist metadata failed for session %s", session.id, exc_info=True)
 
     # --- Task creation/update agents ---
 

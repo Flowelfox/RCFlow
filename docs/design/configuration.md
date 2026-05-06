@@ -1,5 +1,5 @@
 ---
-updated: 2026-04-27
+updated: 2026-05-05
 ---
 
 # Configuration
@@ -43,6 +43,7 @@ All configuration is via environment variables, loaded from a `settings.json` fi
 | `CAVEMAN_LEVEL`         | no       | `full`          | Caveman intensity: `lite`, `full`, or `ultra` |
 | `SESSION_INPUT_TOKEN_LIMIT` | no   | `0` (unlimited) | Max total input tokens (LLM + tool) per session. `0` = no limit. |
 | `SESSION_OUTPUT_TOKEN_LIMIT`| no   | `0` (unlimited) | Max total output tokens (LLM + tool) per session. `0` = no limit. |
+| `SESSION_INACTIVITY_TIMEOUT_MINUTES` | no | `0` (disabled) | Auto-end sessions idle for this many minutes. `0` = never auto-end (default). The reaper checks every 10 minutes and reads the value live, so changes via `PATCH /api/config` take effect without a restart. Paused and terminal sessions are always skipped. |
 | `ARTIFACT_INCLUDE_PATTERN` | no    | `*.md`          | Glob pattern for files to include in artifact extraction (case-insensitive) |
 | `ARTIFACT_EXCLUDE_PATTERN` | no    | `node_modules/**,...` | Comma-separated glob patterns to exclude from extraction |
 | `ARTIFACT_AUTO_SCAN`    | no       | `true`          | Auto-extract artifacts from messages in real time during session execution |

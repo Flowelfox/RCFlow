@@ -32,13 +32,18 @@ _TOOLS_DIR = Path(__file__).parent.parent.parent / "tools"
 # ---------------------------------------------------------------------------
 
 
-def _make_router(session_manager: SessionManager) -> PromptRouter:
+def _make_router(
+    session_manager: SessionManager,
+    *,
+    inactivity_minutes: int = 360,
+) -> PromptRouter:
     llm = MagicMock()
     registry = ToolRegistry()
     registry.load_from_directory(_TOOLS_DIR)
     settings = MagicMock()
     settings.SESSION_INPUT_TOKEN_LIMIT = 0
     settings.SESSION_OUTPUT_TOKEN_LIMIT = 0
+    settings.SESSION_INACTIVITY_TIMEOUT_MINUTES = inactivity_minutes
     return PromptRouter(
         llm,
         session_manager,
@@ -437,6 +442,42 @@ class TestReapInactiveSessions:
         await router._reap_inactive_sessions()
 
         assert all(s.status == SessionStatus.COMPLETED for s in sessions)
+
+    async def test_disabled_when_timeout_is_zero(self, session_manager: SessionManager) -> None:
+        router = _make_router(session_manager, inactivity_minutes=0)
+        session = session_manager.create_session(SessionType.CONVERSATIONAL)
+        session.set_active()
+        session.last_activity_at = datetime.now(UTC) - timedelta(hours=100)
+
+        await router._reap_inactive_sessions()
+
+        # Reaper disabled — session remains ACTIVE despite massive backdate.
+        assert session.status == SessionStatus.ACTIVE
+
+    async def test_uses_custom_timeout_minutes(self, session_manager: SessionManager) -> None:
+        router = _make_router(session_manager, inactivity_minutes=15)
+        session = session_manager.create_session(SessionType.CONVERSATIONAL)
+        session.set_active()
+        session.last_activity_at = datetime.now(UTC) - timedelta(minutes=30)
+
+        await router._reap_inactive_sessions()
+
+        assert session.status == SessionStatus.COMPLETED
+
+    async def test_picks_up_setting_change_live(self, session_manager: SessionManager) -> None:
+        router = _make_router(session_manager, inactivity_minutes=0)
+        session = session_manager.create_session(SessionType.CONVERSATIONAL)
+        session.set_active()
+        session.last_activity_at = datetime.now(UTC) - timedelta(minutes=30)
+
+        # First call: disabled — session survives.
+        await router._reap_inactive_sessions()
+        assert session.status == SessionStatus.ACTIVE
+
+        # Live config change — reaper enables on next tick.
+        router._settings.SESSION_INACTIVITY_TIMEOUT_MINUTES = 15
+        await router._reap_inactive_sessions()
+        assert session.status == SessionStatus.COMPLETED
 
 
 # ---------------------------------------------------------------------------

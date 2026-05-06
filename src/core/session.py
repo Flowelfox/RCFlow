@@ -905,17 +905,19 @@ class SessionManager:
             await self.archive_session(session_id, db)
 
     async def persist_session_metadata(self, session: "ActiveSession", db: AsyncSession) -> None:
-        """Write the session's current metadata and main_project_path to the DB.
+        """Write the session's current title, metadata, and main_project_path to the DB.
 
-        Called after mid-session mutations (e.g. worktree selection, project change)
-        to make the change durable before archival so it survives backend restarts.
-        Only updates the existing stub row — the full archive write at session end
-        supersedes this with the complete record.
+        Called after mid-session mutations (worktree selection, project change,
+        auto-generated title assignment) to make the change durable before
+        archival so it survives an unclean backend restart.  Only updates the
+        existing stub row — the full archive write at session end supersedes
+        this with the complete record.
         """
         try:
             session_uuid = uuid.UUID(session.id)
             row = await db.get(SessionModel, session_uuid)
             if row is not None:
+                row.title = session.title
                 row.metadata_ = dict(session.metadata)
                 row.main_project_path = session.main_project_path
                 await db.commit()

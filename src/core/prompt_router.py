@@ -160,6 +160,7 @@ class PromptRouter(
         self._pending_prompt_tasks: set[asyncio.Task[str]] = set()
         self._pending_log_tasks: set[asyncio.Task[None]] = set()
         self._pending_title_tasks: set[asyncio.Task[None]] = set()
+        self._pending_persist_tasks: set[asyncio.Task[None]] = set()
         self._pending_archive_tasks: set[asyncio.Task[None]] = set()
         self._pending_summary_tasks: set[asyncio.Task[None]] = set()
         self._pending_task_creation_tasks: set[asyncio.Task[None]] = set()
