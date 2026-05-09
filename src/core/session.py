@@ -73,6 +73,24 @@ class SessionType(StrEnum):
 
 
 @dataclass
+class MonitorState:
+    """In-memory tracking for a live Claude Code ``Monitor`` tool invocation.
+
+    Keyed by the Claude Code ``tool_use_id`` so concurrent monitors stay
+    separated.  Each stdout-line batch from the watched script becomes a
+    ``MONITOR_EVENT`` buffer message; the entry is removed when the watch
+    terminates (script exit, timeout, cancel, or session end).
+    """
+
+    description: str
+    command: str
+    timeout_ms: int
+    persistent: bool
+    started_at: datetime
+    event_count: int = 0
+
+
+@dataclass
 class PendingMessage:
     """A user message queued while the agent was busy with a prior turn.
 
@@ -178,6 +196,10 @@ class ActiveSession:
         # Per-stream stack of pre-snapshots for Edit/Write diff computation.
         # Reset at the start of each stream; populated by agent_claude_code.
         self._pending_snapshots: list[tuple[str, str | None] | None] = []
+        # Live Claude Code ``Monitor`` invocations, keyed by tool_use_id.
+        # Persists across turns — a monitor may keep emitting events while the
+        # outer assistant continues other work.  Cleared by session-end hooks.
+        self._active_monitors: dict[str, MonitorState] = {}
         # Fenced code blocks extracted from the latest user prompt on the
         # LLM-mediated path. Consumed by ``PromptRouter._execute_tool`` when an
         # agent tool is invoked so verbatim code blocks always reach the

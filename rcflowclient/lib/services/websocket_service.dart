@@ -289,6 +289,19 @@ class WebSocketService {
     _inputChannel!.sink.add(jsonEncode(msg));
   }
 
+  /// Stop a live Claude Code Monitor watch identified by its tool_use id.
+  /// The server responds with an ``ack`` and emits ``monitor_end`` with
+  /// ``reason="cancelled"`` for the matching block.
+  void cancelMonitor(String sessionId, String monitorId) {
+    if (_inputChannel == null) return;
+    final msg = {
+      'type': 'cancel_monitor',
+      'session_id': sessionId,
+      'monitor_id': monitorId,
+    };
+    _inputChannel!.sink.add(jsonEncode(msg));
+  }
+
   /// Request cancellation of a queued user message that has not yet been
   /// delivered to the agent.  The server may respond with a ``cancel_ack``
   /// carrying ``ok: false`` when the message was already dequeued; the UI

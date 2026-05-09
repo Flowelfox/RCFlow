@@ -274,6 +274,28 @@ class PaneState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Live Claude Code ``Monitor`` watches keyed by ``monitor_id``.  Lookups by
+  /// id keep events routing to the correct block even when interleaved with
+  /// other tool calls.  Entries are removed when ``monitor_end`` arrives or
+  /// the session is switched.
+  final Map<String, DisplayMessage> _activeMonitors = {};
+  Map<String, DisplayMessage> get activeMonitors => _activeMonitors;
+
+  /// All currently-live monitor blocks for this pane, in start order.
+  List<DisplayMessage> get liveMonitors => _activeMonitors.values
+      .where((m) => !m.finished)
+      .toList(growable: false);
+
+  /// Hard cap on monitor events retained per block.  Older entries are
+  /// dropped while ``monitorTotalEvents`` keeps the true count.
+  static const int monitorEventCap = 200;
+
+  Future<void> cancelMonitor(String monitorId) async {
+    final sid = _sessionId;
+    if (sid == null) return;
+    _ws?.cancelMonitor(sid, monitorId);
+  }
+
   // Callback invoked once when a new session is created (ack received).
   void Function(String sessionId)? _onNewSessionAck;
 
@@ -834,6 +856,7 @@ class PaneState extends ChangeNotifier {
     _sessionPaused = false;
     _pausedReason = null;
     _runningSubprocess = null;
+    _activeMonitors.clear();
     _selectedToolMention = null;
     _sessionId = sessionId;
 
@@ -918,6 +941,7 @@ class PaneState extends ChangeNotifier {
     _pendingLocalUserMessages = 0;
     _queuedMessages.clear();
     _runningSubprocess = null;
+    _activeMonitors.clear();
 
     final session = _host.sessions.cast<SessionInfo?>().firstWhere(
       (s) => s!.sessionId == _sessionId,
@@ -951,6 +975,7 @@ class PaneState extends ChangeNotifier {
     _sessionPaused = false;
     _pausedReason = null;
     _runningSubprocess = null;
+    _activeMonitors.clear();
     _pendingLocalUserMessages = 0;
     _queuedMessages.clear();
     _messages.clear();
@@ -992,6 +1017,7 @@ class PaneState extends ChangeNotifier {
     _sessionPaused = false;
     _pausedReason = null;
     _runningSubprocess = null;
+    _activeMonitors.clear();
     _pendingLocalUserMessages = 0;
     _queuedMessages.clear();
     _pendingInputText = null;

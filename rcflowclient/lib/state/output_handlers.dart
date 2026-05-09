@@ -245,6 +245,67 @@ void handleAgentLog(Map<String, dynamic> msg, PaneState pane) {
   }
 }
 
+void handleMonitorStart(Map<String, dynamic> msg, PaneState pane) {
+  final monitorId = msg['monitor_id'] as String?;
+  if (monitorId == null) return;
+  pane.finalizeStream();
+  final block = DisplayMessage(
+    type: DisplayMessageType.monitorBlock,
+    sessionId: msg['session_id'] as String?,
+    toolName: 'Monitor',
+    displayName: msg['description'] as String? ?? 'Monitor',
+    content: '',
+    finished: false,
+    monitorId: monitorId,
+    monitorStartedAt:
+        DateTime.tryParse(msg['started_at'] as String? ?? '') ?? DateTime.now(),
+    monitorTimeoutMs: (msg['timeout_ms'] as num?)?.toInt(),
+    monitorPersistent: msg['persistent'] as bool? ?? false,
+    toolInput: {
+      'description': msg['description'],
+      'command': msg['command'],
+      'timeout_ms': msg['timeout_ms'],
+      'persistent': msg['persistent'],
+    },
+    monitorEvents: <MonitorEvent>[],
+  );
+  pane.activeMonitors[monitorId] = block;
+  pane.addDisplayMessageInStream(block);
+}
+
+void handleMonitorEvent(Map<String, dynamic> msg, PaneState pane) {
+  final monitorId = msg['monitor_id'] as String?;
+  if (monitorId == null) return;
+  final block = pane.activeMonitors[monitorId];
+  if (block == null) return;
+  block.monitorEvents ??= <MonitorEvent>[];
+  block.monitorEvents!.add(MonitorEvent.fromJson(msg));
+  // Bound memory: drop oldest while preserving the running total.
+  while (block.monitorEvents!.length > PaneState.monitorEventCap) {
+    block.monitorEvents!.removeAt(0);
+  }
+  block.monitorTotalEvents++;
+  pane.refresh();
+}
+
+void handleMonitorEnd(Map<String, dynamic> msg, PaneState pane) {
+  final monitorId = msg['monitor_id'] as String?;
+  if (monitorId == null) return;
+  final block = pane.activeMonitors.remove(monitorId);
+  if (block == null) return;
+  block.finished = true;
+  block.monitorTerminationReason = msg['reason'] as String?;
+  final exitCode = msg['exit_code'];
+  if (exitCode is num) {
+    block.monitorExitCode = exitCode.toInt();
+  }
+  if (block.monitorTerminationReason != 'exit' ||
+      (block.monitorExitCode != null && block.monitorExitCode != 0)) {
+    block.isError = true;
+  }
+  pane.refresh();
+}
+
 void handleSubprocessStatus(Map<String, dynamic> msg, PaneState pane) {
   final subprocessType = msg['subprocess_type'] as String?;
   if (subprocessType == null) {
@@ -352,6 +413,9 @@ final Map<WsOutputType, OutputHandler> typedOutputHandlerRegistry = {
   WsOutputType.messageQueuedUpdated: handleMessageQueuedUpdated,
   WsOutputType.cancelAck: handleCancelAck,
   WsOutputType.editAck: handleEditAck,
+  WsOutputType.monitorStart: handleMonitorStart,
+  WsOutputType.monitorEvent: handleMonitorEvent,
+  WsOutputType.monitorEnd: handleMonitorEnd,
 };
 
 /// Legacy string-keyed registry — kept for [PaneState._loadHistory] and
@@ -383,6 +447,9 @@ final Map<String, OutputHandler> outputHandlerRegistry = {
   'message_queued_updated': handleMessageQueuedUpdated,
   'cancel_ack': handleCancelAck,
   'edit_ack': handleEditAck,
+  'monitor_start': handleMonitorStart,
+  'monitor_event': handleMonitorEvent,
+  'monitor_end': handleMonitorEnd,
 };
 
 // ---------------------------------------------------------------------------
@@ -707,6 +774,93 @@ void buildAgentSessionStartHistory(
   );
 }
 
+DisplayMessage? _findLiveMonitorBlock(
+  List<DisplayMessage> messages,
+  String monitorId,
+) {
+  for (var i = messages.length - 1; i >= 0; i--) {
+    final m = messages[i];
+    if (m.type == DisplayMessageType.monitorBlock &&
+        m.monitorId == monitorId &&
+        !m.finished) {
+      return m;
+    }
+  }
+  return null;
+}
+
+void buildMonitorStartHistory(
+  Map<String, dynamic> msg,
+  String sessionId,
+  List<DisplayMessage> messages,
+) {
+  final metadata = msg['metadata'] as Map<String, dynamic>? ?? {};
+  final monitorId = metadata['monitor_id'] as String?;
+  if (monitorId == null) return;
+  messages.add(
+    DisplayMessage(
+      type: DisplayMessageType.monitorBlock,
+      sessionId: sessionId,
+      toolName: 'Monitor',
+      displayName: metadata['description'] as String? ?? 'Monitor',
+      finished: false,
+      monitorId: monitorId,
+      monitorStartedAt:
+          DateTime.tryParse(metadata['started_at'] as String? ?? '') ??
+              DateTime.now(),
+      monitorTimeoutMs: (metadata['timeout_ms'] as num?)?.toInt(),
+      monitorPersistent: metadata['persistent'] as bool? ?? false,
+      toolInput: {
+        'description': metadata['description'],
+        'command': metadata['command'],
+        'timeout_ms': metadata['timeout_ms'],
+        'persistent': metadata['persistent'],
+      },
+      monitorEvents: <MonitorEvent>[],
+    ),
+  );
+}
+
+void buildMonitorEventHistory(
+  Map<String, dynamic> msg,
+  String sessionId,
+  List<DisplayMessage> messages,
+) {
+  final metadata = msg['metadata'] as Map<String, dynamic>? ?? {};
+  final monitorId = metadata['monitor_id'] as String?;
+  if (monitorId == null) return;
+  final block = _findLiveMonitorBlock(messages, monitorId);
+  if (block == null) return;
+  block.monitorEvents ??= <MonitorEvent>[];
+  block.monitorEvents!.add(MonitorEvent.fromJson(metadata));
+  while (block.monitorEvents!.length > 200) {
+    block.monitorEvents!.removeAt(0);
+  }
+  block.monitorTotalEvents++;
+}
+
+void buildMonitorEndHistory(
+  Map<String, dynamic> msg,
+  String sessionId,
+  List<DisplayMessage> messages,
+) {
+  final metadata = msg['metadata'] as Map<String, dynamic>? ?? {};
+  final monitorId = metadata['monitor_id'] as String?;
+  if (monitorId == null) return;
+  final block = _findLiveMonitorBlock(messages, monitorId);
+  if (block == null) return;
+  block.finished = true;
+  block.monitorTerminationReason = metadata['reason'] as String?;
+  final exitCode = metadata['exit_code'];
+  if (exitCode is num) {
+    block.monitorExitCode = exitCode.toInt();
+  }
+  if (block.monitorTerminationReason != 'exit' ||
+      (block.monitorExitCode != null && block.monitorExitCode != 0)) {
+    block.isError = true;
+  }
+}
+
 /// Maps archived message type strings to history builder functions.
 final Map<String, HistoryBuilder> historyBuilderRegistry = {
   'text_chunk': buildTextChunkHistory,
@@ -723,4 +877,7 @@ final Map<String, HistoryBuilder> historyBuilderRegistry = {
   'todo_update': buildTodoUpdateHistory,
   'thinking': buildThinkingHistory,
   'agent_session_start': buildAgentSessionStartHistory,
+  'monitor_start': buildMonitorStartHistory,
+  'monitor_event': buildMonitorEventHistory,
+  'monitor_end': buildMonitorEndHistory,
 };

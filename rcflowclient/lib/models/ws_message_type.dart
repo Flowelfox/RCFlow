@@ -33,6 +33,9 @@ enum WsOutputType {
   messageQueuedUpdated,
   cancelAck,
   editAck,
+  monitorStart,
+  monitorEvent,
+  monitorEnd,
 
   // --- App-level (handled in AppState before pane dispatch) ---
   taskList,
@@ -83,6 +86,9 @@ enum WsOutputType {
       'message_queued_updated' => WsOutputType.messageQueuedUpdated,
       'cancel_ack' => WsOutputType.cancelAck,
       'edit_ack' => WsOutputType.editAck,
+      'monitor_start' => WsOutputType.monitorStart,
+      'monitor_event' => WsOutputType.monitorEvent,
+      'monitor_end' => WsOutputType.monitorEnd,
       'task_list' => WsOutputType.taskList,
       'task_update' => WsOutputType.taskUpdate,
       'task_deleted' => WsOutputType.taskDeleted,

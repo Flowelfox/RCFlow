@@ -441,6 +441,15 @@ class SessionLifecycleMixin:
         if session is None:
             raise ValueError(f"Session not found: {session_id}")
 
+        # Mark the session as PAUSED *before* the first await so that any
+        # racing stream task that observes the SIGKILL-induced EOF (during
+        # ``await executor.cancel()`` → ``await proc.wait()``) sees
+        # status=PAUSED and takes the clean PAUSED branch.  Without this,
+        # the task would fall through to the "unexpected exit" path, push a
+        # spurious "exit code -9" ERROR, and emit an extra AGENT_GROUP_END,
+        # leaving the client in an unrecoverable loading state after resume.
+        session.pause()  # raises RuntimeError if already paused / terminal
+
         # Kill Claude Code subprocess if running
         had_claude_code = session.claude_code_executor is not None
         if session.claude_code_executor is not None:
@@ -480,6 +489,10 @@ class SessionLifecycleMixin:
 
         had_agent = had_claude_code or had_codex or had_opencode
 
+        # Close out any live Monitor watches so they do not appear as still ticking
+        # in the UI while the session sits paused.
+        await self._terminate_active_monitors(session, reason="session_end")  # ty:ignore[unresolved-attribute]
+
         # Auto-deny any pending permission requests
         if session.permission_manager is not None:
             session.permission_manager.cancel_all_pending()
@@ -497,8 +510,6 @@ class SessionLifecycleMixin:
 
         # Clear subprocess tracking fields and broadcast null status
         session.clear_subprocess_tracking()
-
-        session.pause()
 
         # Close any open agent group
         if had_agent:
@@ -578,6 +589,9 @@ class SessionLifecycleMixin:
             with contextlib.suppress(asyncio.CancelledError):
                 await session._opencode_stream_task
         session._opencode_stream_task = None
+
+        # Close out any live Monitor watches before broadcasting interrupt.
+        await self._terminate_active_monitors(session, reason="cancelled")  # ty:ignore[unresolved-attribute]
 
         # Close any open agent group
         if had_claude_code or had_codex or had_opencode:

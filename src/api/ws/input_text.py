@@ -222,6 +222,25 @@ async def ws_input_text(
                     )
                 continue
 
+            if msg_type == "cancel_monitor":
+                cm_session_id = message.get("session_id")
+                cm_monitor_id = message.get("monitor_id")
+                if not cm_session_id or not cm_monitor_id:
+                    await websocket.send_json(
+                        {
+                            "type": "error",
+                            "content": "Missing session_id or monitor_id",
+                            "code": "MISSING_MONITOR_ID",
+                        }
+                    )
+                    continue
+                try:
+                    await prompt_router.cancel_monitor(cm_session_id, cm_monitor_id)
+                    await websocket.send_json({"type": "ack", "session_id": cm_session_id, "monitor_id": cm_monitor_id})
+                except ValueError as e:
+                    await websocket.send_json({"type": "error", "content": str(e), "code": "CANCEL_MONITOR_ERROR"})
+                continue
+
             if msg_type == "cancel_queued":
                 cq_session_id = message.get("session_id")
                 cq_queued_id = message.get("queued_id")

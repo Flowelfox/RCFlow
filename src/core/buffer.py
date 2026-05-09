@@ -40,6 +40,12 @@ class MessageType(StrEnum):
     MESSAGE_QUEUED = "message_queued"
     MESSAGE_DEQUEUED = "message_dequeued"
     MESSAGE_QUEUED_UPDATED = "message_queued_updated"
+    # Long-running Monitor tool lifecycle (Claude Code's deferred ``Monitor`` tool).
+    # Each MONITOR_EVENT carries one stdout-line batch from the watched script;
+    # the block stays open across many events until MONITOR_END.
+    MONITOR_START = "monitor_start"
+    MONITOR_EVENT = "monitor_event"
+    MONITOR_END = "monitor_end"
 
 
 @dataclass

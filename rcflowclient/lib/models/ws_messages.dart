@@ -16,6 +16,36 @@ enum DisplayMessageType {
   /// Session was automatically paused because Claude Code reached its
   /// configured maximum number of turns (--max-turns limit).
   pausedMaxTurns,
+
+  /// A live Claude Code ``Monitor`` watch — streams stdout-line notifications
+  /// from a backgrounded script with a live elapsed-time counter.
+  monitorBlock,
+}
+
+/// Single stdout-line batch from a live Monitor watch.
+class MonitorEvent {
+  final DateTime receivedAt;
+  final String content;
+  final bool isError;
+  final int sequence;
+
+  const MonitorEvent({
+    required this.receivedAt,
+    required this.content,
+    required this.isError,
+    required this.sequence,
+  });
+
+  factory MonitorEvent.fromJson(Map<String, dynamic> json) {
+    return MonitorEvent(
+      receivedAt:
+          DateTime.tryParse(json['received_at'] as String? ?? '') ??
+              DateTime.now(),
+      content: json['content'] as String? ?? '',
+      isError: json['is_error'] as bool? ?? false,
+      sequence: (json['sequence'] as num?)?.toInt() ?? 0,
+    );
+  }
 }
 
 class DisplayMessage {
@@ -52,6 +82,35 @@ class DisplayMessage {
   /// Null when no diff was included in the server message.
   String? fileDiff;
 
+  // ---------------- Monitor block fields ----------------
+
+  /// Stable id for a monitor block, matching the Claude Code ``tool_use_id``.
+  /// Lookups in [PaneState] live-event routing key off this id.
+  final String? monitorId;
+
+  /// Wall-clock time the monitor was started — drives the live elapsed counter.
+  final DateTime? monitorStartedAt;
+
+  /// Configured timeout in milliseconds; non-persistent monitors only.
+  final int? monitorTimeoutMs;
+
+  /// True when this is a session-lifetime watch (no timeout deadline).
+  final bool? monitorPersistent;
+
+  /// Termination reason once finished: ``exit | timeout | cancelled | session_end | error``.
+  String? monitorTerminationReason;
+
+  /// Process exit code when ``monitorTerminationReason == 'exit'``.
+  int? monitorExitCode;
+
+  /// Streaming list of stdout-line batches received while the monitor was live.
+  /// Capped at 200 entries to bound memory; oldest are dropped first.
+  List<MonitorEvent>? monitorEvents;
+
+  /// Total event count reported by the backend (may exceed ``monitorEvents.length``
+  /// when older events have been dropped from the local cap).
+  int monitorTotalEvents;
+
   DisplayMessage({
     required this.type,
     this.content = '',
@@ -67,6 +126,14 @@ class DisplayMessage {
     this.pendingLocalEcho = false,
     this.attachments,
     this.fileDiff,
+    this.monitorId,
+    this.monitorStartedAt,
+    this.monitorTimeoutMs,
+    this.monitorPersistent,
+    this.monitorTerminationReason,
+    this.monitorExitCode,
+    this.monitorEvents,
+    this.monitorTotalEvents = 0,
   });
 
   bool get isQuestion => toolName == 'AskUserQuestion';

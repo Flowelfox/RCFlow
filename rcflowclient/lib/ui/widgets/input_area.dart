@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 
 import '../../models/subprocess_info.dart';
 import '../../models/worker_config.dart';
+import '../../models/ws_messages.dart';
 import '../../services/keyboard_state_reconciler.dart';
 import '../../state/app_state.dart';
 import '../../state/input_area_view_model.dart';
@@ -1307,6 +1308,7 @@ class _InputAreaState extends State<InputArea> {
                   onKill: () => context.read<PaneState>().interruptSubprocess(),
                 ),
               ),
+            const _MonitorStatusStrip(),
             Row(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
@@ -2316,6 +2318,127 @@ class _SubprocessStatusBarState extends State<_SubprocessStatusBar> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Compact strip listing live ``Monitor`` watches for the current pane.
+///
+/// Renders nothing when no monitors are active.  Each entry shows the
+/// description and a live elapsed-time counter that ticks every second
+/// independently of the rest of the UI.
+class _MonitorStatusStrip extends StatefulWidget {
+  const _MonitorStatusStrip();
+
+  @override
+  State<_MonitorStatusStrip> createState() => _MonitorStatusStripState();
+}
+
+class _MonitorStatusStripState extends State<_MonitorStatusStrip> {
+  Timer? _ticker;
+
+  @override
+  void initState() {
+    super.initState();
+    _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _ticker?.cancel();
+    super.dispose();
+  }
+
+  String _fmt(Duration d) {
+    final h = d.inHours;
+    final m = d.inMinutes.remainder(60);
+    final s = d.inSeconds.remainder(60);
+    if (h > 0) {
+      return '${h.toString()}:${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+    }
+    return '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final monitors = context.select<PaneState, List<DisplayMessage>>(
+      (s) => s.liveMonitors,
+    );
+    if (monitors.isEmpty) return const SizedBox.shrink();
+    final colors = context.appColors;
+    final now = DateTime.now();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          color: colors.bgElevated,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: colors.divider),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.podcasts_rounded, size: 12, color: colors.accentLight),
+            const SizedBox(width: 6),
+            Text(
+              monitors.length == 1
+                  ? '1 monitor'
+                  : '${monitors.length} monitors',
+              style: TextStyle(
+                color: colors.textPrimary,
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 2,
+                children: [
+                  for (final m in monitors)
+                    Builder(
+                      builder: (_) {
+                        final started = m.monitorStartedAt;
+                        final elapsed = started != null
+                            ? now.difference(started)
+                            : Duration.zero;
+                        final desc = m.displayName ?? 'Monitor';
+                        return Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              _fmt(elapsed),
+                              style: TextStyle(
+                                color: colors.accentLight,
+                                fontSize: 11,
+                                fontFamily: 'monospace',
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            ConstrainedBox(
+                              constraints: const BoxConstraints(maxWidth: 220),
+                              child: Text(
+                                desc,
+                                style: TextStyle(
+                                  color: colors.textMuted,
+                                  fontSize: 11,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        );
+                      },
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

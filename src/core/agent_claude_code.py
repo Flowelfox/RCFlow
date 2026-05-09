@@ -31,7 +31,7 @@ from src.core.permissions import (
     describe_tool_action,
     get_scope_options,
 )
-from src.core.session import ActivityState, SessionStatus, SessionType
+from src.core.session import ActivityState, MonitorState, SessionStatus, SessionType
 from src.executors.claude_code import ClaudeCodeExecutor
 
 if TYPE_CHECKING:
@@ -50,6 +50,63 @@ _MAX_DIFF_LINES = 200
 _TOOL_OUTPUT_CHUNK_SIZE = 8_192
 _PLAN_MODE_TIMEOUT = 3600  # 1 hour — wait for user to approve/deny plan mode
 _PLAN_REVIEW_TIMEOUT = 3600  # 1 hour — wait for user to respond to plan review
+
+
+_MONITOR_TERMINAL_PREFIXES = (
+    "monitor exited",
+    "monitor stopped",
+    "monitor timed out",
+    "monitor cancelled",
+    "monitor canceled",
+)
+
+
+def _is_monitor_terminal(content: str, is_error: bool) -> bool:
+    """Heuristic: does this Monitor tool_result block end the watch?
+
+    Treat ``is_error=True`` as terminal so we never leak a live block on
+    error.  Otherwise look for the ``"Monitor …"`` summary lines Claude
+    Code emits when the watched script exits, times out, or is stopped.
+    """
+    if is_error:
+        return True
+    head = content.strip().lower()[:64]
+    return any(head.startswith(p) for p in _MONITOR_TERMINAL_PREFIXES)
+
+
+def _classify_monitor_termination(content: str, is_error: bool) -> tuple[str, int | None]:
+    """Map a terminal Monitor payload to a (reason, exit_code) tuple.
+
+    Reason is one of ``"exit" | "timeout" | "cancelled" | "error"``.
+    ``exit_code`` is the integer extracted from ``"exit code N"`` if present,
+    otherwise ``None``.
+    """
+    head = content.strip().lower()
+    exit_code: int | None = None
+    if "exit code" in head:
+        # naive scan — pick the first integer after "exit code"
+        try:
+            tail = head.split("exit code", 1)[1]
+            digits: list[str] = []
+            for ch in tail:
+                if ch.isdigit() or (ch == "-" and not digits):
+                    digits.append(ch)
+                elif digits:
+                    break
+            if digits:
+                exit_code = int("".join(digits))
+        except (ValueError, IndexError):
+            exit_code = None
+    if head.startswith("monitor timed out") or "timed out" in head[:80]:
+        return "timeout", exit_code
+    cancel_prefixes = ("monitor stopped", "monitor cancelled", "monitor canceled")
+    if any(head.startswith(p) for p in cancel_prefixes):
+        return "cancelled", exit_code
+    if head.startswith("monitor exited"):
+        return "exit", exit_code
+    if is_error:
+        return "error", exit_code
+    return "exit", exit_code
 
 
 def _classify_log_level(line: str) -> str:
@@ -544,6 +601,38 @@ class ClaudeCodeAgentMixin:
                             # approval text → CC proceeds; feedback → CC revises the plan.
                             if session.claude_code_executor is not None and session.claude_code_executor.is_running:
                                 await session.claude_code_executor.send_input(response_text)
+                        elif tool_name == "Monitor":
+                            monitor_id = block.get("id") or ""
+                            if monitor_id:
+                                started_at = datetime.now(UTC)
+                                description = str(tool_input.get("description") or "")
+                                command = str(tool_input.get("command") or "")
+                                timeout_ms = int(tool_input.get("timeout_ms") or 300_000)
+                                persistent = bool(tool_input.get("persistent") or False)
+                                session._active_monitors[monitor_id] = MonitorState(
+                                    description=description,
+                                    command=command,
+                                    timeout_ms=timeout_ms,
+                                    persistent=persistent,
+                                    started_at=started_at,
+                                )
+                                session.buffer.push_text(
+                                    MessageType.MONITOR_START,
+                                    {
+                                        "session_id": session.id,
+                                        "monitor_id": monitor_id,
+                                        "description": description,
+                                        "command": command,
+                                        "timeout_ms": timeout_ms,
+                                        "persistent": persistent,
+                                        "started_at": started_at.isoformat(),
+                                    },
+                                )
+                                # Note: no sentinel pushed to ``_pending_snapshots`` —
+                                # Monitor's tool_result blocks are diverted to
+                                # ``_process_monitor_event`` below and never call
+                                # ``_process_tool_result``, so the snapshot stack
+                                # remains 1:1 with non-monitor tool calls.
                         else:
                             session.buffer.push_text(
                                 MessageType.TOOL_START,
@@ -593,11 +682,15 @@ class ClaudeCodeAgentMixin:
                 user_message = event.get("message", {})
                 for block in user_message.get("content", []):
                     if isinstance(block, dict) and block.get("type") == "tool_result":
-                        await self._process_tool_result(
-                            session,
-                            block.get("content", ""),
-                            bool(block.get("is_error", False)),
-                        )
+                        tool_use_id = block.get("tool_use_id") or ""
+                        if tool_use_id and tool_use_id in session._active_monitors:
+                            await self._process_monitor_event(session, tool_use_id, block)
+                        else:
+                            await self._process_tool_result(
+                                session,
+                                block.get("content", ""),
+                                bool(block.get("is_error", False)),
+                            )
 
             elif event_type == "tool_result":
                 # Legacy shape kept for compatibility with synthetic test events.
@@ -631,6 +724,9 @@ class ClaudeCodeAgentMixin:
                     # user sees a distinctive "turn limit reached" indicator and can
                     # resume to continue rather than being asked to end the session.
                     summary_text = result_text or "Claude Code reached the maximum number of turns for this invocation."
+                    # Close any live monitor watches before pausing so the UI
+                    # does not show them as still ticking.
+                    await self._terminate_active_monitors(session, reason="session_end")
                     # Push AGENT_GROUP_END here so the agent block is closed before
                     # the SESSION_PAUSED message appears in the stream.
                     session.buffer.push_text(
@@ -751,6 +847,139 @@ class ClaudeCodeAgentMixin:
                 },
             )
 
+    async def _process_monitor_event(
+        self,
+        session: ActiveSession,
+        monitor_id: str,
+        block: dict[str, Any],
+    ) -> None:
+        """Route a Monitor tool_result block to MONITOR_EVENT or MONITOR_END.
+
+        Each stdout-line batch from Claude Code arrives as a ``tool_result``
+        with the same ``tool_use_id`` as the original ``Monitor`` invocation.
+        Most are intermediate events; the final one is a terminal payload
+        (script exit, timeout, or TaskStop). Terminal detection uses
+        ``is_error`` plus content prefix sniffing — ``is_error=True`` is
+        always treated as terminal so a misclassified non-terminal error
+        block still closes the monitor cleanly.
+        """
+        state = session._active_monitors.get(monitor_id)
+        if state is None:
+            return
+
+        raw_content = block.get("content", "")
+        if isinstance(raw_content, list):
+            parts: list[str] = []
+            for sub in raw_content:
+                if isinstance(sub, dict) and sub.get("type") == "text":
+                    parts.append(sub.get("text", ""))
+            content = "\n".join(parts)
+        else:
+            content = str(raw_content) if raw_content is not None else ""
+
+        is_error = bool(block.get("is_error", False))
+        is_terminal = _is_monitor_terminal(content, is_error)
+
+        if not is_terminal:
+            state.event_count += 1
+            session.buffer.push_text(
+                MessageType.MONITOR_EVENT,
+                {
+                    "session_id": session.id,
+                    "monitor_id": monitor_id,
+                    "content": content,
+                    "is_error": is_error,
+                    "received_at": datetime.now(UTC).isoformat(),
+                    "sequence": state.event_count,
+                },
+            )
+            return
+
+        reason, exit_code = _classify_monitor_termination(content, is_error)
+        session._active_monitors.pop(monitor_id, None)
+        end_payload: dict[str, Any] = {
+            "session_id": session.id,
+            "monitor_id": monitor_id,
+            "reason": reason,
+            "ended_at": datetime.now(UTC).isoformat(),
+            "total_events": state.event_count,
+            "final_content": content,
+        }
+        if exit_code is not None:
+            end_payload["exit_code"] = exit_code
+        session.buffer.push_text(MessageType.MONITOR_END, end_payload)
+
+    async def _terminate_active_monitors(
+        self,
+        session: ActiveSession,
+        reason: str,
+    ) -> None:
+        """Emit MONITOR_END for every live monitor on the session.
+
+        Called from session-end / interrupt / pause hooks so persistent or
+        in-flight monitors do not look perpetually alive in the UI.
+        """
+        if not session._active_monitors:
+            return
+        live = list(session._active_monitors.items())
+        session._active_monitors.clear()
+        for monitor_id, state in live:
+            session.buffer.push_text(
+                MessageType.MONITOR_END,
+                {
+                    "session_id": session.id,
+                    "monitor_id": monitor_id,
+                    "reason": reason,
+                    "ended_at": datetime.now(UTC).isoformat(),
+                    "total_events": state.event_count,
+                    "final_content": "",
+                },
+            )
+
+    async def cancel_monitor(self, session_id: str, monitor_id: str) -> None:
+        """Stop a live Claude Code Monitor watch from the user UI.
+
+        Emits ``MONITOR_END(reason="cancelled")`` for instant client feedback,
+        then asks Claude Code to actually stop the underlying watcher by
+        sending a follow-up instruction to its stdin.  If Claude Code is not
+        currently running the cancellation is local-only.
+
+        Raises:
+            ValueError: If the session does not exist or no live monitor
+                with the given id is tracked.
+        """
+        sm = self._session_manager  # ty:ignore[unresolved-attribute]
+        session = sm.get_session(session_id)
+        if session is None:
+            raise ValueError(f"Session not found: {session_id}")
+        state = session._active_monitors.get(monitor_id)
+        if state is None:
+            raise ValueError(f"Monitor not active: {monitor_id}")
+
+        session._active_monitors.pop(monitor_id, None)
+        session.buffer.push_text(
+            MessageType.MONITOR_END,
+            {
+                "session_id": session.id,
+                "monitor_id": monitor_id,
+                "reason": "cancelled",
+                "ended_at": datetime.now(UTC).isoformat(),
+                "total_events": state.event_count,
+                "final_content": "",
+            },
+        )
+
+        executor = session.claude_code_executor
+        if executor is None or not executor.is_running:
+            return
+        # Inject a short, unambiguous instruction so Claude Code calls TaskStop
+        # on the matching watcher.  The description is the most reliable handle
+        # the user-facing model has — Claude Code's TaskStop targets running
+        # tasks by id internally, but it can map descriptions for us.
+        desc = state.description or monitor_id
+        with contextlib.suppress(RuntimeError):
+            await executor.send_input(f"Stop the active monitor: {desc!r}")
+
     async def _stream_claude_code_events(
         self,
         session: ActiveSession,
@@ -864,6 +1093,10 @@ class ClaudeCodeAgentMixin:
             await session.claude_code_executor.stop_process()
         session.claude_code_executor = None
         session._claude_code_stream_task = None
+
+        # Close out any live Monitor watches before broadcasting SESSION_END
+        # so the client never sees a perpetually-live monitor block.
+        await self._terminate_active_monitors(session, reason="session_end")
 
         # Clear subprocess tracking and broadcast null status
         session.clear_subprocess_tracking()

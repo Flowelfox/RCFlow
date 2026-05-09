@@ -12,10 +12,16 @@ and note which component is affected where it matters.
 
 ## [Unreleased]
 
+### Added
+- **Live monitoring of background watches** — when Claude Code starts a long-running watch on a build log, deploy stream, or any backgrounded script, you now see a dedicated card with the watch description, a live elapsed-time counter, an expandable list of the events (stdout lines) it has captured, and a Stop button to end the watch from the chat. Multiple watches at once each get their own card, and a strip above the input shows the running count and individual elapsed times so you always know what's still being observed. The card switches to a clear "stopped", "timed out", or "exit code N" state when the watch finishes (Backend + Client)
+
 ### Changed
 - **Sessions no longer auto-close by default** — sessions used to be automatically ended after 6 hours of idle time. The auto-close timeout is now configurable from Worker Settings → Session Limits, and **disabled by default**. Set "Inactivity Timeout (minutes)" to a positive number to opt in; set it to 0 (or leave it blank) to keep sessions open indefinitely. Changes take effect without restarting the worker (Backend)
 
 ### Fixed
+- **Direct tool mode now honours the project badge when launching an agent** — sending `#claude_code`, `#codex`, or `#opencode` without an `@Project` mention used to start the agent in the parent projects folder instead of the project you'd picked in the badge, so the first thing the agent saw was a directory full of unrelated repositories. The agent now starts in the selected project's folder, matching what the badge shows (Backend)
+- **Pausing a session no longer shows a spurious "exit code -9" error or causes infinite loading on resume** — pressing pause while the coding agent was actively running could race with the agent's output stream, causing a misleading error message and a duplicate message that left the client stuck in a loading state after unpausing or sending a follow-up message. The session is now marked as paused before any subprocess is killed, so the stream handler always takes the correct clean-up path (Backend)
+- **Active sessions keep their title and chat history after a backend crash or kill** — if the worker was killed or crashed mid-conversation, the next startup would mark the session as interrupted but show it with no title and no messages because the in-memory state had never been written to disk. Active sessions are now flushed to the database every 30 seconds, so a crash restores the session with its title, conversation, token counters, and full chat history intact (Backend)
 - **Auto-generated session titles could disappear after a worker restart** — auto-generated session titles now save to the database the moment they are assigned, so they remain visible after an unclean restart and after the new inactivity-timeout auto-close. Previously, if the worker process was killed before a session reached a terminal state, its title was lost on the next start (Backend)
 
 ---
@@ -39,6 +45,7 @@ and note which component is affected where it matters.
 ## [Backend 0.42.1] — 2026-04-28
 
 ### Fixed
+- **macOS worker dashboard no longer crashes on sleep/wake** — on macOS arm64 with Tcl 9.0 the dashboard could crash with a `SIGBUS` or `SIGSEGV` when the machine woke from sleep, because status updates and progress callbacks were touching the UI from background threads. All background-thread UI updates are now marshalled safely through the main thread (Backend)
 - **Code blocks pasted into a new prompt now reach the coding agent** — when you started a new session and included a fenced code block in your message, the block was sometimes dropped before being handed off to the coding agent (Claude Code, Codex, or OpenCode). The agent received only the LLM's paraphrased task description without the verbatim code. Code blocks from your message are now always preserved and attached to the agent task under the **Additional Content** section (Backend)
 
 ---

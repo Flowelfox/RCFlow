@@ -1,5 +1,5 @@
 ---
-updated: 2026-04-26
+updated: 2026-05-09
 ---
 
 # WebSocket API
@@ -224,6 +224,18 @@ The `decision` field is `"allow"` or `"deny"`. The `scope` field determines how 
 - `"tool_path"` — applies to this tool for files under `path_prefix` (file tools only)
 - `"all_session"` — applies to ALL tools for the rest of the session
 
+Stop a live Claude Code `Monitor` watch (matches a `monitor_start` event by id):
+
+```json
+{
+  "type": "cancel_monitor",
+  "session_id": "uuid",
+  "monitor_id": "<tool_use_id from monitor_start>"
+}
+```
+
+The server responds with `{"type": "ack", "session_id": ..., "monitor_id": ...}` and emits a matching `monitor_end` with `reason: "cancelled"`. Errors return `{"type": "error", "code": "CANCEL_MONITOR_ERROR"}` (e.g., monitor already terminated).
+
 ## Output Text Protocol
 
 Server sends JSON messages:
@@ -265,6 +277,50 @@ Tool output is emitted for all agent executors:
 - **LLM pipeline**: Captured from tool execution results during the agentic loop.
 
 Large tool outputs are truncated to 100,000 characters server-side before delivery.
+
+### Monitor Tool Lifecycle (Claude Code only)
+
+Claude Code's deferred `Monitor` tool emits its own three-stage lifecycle instead of the standard `tool_start`/`tool_output` pair, because a single invocation can span many turns and stream stdout-line notifications continuously until the watched script exits, times out, or is stopped.
+
+```json
+{
+  "type": "monitor_start",
+  "session_id": "uuid",
+  "monitor_id": "<tool_use_id>",
+  "description": "errors in deploy.log",
+  "command": "tail -f deploy.log | grep ERROR",
+  "timeout_ms": 300000,
+  "persistent": false,
+  "started_at": "2026-05-09T13:00:00.000Z"
+}
+```
+
+```json
+{
+  "type": "monitor_event",
+  "session_id": "uuid",
+  "monitor_id": "<tool_use_id>",
+  "content": "ERROR: connection refused\n",
+  "is_error": false,
+  "received_at": "2026-05-09T13:00:42.000Z",
+  "sequence": 3
+}
+```
+
+```json
+{
+  "type": "monitor_end",
+  "session_id": "uuid",
+  "monitor_id": "<tool_use_id>",
+  "reason": "exit",
+  "exit_code": 0,
+  "ended_at": "2026-05-09T13:05:00.000Z",
+  "total_events": 17,
+  "final_content": "Monitor exited with exit code 0"
+}
+```
+
+`reason` is one of `"exit"`, `"timeout"`, `"cancelled"`, `"session_end"`, or `"error"`. `exit_code` is present only when the script exited normally. `monitor_event` is archived (replayed on reconnect) so a reloaded chat still shows the captured event stream. Ordering: `monitor_start` always precedes any `monitor_event` for the same `monitor_id`; `monitor_end` is final.
 
 ```json
 {

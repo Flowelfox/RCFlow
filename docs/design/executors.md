@@ -1,5 +1,5 @@
 ---
-updated: 2026-04-26
+updated: 2026-05-09
 ---
 
 # Executors
@@ -61,6 +61,19 @@ Despite using a PTY, the I/O *protocol* remains `stream-json` (`--output-format 
 **Result completion:** When Claude Code emits a `result` event (turn complete), a `session_end_ask` message is pushed to ask the user whether they want to end the session or continue chatting.
 
 **Environment:** The `CLAUDECODE` and `CLAUDE_AVAILABLE_MODELS` environment variables are removed from the subprocess environment to allow nesting.
+
+**Monitor tool (long-running watches):** Claude Code's deferred `Monitor` tool starts a background script and emits one `tool_result` block per stdout-line batch (using the same `tool_use_id` as the original `tool_use`). Unlike normal tools, Monitor invocations stay open across many turns until the script exits, times out, or is stopped via `TaskStop`.
+
+The Claude Code agent mixin recognises `Monitor` tool calls and:
+
+1. Tracks each invocation in `ActiveSession._active_monitors` keyed by `tool_use_id` (`MonitorState`: description, command, timeout, persistent, started_at, event_count).
+2. Emits `MONITOR_START` instead of `TOOL_START`.
+3. Diverts subsequent `tool_result` blocks for that id to `_process_monitor_event`, which emits `MONITOR_EVENT` for each stdout batch and `MONITOR_END` when a terminal payload is detected (heuristic: `is_error=True` or content prefix matches `"Monitor exited"`, `"Monitor timed out"`, `"Monitor stopped"`).
+4. Skips the `_pending_snapshots` stack entirely so snapshot/diff alignment for interleaved Edit/Write tools is preserved.
+5. Skips `subprocess_current_tool` updates so a long-running monitor does not hijack the input-area subprocess indicator while normal tools execute.
+6. On `_end_claude_code_session`, `pause_session`, `interrupt_subprocess`, and `max_turns` pause, `_terminate_active_monitors(reason="session_end" | "cancelled")` flushes any remaining live monitors so the UI never sees a perpetually-live block.
+
+User-initiated cancel from the client sends a `cancel_monitor` ws-input message; `cancel_monitor(session_id, monitor_id)` on the mixin emits `MONITOR_END(reason="cancelled")` immediately for instant UI feedback and (when Claude Code is still running) injects a stdin instruction asking it to call `TaskStop` on the matching watcher.
 
 **Tool Definition Example:**
 
