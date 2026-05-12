@@ -1,5 +1,5 @@
 ---
-updated: 2026-04-26
+updated: 2026-05-12
 ---
 
 # Interactive Permission Approval
@@ -62,6 +62,32 @@ Tools are classified by risk level to help the user make informed decisions:
 - **Session pause/cancel**: All pending permission requests are auto-denied via `PermissionManager.cancel_all_pending()`.
 - **Session restore**: Permission rules saved in `session.metadata["permission_rules"]` are restored so the user doesn't re-approve previously approved tools.
 - **Multiple clients**: Only the first response for a given `request_id` takes effect; subsequent responses are silently ignored.
+
+## AskUserQuestion Gating
+
+When Claude Code emits an `AskUserQuestion` tool_use, the relay does **not**
+treat it like a normal tool call. Instead, it pushes a `TOOL_START` so the
+client renders the question UI, then **blocks the stream reader on an
+`asyncio.Event`** (mirroring the `ExitPlanMode` gate).
+
+Without this gate the relay would keep reading Claude Code's stdout, which
+auto-cancels the question and lets the assistant proceed as if the user had
+refused to answer — exactly the failure mode the gate is there to prevent.
+
+1. `_relay_claude_code_stream` detects the `AskUserQuestion` tool_use.
+2. The relay pushes `TOOL_START` with the question payload and sets the
+   session's activity state to `awaiting_permission`.
+3. `session._question_event` is created and the relay awaits it (timeout: 1
+   hour, matching the plan-mode/plan-review gates).
+4. The client renders the `QuestionBlock` widget and the user submits an
+   answer (`question_answer` input message on the WebSocket).
+5. `send_interactive_response` stores the answer text on
+   `session._question_response`, marks the `TOOL_START` history entry as
+   `answered`, and sets the event.
+6. The relay wakes up, forwards the answer text to Claude Code's stdin as
+   a new user turn, and resumes reading the stream.
+7. On session pause/cancel, the event is released with `_question_response =
+   None` so the relay can exit cleanly instead of timing out an hour later.
 
 ## Limitations
 

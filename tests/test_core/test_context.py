@@ -19,7 +19,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
+from src.core.buffer import MessageType
 from src.core.context import ContextMixin, _format_file_size
+from src.core.session import ActiveSession, SessionStatus, SessionType
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -483,6 +485,69 @@ class TestIsBareAgentMention:
     def test_not_bare_when_no_tool_mention(self) -> None:
         host = _ContextHost()
         assert host._is_bare_agent_mention("just plain text") is False
+
+
+# ---------------------------------------------------------------------------
+# _handle_direct_prompt — fresh-session auto-archive on parse failure
+# ---------------------------------------------------------------------------
+
+
+class _DirectModeHost(_ContextHost):
+    """Host that records fire_archive_task invocations for assertions."""
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.archived_session_ids: list[str] = []
+
+    def _fire_archive_task(self, session_id: str) -> None:
+        self.archived_session_ids.append(session_id)
+
+
+class TestHandleDirectPromptParseFailure:
+    async def test_fresh_session_failed_first_prompt_is_auto_archived(self) -> None:
+        """A first-prompt parse failure auto-fails and archives the session.
+
+        Without this, the empty session lingers in the active list and gets
+        reloaded as ACTIVE on every backend restart (the DB stub written by
+        _ensure_session_row_in_db is non-terminal), so the user can never
+        clean it up.
+        """
+        tool = _MockTool(name="run_shell", description="shell tool", executor="shell")
+        host = _DirectModeHost(tool_registry=_registry_with(tool))
+        session = ActiveSession("test-session-1", SessionType.CONVERSATIONAL)
+        # Simulate the user-prompt push that happens before _handle_direct_prompt
+        session.buffer.push_text(MessageType.TEXT_CHUNK, {"role": "user", "content": "no hash here"})
+
+        await host._handle_direct_prompt(session, "no hash here")
+
+        assert session.status == SessionStatus.FAILED
+        assert host.archived_session_ids == [session.id]
+        # SESSION_END must be emitted so subscribers tear down their UI
+        types = [m.message_type for m in session.buffer.text_history]
+        assert MessageType.ERROR in types
+        assert MessageType.SESSION_END in types
+
+    async def test_existing_session_failed_prompt_stays_active(self) -> None:
+        """A parse failure on an established session does not kill the session.
+
+        Users with a working session that issued a prior successful prompt
+        should be able to retry after a typo without losing the session.
+        """
+        tool = _MockTool(name="run_shell", description="shell tool", executor="shell")
+        host = _DirectModeHost(tool_registry=_registry_with(tool))
+        session = ActiveSession("test-session-2", SessionType.CONVERSATIONAL)
+        session.set_active()
+        # Mark prior successful activity — title gets set after a good run
+        session.title = "earlier prompt..."
+        session.buffer.push_text(MessageType.TEXT_CHUNK, {"role": "user", "content": "bad input"})
+
+        await host._handle_direct_prompt(session, "bad input")
+
+        assert session.status == SessionStatus.ACTIVE
+        assert host.archived_session_ids == []
+        types = [m.message_type for m in session.buffer.text_history]
+        assert MessageType.ERROR in types
+        assert MessageType.SESSION_END not in types
 
 
 # ---------------------------------------------------------------------------

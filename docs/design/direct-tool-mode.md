@@ -1,5 +1,5 @@
 ---
-updated: 2026-04-27
+updated: 2026-05-12
 ---
 
 # Direct Tool Mode (`LLM_PROVIDER = "none"`)
@@ -44,6 +44,7 @@ When `LLM_PROVIDER` is set to `"none"`, the server operates in **direct tool mod
 - Prompt without `#tool_name` prefix → error listing available tools
 - Unknown tool name → error listing available tools
 - Tool with multiple required parameters → error (cannot map single text input)
+- When the failing prompt is the session's very first turn (no prior agent runs, no title, no token usage), the session is auto-failed and archived after the error is pushed so the empty session does not linger in the active list (and is not reloaded as ACTIVE after a backend restart). Parse failures on an established session leave the session ACTIVE so the user can retry.
 
 ## What Stays the Same
 

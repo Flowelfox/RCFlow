@@ -1272,6 +1272,108 @@ async def test_pause_session_resolves_pending_plan_review_event(
 
 
 # ---------------------------------------------------------------------------
+# AskUserQuestion gate
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_send_interactive_response_resolves_question_event(
+    session_manager: SessionManager,
+) -> None:
+    """send_interactive_response stores the answer and signals a pending question gate."""
+    router = _make_router(session_manager)
+    session = session_manager.create_session(SessionType.LONG_RUNNING)
+    session.set_active()
+
+    session._question_event = asyncio.Event()
+    session._question_response = None
+    session.buffer.push_text(
+        MessageType.TOOL_START,
+        {
+            "session_id": session.id,
+            "tool_name": "AskUserQuestion",
+            "tool_input": {"questions": [{"question": "Which option?"}]},
+        },
+    )
+
+    await router.send_interactive_response(session.id, "Which option?: Option A")
+
+    assert session._question_response == "Which option?: Option A"
+    assert session._question_event.is_set()
+
+    question_msgs = [
+        m
+        for m in session.buffer.text_history
+        if m.message_type == MessageType.TOOL_START and m.data.get("tool_name") == "AskUserQuestion"
+    ]
+    assert len(question_msgs) == 1
+    assert question_msgs[0].data.get("answered") is True
+    assert question_msgs[0].data.get("answer") == "Which option?: Option A"
+
+
+@pytest.mark.asyncio
+async def test_send_interactive_response_question_takes_precedence_over_stdin(
+    session_manager: SessionManager,
+) -> None:
+    """When a question gate is pending, the answer resolves the gate instead of being written to stdin."""
+    router = _make_router(session_manager)
+    session = session_manager.create_session(SessionType.LONG_RUNNING)
+    session.set_active()
+
+    executor = MagicMock()
+    executor.is_running = True
+    executor.send_input = AsyncMock()
+    session.claude_code_executor = executor
+
+    session._question_event = asyncio.Event()
+
+    await router.send_interactive_response(session.id, "answer text")
+
+    # The relay (not send_interactive_response) is the one that forwards the
+    # answer to Claude Code's stdin once the gate releases, so no direct
+    # stdin write should happen here.
+    executor.send_input.assert_not_awaited()
+    assert session._question_event.is_set()
+    assert session._question_response == "answer text"
+
+
+@pytest.mark.asyncio
+async def test_cancel_session_resolves_pending_question_event(
+    session_manager: SessionManager,
+) -> None:
+    """cancel_session releases a pending AskUserQuestion gate so the relay exits."""
+    router = _make_router(session_manager)
+    session = session_manager.create_session(SessionType.LONG_RUNNING)
+    session.set_active()
+
+    session._question_event = asyncio.Event()
+    session._question_response = None
+
+    await router.cancel_session(session.id)
+
+    assert session._question_event.is_set()
+    assert session._question_response is None
+
+
+@pytest.mark.asyncio
+async def test_pause_session_resolves_pending_question_event(
+    session_manager: SessionManager,
+) -> None:
+    """pause_session releases a pending AskUserQuestion gate so the relay exits."""
+    router = _make_router(session_manager)
+    session = session_manager.create_session(SessionType.LONG_RUNNING)
+    session.set_active()
+
+    session._question_event = asyncio.Event()
+    session._question_response = None
+
+    await router.pause_session(session.id)
+
+    assert session._question_event.is_set()
+    assert session._question_response is None
+
+
+# ---------------------------------------------------------------------------
 # handle_prompt — selected_worktree_path pre-selection
 # ---------------------------------------------------------------------------
 

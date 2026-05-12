@@ -465,6 +465,43 @@ class ContextMixin:
     # Direct tool mode
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _is_fresh_direct_mode_session(session: ActiveSession) -> bool:
+        """True when *session* has no successful prior turn.
+
+        A direct-mode session is considered fresh when no agent has been
+        attached, no tokens have been recorded, no title has been assigned,
+        and the only buffered messages are the just-pushed user prompt and
+        error.  Used to decide whether to auto-archive an empty session
+        after its first prompt fails to parse.
+        """
+        if session.title is not None:
+            return False
+        if (
+            session.claude_code_executor is not None
+            or session.codex_executor is not None
+            or session.opencode_executor is not None
+        ):
+            return False
+        if (
+            session.input_tokens
+            or session.output_tokens
+            or session.tool_input_tokens
+            or session.tool_output_tokens
+        ):
+            return False
+        # The buffer contains only the just-pushed user TEXT_CHUNK and the
+        # just-pushed ERROR for a truly fresh failed session.  Any other
+        # archived message types (assistant chunks, tool results, agent
+        # group markers, summaries, etc.) indicate prior activity.
+        for msg in session.buffer.text_history:
+            if msg.message_type == MessageType.ERROR:
+                continue
+            if msg.message_type == MessageType.TEXT_CHUNK and msg.data.get("role") == "user":
+                continue
+            return False
+        return True
+
     def _parse_direct_tool_prompt(self, text: str) -> tuple[ToolDefinition, dict[str, Any], str] | str:
         """Parse a direct-mode prompt into (tool_def, tool_input, display_text) or an error string.
 
@@ -551,6 +588,19 @@ class ContextMixin:
                 },
             )
             session.set_activity(ActivityState.IDLE)
+
+            # A fresh session whose very first prompt fails to parse has no
+            # useful state — auto-fail + archive it so it does not linger in
+            # the active sessions list (the DB stub row written by
+            # _ensure_session_row_in_db would otherwise be reloaded as ACTIVE
+            # after every backend restart, making it impossible to clean up).
+            if self._is_fresh_direct_mode_session(session):
+                session.buffer.push_text(
+                    MessageType.SESSION_END,
+                    {"session_id": session.id, "reason": "direct_tool_parse_error"},
+                )
+                session.fail(parsed)
+                self._fire_archive_task(session.id)  # ty:ignore[unresolved-attribute]
             return
 
         tool_def, tool_input, display_text = parsed

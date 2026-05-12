@@ -163,6 +163,12 @@ class ActiveSession:
         self._plan_review_approved: bool = False
         # The text the user sent in response to the plan review (approval text or feedback).
         self._plan_review_feedback: str | None = None
+        # AskUserQuestion gate — set when an AskUserQuestion tool_use is intercepted.
+        # The relay blocks here until the user submits an answer (or the timeout
+        # expires).  Without this gate, Claude Code auto-cancels the question and
+        # the assistant proceeds as if the user had refused to answer.
+        self._question_event: asyncio.Event | None = None
+        self._question_response: str | None = None
         # Token usage accumulators (running totals across all turns)
         self.input_tokens: int = 0
         self.output_tokens: int = 0

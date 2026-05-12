@@ -74,6 +74,7 @@ void main() {
         DisplayMessageType.thinking,
         DisplayMessageType.todoUpdate,
         DisplayMessageType.pausedMaxTurns,
+        DisplayMessageType.monitorBlock,
       ]);
     });
   });

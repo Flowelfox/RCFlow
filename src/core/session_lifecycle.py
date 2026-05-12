@@ -196,6 +196,12 @@ class SessionLifecycleMixin:
             session._plan_review_feedback = None
             session._plan_review_event.set()
 
+        # Release any pending AskUserQuestion gate so the relay can exit
+        # cleanly instead of timing out an hour later.
+        if session._question_event is not None and not session._question_event.is_set():
+            session._question_response = None
+            session._question_event.set()
+
         # Clear subprocess tracking fields and broadcast null status
         session.clear_subprocess_tracking()
 
@@ -415,6 +421,26 @@ class SessionLifecycleMixin:
             session._plan_review_event.set()
             return
 
+        # If the session is blocked awaiting an AskUserQuestion answer, resolve
+        # that gate.  The relay forwards ``text`` to Claude Code's stdin after
+        # the event fires, so we do NOT write to stdin here.
+        if session._question_event is not None and not session._question_event.is_set():
+            session._question_response = text
+            # Persist the answer in the buffer so history replay marks the
+            # question widget as resolved.  The most-recent unresolved
+            # AskUserQuestion TOOL_START is the target.
+            for msg in reversed(session.buffer.text_history):
+                if (
+                    msg.message_type == MessageType.TOOL_START
+                    and msg.data.get("tool_name") == "AskUserQuestion"
+                    and "answered" not in msg.data
+                ):
+                    msg.data["answered"] = True
+                    msg.data["answer"] = text
+                    break
+            session._question_event.set()
+            return
+
         executor = session.claude_code_executor
         if executor is not None and executor.is_running:
             # Mid-turn: just send to stdin; the original relay task handles the rest
@@ -507,6 +533,12 @@ class SessionLifecycleMixin:
             session._plan_review_approved = False
             session._plan_review_feedback = None
             session._plan_review_event.set()
+
+        # Release any pending AskUserQuestion gate so the relay can exit
+        # cleanly instead of timing out an hour later.
+        if session._question_event is not None and not session._question_event.is_set():
+            session._question_response = None
+            session._question_event.set()
 
         # Clear subprocess tracking fields and broadcast null status
         session.clear_subprocess_tracking()

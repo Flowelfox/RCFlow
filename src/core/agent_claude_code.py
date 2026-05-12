@@ -50,6 +50,7 @@ _MAX_DIFF_LINES = 200
 _TOOL_OUTPUT_CHUNK_SIZE = 8_192
 _PLAN_MODE_TIMEOUT = 3600  # 1 hour — wait for user to approve/deny plan mode
 _PLAN_REVIEW_TIMEOUT = 3600  # 1 hour — wait for user to respond to plan review
+_QUESTION_TIMEOUT = 3600  # 1 hour — wait for user to answer AskUserQuestion
 
 
 _MONITOR_TERMINAL_PREFIXES = (
@@ -633,6 +634,53 @@ class ClaudeCodeAgentMixin:
                                 # ``_process_monitor_event`` below and never call
                                 # ``_process_tool_result``, so the snapshot stack
                                 # remains 1:1 with non-monitor tool calls.
+                        elif tool_name == "AskUserQuestion":
+                            # Render the question in the client and gate the
+                            # relay until the user submits an answer.  Without
+                            # this block the relay would keep reading Claude
+                            # Code's stdout, which auto-cancels the question
+                            # (the assistant then "sees" a refusal and moves
+                            # on without ever giving the user a chance to
+                            # answer).  Mirrors the EnterPlanMode / ExitPlanMode
+                            # gating pattern.
+                            session.buffer.push_text(
+                                MessageType.TOOL_START,
+                                {
+                                    "session_id": session.id,
+                                    "tool_name": tool_name,
+                                    "tool_input": tool_input,
+                                },
+                            )
+                            session._question_event = asyncio.Event()
+                            session._question_response = None
+                            session.set_activity(ActivityState.AWAITING_PERMISSION)
+                            try:
+                                await asyncio.wait_for(
+                                    session._question_event.wait(),
+                                    timeout=_QUESTION_TIMEOUT,
+                                )
+                            except TimeoutError:
+                                session._question_event = None
+                                session._question_response = None
+                                session.buffer.push_text(
+                                    MessageType.ERROR,
+                                    {
+                                        "session_id": session.id,
+                                        "content": "Question timed out. The session was stopped.",
+                                        "code": "QUESTION_TIMEOUT",
+                                    },
+                                )
+                                await self._end_claude_code_session(session)
+                                return
+                            response_text = session._question_response or ""
+                            session._question_event = None
+                            session._question_response = None
+                            session.set_activity(ActivityState.RUNNING_SUBPROCESS)
+                            # Forward the user's answer to Claude Code's stdin
+                            # as a new user turn.  Claude Code resumes its
+                            # turn with the answer as context.
+                            if session.claude_code_executor is not None and session.claude_code_executor.is_running:
+                                await session.claude_code_executor.send_input(response_text)
                         else:
                             session.buffer.push_text(
                                 MessageType.TOOL_START,

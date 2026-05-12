@@ -1,5 +1,5 @@
 ---
-updated: 2026-05-08
+updated: 2026-05-12
 ---
 
 # Session Management
@@ -201,7 +201,7 @@ State is stored in the `session_pending_messages` DB table (see [Database Schema
 1. **Enqueue** — `PromptRouter.handle_prompt()` detects busy, writes a row (+ attachment dir), appends to the in-memory mirror, and emits `message_queued`. The original `ack` to the client carries `queued: true, queued_id`.
 2. **Edit** — `edit_queued` input updates the row's `content` / `display_content` / `updated_at`; emits `message_queued_updated`. Only valid while the row exists; after delivery the message is immutable.
 3. **Cancel** — `cancel_queued` input deletes the row + attachment dir, renumbers remaining positions, emits `message_dequeued` with `reason: "cancelled"`.
-4. **Drain** — At the turn-end boundary in each agent path (Claude Code `result` event, Codex / OpenCode turn end, LLM `_prompt_lock` release), `_drain_pending(session)` pops the head of the queue one entry at a time: delete row + attachments, emit `message_dequeued{reason: "delivered"}`, push `text_chunk(role=user, queued_id=...)` to the buffer, then forward to the executor or append to `conversation_history`.
+4. **Drain** — At the turn-end boundary in each agent path (Claude Code `result` event, Codex / OpenCode turn end, LLM `_prompt_lock` release), `_drain_pending(session)` pops the head of the queue one entry at a time: delete row + attachments, emit `message_dequeued{reason: "delivered"}`, push `text_chunk(role=user, queued_id=...)` to the buffer, then forward to the executor or append to `conversation_history`. Mid-turn delivery is not attempted for any agent: Claude Code's `--input-format stream-json` only consumes stdin between turns, and Codex / OpenCode close stdin after the initial prompt — writing mid-turn would leave the queued row marked "delivered" without ever spawning a reader task to consume the resulting turn's output, so queued messages always wait for the next turn boundary.
 5. **Clear-on-end** — When a session ends / is cancelled, `clear_pending(reason="session_ended")` deletes all rows and emits `message_dequeued` for each.
 
 **Persistence across backend restart** — Queue rows survive process crashes. When the backend restarts, sessions that were active are marked `INTERRUPTED`. `session_update` broadcasts include `queued_messages` populated from the DB, so clients restore the queued bar immediately on resubscribe. Drain does not run automatically on resume; it only runs at the next turn-end boundary after the user resumes the session.
