@@ -12,6 +12,7 @@ Covers:
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -199,6 +200,58 @@ class TestPauseSession:
         await router.pause_session(session.id)
         mock_executor.cancel.assert_awaited_once()
         assert session.claude_code_executor is None
+
+    async def test_session_paused_before_executor_cancel(self, session_manager: SessionManager) -> None:
+        """session.pause() must be called before executor.cancel() is awaited.
+
+        Regression for race condition: when executor.cancel() awaits proc.wait(),
+        the event loop can switch to the background stream task.  That task sees
+        the SIGKILL-induced EOF and checks session.status.  If status is still
+        ACTIVE at that point it takes the 'unexpected exit' path and pushes a
+        spurious exit-code -9 ERROR plus an extra AGENT_GROUP_END, which leaves
+        the client in an unrecoverable loading state after resume.
+
+        The fix is to set session.status=PAUSED synchronously before the first
+        await so the stream task always sees PAUSED.
+        """
+        router = _make_router(session_manager)
+        session = session_manager.create_session(SessionType.LONG_RUNNING)
+        session.set_active()
+
+        status_at_cancel: list[SessionStatus] = []
+
+        async def _cancel_and_record() -> None:
+            status_at_cancel.append(session.status)
+            await asyncio.sleep(0)  # yield so any racing task could run
+
+        mock_executor = AsyncMock()
+        mock_executor.cancel = _cancel_and_record
+        session.claude_code_executor = mock_executor
+
+        await router.pause_session(session.id)
+
+        assert status_at_cancel == [SessionStatus.PAUSED], (
+            f"session.status must be PAUSED when executor.cancel() is awaited (got {status_at_cancel})"
+        )
+
+    async def test_pause_does_not_push_error_with_running_executor(self, session_manager: SessionManager) -> None:
+        """Pausing while an executor is running must never push ERROR messages.
+
+        Regression: the 'unexpected exit' race path pushed a spurious
+        'exit code -9' ERROR when the stream task finished before
+        session.status became PAUSED.
+        """
+        router = _make_router(session_manager)
+        session = session_manager.create_session(SessionType.LONG_RUNNING)
+        session.set_active()
+        mock_executor = AsyncMock()
+        mock_executor.cancel = AsyncMock()
+        session.claude_code_executor = mock_executor
+
+        await router.pause_session(session.id)
+
+        error_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.ERROR]
+        assert not error_msgs, f"Expected no ERROR messages after pause but got: {error_msgs}"
 
 
 # ---------------------------------------------------------------------------
