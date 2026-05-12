@@ -518,8 +518,6 @@ class ContextMixin:
             tool_input["prompt"] = display_text or "Ready for instructions."
             if working_dir:
                 tool_input["working_directory"] = working_dir
-            elif self._settings and self._settings.projects_dirs:  # ty:ignore[unresolved-attribute]
-                tool_input["working_directory"] = str(self._settings.projects_dirs[0])  # ty:ignore[unresolved-attribute]
         elif tool_def.executor == "shell":
             tool_input["command"] = display_text
             if working_dir:

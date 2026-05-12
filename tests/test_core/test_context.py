@@ -420,6 +420,23 @@ class TestParseDirectToolPrompt:
         assert tool_input["prompt"]  # non-empty
         assert tool_input["prompt"] != ""
 
+    def test_agent_without_project_mention_omits_working_directory(self, tmp_path: Path) -> None:
+        """Without @ProjectMention the parser must NOT preset working_directory.
+
+        ``_handle_direct_prompt`` is responsible for falling back to the session's
+        ``main_project_path`` (the project badge); pre-filling it from
+        ``projects_dirs[0]`` here would shadow that fallback so the agent would
+        run in the parent Projects folder instead of the selected project.
+        """
+        settings = MagicMock()
+        settings.projects_dirs = [tmp_path]
+        tool = _MockTool(name="claude_code", description="agent", executor="claude_code")
+        host = _ContextHost(tool_registry=_registry_with(tool), settings=settings)
+        result = host._parse_direct_tool_prompt("#claude_code fix the bug")
+        assert isinstance(result, tuple)
+        _, tool_input, _ = result
+        assert "working_directory" not in tool_input
+
 
 # ---------------------------------------------------------------------------
 # _is_bare_agent_mention
