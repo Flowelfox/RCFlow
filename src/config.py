@@ -226,6 +226,11 @@ class Settings(BaseSettings):
     # Session inactivity reaper (0 = disabled / never auto-close)
     SESSION_INACTIVITY_TIMEOUT_MINUTES: int = 0
 
+    # Periodic incremental flush of active sessions to the database so
+    # title, conversation_history and buffer messages survive an
+    # ungraceful crash or SIGKILL. Set to 0 to disable.
+    SESSION_FLUSH_INTERVAL_SECONDS: int = 30
+
     # Artifacts
     ARTIFACT_INCLUDE_PATTERN: str = "*.md"
     ARTIFACT_EXCLUDE_PATTERN: str = (

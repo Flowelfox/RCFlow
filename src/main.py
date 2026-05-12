@@ -205,6 +205,25 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     telemetry_task = asyncio.create_task(_run_telemetry_loop())
 
+    # Incremental session flush — persists title, conversation_history and
+    # new buffer messages for ACTIVE sessions on a periodic tick so an
+    # ungraceful crash / SIGKILL doesn't lose un-archived state.  Graceful
+    # shutdown still goes through ``save_all_sessions`` below.
+    flush_interval = settings.SESSION_FLUSH_INTERVAL_SECONDS
+
+    async def _run_session_flush_loop() -> None:
+        while True:
+            await asyncio.sleep(flush_interval)
+            try:
+                async with db_session_factory() as db:
+                    await session_manager.flush_dirty_sessions(db)
+            except Exception:
+                logger.exception("Periodic session flush failed (non-fatal)")
+
+    flush_task: asyncio.Task[None] | None = None
+    if flush_interval > 0:
+        flush_task = asyncio.create_task(_run_session_flush_loop())
+
     # UPnP and NAT-PMP are mutually exclusive — when a VPN tunnel captures
     # the default route, an inbound packet via UPnP arrives via the LAN NIC
     # but the reply egresses via the VPN, breaking the connection with
@@ -295,6 +314,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     telemetry_task.cancel()
     update_task.cancel()
     reaper_task.cancel()
+    if flush_task is not None:
+        flush_task.cancel()
     logger.info("Shutting down RCFlow server")
     await terminal_manager.close_all()
     await prompt_router.cancel_pending_tasks()
