@@ -282,7 +282,7 @@ class _WorktreePanelState extends State<WorktreePanel> {
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
-                      if (sessionId != null && workerId != null)
+                      if (sessionId != null)
                         _SmallIconBtn(
                           icon: Icons.close,
                           tooltip: 'Clear worktree selection',
