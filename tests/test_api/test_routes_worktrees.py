@@ -340,10 +340,11 @@ class TestRemoveWorktree:
 
 
 class TestManager:
-    def test_nonexistent_path_raises_404(self) -> None:
+    def test_nonexistent_path_raises_404(self, tmp_path) -> None:
         """A path that doesn't exist on disk must return 404 before hitting git."""
+        missing = tmp_path / "definitely-does-not-exist"
         with pytest.raises(FastHTTPException) as exc_info:
-            _manager("/Users/vpohribnichenko/Projects/espa")
+            _manager(str(missing))
         assert exc_info.value.status_code == 404
 
     def test_existing_non_git_dir_raises_400(self, tmp_path) -> None:

@@ -155,7 +155,7 @@ class WindowsGUI(RCFlowDashboard):
             return False
 
         try:
-            import pystray  # noqa: PLC0415
+            import pystray  # noqa: PLC0415  # ty: ignore[unresolved-import]
             from PIL import Image  # noqa: PLC0415
         except ImportError:
             logger.info("pystray/Pillow not available — running without tray icon")

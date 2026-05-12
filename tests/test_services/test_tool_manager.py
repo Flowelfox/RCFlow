@@ -108,37 +108,44 @@ class TestParseVersion:
 
 
 class TestPlatformDetection:
+    @patch("src.services.tool_manager.sys.platform", "linux")
     @patch("src.services.tool_manager.platform.machine", return_value="x86_64")
     @patch("src.services.tool_manager._is_musl", return_value=False)
     def test_claude_platform_x64(self, _musl, _machine):
         assert _detect_claude_platform() == "linux-x64"
 
+    @patch("src.services.tool_manager.sys.platform", "linux")
     @patch("src.services.tool_manager.platform.machine", return_value="aarch64")
     @patch("src.services.tool_manager._is_musl", return_value=False)
     def test_claude_platform_arm64(self, _musl, _machine):
         assert _detect_claude_platform() == "linux-arm64"
 
+    @patch("src.services.tool_manager.sys.platform", "linux")
     @patch("src.services.tool_manager.platform.machine", return_value="x86_64")
     @patch("src.services.tool_manager._is_musl", return_value=True)
     def test_claude_platform_musl(self, _musl, _machine):
         assert _detect_claude_platform() == "linux-x64-musl"
 
+    @patch("src.services.tool_manager.sys.platform", "linux")
     @patch("src.services.tool_manager.platform.machine", return_value="x86_64")
     @patch("src.services.tool_manager._is_musl", return_value=False)
     @patch("src.services.tool_manager._glibc_too_old", return_value=False)
     def test_codex_target_x64_gnu(self, _glibc, _musl, _machine):
         assert _detect_codex_target() == "x86_64-unknown-linux-gnu"
 
+    @patch("src.services.tool_manager.sys.platform", "linux")
     @patch("src.services.tool_manager.platform.machine", return_value="aarch64")
     @patch("src.services.tool_manager._is_musl", return_value=True)
     def test_codex_target_arm64_musl(self, _musl, _machine):
         assert _detect_codex_target() == "aarch64-unknown-linux-musl"
 
+    @patch("src.services.tool_manager.sys.platform", "linux")
     @patch("src.services.tool_manager.platform.machine", return_value="ppc64le")
     def test_unsupported_arch_claude(self, _machine):
         with pytest.raises(RuntimeError, match="Unsupported"):
             _detect_claude_platform()
 
+    @patch("src.services.tool_manager.sys.platform", "linux")
     @patch("src.services.tool_manager.platform.machine", return_value="ppc64le")
     def test_unsupported_arch_codex(self, _machine):
         with pytest.raises(RuntimeError, match="Unsupported"):
