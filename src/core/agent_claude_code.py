@@ -1087,6 +1087,58 @@ class ClaudeCodeAgentMixin:
         )
         self.schedule_pending_drain(session)  # ty:ignore[unresolved-attribute]
 
+        await self._drain_monitor_events(session, executor)
+
+    async def _drain_monitor_events(
+        self,
+        session: ActiveSession,
+        executor: ClaudeCodeExecutor,
+    ) -> None:
+        """Keep reading Claude Code stdout while ``Monitor`` watches are alive.
+
+        Claude Code's deferred ``Monitor`` tool emits its ``tool_result``
+        events (including the terminal "Monitor exited/timed out/stopped"
+        payload) on stdout *after* the turn-ending ``result`` event, between
+        user turns.  The default executor read loop breaks on ``result`` and
+        leaves those events sitting in the OS pipe buffer until the next user
+        input — which is why MONITOR_END never reaches the client and the
+        live-monitor strip never clears on its own.
+
+        This helper resumes reading after every ``result`` event for as long
+        as at least one monitor is still tracked.  It is awaited inline by
+        the post-turn streaming hooks so the encompassing
+        ``_claude_code_stream_task`` stays the cancel target for
+        ``_forward_to_claude_code`` when the user sends a new message.
+        """
+        terminal_statuses = (
+            SessionStatus.COMPLETED,
+            SessionStatus.CANCELLED,
+            SessionStatus.FAILED,
+            SessionStatus.PAUSED,
+        )
+        while session._active_monitors and executor.is_running:
+            if session.status in terminal_statuses:
+                return
+            try:
+                await self._relay_claude_code_stream(session, executor.read_more_events())
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception(
+                    "Claude Code monitor drain error in session %s",
+                    session.id,
+                )
+                return
+            if session.status in terminal_statuses:
+                return
+            if not executor.got_result:
+                # Process exited mid-drain.
+                break
+        # If CC died while monitors were still tracked, flush them so the UI
+        # never sees a perpetually live block.
+        if session._active_monitors and not executor.is_running:
+            await self._terminate_active_monitors(session, reason="executor_exit")
+
     async def _end_claude_code_session(self, session: ActiveSession) -> None:
         """Clean up Claude Code state when the session ends."""
         if session.claude_code_executor is not None:
@@ -1272,6 +1324,8 @@ class ClaudeCodeAgentMixin:
         )
         self.schedule_pending_drain(session)  # ty:ignore[unresolved-attribute]
 
+        await self._drain_monitor_events(session, executor)
+
     async def _read_claude_code_followup(
         self,
         session: ActiveSession,
@@ -1350,3 +1404,5 @@ class ClaudeCodeAgentMixin:
             {"session_id": session.id},
         )
         self.schedule_pending_drain(session)  # ty:ignore[unresolved-attribute]
+
+        await self._drain_monitor_events(session, executor)

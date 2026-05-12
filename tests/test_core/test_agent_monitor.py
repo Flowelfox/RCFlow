@@ -25,7 +25,7 @@ from src.core.agent_claude_code import (
     _is_monitor_terminal,
 )
 from src.core.buffer import MessageType
-from src.core.session import MonitorState
+from src.core.session import MonitorState, SessionStatus
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -417,4 +417,99 @@ class TestMonitorIntegration:
         assert len(ends) == 2
         assert {p["monitor_id"] for p in ends} == {"m1", "m2"}
         assert all(p["reason"] == "session_end" for p in ends)
+        assert session._active_monitors == {}
+
+
+# ---------------------------------------------------------------------------
+# Drain phase tests — covers the post-"result" reader keep-alive that
+# delivers Monitor terminal events emitted between user turns.
+# ---------------------------------------------------------------------------
+
+
+class TestDrainMonitorEvents:
+    """Verify ``_drain_monitor_events`` keeps reading until monitors close.
+
+    Without the drain, Claude Code's deferred Monitor tool_result blocks
+    sit in the OS pipe buffer between turns and the client never sees
+    MONITOR_END.  These tests check the drain loop directly without
+    spawning a real subprocess.
+    """
+
+    @pytest.mark.asyncio
+    async def test_no_drain_when_no_monitors(self, tmp_path: Path) -> None:
+        """Drain is a no-op when no monitors are tracked."""
+        session = _make_session(tmp_path)
+        session.status = SessionStatus.ACTIVE
+        session._active_monitors = {}
+        executor = MagicMock()
+        executor.is_running = True
+        executor.read_more_events = MagicMock()
+
+        mixin = _make_mixin()
+        await mixin._drain_monitor_events(session, executor)
+
+        executor.read_more_events.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_drain_loops_until_monitors_close(self, tmp_path: Path) -> None:
+        """Drain calls ``read_more_events`` repeatedly until monitors empty."""
+        session = _make_session(tmp_path)
+        session.status = SessionStatus.ACTIVE
+        session._active_monitors = {
+            "m1": MonitorState("d", "c", 1000, False, datetime.now(UTC)),
+        }
+
+        # Mock relay so it pretends to clear the monitor on the first call,
+        # mimicking a MONITOR_END being processed mid-read.
+        call_count = {"n": 0}
+
+        async def fake_relay(s, _stream):
+            call_count["n"] += 1
+            s._active_monitors.clear()
+
+        executor = MagicMock()
+        executor.is_running = True
+        executor.got_result = True
+        executor.read_more_events = MagicMock(return_value=MagicMock())
+
+        mixin = _make_mixin()
+        with patch.object(mixin, "_relay_claude_code_stream", side_effect=fake_relay):
+            await mixin._drain_monitor_events(session, executor)
+
+        assert call_count["n"] == 1
+        assert session._active_monitors == {}
+
+    @pytest.mark.asyncio
+    async def test_drain_stops_on_process_exit_and_terminates_leftovers(self, tmp_path: Path) -> None:
+        """If CC dies mid-drain with monitors live, leftover are flushed."""
+        session = _make_session(tmp_path)
+        session.status = SessionStatus.ACTIVE
+        session._active_monitors = {
+            "m1": MonitorState("d", "c", 1000, False, datetime.now(UTC), event_count=2),
+        }
+
+        async def fake_relay(_s, _stream):
+            return
+
+        # Process becomes "not running" after the first relay call.
+        running_state = {"alive": True}
+
+        def is_running_get():
+            value = running_state["alive"]
+            running_state["alive"] = False
+            return value
+
+        executor = MagicMock()
+        type(executor).is_running = property(lambda _self: is_running_get())
+        executor.got_result = False  # mimics abnormal exit
+        executor.read_more_events = MagicMock(return_value=MagicMock())
+
+        mixin = _make_mixin()
+        with patch.object(mixin, "_relay_claude_code_stream", side_effect=fake_relay):
+            await mixin._drain_monitor_events(session, executor)
+
+        # Leftover monitor was force-ended.
+        ends = _payloads_of(session, MessageType.MONITOR_END)
+        assert len(ends) == 1
+        assert ends[0]["reason"] == "executor_exit"
         assert session._active_monitors == {}

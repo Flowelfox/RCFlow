@@ -1,5 +1,5 @@
 ---
-updated: 2026-05-09
+updated: 2026-05-10
 ---
 
 # Executors
@@ -72,6 +72,7 @@ The Claude Code agent mixin recognises `Monitor` tool calls and:
 4. Skips the `_pending_snapshots` stack entirely so snapshot/diff alignment for interleaved Edit/Write tools is preserved.
 5. Skips `subprocess_current_tool` updates so a long-running monitor does not hijack the input-area subprocess indicator while normal tools execute.
 6. On `_end_claude_code_session`, `pause_session`, `interrupt_subprocess`, and `max_turns` pause, `_terminate_active_monitors(reason="session_end" | "cancelled")` flushes any remaining live monitors so the UI never sees a perpetually-live block.
+7. After every turn-end (`result` event), if any monitor is still tracked, `_drain_monitor_events(session, executor)` keeps the stdout reader alive across user turns by repeatedly calling `executor.read_more_events()`. Without this drain, Claude Code's between-turn `tool_result` blocks for the deferred Monitor (including the terminal "Monitor exited/timed out/stopped" payload) would sit unread in the OS pipe buffer until the next user input, causing `MONITOR_END` to never reach the client and the live-monitor strip to never clear on its own. The drain runs inline in the encompassing `_claude_code_stream_task` so `_forward_to_claude_code` stays the cancel target when the user sends a new message.
 
 User-initiated cancel from the client sends a `cancel_monitor` ws-input message; `cancel_monitor(session_id, monitor_id)` on the mixin emits `MONITOR_END(reason="cancelled")` immediately for instant UI feedback and (when Claude Code is still running) injects a stdin instruction asking it to call `TaskStop` on the matching watcher.
 
