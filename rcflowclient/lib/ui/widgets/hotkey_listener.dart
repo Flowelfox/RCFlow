@@ -142,6 +142,14 @@ class _HotkeyListenerState extends State<HotkeyListener> {
         return true;
 
       case HotkeyAction.focusInputArea:
+        if (appState.getPaneType(appState.activePaneId) == PaneType.chat) {
+          final pane = appState.activePane;
+          final sid = pane.sessionId;
+          if (sid != null && !pane.sessionEnded && !pane.sessionPaused) {
+            pane.pauseSession(sid);
+            return true;
+          }
+        }
         appState.requestInputFocus();
         return true;
 

@@ -13,6 +13,7 @@ import '../dialogs/setup_wizard.dart';
 import '../onboarding_keys.dart' as onboarding;
 import '../widgets/connection_bar.dart';
 import '../widgets/custom_title_bar.dart';
+import '../../services/keyboard_state_reconciler.dart';
 import '../widgets/hotkey_listener.dart';
 import '../widgets/input_area.dart';
 import '../widgets/onboarding_overlay.dart';
@@ -171,10 +172,20 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
       ),
     );
 
+    // Reconcile modifier state on every pointer-down. This closes the gap
+    // where a global hook (Wispr Flow etc.) eats a modifier key-up while
+    // the window already has focus — the HardwareKeyboard handler only fires
+    // on the next key-down, but a mouse click fires this first.
+    final reconciled = Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: (_) => KeyboardStateReconciler.reconcile(),
+      child: desktop,
+    );
+
     if (Platform.isMacOS) {
-      return PlatformMenuBar(menus: _buildMacOSMenus(context), child: desktop);
+      return PlatformMenuBar(menus: _buildMacOSMenus(context), child: reconciled);
     }
-    return desktop;
+    return reconciled;
   }
 
   /// Builds the native macOS menu bar entries, wired to app actions.
