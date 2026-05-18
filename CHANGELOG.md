@@ -28,6 +28,9 @@ and note which component is affected where it matters.
 - **Auto-generated session titles could disappear after a worker restart** — auto-generated session titles now save to the database the moment they are assigned, so they remain visible after an unclean restart and after the new inactivity-timeout auto-close. Previously, if the worker process was killed before a session reached a terminal state, its title was lost on the next start (Backend)
 - **Coding-agent sessions failed with "model: String should have at least 1 character"** — leaving the Model field blank in Worker Settings used to save an empty value to the agent's configuration, which the CLI then forwarded to the upstream API as an empty model name and the API rejected with a 400 error. The empty value is now dropped on save, so a blank Model field correctly means "use the CLI default" and existing blank entries are healed the next time settings are saved (Backend)
 
+### Security
+- **Patched four high-severity advisories in upstream dependencies** — picks up fixes for sensitive-header forwarding on proxied redirects, a decompression-bomb safeguard bypass, denial of service via unbounded multipart headers, and a Windows path-traversal in templating. No configuration changes required (Backend)
+
 ---
 
 ## [Backend 0.43.0 / Client 1.46.0] — 2026-04-29
