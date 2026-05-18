@@ -757,6 +757,13 @@ class ToolSettingsManager:
             _sync_caveman_mode(tool_name, current, config_dir)
             current.pop("caveman_mode", None)
 
+        # Strip empty-string model. CLIs (Claude Code, Codex, OpenCode) read
+        # settings.json directly and forward the literal value to upstream APIs;
+        # an empty string yields a 400 ("model: String should have at least
+        # 1 character") instead of falling back to the CLI default.
+        if current.get("model") == "":
+            current.pop("model", None)
+
         rel = _TOOL_CONFIG_PATHS.get(tool_name)
         assert rel is not None
         settings_path = self._base_dir / rel
