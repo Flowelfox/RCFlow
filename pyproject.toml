@@ -108,6 +108,9 @@ select = [
     "S",      # flake8-bandit (security)
     "RET",    # flake8-return
     "LOG",    # flake8-logging
+    # COM (trailing-comma) intentionally excluded — ruff's docs warn that
+    # COM812 / COM819 conflict with `ruff format` (which already handles
+    # trailing commas), so enabling both produces oscillating fixes.
 ]
 
 # Inherent to this CLI / WebSocket-server / build-tooling codebase. Enabling

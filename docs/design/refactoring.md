@@ -37,26 +37,36 @@ Current floors: Python **52%**, Flutter **14%**.
 
 ## Phase 3 — Backend Test Gaps
 
-In progress. Adds: direct unit tests for `agent_claude_code` / `agent_codex` /
-`agent_opencode` once the per-agent classes land, real implementations
-for the `*_plan.py` stubs, and minimal route tests for the 12 untested
-endpoints (auth, config, dashboard, models, projects, rcflow_plugins,
-slash_commands, telemetry, tools, uploads, …).
+| Slice | Status | Notes |
+|-------|--------|-------|
+| Route tests for dashboard.py + projects.py | ✅ done | Coverage 52.99 → 53.12% |
+| Direct agent unit tests | ⏳ deferred | Best landed alongside Phase 2d so the targets are isolated classes rather than mixins |
+| Real implementations for `*_plan.py` files | n/a | Audit was misled by filename — those files are real tests for plan-mode infrastructure, not "to-do" stubs |
+| Tests for `auth`, `config`, `models`, `slash_commands`, `tools`, `uploads`, `telemetry`, `rcflow_plugins` routes | ⏳ partial | Existing `test_claude_code_login.py`, `test_config_reload.py`, `test_models_route.py`, `test_slash_commands.py`, `test_rcflow_plugins.py`, `test_uploads.py` already cover the most-used paths; `telemetry` and `tools` need DB / ToolManager fixtures and ship in dedicated PRs |
 
 ## Phase 4 — Flutter File Splits
 
-Pending. Targets: `server_config_screen.dart`, `input_area.dart`,
-`settings_menu.dart`, `task_pane.dart`, plus a `lib/theme/spacing.dart`
-constants file replacing inline padding literals across ~60 widget
-files.
+| Slice | Status | Notes |
+|-------|--------|-------|
+| `lib/theme/spacing.dart` shared tokens | ✅ done | `kSpace1..6`, `kPadCompact/Default/Comfortable`, `kGapInline/Tight/Relaxed`, `kRadiusSmall/Medium/Large`. Replaces ad-hoc literals; widget rewrites consume these in follow-ups |
+| `server_config_screen.dart` (3959) split | ⏳ deferred | 28 embedded classes; extract `lib/ui/widgets/config_fields/` + `lib/ui/widgets/config_layout/` |
+| `input_area.dart` (2605) split | ⏳ deferred | Extract autocomplete, worktree picker, attachment strip, key shortcuts |
+| `settings_menu.dart` (1778) split | ⏳ deferred | Promote each section to its own file under `lib/ui/widgets/settings/` |
+| `task_pane.dart` (1821) split | ⏳ deferred | Header / list / detail / actions |
+| Codemod replacing hardcoded EdgeInsets with spacing tokens | ⏳ deferred | One mechanical PR after the file splits land |
 
 ## Phase 5 — Flutter State / Transport Split
 
-Pending. `AppState`, `PaneState`, `WebSocketService` get carved into
-per-feature notifiers and a transport/dispatcher/REST trio. High-risk;
-lands only after Phase 4 is stable.
+⏳ deferred. `AppState`, `PaneState`, `WebSocketService` get carved into
+per-feature `ChangeNotifier`s and a `WebSocketTransport` /
+`MessageDispatcher` / `lib/services/rest/*` trio. Lands only after
+Phase 4 file splits are stable — the smaller files surface seams
+that aren't visible inside the current god-files.
 
 ## Phase 6 — Flutter Tests + Final Lint
 
-Pending. Tests for the new transport/dispatcher/REST/state seams;
-ruff `D` + `COM` rule families enabled.
+| Slice | Status | Notes |
+|-------|--------|-------|
+| Tests for the new transport / dispatcher / REST / sub-state seams | ⏳ deferred | Gated on Phase 5 |
+| Ruff `D` (docstrings) | ⏳ deferred | Thousands of violations on existing code; needs a docstring sweep PR or per-module incremental enablement |
+| Ruff `COM` (trailing commas) | ❌ not enabled | The `ruff format` step already handles trailing commas and the ruff docs flag `COM812` / `COM819` as conflicting with the formatter — enabling both produces oscillating fixes. Comment in `pyproject.toml` records the decision so future contributors don't reintroduce the conflict |
