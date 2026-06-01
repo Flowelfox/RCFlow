@@ -24,8 +24,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Shared constants consumed by both GUI modules
-POLL_MS        = 300
-MAX_LOG_LINES  = 5000
+POLL_MS = 300
+MAX_LOG_LINES = 5000
 MAX_LOG_BUFFER = 10000
 
 

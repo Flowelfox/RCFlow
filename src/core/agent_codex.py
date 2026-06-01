@@ -19,6 +19,12 @@ from typing import TYPE_CHECKING, Any
 
 from src.core.agent_auth import agent_configuration_issue
 from src.core.buffer import MessageType
+from src.core.cwd_tracking import (
+    apply_agent_cwd,
+    looks_like_git_worktree_mutation,
+    parse_cwd_change,
+    reset_worktree_cache,
+)
 from src.core.session import ActivityState, SessionStatus, SessionType
 from src.executors.codex import CodexExecutor
 
@@ -187,6 +193,9 @@ class CodexAgentMixin:
         session.metadata["codex_working_directory"] = str(working_path)
         session.metadata["codex_tool_name"] = tool_def.name
         session.metadata["codex_parameters"] = tool_call.tool_input
+        # Seed the live agent-cwd mirror so the worktree badge starts correct.
+        session.metadata["agent_cwd"] = str(working_path)
+        session.agent_cwd = str(working_path)
 
         # Start streaming in a background task that reads events and pushes to buffer
         task = asyncio.create_task(self._stream_codex_events(session, executor, tool_def, tool_call))
@@ -283,6 +292,17 @@ class CodexAgentMixin:
                                 "started_at": session.subprocess_started_at.isoformat(),
                             },
                         )
+                    # Live worktree-badge tracking — same machinery the
+                    # Claude Code Bash interception uses.
+                    command = str(item.get("command", "") or "")
+                    if looks_like_git_worktree_mutation(command):
+                        reset_worktree_cache()
+                    new_cwd = parse_cwd_change(
+                        command,
+                        session.metadata.get("agent_cwd") or session.subprocess_working_directory,
+                    )
+                    if new_cwd and apply_agent_cwd(session, new_cwd) and self._session_manager is not None:  # ty:ignore[unresolved-attribute]
+                        self._session_manager.broadcast_session_update(session)  # ty:ignore[unresolved-attribute]
                 elif item_type == "file_change":
                     post_tool_text_chunks.clear()
                     session.buffer.push_text(

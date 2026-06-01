@@ -18,12 +18,20 @@ import logging
 import os
 import shutil
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from src.core.agent_auth import agent_configuration_issue
 from src.core.buffer import MessageType
+from src.core.cwd_tracking import (
+    apply_agent_cwd,
+    extract_paths_from_tool_input,
+    infer_cwd_from_output,
+    infer_cwd_from_tool_paths,
+    looks_like_git_worktree_mutation,
+    reset_worktree_cache,
+)
 from src.core.permissions import (
     PermissionDecision,
     PermissionManager,
@@ -333,6 +341,12 @@ class ClaudeCodeAgentMixin:
         session.metadata["claude_code_tool_name"] = tool_def.name
         session.metadata["claude_code_parameters"] = tool_call.tool_input
 
+        # Seed the live agent-cwd mirror used by the worktree badge so
+        # the client UI starts in the right place before any tool call
+        # lands.
+        session.metadata["agent_cwd"] = str(working_path)
+        session.agent_cwd = str(working_path)
+
         # Start streaming in a background task that reads events and pushes to buffer
         task = asyncio.create_task(self._stream_claude_code_events(session, executor, tool_def, tool_call))
         session._claude_code_stream_task = task
@@ -602,6 +616,14 @@ class ClaudeCodeAgentMixin:
                             # approval text → CC proceeds; feedback → CC revises the plan.
                             if session.claude_code_executor is not None and session.claude_code_executor.is_running:
                                 await session.claude_code_executor.send_input(response_text)
+                        elif tool_name == "ScheduleWakeup":
+                            # Persist the wake, arm the scheduler, push
+                            # WAKEUP_SCHEDULED.  The wake never blocks the
+                            # CC relay — CC's own tool framework synthesises
+                            # whatever tool_result it needs; our job is just
+                            # to make sure the prompt actually fires when
+                            # the delay expires (handled by WakeupScheduler).
+                            await self._handle_schedule_wakeup_tool(session, tool_input, block)
                         elif tool_name == "Monitor":
                             monitor_id = block.get("id") or ""
                             if monitor_id:
@@ -716,6 +738,32 @@ class ClaudeCodeAgentMixin:
                                         "started_at": session.subprocess_started_at.isoformat(),
                                     },
                                 )
+                            # Invalidate the worktree cache when a Bash
+                            # command plausibly mutates the worktree set.
+                            if tool_name == "Bash" and looks_like_git_worktree_mutation(
+                                str(tool_input.get("command") or "")
+                            ):
+                                reset_worktree_cache()
+                            # Tool-input file-path inference.  Any tool
+                            # call that touches a file in a worktree
+                            # tells us where the agent is working — no
+                            # command parsing, no shell tracking
+                            # required.  Catches Edit, Write, Read,
+                            # Glob, Grep, NotebookEdit, MultiEdit etc.
+                            # in one go.
+                            paths = extract_paths_from_tool_input(tool_input)
+                            if paths:
+                                inferred = infer_cwd_from_tool_paths(
+                                    paths,
+                                    session.metadata.get("claude_code_working_directory"),
+                                    session.main_project_path,
+                                )
+                                if (
+                                    inferred
+                                    and apply_agent_cwd(session, inferred)
+                                    and self._session_manager is not None  # ty:ignore[unresolved-attribute]
+                                ):
+                                    self._session_manager.broadcast_session_update(session)  # ty:ignore[unresolved-attribute]
                         # Collect tool input values for scanning
                         for v in tool_input.values():
                             if isinstance(v, str):
@@ -813,6 +861,117 @@ class ClaudeCodeAgentMixin:
             else:
                 logger.debug("Skipping unknown Claude Code event type: %s", event_type)
 
+    async def _handle_schedule_wakeup_tool(
+        self,
+        session: ActiveSession,
+        tool_input: dict[str, Any],
+        block: dict[str, Any],
+    ) -> None:
+        """Persist + arm a ``ScheduleWakeup`` request.
+
+        Validates the input, writes a row via the wakeup store, asks
+        the scheduler to arm a timer, and pushes a TOOL_START so the
+        chat history reflects the call.  The actual badge / inline
+        card update is fired by the store as part of WAKEUP_SCHEDULED.
+        """
+        store = self._wakeup_store  # ty:ignore[unresolved-attribute]
+        scheduler = self._wakeup_scheduler  # ty:ignore[unresolved-attribute]
+        if store is None or scheduler is None:
+            # No persistence layer configured (test harness, etc.) — fall
+            # through to the generic TOOL_START so the call is still
+            # visible in chat history but nothing is armed.
+            session.buffer.push_text(
+                MessageType.TOOL_START,
+                {
+                    "session_id": session.id,
+                    "tool_name": "ScheduleWakeup",
+                    "tool_input": tool_input,
+                },
+            )
+            return
+
+        prompt = str(tool_input.get("prompt") or "").strip()
+        reason = str(tool_input.get("reason") or "").strip()
+        delay_raw = tool_input.get("delaySeconds")
+        try:
+            delay = int(delay_raw) if delay_raw is not None else 0
+        except (TypeError, ValueError):
+            delay = 0
+        # Clamp to the same window the upstream tool description
+        # advertises (60 s lower bound, 1 h upper bound).  This also
+        # protects us from a runaway recursive ``/loop`` that schedules
+        # near-zero delays.
+        delay = max(60, min(3600, delay))
+
+        if not prompt:
+            # Reject gracefully — push a TOOL_OUTPUT explaining why so
+            # the user can see what happened.
+            session.buffer.push_text(
+                MessageType.TOOL_START,
+                {
+                    "session_id": session.id,
+                    "tool_name": "ScheduleWakeup",
+                    "tool_input": tool_input,
+                },
+            )
+            session.buffer.push_text(
+                MessageType.TOOL_OUTPUT,
+                {
+                    "session_id": session.id,
+                    "tool_name": "ScheduleWakeup",
+                    "content": "ScheduleWakeup ignored: no prompt provided.",
+                    "is_error": True,
+                },
+            )
+            return
+
+        fire_at = datetime.now(UTC) + timedelta(seconds=delay)
+        # Render the call itself so chat history shows the request
+        # alongside the per-wake events the store emits.
+        session.buffer.push_text(
+            MessageType.TOOL_START,
+            {
+                "session_id": session.id,
+                "tool_name": "ScheduleWakeup",
+                "tool_input": {
+                    "delaySeconds": delay,
+                    "reason": reason,
+                    "prompt": prompt,
+                },
+            },
+        )
+
+        wake = await store.enqueue(
+            session,
+            prompt=prompt,
+            reason=reason,
+            fire_at=fire_at,
+        )
+        scheduler.arm(session.id, wake)
+        logger.info(
+            "ScheduleWakeup armed: session=%s wake_id=%s delay=%ds fire_at=%s wakes_in_mirror=%d",
+            session.id,
+            wake.wake_id,
+            delay,
+            fire_at.isoformat(),
+            len(session.scheduled_wakes),
+        )
+        if self._session_manager is not None:  # ty:ignore[unresolved-attribute]
+            self._session_manager.broadcast_session_update(session)  # ty:ignore[unresolved-attribute]
+        # Acknowledge so the assistant message lists a tool_result.
+        # We rely on the generic TOOL_OUTPUT path; ScheduleWakeup
+        # doesn't produce its own result event from CC.
+        session.buffer.push_text(
+            MessageType.TOOL_OUTPUT,
+            {
+                "session_id": session.id,
+                "tool_name": "ScheduleWakeup",
+                "content": (f"Wake scheduled in {delay}s (at {fire_at.isoformat()}). wake_id={wake.wake_id}"),
+                "is_error": False,
+            },
+        )
+        _ = block  # placeholder — kept for future tool_use_id linkage.
+
     async def _process_tool_result(
         self,
         session: ActiveSession,
@@ -894,6 +1053,18 @@ class ClaudeCodeAgentMixin:
                     "started_at": session.subprocess_started_at.isoformat(),
                 },
             )
+
+        # Output-side cwd inference.  Many tools that change the agent's
+        # working location (wt attach, git worktree add, custom switch
+        # scripts) don't actually ``cd`` Claude Code's shell — the cwd
+        # field in the CC jsonl stays put — but their *output* names the
+        # target worktree's absolute path.  We scan the tool result for
+        # any string that exactly matches a known Git worktree of the
+        # session's project; unrelated paths in the output are ignored,
+        # so this is conservative and command-agnostic.
+        inferred = infer_cwd_from_output(content, session.main_project_path)
+        if inferred and apply_agent_cwd(session, inferred) and self._session_manager is not None:  # ty:ignore[unresolved-attribute]
+            self._session_manager.broadcast_session_update(session)  # ty:ignore[unresolved-attribute]
 
     async def _process_monitor_event(
         self,
@@ -1130,12 +1301,39 @@ class ClaudeCodeAgentMixin:
         )
 
         logger.info(
-            "Claude Code initial streaming finished, process kept alive (session=%s)",
+            "Claude Code initial streaming finished (session=%s)",
             session.id,
         )
-        self.schedule_pending_drain(session)  # ty:ignore[unresolved-attribute]
+        self._schedule_drain_after_stream_task(session)
 
         await self._drain_monitor_events(session, executor)
+
+        # Clear the "subprocess running" indicator now that the turn is fully
+        # over (any active Monitor watches have also finished or been
+        # surrendered above).  If a queued message is about to drain,
+        # ``_forward_to_claude_code`` will re-set subprocess tracking for the
+        # next turn; otherwise the UI correctly stops showing the running
+        # indicator instead of leaving it pinned indefinitely.
+        session.clear_subprocess_tracking()
+
+    def _schedule_drain_after_stream_task(self, session: ActiveSession) -> None:
+        """Schedule pending-message drain to fire after the active CC stream task is done.
+
+        Called from inside ``_stream_claude_code_events`` /
+        ``_restart_claude_code_with_prompt`` — i.e. *while* the owning
+        task is still running its trailing
+        ``_drain_monitor_events``.  Scheduling the drain inline used to
+        race that await: ``_drain_one`` could reach
+        ``_forward_to_claude_code`` while the stream task was still alive,
+        triggering a cancel of the very task whose ``stdin`` write was
+        about to land.  Hooking ``add_done_callback`` guarantees the
+        drain runs only once the stream task has fully unwound.
+        """
+        task = session._claude_code_stream_task
+        if task is None or task.done():
+            self.schedule_pending_drain(session)  # ty:ignore[unresolved-attribute]
+            return
+        task.add_done_callback(lambda _t: self.schedule_pending_drain(session))  # ty:ignore[unresolved-attribute]
 
     async def _drain_monitor_events(
         self,
@@ -1224,6 +1422,14 @@ class ClaudeCodeAgentMixin:
         restarting it with the same ``--session-id``.
         """
         executor = session.claude_code_executor
+        stream_task = session._claude_code_stream_task
+        logger.info(
+            "_forward_to_claude_code: entry (session=%s, executor=%s, executor_running=%s, stream_task_done=%s)",
+            session.id,
+            executor is not None,
+            executor.is_running if executor is not None else False,
+            stream_task.done() if stream_task is not None else None,
+        )
         if executor is None:
             return
 
@@ -1265,32 +1471,25 @@ class ClaudeCodeAgentMixin:
             },
         )
 
-        if executor.is_running:
-            # Process still alive — send directly via stdin
-            try:
-                await executor.send_input(text)
-            except RuntimeError:
-                logger.warning("Failed to send input to Claude Code (session=%s), restarting", session.id)
-                # Kill the old process explicitly — it may still be alive with broken stdin
-                await executor.cancel()
-                session._claude_code_stream_task = asyncio.create_task(
-                    self._restart_claude_code_with_prompt(session, executor, text)
-                )
-                return
-
-            # Ensure any previous stream task is stopped before starting a new one
-            if session._claude_code_stream_task is not None and not session._claude_code_stream_task.done():
-                session._claude_code_stream_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await session._claude_code_stream_task
-
-            # Read response events in background
-            session._claude_code_stream_task = asyncio.create_task(self._read_claude_code_followup(session, executor))
-        else:
-            # Process unexpectedly exited — restart with same session-id as fallback
-            session._claude_code_stream_task = asyncio.create_task(
-                self._restart_claude_code_with_prompt(session, executor, text)
-            )
+        # Always restart the subprocess for follow-ups.  Claude Code's
+        # ``--print`` mode terminates after each turn (regardless of
+        # ``--session-id`` vs ``--resume``), so the "process kept alive
+        # between turns" assumption no longer holds — empirically the
+        # process exits within seconds of the ``result`` event.  When a
+        # queued message drained right after a turn, ``send_input`` would
+        # race that exit: stdin write succeeded but the process tore down
+        # before producing a result event, and the queued message was
+        # silently lost.  ``restart_with_prompt`` uses ``--resume`` +
+        # the prompt as the initial CLI argument so the new process
+        # picks up the conversation history and reliably produces a
+        # result event.
+        if session._claude_code_stream_task is not None and not session._claude_code_stream_task.done():
+            session._claude_code_stream_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await session._claude_code_stream_task
+        session._claude_code_stream_task = asyncio.create_task(
+            self._restart_claude_code_with_prompt(session, executor, text)
+        )
 
     async def _restart_claude_code_with_prompt(
         self,
@@ -1370,87 +1569,9 @@ class ClaudeCodeAgentMixin:
             MessageType.AGENT_GROUP_END,
             {"session_id": session.id},
         )
-        self.schedule_pending_drain(session)  # ty:ignore[unresolved-attribute]
+        self._schedule_drain_after_stream_task(session)
 
         await self._drain_monitor_events(session, executor)
 
-    async def _read_claude_code_followup(
-        self,
-        session: ActiveSession,
-        executor: ClaudeCodeExecutor,
-    ) -> None:
-        """Read follow-up events from a still-running Claude Code process."""
-        try:
-            await self._relay_claude_code_stream(session, executor.read_more_events())
-        except Exception as e:
-            logger.exception("Claude Code follow-up error in session %s", session.id)
-            session.buffer.push_text(
-                MessageType.AGENT_GROUP_END,
-                {"session_id": session.id},
-            )
-            session.buffer.push_text(
-                MessageType.ERROR,
-                {
-                    "session_id": session.id,
-                    "content": f"Claude Code error: {e}",
-                    "code": "CLAUDE_CODE_ERROR",
-                },
-            )
-            await self._end_claude_code_session(session)
-            return
-
-        # If the relay ended the session itself (e.g. plan mode denied), already done.
-        if session.status in (SessionStatus.COMPLETED, SessionStatus.CANCELLED, SessionStatus.FAILED):
-            return
-
-        # If the session was paused during relay (e.g. max_turns), relay already
-        # pushed AGENT_GROUP_END and SESSION_PAUSED — just clean up and return.
-        if session.status == SessionStatus.PAUSED:
-            if session.claude_code_executor is not None:
-                await session.claude_code_executor.stop_process()
-            session.claude_code_executor = None
-            session._claude_code_stream_task = None
-            logger.info("Session %s paused after follow-up stream (reason=%s)", session.id, session.paused_reason)
-            return
-
-        # Detect unexpected exit (no result event received)
-        if not executor.got_result:
-            exit_code = executor.exit_code
-            session.set_activity(ActivityState.IDLE)
-            session.clear_subprocess_tracking()
-            session.buffer.push_text(
-                MessageType.AGENT_GROUP_END,
-                {"session_id": session.id},
-            )
-            if exit_code == 0:
-                logger.info(
-                    "Claude Code (follow-up) exited cleanly without result event (session=%s)",
-                    session.id,
-                )
-            else:
-                logger.warning(
-                    "Claude Code (follow-up) exited without result event (session=%s, exit_code=%s)",
-                    session.id,
-                    exit_code,
-                )
-                session.buffer.push_text(
-                    MessageType.ERROR,
-                    {
-                        "session_id": session.id,
-                        "content": (
-                            f"Claude Code process exited unexpectedly (exit code: {exit_code}). "
-                            "This may be caused by a timeout, out-of-memory condition, or internal error. "
-                            "You can send another message to restart it."
-                        ),
-                        "code": "CLAUDE_CODE_UNEXPECTED_EXIT",
-                    },
-                )
-            return
-
-        session.buffer.push_text(
-            MessageType.AGENT_GROUP_END,
-            {"session_id": session.id},
-        )
-        self.schedule_pending_drain(session)  # ty:ignore[unresolved-attribute]
-
-        await self._drain_monitor_events(session, executor)
+        # See ``_stream_claude_code_events`` for rationale.
+        session.clear_subprocess_tracking()

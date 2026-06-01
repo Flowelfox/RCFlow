@@ -630,7 +630,6 @@ class RCFlowMacOSGUI:
         )
         self._update_check_btn.grid(row=1, column=4, padx=(s, g), pady=(0, g))
 
-
         try:
             auto = bool(Settings().RCFLOW_UPDATE_AUTO_CHECK)
         except Exception:
@@ -730,7 +729,6 @@ class RCFlowMacOSGUI:
         self._updater.download(on_progress=_on_progress, on_done=_on_done, on_error=_on_error)
 
     def _prompt_launch_installer(self, path: Path) -> None:
-
         choice = messagebox.askyesnocancel(
             "Update downloaded",
             f"The installer was saved to:\n{path}\n\nLaunch it now?\n\n"
@@ -747,7 +745,6 @@ class RCFlowMacOSGUI:
 
     @staticmethod
     def _reveal_in_finder(path: Path) -> None:
-
         with contextlib.suppress(Exception):
             subprocess.Popen(["open", "-R", str(path)])
 
@@ -758,14 +755,12 @@ class RCFlowMacOSGUI:
         self._updater.dismiss_current()
 
     def _on_update_auto_toggle(self) -> None:
-
         update_settings_file({"RCFLOW_UPDATE_AUTO_CHECK": "true" if self._update_auto_var.get() else "false"})
 
     # ── Settings I/O ─────────────────────────────────────────────────────
 
     def _load_settings(self) -> None:
         try:
-
             s = Settings()
             self._ip_var.set(s.RCFLOW_HOST)
             self._port_var.set(str(s.RCFLOW_PORT))
@@ -777,11 +772,9 @@ class RCFlowMacOSGUI:
         self._apply_forwarding_mutex()
 
     def _on_wss_toggle(self) -> None:
-
         update_settings_file({"WSS_ENABLED": str(self._wss_var.get())})
 
     def _on_upnp_toggle(self) -> None:
-
         enabled = bool(self._upnp_var.get())
         updates: dict[str, str] = {"UPNP_ENABLED": "true" if enabled else "false"}
         # Mutex with NAT-PMP: enabling UPnP turns NAT-PMP off.  Both routes
@@ -794,7 +787,6 @@ class RCFlowMacOSGUI:
         self._apply_forwarding_mutex()
 
     def _on_natpmp_toggle(self) -> None:
-
         enabled = bool(self._natpmp_var.get())
         updates: dict[str, str] = {"NATPMP_ENABLED": "true" if enabled else "false"}
         # Mutex with UPnP — see ``_on_upnp_toggle`` for the rationale.
@@ -821,7 +813,6 @@ class RCFlowMacOSGUI:
 
     def _on_copy_token(self) -> None:
         try:
-
             api_key = read_token_from_file()
             if not api_key:
                 self._set_status("No API token configured", error=True, sticky=True)
@@ -835,8 +826,6 @@ class RCFlowMacOSGUI:
 
     def _on_add_to_client(self) -> None:
         try:
-
-
             host = self._ip_var.get().strip()
             port_str = self._port_var.get().strip()
             if not host or not port_str:
@@ -1128,11 +1117,7 @@ class RCFlowMacOSGUI:
             "Manage Claude Code, Codex, and OpenCode sessions across machines.\n"
             "Source and issues: github.com/Flowelfox/RCFlow"
         )
-        credits = (
-            NSAttributedString.alloc().initWithString_(credits_text)
-            if NSAttributedString is not None
-            else None
-        )
+        credits = NSAttributedString.alloc().initWithString_(credits_text) if NSAttributedString is not None else None
         options: dict[str, object] = {
             "ApplicationName": "RCFlow Worker",
             "ApplicationVersion": version,
@@ -1365,7 +1350,6 @@ class RCFlowMacOSGUI:
 
             self._status_item.setMenu_(menu)
         except Exception as _exc:
-
             msg = traceback.format_exc()
             print(f"RCFlow: NSStatusItem setup failed — {_exc}\n{msg}", file=sys.stderr)
             logger.exception("Failed to create NSStatusItem — keeping window visible")
@@ -1373,7 +1357,6 @@ class RCFlowMacOSGUI:
 
     @staticmethod
     def _get_icon_path() -> Path:
-
         if is_frozen():
             # PyInstaller --icon places the .icns at Contents/Resources/
             return Path(sys.executable).resolve().parent.parent / "Resources" / "tray_icon.icns"
@@ -1437,9 +1420,7 @@ class RCFlowMacOSGUI:
             r, g, b = rgb
             NSColor.colorWithCalibratedRed_green_blue_alpha_(r, g, b, 1.0).setFill()
             inset = 1.0
-            path = NSBezierPath.bezierPathWithOvalInRect_(
-                NSMakeRect(inset, inset, size - 2 * inset, size - 2 * inset)
-            )
+            path = NSBezierPath.bezierPathWithOvalInRect_(NSMakeRect(inset, inset, size - 2 * inset, size - 2 * inset))
             path.fill()
         finally:
             img.unlockFocus()
@@ -1453,9 +1434,7 @@ class RCFlowMacOSGUI:
                 text = "RCFlow Worker: Running" if running else "RCFlow Worker: Stopped"
                 self._ns_status_text.setTitle_(text)  # ty:ignore[unresolved-attribute]
                 # Green dot when running, neutral grey when stopped.
-                dot_rgb: tuple[float, float, float] = (
-                    (0.30, 0.78, 0.40) if running else (0.55, 0.55, 0.55)
-                )
+                dot_rgb: tuple[float, float, float] = (0.30, 0.78, 0.40) if running else (0.55, 0.55, 0.55)
                 dot_img = self._make_status_dot(dot_rgb)
                 if dot_img is not None:
                     self._ns_status_text.setImage_(dot_img)  # ty:ignore[unresolved-attribute]
@@ -1897,7 +1876,6 @@ def run_gui_macos(*, minimized: bool = False) -> None:
         gui.run(minimized=minimized)
         _trace("gui.run() returned — mainloop exited cleanly")
     except Exception:
-
         crash_msg = traceback.format_exc()
         _trace(f"EXCEPTION:\n{crash_msg}")
 

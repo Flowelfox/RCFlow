@@ -522,10 +522,9 @@ class _ArtifactContentState extends State<_ArtifactContent> {
   }
 
   Widget _buildRenderedMarkdown(BuildContext context) {
-    return SelectionScope(
-      child: MarkdownCopyMenu(
-        rawMarkdown: _content!,
-        child: MarkdownBody(
+    return MessageSelectionArea(
+      rawMarkdown: _content!,
+      child: MarkdownBody(
           data: _content!,
           shrinkWrap: true,
           selectable: false,
@@ -614,7 +613,6 @@ class _ArtifactContentState extends State<_ArtifactContent> {
             ),
           ),
         ),
-      ),
     );
   }
 

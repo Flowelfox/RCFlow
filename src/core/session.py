@@ -122,6 +122,33 @@ class PendingMessage:
         }
 
 
+@dataclass
+class ScheduledWake:
+    """A pending ``ScheduleWakeup`` call the agent placed on itself.
+
+    Mirrors one row of the ``session_scheduled_wakes`` DB table.  The
+    authoritative store is the DB; this in-memory copy lets the
+    badge / inline card render without a query each broadcast.  See
+    ``Scheduled Wakeups`` in ``docs/design/sessions.md``.
+    """
+
+    wake_id: str
+    prompt: str
+    reason: str
+    fire_at: datetime
+    created_at: datetime
+
+    def to_snapshot(self) -> dict[str, Any]:
+        """Lightweight dict included in ``session_update.scheduled_wakes``."""
+        return {
+            "wake_id": self.wake_id,
+            "prompt": self.prompt,
+            "reason": self.reason,
+            "fire_at": self.fire_at.isoformat(),
+            "created_at": self.created_at.isoformat(),
+        }
+
+
 class ActiveSession:
     """An in-memory active session with its buffer and conversation context."""
 
@@ -199,6 +226,11 @@ class ActiveSession:
         self.subprocess_type: str | None = None
         self.subprocess_display_name: str | None = None
         self.subprocess_working_directory: str | None = None
+        # Live agent cwd — mirrors ``metadata["agent_cwd"]``.  Tracks where
+        # the managed agent (Claude Code / Codex / OpenCode) believes it is
+        # right now, updated on each Bash ``cd`` / ``git worktree …`` call.
+        # Used by the worktree-badge label and the session tooltip.
+        self.agent_cwd: str | None = None
         # Per-stream stack of pre-snapshots for Edit/Write diff computation.
         # Reset at the start of each stream; populated by agent_claude_code.
         self._pending_snapshots: list[tuple[str, str | None] | None] = []
@@ -223,6 +255,11 @@ class ActiveSession:
         # through :class:`SessionPendingMessageStore` which writes the DB then
         # updates this list.  See ``Queued User Messages`` in ``docs/design/sessions.md``.
         self.pending_user_messages: list[PendingMessage] = []
+        # In-memory mirror of the agent's pending ScheduleWakeup calls
+        # (rows of ``session_scheduled_wakes``).  The badge label, the
+        # inline wakeup card, and ``broadcast_session_update`` all read
+        # from this list.
+        self.scheduled_wakes: list[ScheduledWake] = []
 
     @property
     def agent_type(self) -> str | None:
@@ -318,6 +355,12 @@ class ActiveSession:
             return True
         if self._prompt_lock.locked():
             return True
+        # Paused sessions accept queued sends — they must be held
+        # until the user resumes, then drained in order.  Without this
+        # guard, a message that arrives during a pause would either
+        # auto-resume + skip the queue or be lost entirely.
+        if self.status == SessionStatus.PAUSED:
+            return True
         return self._activity_state != ActivityState.IDLE
 
     def pending_snapshot(self) -> list[dict[str, Any]]:
@@ -362,6 +405,40 @@ class ActiveSession:
         """Drop all queued entries and return them (for per-entry cleanup by the caller)."""
         dropped = list(self.pending_user_messages)
         self.pending_user_messages.clear()
+        return dropped
+
+    # ------------------------------------------------------------------
+    # Scheduled wake mirror
+
+    def wakes_snapshot(self) -> list[dict[str, Any]]:
+        """Return the pending wake list as snapshot dicts."""
+        return [w.to_snapshot() for w in self.scheduled_wakes]
+
+    def _find_wake_index(self, wake_id: str) -> int | None:
+        for idx, w in enumerate(self.scheduled_wakes):
+            if w.wake_id == wake_id:
+                return idx
+        return None
+
+    def mirror_add_wake(self, entry: ScheduledWake) -> None:
+        """Insert *entry* into the in-memory wake list ordered by fire_at."""
+        for idx, existing in enumerate(self.scheduled_wakes):
+            if existing.fire_at > entry.fire_at:
+                self.scheduled_wakes.insert(idx, entry)
+                return
+        self.scheduled_wakes.append(entry)
+
+    def mirror_remove_wake(self, wake_id: str) -> ScheduledWake | None:
+        """Remove and return the named wake, or None if not present."""
+        idx = self._find_wake_index(wake_id)
+        if idx is None:
+            return None
+        return self.scheduled_wakes.pop(idx)
+
+    def mirror_clear_wakes(self) -> list[ScheduledWake]:
+        """Drop all pending wakes; used on session end / cancel."""
+        dropped = list(self.scheduled_wakes)
+        self.scheduled_wakes.clear()
         return dropped
 
     @property
@@ -573,6 +650,7 @@ class SessionManager:
             "paused_reason": session.paused_reason,
             "worktree": session.metadata.get("worktree"),
             "selected_worktree_path": session.metadata.get("selected_worktree_path"),
+            "agent_cwd": session.metadata.get("agent_cwd"),
             "main_project_path": session.main_project_path,
             "project_name_error": session.project_name_error,
             "agent_type": session.agent_type,
@@ -585,6 +663,9 @@ class SessionManager:
             # their local pinned-at-bottom queue from this list on every
             # receipt (reconnect-safe).
             "queued_messages": session.pending_snapshot(),
+            # Pending ``ScheduleWakeup`` calls — drives the wake badge
+            # and the inline wakeup-card replay on subscribe.
+            "scheduled_wakes": session.wakes_snapshot(),
         }
         for queue in self._update_subscribers.values():
             queue.put_nowait(update)
@@ -869,6 +950,7 @@ class SessionManager:
                     "tool_cost_usd": s.tool_cost_usd,
                     "worktree": s.metadata.get("worktree"),
                     "selected_worktree_path": s.metadata.get("selected_worktree_path"),
+                    "agent_cwd": s.metadata.get("agent_cwd"),
                     "main_project_path": s.main_project_path,
                     "agent_type": s.agent_type,
                     "sort_order": s.sort_order,
@@ -911,6 +993,7 @@ class SessionManager:
                         "tool_cost_usd": row.tool_cost_usd or 0.0,
                         "worktree": archived_meta.get("worktree"),
                         "selected_worktree_path": archived_meta.get("selected_worktree_path"),
+                        "agent_cwd": archived_meta.get("agent_cwd"),
                         "main_project_path": row.main_project_path,
                         "agent_type": None,
                         "sort_order": row.sort_order,

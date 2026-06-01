@@ -39,6 +39,8 @@ from src.core.llm import LLMClient, StreamDone, TextChunk, ToolCallRequest, llm_
 from src.core.pending_store import SessionPendingMessageStore
 from src.core.session import ActiveSession, ActivityState, SessionManager, SessionStatus, SessionType
 from src.core.session_lifecycle import SessionLifecycleMixin
+from src.core.wakeup_scheduler import WakeupScheduler
+from src.core.wakeup_store import SessionScheduledWakeStore
 from src.database.models import Session as SessionModel
 from src.database.models import Task as TaskModel
 from src.database.models import TaskSession as TaskSessionModel
@@ -136,6 +138,7 @@ class PromptRouter(
         artifact_scanner: ArtifactScanner | None = None,
         telemetry_service: TelemetryService | None = None,
         pending_store: SessionPendingMessageStore | None = None,
+        wakeup_store: SessionScheduledWakeStore | None = None,
     ) -> None:
         self._llm = llm_client
         self._session_manager = session_manager
@@ -148,6 +151,13 @@ class PromptRouter(
         self._artifact_scanner = artifact_scanner
         self._telemetry = telemetry_service
         self._pending_store = pending_store
+        self._wakeup_store = wakeup_store
+        # The scheduler is initialised lazily so the ``on_fire`` closure
+        # can capture ``self``.  It is created the first time a wake is
+        # armed (or on startup-recovery, whichever comes first).
+        self._wakeup_scheduler: WakeupScheduler | None = (
+            WakeupScheduler(self._fire_pending_wakeup) if wakeup_store is not None else None
+        )
         self._drain_tasks: set[asyncio.Task[None]] = set()
         # Holds strong references to in-flight ``handle_prompt`` tasks created
         # by the WebSocket input handler. Without this, the only reference to
@@ -703,9 +713,11 @@ class PromptRouter(
         Called at the end of each turn (Claude Code / Codex / OpenCode result
         event, LLM ``_prompt_lock`` release).  Delivers the oldest pending
         message by invoking :meth:`handle_prompt`; any subsequent queued
-        messages are picked up by the next turn-end hook.
+        messages are picked up by :meth:`_drain_one`'s self-rescheduling
+        tail or the next turn-end hook.
         """
         if self._pending_store is None:
+            logger.info("schedule_pending_drain: no pending store (session=%s)", session.id)
             return
         if not session.pending_user_messages:
             return
@@ -715,7 +727,18 @@ class PromptRouter(
             SessionStatus.FAILED,
             SessionStatus.CANCELLED,
         ):
+            logger.info(
+                "schedule_pending_drain: session not eligible (session=%s, status=%s, queue_len=%d)",
+                session.id,
+                session.status.value,
+                len(session.pending_user_messages),
+            )
             return
+        logger.info(
+            "schedule_pending_drain: dispatching drain (session=%s, queue_len=%d)",
+            session.id,
+            len(session.pending_user_messages),
+        )
         task = asyncio.create_task(self._drain_one(session))
         self._drain_tasks.add(task)
         task.add_done_callback(self._drain_tasks.discard)
@@ -725,6 +748,7 @@ class PromptRouter(
         if self._pending_store is None or not session.pending_user_messages:
             return
         head = session.pending_user_messages[0]
+        logger.info("_drain_one: start (session=%s, queued_id=%s)", session.id, head.queued_id)
         try:
             attachments = await asyncio.to_thread(SessionPendingMessageStore.rehydrate_attachments, head)
         except OSError as e:
@@ -732,6 +756,7 @@ class PromptRouter(
             attachments = []
         # Remove the row + disk bytes; emits ``message_dequeued``.
         await self._pending_store.pop_head(session)
+        logger.info("_drain_one: popped head (session=%s, queued_id=%s)", session.id, head.queued_id)
         try:
             await self.handle_prompt(
                 text=head.content,
@@ -748,6 +773,65 @@ class PromptRouter(
                 "Failed to deliver drained queued message %s for session %s",
                 head.queued_id,
                 session.id,
+            )
+            # Surface the failure to the user instead of leaving the message
+            # silently disappeared from the queue.
+            session.buffer.push_text(
+                MessageType.ERROR,
+                {
+                    "session_id": session.id,
+                    "content": (
+                        "Failed to deliver a queued message — please resend it. Backend logs have the full traceback."
+                    ),
+                    "code": "QUEUED_MESSAGE_DELIVERY_FAILED",
+                },
+            )
+            return
+
+        logger.info("_drain_one: handle_prompt done (session=%s, queued_id=%s)", session.id, head.queued_id)
+
+        # Self-propel through multi-message queues: if more messages are still
+        # queued and the session is now idle, schedule the next drain instead
+        # of waiting for the next turn-end hook.  Single-message case (the one
+        # this fix targets) is unaffected — the queue is empty after one pop.
+        if session.pending_user_messages and not session.is_busy_for_queue():
+            logger.info(
+                "_drain_one: scheduling follow-up drain (session=%s, queue_len=%d)",
+                session.id,
+                len(session.pending_user_messages),
+            )
+            self.schedule_pending_drain(session)
+
+    async def _fire_pending_wakeup(self, session_id: str, wake) -> None:  # type: ignore[no-untyped-def]
+        """Callback handed to the :class:`WakeupScheduler`.
+
+        Marks the wake fired in the store, then routes the prompt
+        through :meth:`handle_prompt` so it reuses all the normal
+        delivery machinery (forward to live CC, restart CC if exited,
+        queue if mid-turn, etc.).  Source-tagging keeps user-visible
+        flows distinguishable from wake-driven ones.
+        """
+        session = self._session_manager.get_session(session_id)
+        if session is None:
+            logger.info("Wake fired for missing session %s — dropping.", session_id)
+            return
+        store = self._wakeup_store
+        if store is None:
+            return
+        await store.mark_fired(session, wake.wake_id)
+        if self._session_manager is not None:
+            self._session_manager.broadcast_session_update(session)
+        try:
+            await self.handle_prompt(
+                text=wake.prompt,
+                session_id=session_id,
+                display_text=wake.prompt,
+            )
+        except Exception:
+            logger.exception(
+                "Wakeup delivery failed (session=%s wake=%s)",
+                session_id,
+                wake.wake_id,
             )
 
     async def handle_prompt(

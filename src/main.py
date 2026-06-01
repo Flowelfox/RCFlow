@@ -17,6 +17,7 @@ from src.core.llm import LLMClient
 from src.core.pending_store import SessionPendingMessageStore
 from src.core.prompt_router import PromptRouter
 from src.core.session import SessionManager
+from src.core.wakeup_store import SessionScheduledWakeStore
 from src.database.engine import check_connection, dispose_engine, get_session_factory, init_engine
 from src.logs import setup_logging
 from src.paths import get_data_dir, is_frozen
@@ -163,6 +164,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         except Exception:
             logger.exception("Failed to hydrate pending messages for session %s", _active.id)
 
+    # Scheduled-wake store (Claude Code ``ScheduleWakeup`` tool).
+    wakeup_store = SessionScheduledWakeStore(db_session_factory)
+    app.state.wakeup_store = wakeup_store
+
     # Prompt router
     prompt_router = PromptRouter(
         llm_client,
@@ -175,8 +180,22 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         artifact_scanner,
         telemetry_service,
         pending_store=pending_store,
+        wakeup_store=wakeup_store,
     )
     app.state.prompt_router = prompt_router
+
+    # Re-arm any wake that survived the restart.  The store hydrates
+    # the per-session mirrors and we hand each wake to the scheduler so
+    # past-due ones fire on the next event loop tick and future ones
+    # fire at their original ``fire_at``.
+    try:
+        restored = await wakeup_store.restore_all_pending(session_manager)
+        if restored and prompt_router._wakeup_scheduler is not None:
+            for session_id, wake in restored:
+                prompt_router._wakeup_scheduler.arm(session_id, wake)
+            logger.info("Restored %d pending wake(s) on startup", len(restored))
+    except Exception:
+        logger.exception("Wakeup restore failed at startup")
 
     logger.info(
         "RCFlow ready — listening on %s:%d (backend_id=%s)",

@@ -46,6 +46,13 @@ class MessageType(StrEnum):
     MONITOR_START = "monitor_start"
     MONITOR_EVENT = "monitor_event"
     MONITOR_END = "monitor_end"
+    # Claude Code ``ScheduleWakeup`` lifecycle.  SCHEDULED is pushed the
+    # moment the tool call lands; FIRED when the timer expires and the
+    # prompt is forwarded back into CC; CANCELLED when the user dismisses
+    # the wake or the session ends before it fires.
+    WAKEUP_SCHEDULED = "wakeup_scheduled"
+    WAKEUP_FIRED = "wakeup_fired"
+    WAKEUP_CANCELLED = "wakeup_cancelled"
 
 
 @dataclass

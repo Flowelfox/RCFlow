@@ -373,7 +373,6 @@ class TestCancel:
 
 class TestBuildEnv:
     def test_includes_os_env(self, executor: OpenCodeExecutor):
-
         env = executor._build_env()
         assert "PATH" in env or len(env) > 0  # at minimum has something
 

@@ -483,12 +483,7 @@ class ContextMixin:
             or session.opencode_executor is not None
         ):
             return False
-        if (
-            session.input_tokens
-            or session.output_tokens
-            or session.tool_input_tokens
-            or session.tool_output_tokens
-        ):
+        if session.input_tokens or session.output_tokens or session.tool_input_tokens or session.tool_output_tokens:
             return False
         # The buffer contains only the just-pushed user TEXT_CHUNK and the
         # just-pushed ERROR for a truly fresh failed session.  Any other

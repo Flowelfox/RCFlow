@@ -235,7 +235,13 @@ async def cancel_session(session_id: str, request: Request) -> dict[str, Any]:
     try:
         session = await prompt_router.cancel_session(session_id)
     except ValueError:
-        # Session not in memory — check if it exists in the DB with a non-terminal status
+        # Session not in memory — check the DB.  Sessions get archived (and
+        # removed from memory) within milliseconds of cancel, so rapid
+        # double-clicks routinely land here even after a successful first
+        # cancel.  Treat the DB row as authoritative and answer the same way
+        # whether the row was just-now flipped to cancelled or had been
+        # cancelled previously — the client only cares that the session is in
+        # a terminal state when this call returns.
         db_session_factory = request.app.state.db_session_factory
         if db_session_factory is not None:
             try:
@@ -244,19 +250,44 @@ async def cancel_session(session_id: str, request: Request) -> dict[str, Any]:
                 raise HTTPException(status_code=400, detail=f"Invalid session ID: {session_id}") from None
             async with db_session_factory() as db:
                 row = await db.get(SessionModel, session_uuid)
-                if row is not None and row.status not in ("completed", "failed", "cancelled"):
-                    row.status = "cancelled"
-                    row.ended_at = datetime.now(UTC)
-                    await db.commit()
-                    logger.info("Session %s cancelled in DB (was not in memory)", session_id)
+                if row is not None:
+                    if row.status not in ("completed", "failed", "cancelled"):
+                        row.status = "cancelled"
+                        row.ended_at = datetime.now(UTC)
+                        await db.commit()
+                        logger.info("Session %s cancelled in DB (was not in memory)", session_id)
+                    else:
+                        logger.info(
+                            "Session %s already terminal in DB (status=%s), returning success",
+                            session_id,
+                            row.status,
+                        )
                     return {
                         "session_id": session_id,
-                        "status": "cancelled",
-                        "cancelled_at": row.ended_at.isoformat(),
+                        "status": row.status,
+                        "cancelled_at": row.ended_at.isoformat() if row.ended_at else None,
                     }
         raise HTTPException(status_code=404, detail=f"Session not found: {session_id}") from None
-    except RuntimeError as e:
-        raise HTTPException(status_code=409, detail=str(e)) from None
+    except RuntimeError:
+        # Session is already in a terminal state in memory (e.g. a concurrent
+        # cancel finished first).  Return the existing terminal state as
+        # success so the client doesn't see a misleading "cancel failed"
+        # error on rapid double-clicks.
+        existing = prompt_router._session_manager.get_session(session_id)
+        if existing is not None:
+            logger.info(
+                "Session %s already terminal in memory (status=%s), returning success",
+                session_id,
+                existing.status.value,
+            )
+            return {
+                "session_id": existing.id,
+                "status": existing.status.value,
+                "cancelled_at": existing.ended_at.isoformat() if existing.ended_at else None,
+            }
+        # Race: session was archived between cancel_session()'s terminal-check
+        # and our get_session() here.  Fall through to the DB path by re-raising.
+        raise HTTPException(status_code=409, detail="Session already in terminal state") from None
     logger.info("Session %s cancelled via HTTP API", session_id)
     return {
         "session_id": session.id,
@@ -752,3 +783,69 @@ async def get_draft(
         if draft is None:
             return DraftResponse(content="", updated_at=datetime.now(UTC))
         return DraftResponse(content=draft.content, updated_at=draft.updated_at)
+
+
+# ---------------------------------------------------------------------------
+# Scheduled wakes
+# ---------------------------------------------------------------------------
+
+
+@router.delete(
+    "/sessions/{session_id}/wakes/{wake_id}",
+    summary="Cancel a pending scheduled wake",
+    description=(
+        "Cancel one pending ``ScheduleWakeup`` call.  The associated timer "
+        "is dropped, the DB row is marked cancelled, and the client sees a "
+        "``WAKEUP_CANCELLED`` event so the badge / inline card update."
+    ),
+    dependencies=[Depends(verify_http_api_key)],
+)
+async def cancel_session_wake(
+    session_id: str,
+    wake_id: str,
+    request: Request,
+) -> dict[str, Any]:
+    prompt_router: PromptRouter = request.app.state.prompt_router
+    session_manager: SessionManager = request.app.state.session_manager
+    session = session_manager.get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+    store = getattr(prompt_router, "_wakeup_store", None)
+    scheduler = getattr(prompt_router, "_wakeup_scheduler", None)
+    if store is None:
+        raise HTTPException(status_code=503, detail="Wakeup store unavailable")
+    cancelled = await store.cancel(session, wake_id, reason="user_cancelled")
+    if cancelled is None:
+        raise HTTPException(status_code=404, detail=f"Wake not found: {wake_id}")
+    if scheduler is not None:
+        scheduler.cancel(wake_id)
+    session_manager.broadcast_session_update(session)
+    logger.info("Session %s wake %s cancelled via HTTP API", session_id, wake_id)
+    return {"session_id": session_id, "wake_id": wake_id, "status": "cancelled"}
+
+
+@router.delete(
+    "/sessions/{session_id}/wakes",
+    summary="Cancel every pending wake on a session",
+    dependencies=[Depends(verify_http_api_key)],
+)
+async def cancel_session_wakes(
+    session_id: str,
+    request: Request,
+) -> dict[str, Any]:
+    prompt_router: PromptRouter = request.app.state.prompt_router
+    session_manager: SessionManager = request.app.state.session_manager
+    session = session_manager.get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+    store = getattr(prompt_router, "_wakeup_store", None)
+    scheduler = getattr(prompt_router, "_wakeup_scheduler", None)
+    if store is None:
+        raise HTTPException(status_code=503, detail="Wakeup store unavailable")
+    wake_ids = [w.wake_id for w in session.scheduled_wakes]
+    cancelled = await store.cancel_all_for_session(session, reason="user_cancelled")
+    if scheduler is not None:
+        scheduler.cancel_all_for_session(session_id, wake_ids)
+    session_manager.broadcast_session_update(session)
+    logger.info("Session %s — %d wakes cancelled via HTTP API", session_id, len(cancelled))
+    return {"session_id": session_id, "cancelled": [w.wake_id for w in cancelled]}

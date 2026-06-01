@@ -7,6 +7,7 @@ from sqlalchemy import select
 
 from src.api.deps import handle_ws_first_message_auth, verify_ws_api_key
 from src.core.attachment_store import AttachmentStore, ResolvedAttachment
+from src.core.session import SessionStatus
 from src.database.models import LinearIssue as LinearIssueModel
 
 logger = logging.getLogger(__name__)
@@ -503,8 +504,17 @@ async def ws_input_text(
             await websocket.send_json(ack_payload)
 
             # If the prompt was enqueued, delivery happens on the next turn
-            # boundary via ``PromptRouter.schedule_pending_drain``.
+            # boundary via ``PromptRouter.schedule_pending_drain``.  If the
+            # session was paused at enqueue time, the user's send is the
+            # implicit "resume" signal — trigger resume so the drain
+            # actually fires; without it the queue would just keep growing.
             if queued_id is not None:
+                if session_obj is not None and session_obj.status == SessionStatus.PAUSED:
+                    resume_task = asyncio.create_task(
+                        prompt_router.resume_session(result_session_id),
+                    )
+                    background_tasks.add(resume_task)
+                    resume_task.add_done_callback(background_tasks.discard)
                 continue
 
             # Process prompt in the background

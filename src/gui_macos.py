@@ -138,33 +138,39 @@ class RCFlowMacOSGUI:
         sc.grid(row=0, column=0, sticky="ew")
 
         ctk.CTkLabel(
-            sc, text="Server Settings",
+            sc,
+            text="Server Settings",
             font=ctk.CTkFont(size=theme.FONT_SIZE_SMALL, weight="bold"),
         ).grid(row=0, column=0, columnspan=6, sticky="w", padx=p_group, pady=(p_group, p_small))
 
         ctk.CTkLabel(sc, text="IP Address", font=ctk.CTkFont(size=theme.FONT_SIZE_BODY)).grid(
-            row=1, column=0, sticky="w", padx=(p_group, p_small), pady=(0, p_group))
+            row=1, column=0, sticky="w", padx=(p_group, p_small), pady=(0, p_group)
+        )
         self._ip_var = tk.StringVar(value="0.0.0.0")
         self._ip_entry = ctk.CTkEntry(
-            sc, textvariable=self._ip_var, width=155,
-            font=ctk.CTkFont(size=theme.FONT_SIZE_BODY))
+            sc, textvariable=self._ip_var, width=155, font=ctk.CTkFont(size=theme.FONT_SIZE_BODY)
+        )
         self._ip_entry.grid(row=1, column=1, sticky="w", padx=(0, p_group), pady=(0, p_group))
 
         ctk.CTkLabel(sc, text="Port", font=ctk.CTkFont(size=theme.FONT_SIZE_BODY)).grid(
-            row=1, column=2, sticky="w", padx=(0, p_small), pady=(0, p_group))
+            row=1, column=2, sticky="w", padx=(0, p_small), pady=(0, p_group)
+        )
         from src.config import _DEFAULT_PORT  # noqa: PLC0415
 
         self._port_var = tk.StringVar(value=str(_DEFAULT_PORT))
         self._port_entry = ctk.CTkEntry(
-            sc, textvariable=self._port_var, width=76,
-            font=ctk.CTkFont(size=theme.FONT_SIZE_BODY))
+            sc, textvariable=self._port_var, width=76, font=ctk.CTkFont(size=theme.FONT_SIZE_BODY)
+        )
         self._port_entry.grid(row=1, column=3, sticky="w", padx=(0, p_group), pady=(0, p_group))
 
         self._wss_var = tk.BooleanVar(value=True)
         self._wss_check = ctk.CTkCheckBox(
-            sc, text="WSS Enabled",
-            variable=self._wss_var, command=self._on_wss_toggle,
-            font=ctk.CTkFont(size=theme.FONT_SIZE_BODY))
+            sc,
+            text="WSS Enabled",
+            variable=self._wss_var,
+            command=self._on_wss_toggle,
+            font=ctk.CTkFont(size=theme.FONT_SIZE_BODY),
+        )
         self._wss_check.grid(row=1, column=4, sticky="w", padx=(0, p_group), pady=(0, p_group))
 
         # Action buttons (right of settings card)
@@ -172,30 +178,38 @@ class RCFlowMacOSGUI:
         btns.grid(row=0, column=1, sticky="ne", padx=(p_group, 0))
 
         self._toggle_btn = ctk.CTkButton(
-            btns, text="Start", width=104,
+            btns,
+            text="Start",
+            width=104,
             fg_color=theme.BTN_START_FG,
             hover_color=theme.BTN_START_HOVER,
             text_color=theme.BTN_START_TEXT,
             font=ctk.CTkFont(size=theme.FONT_SIZE_BODY, weight="bold"),
-            command=self._on_toggle)
+            command=self._on_toggle,
+        )
         self._toggle_btn.pack(pady=(0, p_small))
 
         self._copy_token_btn = ctk.CTkButton(
-            btns, text="Copy Token", width=104,
+            btns,
+            text="Copy Token",
+            width=104,
             fg_color=theme.BTN_COPY_FG,
             hover_color=theme.BTN_COPY_HOVER,
             text_color=theme.BTN_COPY_TEXT,
             font=ctk.CTkFont(size=theme.FONT_SIZE_BODY),
-            command=self._on_copy_token)
+            command=self._on_copy_token,
+        )
         self._copy_token_btn.pack()
 
         # ── Status pill ──────────────────────────────────────────────
         self._status_label = ctk.CTkLabel(
-            self._root, text="  Stopped  ",
+            self._root,
+            text="  Stopped  ",
             fg_color=theme.STATUS_STOPPED,
             text_color=("#ffffff", "#e5e7eb"),
             corner_radius=6,
-            font=ctk.CTkFont(size=theme.FONT_SIZE_SMALL, weight="bold"))
+            font=ctk.CTkFont(size=theme.FONT_SIZE_SMALL, weight="bold"),
+        )
         self._status_label.grid(row=1, column=0, sticky="w", padx=p_outer, pady=(p_small + 2, 0))
 
         # ── Instance details card ────────────────────────────────────
@@ -203,30 +217,37 @@ class RCFlowMacOSGUI:
         dc.grid(row=2, column=0, sticky="ew", padx=p_outer, pady=(p_small, 0))
 
         ctk.CTkLabel(
-            dc, text="Instance Details",
+            dc,
+            text="Instance Details",
             font=ctk.CTkFont(size=theme.FONT_SIZE_SMALL, weight="bold"),
         ).grid(row=0, column=0, columnspan=8, sticky="w", padx=p_group, pady=(p_group, p_small))
 
         detail_info = [
-            ("Bound Address",   "_bound_addr_var"),
-            ("Uptime",          "_uptime_var"),
+            ("Bound Address", "_bound_addr_var"),
+            ("Uptime", "_uptime_var"),
             ("Active Sessions", "_sessions_var"),
-            ("Backend ID",      "_backend_id_var"),
+            ("Backend ID", "_backend_id_var"),
         ]
         for col, (label, var_name) in enumerate(detail_info):
             ctk.CTkLabel(
-                dc, text=label,
+                dc,
+                text=label,
                 font=ctk.CTkFont(size=theme.FONT_SIZE_SMALL),
                 text_color=("gray40", "gray60"),
-            ).grid(row=1, column=col * 2, sticky="w",
-                   padx=(p_group if col == 0 else p_group // 2, p_small), pady=(0, p_group))
+            ).grid(
+                row=1,
+                column=col * 2,
+                sticky="w",
+                padx=(p_group if col == 0 else p_group // 2, p_small),
+                pady=(0, p_group),
+            )
             var = tk.StringVar(value="\u2014")
             setattr(self, var_name, var)
             ctk.CTkLabel(
-                dc, textvariable=var,
+                dc,
+                textvariable=var,
                 font=ctk.CTkFont(size=theme.FONT_SIZE_SMALL, weight="bold"),
-            ).grid(row=1, column=col * 2 + 1, sticky="w",
-                   padx=(0, p_group), pady=(0, p_group))
+            ).grid(row=1, column=col * 2 + 1, sticky="w", padx=(0, p_group), pady=(0, p_group))
 
         # ── Log viewer card ──────────────────────────────────────────
         lc = ctk.CTkFrame(self._root, corner_radius=8)
@@ -235,24 +256,19 @@ class RCFlowMacOSGUI:
         lc.grid_columnconfigure(0, weight=1)
 
         ctk.CTkLabel(
-            lc, text="Server Log",
+            lc,
+            text="Server Log",
             font=ctk.CTkFont(size=theme.FONT_SIZE_SMALL, weight="bold"),
         ).grid(row=0, column=0, sticky="w", padx=p_group, pady=(p_group, p_small))
 
-        self._log_box = ctk.CTkTextbox(
-            lc, state="disabled", wrap="word",
-            font=(theme.mono_font(), theme.FONT_SIZE_LOG))
+        self._log_box = ctk.CTkTextbox(lc, state="disabled", wrap="word", font=(theme.mono_font(), theme.FONT_SIZE_LOG))
         self._log_box.grid(row=1, column=0, sticky="nsew", padx=p_small, pady=(0, p_small))
 
         # Apply syntax-highlight tags on the underlying tk.Text widget
         _dark = ctk.get_appearance_mode().lower() == "dark"
         self._log_widget = self._log_box._textbox
-        self._log_widget.tag_configure(
-            "error",
-            foreground=theme.LOG_DARK_ERROR if _dark else theme.LOG_LIGHT_ERROR)
-        self._log_widget.tag_configure(
-            "warning",
-            foreground=theme.LOG_DARK_WARN if _dark else theme.LOG_LIGHT_WARN)
+        self._log_widget.tag_configure("error", foreground=theme.LOG_DARK_ERROR if _dark else theme.LOG_LIGHT_ERROR)
+        self._log_widget.tag_configure("warning", foreground=theme.LOG_DARK_WARN if _dark else theme.LOG_LIGHT_WARN)
 
     # ── Settings I/O ─────────────────────────────────────────────────────
 
@@ -319,10 +335,8 @@ class RCFlowMacOSGUI:
         self._port_entry.configure(state="disabled")
         self._wss_check.configure(state="disabled")
         self._toggle_btn.configure(
-            text="Stop",
-            fg_color=theme.BTN_STOP_FG,
-            hover_color=theme.BTN_STOP_HOVER,
-            text_color=theme.BTN_STOP_TEXT)
+            text="Stop", fg_color=theme.BTN_STOP_FG, hover_color=theme.BTN_STOP_HOVER, text_color=theme.BTN_STOP_TEXT
+        )
         protocol = "WSS" if self._wss_var.get() else "WS"
         self._set_status(f"Starting ({protocol})...")
 
@@ -407,7 +421,8 @@ class RCFlowMacOSGUI:
                 m, s = divmod(rem, 60)
                 self._uptime_var.set(f"{h:02d}:{m:02d}:{s:02d}")  # ty:ignore[unresolved-attribute]
             self._bound_addr_var.set(  # ty:ignore[unresolved-attribute]
-                f"{self._ip_var.get()}:{self._port_var.get()}")
+                f"{self._ip_var.get()}:{self._port_var.get()}"
+            )
         else:
             if self._toggle_btn.cget("text") == "Stop":
                 rc = self._server.exit_code
@@ -419,7 +434,8 @@ class RCFlowMacOSGUI:
                     text="Start",
                     fg_color=theme.BTN_START_FG,
                     hover_color=theme.BTN_START_HOVER,
-                    text_color=theme.BTN_START_TEXT)
+                    text_color=theme.BTN_START_TEXT,
+                )
                 if rc and rc != 0:
                     self._set_status(f"Stopped (exit code {rc})", error=True)
                     self._log_buffer.append(f"Server exited with code {rc}")
@@ -515,45 +531,50 @@ class RCFlowMacOSGUI:
             menu = NSMenu.new()
 
             self._ns_status_text = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-                "RCFlow Worker: Stopped", None, "")
+                "RCFlow Worker: Stopped", None, ""
+            )
             self._ns_status_text.setEnabled_(False)
             menu.addItem_(self._ns_status_text)
 
             menu.addItem_(NSMenuItem.separatorItem())
 
             self._ns_toggle_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-                "Start Server", "toggleServer:", "")
+                "Start Server", "toggleServer:", ""
+            )
             self._ns_toggle_item.setTarget_(self._delegate)
             menu.addItem_(self._ns_toggle_item)
 
             menu.addItem_(NSMenuItem.separatorItem())
 
             open_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-                "Open Settings\u2026", "openSettings:", "")
+                "Open Settings\u2026", "openSettings:", ""
+            )
             open_item.setTarget_(self._delegate)
             menu.addItem_(open_item)
 
             self._ns_copy_token_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-                "Copy Token", "copyToken:", "")
+                "Copy Token", "copyToken:", ""
+            )
             self._ns_copy_token_item.setTarget_(self._delegate)
             menu.addItem_(self._ns_copy_token_item)
 
             menu.addItem_(NSMenuItem.separatorItem())
 
             self._ns_autostart_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-                "Start with macOS", "toggleAutostart:", "")
+                "Start with macOS", "toggleAutostart:", ""
+            )
             self._ns_autostart_item.setTarget_(self._delegate)
             self._ns_autostart_item.setState_(1 if _is_autostart_enabled() else 0)
             menu.addItem_(self._ns_autostart_item)
 
-            quit_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-                "Quit", "quitApp:", "")
+            quit_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Quit", "quitApp:", "")
             quit_item.setTarget_(self._delegate)
             menu.addItem_(quit_item)
 
             self._status_item.setMenu_(menu)  # type: ignore[union-attr]
         except Exception as _exc:
             import traceback  # noqa: PLC0415
+
             msg = traceback.format_exc()
             print(f"RCFlow: NSStatusItem setup failed — {_exc}\n{msg}", file=sys.stderr)
             logger.exception("Failed to create NSStatusItem — keeping window visible")
@@ -644,6 +665,7 @@ class RCFlowMacOSGUI:
             if not getattr(sys, "frozen", False):
                 with contextlib.suppress(Exception):
                     from AppKit import NSApplication  # noqa: PLC0415  # ty: ignore[unresolved-import]
+
                     NSApplication.sharedApplication().setActivationPolicy_(1)
             self._root.withdraw()
             _t("window withdrawn")
@@ -660,7 +682,8 @@ class RCFlowMacOSGUI:
                     self._ip_var.get().strip(),
                     self._port_var.get().strip(),
                     self._wss_var.get(),
-                    self._on_status_result)
+                    self._on_status_result,
+                )
                 self._root.after(5000, _status_loop)
 
         self._root.after(3000, _status_loop)
@@ -784,8 +807,7 @@ def run_gui_macos() -> None:
             _hidden.withdraw()
             _mb.showerror(
                 "RCFlow Worker \u2014 Startup Error",
-                f"RCFlow failed to start.\n\n{crash_msg[:500]}\n\n"
-                f"Full log: {_get_crash_log_path()}",
+                f"RCFlow failed to start.\n\n{crash_msg[:500]}\n\nFull log: {_get_crash_log_path()}",
             )
             _hidden.destroy()
         except Exception:

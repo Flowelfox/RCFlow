@@ -32,6 +32,9 @@ def _make_session(
     s.main_project_path = main_project_path
     s.project_name_error = project_name_error
     s.metadata = metadata or {}
+    # ``BadgeState._wakeup_badge`` reads this list — default to empty so
+    # the badge is hidden unless a test explicitly sets pending wakes.
+    s.scheduled_wakes = []
     return s
 
 

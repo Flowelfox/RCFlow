@@ -528,10 +528,9 @@ class _TaskDetailContentState extends State<_TaskDetailContent> {
                       color: context.appColors.bgElevated,
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    child: SelectionScope(
-                      child: MarkdownCopyMenu(
-                        rawMarkdown: task.description!,
-                        child: MarkdownBody(
+                    child: MessageSelectionArea(
+                      rawMarkdown: task.description!,
+                      child: MarkdownBody(
                           data: task.description!,
                           shrinkWrap: true,
                           selectable: false,
@@ -631,7 +630,6 @@ class _TaskDetailContentState extends State<_TaskDetailContent> {
                         ),
                       ),
                     ),
-                  ),
                   const SizedBox(height: 16),
                 ],
               )

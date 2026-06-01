@@ -47,6 +47,20 @@ class SessionLifecycleMixin:
         except Exception:
             logger.exception("Failed to clear pending messages for session %s", session.id)
 
+    async def _drop_wakes_on_session_end(self, session: ActiveSession, *, reason: str) -> None:
+        """Cancel any pending ``ScheduleWakeup`` callbacks on session end."""
+        store = getattr(self, "_wakeup_store", None)
+        scheduler = getattr(self, "_wakeup_scheduler", None)
+        if store is None or not session.scheduled_wakes:
+            return
+        wake_ids = [w.wake_id for w in session.scheduled_wakes]
+        try:
+            await store.cancel_all_for_session(session, reason=reason)
+        except Exception:
+            logger.exception("Failed to clear scheduled wakes for session %s", session.id)
+        if scheduler is not None:
+            scheduler.cancel_all_for_session(session.id, wake_ids)
+
     @property
     def is_direct_tool_mode(self) -> bool:
         """Whether the router is in direct tool mode (no LLM)."""
@@ -227,6 +241,7 @@ class SessionLifecycleMixin:
 
         session.cancel()
         await self._drop_pending_on_session_end(session, reason="session_ended")
+        await self._drop_wakes_on_session_end(session, reason="session_ended")
         self._fire_archive_task(session_id)  # ty:ignore[unresolved-attribute]
         logger.info("Cancelled session %s", session_id)
         return session
@@ -324,6 +339,7 @@ class SessionLifecycleMixin:
 
         session.complete()
         await self._drop_pending_on_session_end(session, reason="session_ended")
+        await self._drop_wakes_on_session_end(session, reason="session_ended")
         self._fire_archive_task(session_id)  # ty:ignore[unresolved-attribute]
         logger.info("Ended session %s (user confirmed)", session_id)
         return session
@@ -673,6 +689,14 @@ class SessionLifecycleMixin:
         if session is None:
             raise ValueError(f"Session not found: {session_id}")
 
+        # Idempotent: multiple concurrent sends to a paused session each
+        # fire a resume task — the second arrives after the first already
+        # flipped status back to ACTIVE.  Skip cleanly instead of raising.
+        if session.status != SessionStatus.PAUSED:
+            if session.pending_user_messages:
+                self.schedule_pending_drain(session)  # ty:ignore[unresolved-attribute]
+            return session
+
         session.resume()
 
         session.buffer.push_text(
@@ -772,6 +796,11 @@ class SessionLifecycleMixin:
                     session.opencode_executor = oc_executor
 
         logger.info("Resumed session %s", session_id)
+        # Drain any messages that piled up while the session was paused.
+        # Without this, messages enqueued during pause would sit
+        # untouched until the user sent a *new* message after resume.
+        if session.pending_user_messages:
+            self.schedule_pending_drain(session)  # ty:ignore[unresolved-attribute]
         return session
 
     async def restore_session(self, session_id: str) -> ActiveSession:

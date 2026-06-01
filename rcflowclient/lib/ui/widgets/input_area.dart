@@ -15,6 +15,7 @@ import '../../state/pane_state.dart';
 import '../../theme.dart';
 import '../../tips.dart';
 import '../badges/badge_chip.dart';
+import '../utils/markdown_copy_menu.dart' show readClipboardAsMarkdown;
 import 'create_worktree_dialog.dart';
 import 'session_identity_bar.dart' show CavemanPreviewBadge, WorkerBadge;
 
@@ -218,14 +219,19 @@ class _InputAreaState extends State<InputArea> {
   /// Reads the system clipboard and inserts at the current cursor position,
   /// replacing any active selection. Only fires for the active pane so that
   /// multi-pane layouts don't all paste simultaneously.
+  ///
+  /// Prefers the clipboard's rich `text/html` payload (from Word, Google
+  /// Docs, web pages, etc.) and converts it to Markdown source before
+  /// insertion — pasting a bold word, a table, or a list keeps its
+  /// formatting in the rendered chat history.  Plain-text clipboard
+  /// content is inserted unchanged.
   Future<void> _onPasteRequest() async {
     if (!mounted) return;
     final appState = context.read<AppState>();
     if (appState.activePaneId != _pane.paneId) return;
     _focusNode.requestFocus();
-    final data = await Clipboard.getData(Clipboard.kTextPlain);
-    final pasted = data?.text;
-    if (pasted == null || !mounted) return;
+    final pasted = await readClipboardAsMarkdown();
+    if (pasted.isEmpty || !mounted) return;
     _insertAtCursor(pasted);
   }
 

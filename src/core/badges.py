@@ -57,6 +57,7 @@ class BadgePriority:
     AGENT = 20
     PROJECT = 30
     WORKTREE = 40
+    WAKEUP = 45
     CAVEMAN = 50
 
 
@@ -110,6 +111,12 @@ class BadgeState:
                 badges.append(b)
         except Exception:
             logger.warning("Failed to compute worktree badge for %s", session.id, exc_info=True)
+
+        try:
+            if b := self._wakeup_badge(session):
+                badges.append(b)
+        except Exception:
+            logger.warning("Failed to compute wakeup badge for %s", session.id, exc_info=True)
 
         try:
             if b := self._caveman_badge(session):
@@ -189,25 +196,47 @@ class BadgeState:
 
     def _worktree_badge(self, session: ActiveSession) -> BadgeSpec | None:
         wt = session.metadata.get("worktree")
-        if not wt:
+        agent_cwd = session.metadata.get("agent_cwd")
+        # Without either a recorded worktree action or a live agent cwd
+        # there is nothing meaningful to show.
+        if not wt and not agent_cwd:
             return None
+
         # wt may be a plain dict (serialised from metadata) or a WorktreeInfo
         # dataclass; handle both.
-        if hasattr(wt, "branch"):
-            branch = wt.branch
-            repo_path = getattr(wt, "repo_path", None)
-            last_action = getattr(wt, "last_action", "")
-            base = getattr(wt, "base", None)
-            payload: dict[str, Any] = {
-                "repo_path": repo_path,
-                "branch": branch,
-                "base": base,
-                "last_action": last_action,
-            }
-        else:
-            branch = wt.get("branch")
-            payload = dict(wt)
-        label = branch or (wt.get("repo_path") if isinstance(wt, dict) else None) or "worktree"
+        branch: str | None = None
+        payload: dict[str, Any] = {}
+        if wt is not None:
+            if hasattr(wt, "branch"):
+                branch = wt.branch
+                payload = {
+                    "repo_path": getattr(wt, "repo_path", None),
+                    "branch": branch,
+                    "base": getattr(wt, "base", None),
+                    "last_action": getattr(wt, "last_action", ""),
+                }
+            elif isinstance(wt, dict):
+                branch = wt.get("branch")
+                payload = dict(wt)
+
+        if agent_cwd:
+            payload["agent_cwd"] = agent_cwd
+
+        # Label priority: explicit branch from the last worktree action,
+        # then a directory-name fallback derived from the agent's live cwd
+        # (useful when the agent ``cd``s into a worktree the user never
+        # explicitly attached), then whatever loose metadata we have.
+        label = branch
+        if not label and agent_cwd:
+            project = session.main_project_path
+            if project and agent_cwd.startswith(project):
+                rel = agent_cwd[len(project) :].strip("/\\")
+                if rel:
+                    # Last path segment reads cleanly in the chip
+                    # (e.g. ``.worktrees/foo`` → ``foo``).
+                    label = rel.rsplit("/", 1)[-1].rsplit("\\", 1)[-1] or rel
+        if not label:
+            label = (wt.get("repo_path") if isinstance(wt, dict) else None) or "worktree"
         return BadgeSpec(
             type="worktree",
             label=label,
@@ -215,6 +244,41 @@ class BadgeState:
             visible=True,
             interactive=False,
             payload=payload,
+        )
+
+    def _wakeup_badge(self, session: ActiveSession) -> BadgeSpec | None:
+        """Render a clock badge for the next pending ``ScheduleWakeup``.
+
+        Returns ``None`` when no wake is pending so the badge is only
+        visible while there is something to count down toward.  Label
+        is the wake count when multiple are queued, or the
+        next-fire ISO time when there's just one; the payload always
+        carries the full list so the client can compute its own
+        relative-time string.
+        """
+        logger.info(
+            "wakeup_badge: session=%s scheduled_wakes=%d",
+            session.id,
+            len(session.scheduled_wakes),
+        )
+        wakes = session.scheduled_wakes
+        if not wakes:
+            return None
+        # Earliest fire_at first.
+        nxt = wakes[0]
+        label = nxt.fire_at.strftime("%H:%M") if len(wakes) == 1 else f"{len(wakes)} wakes"
+        return BadgeSpec(
+            type="wakeup",
+            label=label,
+            priority=BadgePriority.WAKEUP,
+            visible=True,
+            interactive=True,
+            payload={
+                "next_wake_id": nxt.wake_id,
+                "next_fire_at": nxt.fire_at.isoformat(),
+                "next_reason": nxt.reason,
+                "wakes": [w.to_snapshot() for w in wakes],
+            },
         )
 
     def _caveman_badge(self, session: ActiveSession) -> BadgeSpec | None:

@@ -79,7 +79,7 @@ class _PlanReviewAskCardState extends State<PlanReviewAskCard> {
               color: context.appColors.bgOverlay,
               borderRadius: BorderRadius.circular(8),
             ),
-            child: MarkdownCopyMenu(
+            child: MessageSelectionArea(
               rawMarkdown: widget.message.content,
               child: MarkdownBody(
                 data: widget.message.content,

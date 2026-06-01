@@ -48,7 +48,7 @@ class UserBubble extends StatelessWidget {
                 ),
                 SizedBox(height: 8),
               ],
-              MarkdownCopyMenu(
+              MessageSelectionArea(
                 rawMarkdown: message.content,
                 child: MarkdownBody(
                   data: message.content.replaceAll('\n', '  \n'),

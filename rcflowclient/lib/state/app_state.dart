@@ -244,6 +244,11 @@ class AppState extends ChangeNotifier implements PaneHost {
     try {
       _userEndedSessionIds.add(sessionId);
       await _wsForSession(workerId)?.cancelSession(sessionId);
+      // Optimistically mark the session terminal so the End button hides
+      // and the session moves to its post-end visual state without waiting
+      // for the server's `session_update` broadcast — that round-trip is
+      // what made repeat clicks feel necessary.
+      _registry[workerId]?.markSessionLocallyTerminal(sessionId, 'cancelled');
       // If any pane is viewing this session, clean it up
       for (final pane in _panes.values) {
         if (pane.sessionId == sessionId) {

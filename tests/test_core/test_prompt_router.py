@@ -460,13 +460,17 @@ async def test_resume_nonexistent_session_raises(session_manager: SessionManager
 
 
 @pytest.mark.asyncio
-async def test_resume_non_paused_raises(session_manager: SessionManager) -> None:
+async def test_resume_non_paused_is_idempotent(session_manager: SessionManager) -> None:
+    """Multiple concurrent sends to a paused session each fire a resume task;
+    the later ones land after the first already flipped status to ACTIVE and
+    must short-circuit silently rather than raising."""
     router = _make_router(session_manager)
     session = session_manager.create_session(SessionType.CONVERSATIONAL)
     session.set_active()
 
-    with pytest.raises(RuntimeError, match="Cannot resume"):
-        await router.resume_session(session.id)
+    result = await router.resume_session(session.id)
+    assert result is session
+    assert session.status == SessionStatus.ACTIVE
 
 
 @pytest.mark.asyncio

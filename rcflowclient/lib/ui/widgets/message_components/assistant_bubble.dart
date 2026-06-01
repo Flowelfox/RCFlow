@@ -48,7 +48,7 @@ class _AssistantBubbleState extends State<AssistantBubble> {
     }
     return Padding(
       padding: const EdgeInsets.only(top: 4, bottom: 4, right: 32),
-      child: MarkdownCopyMenu(rawMarkdown: content, child: _cachedBody!),
+      child: MessageSelectionArea(rawMarkdown: content, child: _cachedBody!),
     );
   }
 

@@ -10,7 +10,6 @@ import '../../state/pane_state.dart';
 import '../../theme.dart';
 import '../../tips.dart';
 import '../dialogs/worker_edit_dialog.dart';
-import '../utils/markdown_copy_menu.dart';
 import 'message_bubble.dart';
 import 'session_panel.dart';
 
@@ -310,41 +309,43 @@ class _OutputDisplayState extends State<OutputDisplay> {
             return _withLlmBanner(
               context,
               pane,
-              SelectionScope(
-                child: ListView.builder(
-                  controller: _scrollController,
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-                  itemCount: msgs.length + 1,
-                  itemBuilder: (context, index) {
-                    if (index == 0) {
-                      if (hasMore) {
-                        return _buildLoadMoreIndicator(
-                          loading: loadingMore,
-                          remaining: pane.totalMessageCount - msgs.length,
-                        );
-                      }
-                      return Padding(
-                        padding: EdgeInsets.symmetric(vertical: 12),
-                        child: Center(
-                          child: Text(
-                            'Beginning of session',
-                            style: TextStyle(
-                              color: context.appColors.textMuted,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ),
+              // Each assistant bubble owns its own `MessageSelectionArea`
+              // so the rawMarkdown for the copy action is unambiguous.
+              // The previous outer SelectionScope had no idea which
+              // message a selection came from and copied plain text only.
+              ListView.builder(
+                controller: _scrollController,
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                itemCount: msgs.length + 1,
+                itemBuilder: (context, index) {
+                  if (index == 0) {
+                    if (hasMore) {
+                      return _buildLoadMoreIndicator(
+                        loading: loadingMore,
+                        remaining: pane.totalMessageCount - msgs.length,
                       );
                     }
-                    final msg = msgs[index - 1];
-                    // ObjectKey by message identity — DisplayMessage instances
-                    // are stable across streaming (the same object grows in
-                    // place), so this lets Flutter reuse the existing element
-                    // and child state instead of treating each rebuild as a
-                    // brand-new list item.
-                    return MessageBubble(key: ObjectKey(msg), message: msg);
-                  },
-                ),
+                    return Padding(
+                      padding: EdgeInsets.symmetric(vertical: 12),
+                      child: Center(
+                        child: Text(
+                          'Beginning of session',
+                          style: TextStyle(
+                            color: context.appColors.textMuted,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                    );
+                  }
+                  final msg = msgs[index - 1];
+                  // ObjectKey by message identity — DisplayMessage instances
+                  // are stable across streaming (the same object grows in
+                  // place), so this lets Flutter reuse the existing element
+                  // and child state instead of treating each rebuild as a
+                  // brand-new list item.
+                  return MessageBubble(key: ObjectKey(msg), message: msg);
+                },
               ),
             );
           },

@@ -416,7 +416,19 @@ final Map<WsOutputType, OutputHandler> typedOutputHandlerRegistry = {
   WsOutputType.monitorStart: handleMonitorStart,
   WsOutputType.monitorEvent: handleMonitorEvent,
   WsOutputType.monitorEnd: handleMonitorEnd,
+  // Wakeup events are surfaced primarily through the session badge
+  // (driven from `session_update.scheduled_wakes`) and the
+  // ScheduleWakeup tool's own TOOL_START / TOOL_OUTPUT messages, so the
+  // per-pane handlers here are deliberate no-ops — they just keep the
+  // dispatcher from dumping raw JSON into the chat.
+  WsOutputType.wakeupScheduled: _noopWakeupHandler,
+  WsOutputType.wakeupFired: _noopWakeupHandler,
+  WsOutputType.wakeupCancelled: _noopWakeupHandler,
 };
+
+void _noopWakeupHandler(Map<String, dynamic> msg, PaneState pane) {
+  // Intentionally empty — see comment on the registry entries above.
+}
 
 /// Legacy string-keyed registry — kept for [PaneState._loadHistory] and
 /// tests that call handlers directly by string name. Prefer

@@ -1,4 +1,5 @@
 import 'badge_spec.dart';
+import 'scheduled_wake.dart';
 
 /// Worktree context attached to a session after a worktree tool call succeeds.
 class WorktreeInfo {
@@ -57,6 +58,18 @@ class SessionInfo {
   /// or null if no worktree is explicitly selected for this session.
   final String? selectedWorktreePath;
 
+  /// Live cwd of the managed agent subprocess (Claude Code / Codex /
+  /// OpenCode).  Updated server-side as the agent issues `cd` commands
+  /// inside its Bash tool; surfaces as the worktree-badge tooltip and
+  /// drives the badge label fallback when no explicit worktree action
+  /// has happened yet.
+  final String? agentCwd;
+
+  /// Pending `ScheduleWakeup` calls for this session, fire-time order
+  /// (earliest first).  Powers the wakeup badge + inline card and is
+  /// the source of truth for "what wakes will fire when".
+  final List<ScheduledWake> scheduledWakes;
+
   /// Absolute path of the project directory attached to this session via the
   /// latest @ProjectName mention.  Null means the session is "Global" (no
   /// project attached yet).
@@ -97,6 +110,8 @@ class SessionInfo {
     this.toolCostUsd = 0.0,
     this.worktreeInfo,
     this.selectedWorktreePath,
+    this.agentCwd,
+    this.scheduledWakes = const [],
     this.mainProjectPath,
     this.agentType,
     this.sortOrder,
@@ -141,6 +156,11 @@ class SessionInfo {
       toolCostUsd: (json['tool_cost_usd'] as num?)?.toDouble() ?? 0.0,
       worktreeInfo: wtJson != null ? WorktreeInfo.fromJson(wtJson) : null,
       selectedWorktreePath: json['selected_worktree_path'] as String?,
+      agentCwd: json['agent_cwd'] as String?,
+      scheduledWakes: ((json['scheduled_wakes'] as List<dynamic>?) ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map(ScheduledWake.fromJson)
+          .toList(),
       mainProjectPath: json['main_project_path'] as String?,
       agentType: json['agent_type'] as String?,
       sortOrder: (json['sort_order'] as num?)?.toInt(),
@@ -167,6 +187,10 @@ class SessionInfo {
     if (worktreeInfo != null) 'worktree': worktreeInfo!.toJson(),
     if (selectedWorktreePath != null)
       'selected_worktree_path': selectedWorktreePath,
+    if (agentCwd != null) 'agent_cwd': agentCwd,
+    if (scheduledWakes.isNotEmpty)
+      'scheduled_wakes':
+          scheduledWakes.map((w) => w.toJson()).toList(),
     if (mainProjectPath != null) 'main_project_path': mainProjectPath,
     if (agentType != null) 'agent_type': agentType,
     if (sortOrder != null) 'sort_order': sortOrder,
@@ -195,6 +219,8 @@ class SessionInfo {
     // Pass Object() sentinel to explicitly clear worktreeInfo
     Object? worktreeInfo = _keep,
     String? selectedWorktreePath,
+    Object? agentCwd = _keep,
+    List<ScheduledWake>? scheduledWakes,
     String? mainProjectPath,
     // Pass Object() sentinel to explicitly clear agentType
     Object? agentType = _keep,
@@ -223,6 +249,8 @@ class SessionInfo {
           ? this.worktreeInfo
           : worktreeInfo as WorktreeInfo?,
       selectedWorktreePath: selectedWorktreePath ?? this.selectedWorktreePath,
+      agentCwd: identical(agentCwd, _keep) ? this.agentCwd : agentCwd as String?,
+      scheduledWakes: scheduledWakes ?? this.scheduledWakes,
       mainProjectPath: mainProjectPath ?? this.mainProjectPath,
       agentType: identical(agentType, _keep)
           ? this.agentType

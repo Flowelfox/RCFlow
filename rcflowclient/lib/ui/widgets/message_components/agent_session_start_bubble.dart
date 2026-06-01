@@ -89,7 +89,7 @@ class _AgentSessionStartBubbleState extends State<AgentSessionStartBubble> {
             ),
             if (prompt.isNotEmpty) ...[
               const SizedBox(height: 8),
-              MarkdownCopyMenu(
+              MessageSelectionArea(
                 rawMarkdown: prompt,
                 child: _cachedMarkdownBody(context, displayPrompt),
               ),

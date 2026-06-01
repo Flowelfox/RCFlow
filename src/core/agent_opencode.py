@@ -18,6 +18,12 @@ from typing import TYPE_CHECKING, Any
 
 from src.core.agent_auth import agent_configuration_issue
 from src.core.buffer import MessageType
+from src.core.cwd_tracking import (
+    apply_agent_cwd,
+    looks_like_git_worktree_mutation,
+    parse_cwd_change,
+    reset_worktree_cache,
+)
 from src.core.session import ActivityState, SessionStatus, SessionType
 from src.executors.opencode import OpenCodeExecutor
 
@@ -134,6 +140,9 @@ class OpenCodeAgentMixin:
         session.metadata["opencode_working_directory"] = str(working_path)
         session.metadata["opencode_tool_name"] = tool_def.name
         session.metadata["opencode_parameters"] = tool_call.tool_input
+        # Seed agent-cwd mirror for the live worktree badge.
+        session.metadata["agent_cwd"] = str(working_path)
+        session.agent_cwd = str(working_path)
 
         task = asyncio.create_task(self._stream_opencode_events(session, executor, tool_def, tool_call))
         session._opencode_stream_task = task
@@ -249,6 +258,17 @@ class OpenCodeAgentMixin:
                             "started_at": session.subprocess_started_at.isoformat(),
                         },
                     )
+                # Live worktree-badge tracking for OpenCode's bash tool.
+                if tool_name in ("bash", "Bash"):
+                    command = str(tool_input.get("command") or "")
+                    if looks_like_git_worktree_mutation(command):
+                        reset_worktree_cache()
+                    new_cwd = parse_cwd_change(
+                        command,
+                        session.metadata.get("agent_cwd") or session.subprocess_working_directory,
+                    )
+                    if new_cwd and apply_agent_cwd(session, new_cwd) and self._session_manager is not None:  # ty:ignore[unresolved-attribute]
+                        self._session_manager.broadcast_session_update(session)  # ty:ignore[unresolved-attribute]
 
                 if tool_status == "completed":
                     output = state.get("output") or ""

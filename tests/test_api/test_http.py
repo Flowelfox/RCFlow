@@ -45,11 +45,78 @@ class TestCancelSession:
         assert resp.status_code == 404
 
     def test_cancel_completed_session(self, client: TestClient, session_manager: SessionManager) -> None:
+        """Cancelling a session that already reached a terminal state in memory
+        returns 200 with the existing terminal status.  Rapid double-clicks
+        on End used to surface this as a misleading 409 error in the UI."""
         session = session_manager.create_session(SessionType.ONE_SHOT)
         session.complete()
 
         resp = client.post(f"/api/sessions/{session.id}/cancel", headers=_auth_headers())
-        assert resp.status_code == 409
+        assert resp.status_code == 200
+        body: dict[str, Any] = resp.json()
+        assert body["session_id"] == session.id
+        assert body["status"] == "completed"
+
+    def test_cancel_already_cancelled_session(
+        self,
+        client: TestClient,
+        session_manager: SessionManager,
+    ) -> None:
+        """Cancel must be idempotent for in-memory cancelled sessions too."""
+        session = session_manager.create_session(SessionType.ONE_SHOT)
+        session.set_active()
+        # First cancel — happy path.
+        first = client.post(f"/api/sessions/{session.id}/cancel", headers=_auth_headers())
+        assert first.status_code == 200
+        # Second cancel — must also succeed without a 409.
+        second = client.post(f"/api/sessions/{session.id}/cancel", headers=_auth_headers())
+        assert second.status_code == 200
+        body: dict[str, Any] = second.json()
+        assert body["status"] == "cancelled"
+        # ``cancelled_at`` from the first call is preserved.
+        assert body["cancelled_at"] == first.json()["cancelled_at"]
+
+    def test_cancel_already_cancelled_db_only_session(
+        self,
+        test_app: FastAPI,
+        tmp_path,
+    ) -> None:
+        """A session that's already cancelled in the DB and no longer in memory
+        still returns 200 — the second cancel of an archived session must not
+        404."""
+        db_file = tmp_path / "cancel.db"
+        sync_engine = _sync_create_engine(f"sqlite:///{db_file}")
+        Base.metadata.create_all(sync_engine)
+        session_id = _uuid_mod.uuid4()
+        with _OrmSession(sync_engine) as sess:
+            sess.add(
+                _DbSession(
+                    id=session_id,
+                    backend_id="test-backend",
+                    created_at=datetime.now(UTC),
+                    ended_at=datetime.now(UTC),
+                    session_type="conversational",
+                    status="cancelled",
+                    metadata_={},
+                )
+            )
+            sess.commit()
+        sync_engine.dispose()
+
+        engine = create_async_engine(
+            f"sqlite+aiosqlite:///{db_file}",
+            connect_args={"check_same_thread": False},
+        )
+        test_app.state.db_session_factory = async_sessionmaker(engine, expire_on_commit=False)
+        try:
+            db_client = TestClient(test_app)
+            resp = db_client.post(f"/api/sessions/{session_id}/cancel", headers=_auth_headers())
+            assert resp.status_code == 200
+            body: dict[str, Any] = resp.json()
+            assert body["status"] == "cancelled"
+            assert body["cancelled_at"] is not None
+        finally:
+            test_app.state.db_session_factory = None
 
     def test_cancel_requires_auth(self, client: TestClient, session_manager: SessionManager) -> None:
         session = session_manager.create_session(SessionType.ONE_SHOT)
@@ -212,12 +279,15 @@ class TestResumeSession:
         resp = client.post("/api/sessions/nonexistent-id/resume", headers=_auth_headers())
         assert resp.status_code == 404
 
-    def test_resume_active_session(self, client: TestClient, session_manager: SessionManager) -> None:
+    def test_resume_active_session_is_idempotent(self, client: TestClient, session_manager: SessionManager) -> None:
+        # Resuming an already-active session is a silent no-op now —
+        # multiple concurrent sends to a paused session each trigger a
+        # resume task and the later ones must not surface a 409.
         session = session_manager.create_session(SessionType.CONVERSATIONAL)
         session.set_active()
 
         resp = client.post(f"/api/sessions/{session.id}/resume", headers=_auth_headers())
-        assert resp.status_code == 409
+        assert resp.status_code == 200
 
     def test_resume_requires_auth(self, client: TestClient, session_manager: SessionManager) -> None:
         session = session_manager.create_session(SessionType.CONVERSATIONAL)
