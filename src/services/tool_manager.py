@@ -672,7 +672,7 @@ class ToolManager:
                     # .zip (macOS and Windows)
                     with zipfile.ZipFile(archive_path) as zf:
                         names = zf.namelist()
-                        zf.extractall(tmp_dir)
+                        zf.extractall(tmp_dir)  # noqa: S202
                         extracted = _find_opencode_binary(Path(tmp_dir), names)
                         if not extracted:
                             raise RuntimeError(f"Could not find opencode binary in zip: {names}")
@@ -1012,7 +1012,7 @@ class ToolManager:
             else:
                 with zipfile.ZipFile(archive_path) as zf:
                     names = zf.namelist()
-                    zf.extractall(tmp_dir)
+                    zf.extractall(tmp_dir)  # noqa: S202
                     extracted = _find_opencode_binary(Path(tmp_dir), names)
                     if not extracted:
                         yield {"step": "error", "message": f"Could not find opencode binary in zip: {names}"}

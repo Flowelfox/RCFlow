@@ -131,7 +131,7 @@ class OpenCodeAgentMixin:
         tool_call.tool_input["working_directory"] = str(working_path)
 
         executor = self._get_executor(tool_def.executor, tool_def)  # ty:ignore[unresolved-attribute]
-        assert isinstance(executor, OpenCodeExecutor)
+        assert isinstance(executor, OpenCodeExecutor)  # noqa: S101
 
         session.opencode_executor = executor
         session.session_type = SessionType.LONG_RUNNING

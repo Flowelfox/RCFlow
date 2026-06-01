@@ -73,7 +73,7 @@ class BackgroundTasksMixin:
         response_text: str | None,
     ) -> None:
         """Write a single LLM call record to the database. Never raises."""
-        assert self._db_session_factory is not None  # ty:ignore[unresolved-attribute]
+        assert self._db_session_factory is not None  # ty:ignore[unresolved-attribute]  # noqa: S101
         try:
             async with self._db_session_factory() as db:  # ty:ignore[unresolved-attribute]
                 row = LLMCall(
@@ -158,7 +158,7 @@ class BackgroundTasksMixin:
 
     async def _archive_session(self, session_id: str) -> None:
         """Archive a completed session to the database and optionally extract artifacts. Never raises."""
-        assert self._db_session_factory is not None  # ty:ignore[unresolved-attribute]
+        assert self._db_session_factory is not None  # ty:ignore[unresolved-attribute]  # noqa: S101
         try:
             async with self._db_session_factory() as db:  # ty:ignore[unresolved-attribute]
                 await self._session_manager.archive_session(session_id, db)  # ty:ignore[unresolved-attribute]
@@ -221,7 +221,7 @@ class BackgroundTasksMixin:
 
     async def _generate_and_set_title(self, session: ActiveSession, user_text: str, assistant_text: str) -> None:
         """Generate a title and assign it to the session. Never raises."""
-        assert self._llm is not None  # ty:ignore[unresolved-attribute]
+        assert self._llm is not None  # ty:ignore[unresolved-attribute]  # noqa: S101
         try:
             title = await self._llm.generate_title(user_text, assistant_text)  # ty:ignore[unresolved-attribute]
             session.title = title
@@ -263,7 +263,7 @@ class BackgroundTasksMixin:
 
     async def _persist_session_metadata(self, session: ActiveSession) -> None:
         """Write the session's title + metadata to the DB. Never raises."""
-        assert self._db_session_factory is not None  # ty:ignore[unresolved-attribute]
+        assert self._db_session_factory is not None  # ty:ignore[unresolved-attribute]  # noqa: S101
         try:
             async with self._db_session_factory() as db:  # ty:ignore[unresolved-attribute]
                 await self._session_manager.persist_session_metadata(session, db)  # ty:ignore[unresolved-attribute]
@@ -596,7 +596,7 @@ class BackgroundTasksMixin:
         project_path: Path | None,
     ) -> None:
         """Extract artifacts from in-memory conversation history. Never raises."""
-        assert self._artifact_scanner is not None  # ty:ignore[unresolved-attribute]
+        assert self._artifact_scanner is not None  # ty:ignore[unresolved-attribute]  # noqa: S101
         try:
             new_count, updated_count = await self._artifact_scanner.scan_from_history(  # ty:ignore[unresolved-attribute]
                 session_id, conversation_history, project_path
@@ -617,7 +617,7 @@ class BackgroundTasksMixin:
 
     async def _text_artifact_scan(self, session_id: str, texts: list[str], project_path: Path | None) -> None:
         """Extract artifacts from raw text strings. Never raises."""
-        assert self._artifact_scanner is not None  # ty:ignore[unresolved-attribute]
+        assert self._artifact_scanner is not None  # ty:ignore[unresolved-attribute]  # noqa: S101
         try:
             new_count, updated_count = await self._artifact_scanner.scan_texts(  # ty:ignore[unresolved-attribute]
                 session_id, texts, project_path

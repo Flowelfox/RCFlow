@@ -765,7 +765,7 @@ class ToolSettingsManager:
             current.pop("model", None)
 
         rel = _TOOL_CONFIG_PATHS.get(tool_name)
-        assert rel is not None
+        assert rel is not None  # noqa: S101
         settings_path = self._base_dir / rel
         settings_path.parent.mkdir(parents=True, exist_ok=True)
 

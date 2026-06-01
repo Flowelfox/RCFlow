@@ -183,7 +183,7 @@ class CodexAgentMixin:
         tool_call.tool_input["working_directory"] = str(working_path)
 
         executor = self._get_executor(tool_def.executor, tool_def)  # ty:ignore[unresolved-attribute]
-        assert isinstance(executor, CodexExecutor)
+        assert isinstance(executor, CodexExecutor)  # noqa: S101
 
         session.codex_executor = executor
         session.session_type = SessionType.LONG_RUNNING

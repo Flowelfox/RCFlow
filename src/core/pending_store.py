@@ -189,8 +189,7 @@ class SessionPendingMessageStore:
 
     async def cancel(self, session: ActiveSession, *, queued_id: str) -> PendingMessage | None:
         """Remove a queued message by id. Returns the popped entry or None."""
-        removed = await self._delete_one(session, queued_id=queued_id, reason="cancelled")
-        return removed
+        return await self._delete_one(session, queued_id=queued_id, reason="cancelled")
 
     async def pop_head(self, session: ActiveSession) -> PendingMessage | None:
         """Remove and return the oldest queued message; broadcast ``message_dequeued``."""

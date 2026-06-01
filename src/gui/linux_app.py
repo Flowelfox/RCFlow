@@ -590,7 +590,7 @@ class LinuxGUI(RCFlowDashboard):
         self._journal_proc = proc
 
         def _pump() -> None:
-            assert proc.stdout is not None
+            assert proc.stdout is not None  # noqa: S101
             for line in proc.stdout:
                 self._log_buffer.append(line.rstrip("\n"))
             self._log_buffer.append(f"[journal] journalctl exited with code {proc.poll()}")

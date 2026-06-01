@@ -82,10 +82,9 @@ def _format_file_size(size_bytes: int) -> str:
     """Format a byte count to a human-readable string."""
     if size_bytes < 1024:
         return f"{size_bytes} B"
-    elif size_bytes < 1024 * 1024:
+    if size_bytes < 1024 * 1024:
         return f"{size_bytes / 1024:.1f} KB"
-    else:
-        return f"{size_bytes / (1024 * 1024):.1f} MB"
+    return f"{size_bytes / (1024 * 1024):.1f} MB"
 
 
 class ContextMixin:

@@ -589,7 +589,7 @@ class ServerManager:
                     proc.kill()
                     proc.wait(timeout=5)
             else:
-                assert adopted_pid is not None
+                assert adopted_pid is not None  # noqa: S101
                 _kill_pid(adopted_pid)
                 self._wait_for_pid_exit(adopted_pid, timeout=10)
                 if _is_pid_alive(adopted_pid):
@@ -677,7 +677,7 @@ class ServerManager:
 
     def _read_output(self, proc: subprocess.Popen[str]) -> None:
         try:
-            assert proc.stdout is not None
+            assert proc.stdout is not None  # noqa: S101
             for raw in proc.stdout:
                 line = raw.rstrip("\n\r")
                 if line:

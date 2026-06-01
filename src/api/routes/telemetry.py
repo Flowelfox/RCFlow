@@ -307,7 +307,7 @@ async def get_session_summary(
     completed_turns = [t for t in turns if t.ts_end is not None]
     if turns and completed_turns:
         last_ts_end = completed_turns[-1].ts_end
-        assert last_ts_end is not None  # guaranteed by the filter above
+        assert last_ts_end is not None  # guaranteed by the filter above  # noqa: S101
         session_duration_ms = int((last_ts_end - turns[0].ts_start).total_seconds() * 1000)
 
     # Per-turn breakdown

@@ -162,7 +162,7 @@ def setup_logging(settings: Settings) -> None:
             datefmt=_DATE_FORMAT,
             stream=sys.stderr,
         )
-        logging.warning(
+        logging.getLogger(__name__).warning(
             "Could not configure file logging (%s: %s); falling back to console only",
             type(exc).__name__,
             exc,

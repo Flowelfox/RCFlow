@@ -317,7 +317,7 @@ class ClaudeCodeAgentMixin:
         tool_call.tool_input["working_directory"] = str(working_path)
 
         executor = self._get_executor(tool_def.executor, tool_def)  # ty:ignore[unresolved-attribute]
-        assert isinstance(executor, ClaudeCodeExecutor)
+        assert isinstance(executor, ClaudeCodeExecutor)  # noqa: S101
 
         session.claude_code_executor = executor
         session.session_type = SessionType.LONG_RUNNING

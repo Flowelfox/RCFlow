@@ -931,7 +931,7 @@ class TestPlanModeTimeout:
         mixin = _make_mixin()
         mixin._end_claude_code_session = AsyncMock()
 
-        async def _fast_wait(coro, *, timeout):
+        async def _fast_wait(coro, *, timeout):  # noqa: ASYNC109
             # Discard the unawaited coroutine so Python doesn't warn about it.
             coro.close()
             # Simulate client approving plan mode before timeout fires.

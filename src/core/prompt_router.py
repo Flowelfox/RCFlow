@@ -872,7 +872,7 @@ class PromptRouter(
         """
         resolved_id = self.ensure_session(session_id)
         session = self._session_manager.get_session(resolved_id)
-        assert session is not None  # ensure_session guarantees this
+        assert session is not None  # ensure_session guarantees this  # noqa: S101
 
         # Store task_id in session metadata so _build_plan_context can inject
         # the plan on the first LLM turn. Only set once to avoid overwriting if
@@ -1099,7 +1099,7 @@ class PromptRouter(
 
             # Run the agentic loop
             try:
-                assert self._llm is not None, "LLM client not initialized"
+                assert self._llm is not None, "LLM client not initialized"  # noqa: S101
                 async for event in self._llm.run_agentic_loop(
                     messages=session.conversation_history,
                     execute_tool_fn=execute_tool,

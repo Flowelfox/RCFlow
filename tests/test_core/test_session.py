@@ -52,8 +52,7 @@ def _make_db_mock(stale_rows: list, msg_rows: list | None = None) -> AsyncMock:
 
     def _execute_side_effect(*_args, **_kwargs):
         # Each call returns a fresh MagicMock; we swap scalars() returns in order.
-        result = MagicMock()
-        return result
+        return MagicMock()
 
     # We need different results per call, so use a counter-based side_effect.
     call_results: list[MagicMock] = []

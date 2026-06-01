@@ -92,18 +92,51 @@ line-length = 120
 
 [tool.ruff.lint]
 select = [
-    "E",    # pycodestyle errors
-    "W",    # pycodestyle warnings
-    "F",    # pyflakes
-    "I",    # isort
-    "N",    # pep8-naming
-    "UP",   # pyupgrade
-    "B",    # flake8-bugbear
-    "SIM",  # flake8-simplify
-    "TCH",  # flake8-type-checking
-    "RUF",  # ruff-specific
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # pyflakes
+    "I",      # isort
+    "N",      # pep8-naming
+    "UP",     # pyupgrade
+    "B",      # flake8-bugbear
+    "SIM",    # flake8-simplify
+    "TCH",    # flake8-type-checking
+    "RUF",    # ruff-specific
     "PLC0415",  # import-outside-top-level
+    "C901",   # complexity
+    "ASYNC",  # flake8-async
+    "S",      # flake8-bandit (security)
+    "RET",    # flake8-return
+    "LOG",    # flake8-logging
 ]
+
+# Inherent to this CLI / WebSocket-server / build-tooling codebase. Enabling
+# the parent S rule still catches the high-signal subrules (hardcoded passwords,
+# tarfile unsafe extract, jinja autoescape, weak hashes, etc.).
+ignore = [
+    "S104",     # bind to 0.0.0.0 — intentional for the server listener
+    "S108",     # /tmp paths — used in tests and platform-specific bundling
+    "S110",     # try/except/pass — used for best-effort cleanup paths
+    "S310",     # urllib.request.urlopen — used for trusted release-asset fetches
+    "S603",     # subprocess without shell=False — we launch trusted CLIs
+    "S607",     # start-process with partial path — `claude`, `codex`, `opencode`
+    "S606",     # start-process without shell — intentional
+    "ASYNC240", # pathlib in async — synchronous fs calls are OK in our context
+]
+
+# Complexity ratchet: the current ceiling is set high so that landing the rule
+# is a no-op for working code. Phase 2 (composition refactor) reduces this
+# organically by splitting the highest-complexity functions
+# (handle_prompt=43, ws_input_text=63, _relay_claude_code_stream=49, etc.).
+# Lower the ceiling step by step as those splits land.
+[tool.ruff.lint.mccabe]
+max-complexity = 70
+
+[tool.ruff.lint.per-file-ignores]
+# Tests use assert and rotate through local temp files / fake subprocesses.
+"tests/*" = ["S101", "S105", "S106"]
+# Database migrations are mechanically generated; complexity gates don't fit.
+"src/database/migrations/*" = ["C901"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["src"]

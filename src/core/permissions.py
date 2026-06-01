@@ -298,7 +298,7 @@ class PermissionManager:
         pending.event.set()
         return True
 
-    async def wait_for_response(self, request_id: str, timeout: float | None = None) -> PendingPermission:
+    async def wait_for_response(self, request_id: str, timeout: float | None = None) -> PendingPermission:  # noqa: ASYNC109
         """Wait for a permission response.
 
         Returns the resolved :class:`PendingPermission`.  If the timeout

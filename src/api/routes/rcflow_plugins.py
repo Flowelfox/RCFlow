@@ -163,8 +163,7 @@ def _derive_plugin_name(source: str) -> str:
     name = name.rsplit("/", 1)[-1]
     if name.endswith(".git"):
         name = name[:-4]
-    name = re.sub(r"[^\w\-]", "-", name).strip("-") or "plugin"
-    return name
+    return re.sub(r"[^\w\-]", "-", name).strip("-") or "plugin"
 
 
 def _require_supported_tool(tool_name: str) -> None:

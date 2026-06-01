@@ -461,7 +461,7 @@ class UpdateService:
         self._notify()
 
         def _run() -> None:
-            assert info is not None
+            assert info is not None  # noqa: S101
             try:
                 dest = self._download_path(info)
                 if info.asset_size is not None and dest.exists() and dest.stat().st_size == info.asset_size:
