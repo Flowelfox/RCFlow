@@ -31,6 +31,7 @@ from src.core.agent_claude_code import ClaudeCodeAgentMixin
 from src.core.agent_codex import CodexAgentMixin
 from src.core.agent_opencode import OpenCodeAgentMixin
 from src.core.agent_prompt import extract_code_blocks, format_agent_prompt
+from src.core.agents import MAX_TOOL_OUTPUT_CHARS, truncate_tool_output
 from src.core.attachment_store import ResolvedAttachment
 from src.core.background_tasks import BackgroundTasksMixin
 from src.core.buffer import MessageType
@@ -60,7 +61,7 @@ from src.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
 
-_MAX_TOOL_OUTPUT_CHARS = 100_000
+_MAX_TOOL_OUTPUT_CHARS = MAX_TOOL_OUTPUT_CHARS
 
 
 def _classify_llm_exception(exc: BaseException) -> tuple[str, str]:
@@ -83,11 +84,7 @@ def _classify_llm_exception(exc: BaseException) -> tuple[str, str]:
     return (str(exc), "PROMPT_PROCESSING_ERROR")
 
 
-def _truncate_tool_output(content: str) -> str:
-    """Truncate tool output that exceeds the size limit for client delivery."""
-    if len(content) > _MAX_TOOL_OUTPUT_CHARS:
-        return content[:_MAX_TOOL_OUTPUT_CHARS] + f"\n\n... (truncated, {len(content):,} total chars)"
-    return content
+_truncate_tool_output = truncate_tool_output
 
 
 def _build_planning_prompt(title: str, description: str, plan_path: Path) -> str:

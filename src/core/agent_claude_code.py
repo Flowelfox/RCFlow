@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from src.core.agent_auth import agent_configuration_issue
+from src.core.agents import MAX_TOOL_OUTPUT_CHARS, truncate_tool_output
 from src.core.buffer import MessageType
 from src.core.cwd_tracking import (
     apply_agent_cwd,
@@ -52,7 +53,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_MAX_TOOL_OUTPUT_CHARS = 100_000
+_MAX_TOOL_OUTPUT_CHARS = MAX_TOOL_OUTPUT_CHARS
 _MAX_SNAPSHOT_BYTES = 1_000_000  # 1 MB limit for pre/post file snapshots
 _MAX_DIFF_LINES = 200
 _TOOL_OUTPUT_CHUNK_SIZE = 8_192
@@ -199,11 +200,7 @@ def _split_into_chunks(content: str, chunk_size: int) -> list[str]:
     return chunks
 
 
-def _truncate_tool_output(content: str) -> str:
-    """Truncate tool output that exceeds the size limit for client delivery."""
-    if len(content) > _MAX_TOOL_OUTPUT_CHARS:
-        return content[:_MAX_TOOL_OUTPUT_CHARS] + f"\n\n... (truncated, {len(content):,} total chars)"
-    return content
+_truncate_tool_output = truncate_tool_output
 
 
 class ClaudeCodeAgentMixin:

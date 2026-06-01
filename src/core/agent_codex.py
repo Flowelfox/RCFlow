@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from src.core.agent_auth import agent_configuration_issue
+from src.core.agents import truncate_tool_output
 from src.core.buffer import MessageType
 from src.core.cwd_tracking import (
     apply_agent_cwd,
@@ -38,14 +39,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_MAX_TOOL_OUTPUT_CHARS = 100_000
-
-
-def _truncate_tool_output(content: str) -> str:
-    """Truncate tool output that exceeds the size limit for client delivery."""
-    if len(content) > _MAX_TOOL_OUTPUT_CHARS:
-        return content[:_MAX_TOOL_OUTPUT_CHARS] + f"\n\n... (truncated, {len(content):,} total chars)"
-    return content
+_truncate_tool_output = truncate_tool_output
 
 
 class CodexAgentMixin:
