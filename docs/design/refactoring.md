@@ -86,9 +86,15 @@ six worktree/project-artifact HTTP methods in step 1 — those moved into
 state. `websocket_service.dart` 767 → 521 lines; flutter analyze clean, all
 479 client tests pass.
 
-**Step 3 (AppState / PaneState → feature ChangeNotifiers)** follows — carve one
-feature at a time with AppState delegating until each of the 29 read-sites is
-migrated.
+**Step 3 (AppState / PaneState → feature stores) — in progress.** The three
+entity collections are carved into owned stores under `lib/state/stores/`:
+`LinearIssueStore`, `TaskStore`, `ArtifactStore` (each holds its map + the
+read-only query projections + list/upsert/remove mutations). `AppState` owns
+one of each and delegates its getters/handlers, keeping the notify, toast, and
+pane-management responsibilities, so the read-sites and Provider tree are
+unchanged. All 479 client tests pass. Remaining for step 3: the pane/session/
+clipboard/notification clusters on `AppState` and the `PaneState` (2073-line)
+carve — same owned-store-with-delegation pattern.
 
 ## Phase 6 — Flutter Tests + Final Lint
 

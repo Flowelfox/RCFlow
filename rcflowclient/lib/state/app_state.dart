@@ -6,6 +6,9 @@ import 'dart:math';
 
 import '../models/artifact_info.dart';
 import '../models/linear_issue_info.dart';
+import 'stores/artifact_store.dart';
+import 'stores/linear_issue_store.dart';
+import 'stores/task_store.dart';
 import '../models/session_info.dart';
 import '../models/split_tree.dart';
 import '../models/task_info.dart';
@@ -350,31 +353,16 @@ class AppState extends ChangeNotifier implements PaneHost {
   }
 
   // --- Task tracking ---
-  final Map<String, TaskInfo> _tasks = {};
+  final TaskStore _taskStore = TaskStore();
 
   /// All tasks sorted by updatedAt descending.
-  List<TaskInfo> get tasks {
-    final all = _tasks.values.toList();
-    all.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
-    return all;
-  }
+  List<TaskInfo> get tasks => _taskStore.all();
 
   /// Tasks grouped by workerId (for sidebar display).
-  Map<String, List<TaskInfo>> get tasksByWorker {
-    final map = <String, List<TaskInfo>>{};
-    for (final config in _registry.configs) {
-      map[config.id] = [];
-    }
-    for (final t in _tasks.values) {
-      map.putIfAbsent(t.workerId, () => []).add(t);
-    }
-    for (final list in map.values) {
-      list.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
-    }
-    return map;
-  }
+  Map<String, List<TaskInfo>> get tasksByWorker =>
+      _taskStore.byWorker(_registry.configs);
 
-  TaskInfo? getTask(String taskId) => _tasks[taskId];
+  TaskInfo? getTask(String taskId) => _taskStore.get(taskId);
 
   /// Look up a [SessionInfo] by its ID across all connected workers.
   /// Returns null if the session is not currently known to any worker.
@@ -388,18 +376,12 @@ class AppState extends ChangeNotifier implements PaneHost {
   }
 
   /// Check if a session is attached to any task (for sidebar indicator).
-  bool isSessionAttachedToTask(String sessionId) {
-    return _tasks.values.any(
-      (t) => t.sessions.any((s) => s.sessionId == sessionId),
-    );
-  }
+  bool isSessionAttachedToTask(String sessionId) =>
+      _taskStore.isAttachedToSession(sessionId);
 
   /// Get all tasks that a session is attached to.
-  List<TaskInfo> tasksForSession(String sessionId) {
-    return _tasks.values
-        .where((t) => t.sessions.any((s) => s.sessionId == sessionId))
-        .toList();
-  }
+  List<TaskInfo> tasksForSession(String sessionId) =>
+      _taskStore.forSession(sessionId);
 
   /// Return the display name for the given workerId (falls back to first worker).
   String _workerName(String workerId) {
@@ -411,31 +393,20 @@ class AppState extends ChangeNotifier implements PaneHost {
   }
 
   void _handleTaskList(List<dynamic> list, String workerId) {
-    // Remove existing tasks from this worker
-    _tasks.removeWhere((_, t) => t.workerId == workerId);
-    final workerName = _workerName(workerId);
-    for (final raw in list) {
-      final t = TaskInfo.fromJson(
-        raw as Map<String, dynamic>,
-        workerId: workerId,
-        workerName: workerName,
-      );
-      _tasks[t.taskId] = t;
-    }
+    _taskStore.replaceWorker(workerId, _workerName(workerId), list);
     notifyListeners();
   }
 
   void _handleTaskUpdate(Map<String, dynamic> msg, String workerId) {
     final taskId = msg['task_id'] as String?;
     if (taskId == null) return;
-    final workerName = _workerName(workerId);
-    final existing = _tasks[taskId];
+    final existing = _taskStore.get(taskId);
     final updated = TaskInfo.fromJson(
       msg,
       workerId: workerId,
-      workerName: workerName,
+      workerName: _workerName(workerId),
     );
-    _tasks[taskId] = updated;
+    _taskStore.upsert(updated);
 
     // N3: Task created (new task ID)
     if (existing == null) {
@@ -464,7 +435,7 @@ class AppState extends ChangeNotifier implements PaneHost {
   void _handleTaskDeleted(Map<String, dynamic> msg) {
     final taskId = msg['task_id'] as String?;
     if (taskId == null) return;
-    _tasks.remove(taskId);
+    _taskStore.remove(taskId);
 
     // Close any pane currently viewing this task
     for (final entry in _panes.entries.toList()) {
@@ -478,21 +449,14 @@ class AppState extends ChangeNotifier implements PaneHost {
   }
 
   // --- Artifact tracking ---
-  final Map<String, ArtifactInfo> _artifacts = {};
+  final ArtifactStore _artifactStore = ArtifactStore();
 
   /// All artifacts sorted by discoveredAt descending.
-  List<ArtifactInfo> get artifacts {
-    final all = _artifacts.values.toList();
-    all.sort((a, b) {
-      final aTime = a.discoveredAt ?? DateTime(1970);
-      final bTime = b.discoveredAt ?? DateTime(1970);
-      return bTime.compareTo(aTime);
-    });
-    return all;
-  }
+  List<ArtifactInfo> get artifacts => _artifactStore.all();
 
   /// Get a single artifact by ID.
-  ArtifactInfo? getArtifact(String artifactId) => _artifacts[artifactId];
+  ArtifactInfo? getArtifact(String artifactId) =>
+      _artifactStore.get(artifactId);
 
   /// Load artifacts from all connected workers.
   void loadArtifacts() {
@@ -504,37 +468,27 @@ class AppState extends ChangeNotifier implements PaneHost {
   }
 
   void _handleArtifactList(List<dynamic> list, String workerId) {
-    // Remove existing artifacts from this worker
-    _artifacts.removeWhere((_, a) => a.workerId == workerId);
-    final workerName = _workerName(workerId);
-    for (final raw in list) {
-      final a = ArtifactInfo.fromJson(
-        raw as Map<String, dynamic>,
-        workerId: workerId,
-        workerName: workerName,
-      );
-      _artifacts[a.artifactId] = a;
-    }
+    _artifactStore.replaceWorker(workerId, _workerName(workerId), list);
     notifyListeners();
   }
 
   void _handleArtifactUpdate(Map<String, dynamic> msg, String workerId) {
     final artifactId = msg['artifact_id'] as String?;
     if (artifactId == null) return;
-    final workerName = _workerName(workerId);
-    final updated = ArtifactInfo.fromJson(
-      msg,
-      workerId: workerId,
-      workerName: workerName,
+    _artifactStore.upsert(
+      ArtifactInfo.fromJson(
+        msg,
+        workerId: workerId,
+        workerName: _workerName(workerId),
+      ),
     );
-    _artifacts[artifactId] = updated;
     notifyListeners();
   }
 
   void _handleArtifactDeleted(Map<String, dynamic> msg) {
     final artifactId = msg['artifact_id'] as String?;
     if (artifactId == null) return;
-    _artifacts.remove(artifactId);
+    _artifactStore.remove(artifactId);
 
     // Close any pane currently viewing this artifact
     for (final entry in _panes.entries.toList()) {
@@ -625,79 +579,46 @@ class AppState extends ChangeNotifier implements PaneHost {
   }
 
   // --- Linear issue tracking ---
-  final Map<String, LinearIssueInfo> _linearIssues = {};
+  final LinearIssueStore _linearStore = LinearIssueStore();
 
   /// All Linear issues sorted by updatedAt descending.
-  List<LinearIssueInfo> get linearIssues {
-    final all = _linearIssues.values.toList();
-    all.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
-    return all;
-  }
+  List<LinearIssueInfo> get linearIssues => _linearStore.all();
 
   /// Linear issues grouped by workerId (for sidebar display).
-  Map<String, List<LinearIssueInfo>> get linearIssuesByWorker {
-    final map = <String, List<LinearIssueInfo>>{};
-    for (final config in _registry.configs) {
-      map[config.id] = [];
-    }
-    for (final i in _linearIssues.values) {
-      map.putIfAbsent(i.workerId, () => []).add(i);
-    }
-    for (final list in map.values) {
-      list.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
-    }
-    return map;
-  }
+  Map<String, List<LinearIssueInfo>> get linearIssuesByWorker =>
+      _linearStore.byWorker(_registry.configs);
 
-  LinearIssueInfo? getLinearIssue(String issueId) => _linearIssues[issueId];
+  LinearIssueInfo? getLinearIssue(String issueId) => _linearStore.get(issueId);
 
   /// All Linear issues linked to the given task, sorted by updatedAt descending.
-  List<LinearIssueInfo> linearIssuesForTask(String taskId) {
-    final result = _linearIssues.values
-        .where((i) => i.taskId == taskId)
-        .toList();
-    result.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
-    return result;
-  }
+  List<LinearIssueInfo> linearIssuesForTask(String taskId) =>
+      _linearStore.forTask(taskId);
 
   /// All Linear issues not yet linked to any task, sorted by updatedAt descending.
-  List<LinearIssueInfo> get unlinkedLinearIssues {
-    final result = _linearIssues.values.where((i) => i.taskId == null).toList();
-    result.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
-    return result;
-  }
+  List<LinearIssueInfo> get unlinkedLinearIssues => _linearStore.unlinked();
 
   void _handleLinearIssueList(List<dynamic> list, String workerId) {
-    _linearIssues.removeWhere((_, i) => i.workerId == workerId);
-    final workerName = _workerName(workerId);
-    for (final raw in list) {
-      final issue = LinearIssueInfo.fromJson(
-        raw as Map<String, dynamic>,
-        workerId: workerId,
-        workerName: workerName,
-      );
-      _linearIssues[issue.id] = issue;
-    }
+    _linearStore.replaceWorker(workerId, _workerName(workerId), list);
     notifyListeners();
   }
 
   void _handleLinearIssueUpdate(Map<String, dynamic> msg, String workerId) {
     final issueId = msg['id'] as String?;
     if (issueId == null) return;
-    final workerName = _workerName(workerId);
-    final updated = LinearIssueInfo.fromJson(
-      msg,
-      workerId: workerId,
-      workerName: workerName,
+    _linearStore.upsert(
+      LinearIssueInfo.fromJson(
+        msg,
+        workerId: workerId,
+        workerName: _workerName(workerId),
+      ),
     );
-    _linearIssues[issueId] = updated;
     notifyListeners();
   }
 
   void _handleLinearIssueDeleted(Map<String, dynamic> msg) {
     final issueId = msg['id'] as String?;
     if (issueId == null) return;
-    _linearIssues.remove(issueId);
+    _linearStore.remove(issueId);
 
     // Close any pane currently viewing this issue
     for (final entry in _panes.entries.toList()) {
@@ -1125,8 +1046,11 @@ class AppState extends ChangeNotifier implements PaneHost {
 
   /// Look up a worker matching the host+port+token triple from a deep link.
   /// Returns null when no duplicate exists.
-  WorkerConfig? findWorkerByHostPortToken(String host, int port, String token) =>
-      _registry.findByHostPortToken(host, port, token);
+  WorkerConfig? findWorkerByHostPortToken(
+    String host,
+    int port,
+    String token,
+  ) => _registry.findByHostPortToken(host, port, token);
 
   void updateWorker(WorkerConfig config) => _registry.update(config);
 
@@ -1157,7 +1081,8 @@ class AppState extends ChangeNotifier implements PaneHost {
   // --- PaneHost interface ---
 
   @override
-  WebSocketService wsForWorker(String workerId) => _registry.wsForWorker(workerId);
+  WebSocketService wsForWorker(String workerId) =>
+      _registry.wsForWorker(workerId);
 
   @override
   String? workerIdForSession(String sessionId) =>
@@ -1466,7 +1391,7 @@ class AppState extends ChangeNotifier implements PaneHost {
 
     // Task pane: reopen if the task still exists
     if (record.paneType == PaneType.task && record.taskId != null) {
-      if (_tasks.containsKey(record.taskId)) {
+      if (_taskStore.get(record.taskId!) != null) {
         if (hasNoPanes) {
           openTaskInPane(record.taskId!);
         } else {
@@ -1481,7 +1406,7 @@ class AppState extends ChangeNotifier implements PaneHost {
 
     // Artifact pane: reopen if the artifact still exists
     if (record.paneType == PaneType.artifact && record.artifactId != null) {
-      if (_artifacts.containsKey(record.artifactId)) {
+      if (_artifactStore.get(record.artifactId!) != null) {
         if (hasNoPanes) {
           openArtifactInPane(record.artifactId!);
         } else {
@@ -1497,7 +1422,7 @@ class AppState extends ChangeNotifier implements PaneHost {
     // Linear issue pane: reopen if the issue still exists
     if (record.paneType == PaneType.linearIssue &&
         record.linearIssueId != null) {
-      if (_linearIssues.containsKey(record.linearIssueId)) {
+      if (_linearStore.get(record.linearIssueId!) != null) {
         if (hasNoPanes) {
           openLinearIssueInPane(record.linearIssueId!);
         } else {
