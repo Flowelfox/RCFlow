@@ -7,6 +7,14 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'server_url.dart';
 
+/// Opens a [WebSocketChannel] for [url]; injected to allow socket-free tests.
+typedef ChannelConnector =
+    Future<WebSocketChannel> Function(
+      Uri url, {
+      required bool secure,
+      required bool allowSelfSigned,
+    });
+
 /// Owns the raw input/output WebSocket channels and their lifecycle.
 ///
 /// Split out of [WebSocketService]: this class is responsible purely for the
@@ -14,6 +22,14 @@ import 'server_url.dart';
 /// frames onto broadcast streams, and writing outbound JSON.  [WebSocketService]
 /// composes one of these and exposes the higher-level command/REST surface.
 class WebSocketTransport {
+  /// [connector] overrides how raw channels are opened (tests inject a fake);
+  /// it defaults to a real [io.WebSocket] with ping keepalive.
+  WebSocketTransport({ChannelConnector? connector}) {
+    _connector = connector ?? _connectSocket;
+  }
+
+  late final ChannelConnector _connector;
+
   static const _pingInterval = Duration(seconds: 5);
 
   WebSocketChannel? _inputChannel;
@@ -70,7 +86,7 @@ class WebSocketTransport {
 
     // Connect input channel
     try {
-      _inputChannel = await _connectSocket(
+      _inputChannel = await _connector(
         url.wsInputText(),
         secure: secure,
         allowSelfSigned: allowSelfSigned,
@@ -98,7 +114,7 @@ class WebSocketTransport {
 
     // Connect output channel after input succeeds
     try {
-      _outputChannel = await _connectSocket(
+      _outputChannel = await _connector(
         url.wsOutputText(),
         secure: secure,
         allowSelfSigned: allowSelfSigned,
