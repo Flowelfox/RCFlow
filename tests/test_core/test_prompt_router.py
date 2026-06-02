@@ -112,7 +112,7 @@ async def test_summarize_and_push_pushes_summary_message(session_manager: Sessio
     session = session_manager.create_session(SessionType.LONG_RUNNING)
     session.set_active()
 
-    await router._summarize_and_push(session, "Long result text.")
+    await router._background._summarize_and_push(session, "Long result text.")
 
     summary_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.SUMMARY]
     assert len(summary_msgs) == 1
@@ -130,7 +130,7 @@ async def test_summarize_and_push_failure_does_not_raise(session_manager: Sessio
     session.set_active()
 
     # Must not raise
-    await router._summarize_and_push(session, "Some text.")
+    await router._background._summarize_and_push(session, "Some text.")
 
     summary_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.SUMMARY]
     assert len(summary_msgs) == 0
@@ -149,7 +149,7 @@ async def test_generate_and_set_title(session_manager: SessionManager) -> None:
     session.set_active()
     assert session.title is None
 
-    await router._generate_and_set_title(session, "list files", "Here are the files...")
+    await router._background._generate_and_set_title(session, "list files", "Here are the files...")
 
     router._llm.generate_title.assert_awaited_once_with("list files", "Here are the files...")  # type: ignore[attr-defined]
     assert session.title == "List project files"
@@ -165,7 +165,7 @@ async def test_generate_and_set_title_failure_does_not_raise(session_manager: Se
     session.set_active()
 
     # Should not raise
-    await router._generate_and_set_title(session, "hello", "world")
+    await router._background._generate_and_set_title(session, "hello", "world")
 
     # On LLM failure the finally-block sets a fallback title derived from user_text
     assert session.title == "hello"
@@ -193,7 +193,7 @@ async def test_fire_title_task(session_manager: SessionManager) -> None:
 
 
 async def _async_stream_chunks(chunks: list[ExecutionChunk]):
-    """Helper to create an async generator from a list of ExecutionChunks."""
+    """Create an async generator from a list of ExecutionChunks."""
     for chunk in chunks:
         yield chunk
 
@@ -460,13 +460,18 @@ async def test_resume_nonexistent_session_raises(session_manager: SessionManager
 
 
 @pytest.mark.asyncio
-async def test_resume_non_paused_raises(session_manager: SessionManager) -> None:
+async def test_resume_non_paused_is_idempotent(session_manager: SessionManager) -> None:
+    """Multiple concurrent sends to a paused session each fire a resume task;
+    the later ones land after the first already flipped status to ACTIVE and
+    must short-circuit silently rather than raising.
+    """
     router = _make_router(session_manager)
     session = session_manager.create_session(SessionType.CONVERSATIONAL)
     session.set_active()
 
-    with pytest.raises(RuntimeError, match="Cannot resume"):
-        await router.resume_session(session.id)
+    result = await router.resume_session(session.id)
+    assert result is session
+    assert session.status == SessionStatus.ACTIVE
 
 
 @pytest.mark.asyncio
@@ -527,7 +532,7 @@ async def test_end_paused_session(session_manager: SessionManager) -> None:
 def test_build_tool_context_agent_only(session_manager: SessionManager) -> None:
     """A single agent mention produces a MUST directive."""
     router = _make_router_with_real_registry(session_manager)
-    ctx = router._build_tool_context(["ClaudeCode"])
+    ctx = router._context._build_tool_context(["ClaudeCode"])
     assert ctx is not None
     assert "MUST" in ctx
     assert "claude_code" in ctx
@@ -537,7 +542,7 @@ def test_build_tool_context_agent_only(session_manager: SessionManager) -> None:
 def test_build_tool_context_worktree_only(session_manager: SessionManager) -> None:
     """A worktree-only mention produces a preference block (no orchestration)."""
     router = _make_router_with_real_registry(session_manager)
-    ctx = router._build_tool_context(["Worktree"])
+    ctx = router._context._build_tool_context(["Worktree"])
     assert ctx is not None
     assert "Tool preference" in ctx
     assert "Step 1" not in ctx
@@ -546,7 +551,7 @@ def test_build_tool_context_worktree_only(session_manager: SessionManager) -> No
 def test_build_tool_context_worktree_and_agent_orchestration(session_manager: SessionManager) -> None:
     """Worktree + agent mention produces the two-step orchestration directive."""
     router = _make_router_with_real_registry(session_manager)
-    ctx = router._build_tool_context(["Worktree", "ClaudeCode"])
+    ctx = router._context._build_tool_context(["Worktree", "ClaudeCode"])
     assert ctx is not None
     assert "Step 1" in ctx
     assert "Step 2" in ctx
@@ -560,7 +565,7 @@ def test_build_tool_context_worktree_and_agent_orchestration(session_manager: Se
 def test_build_tool_context_worktree_and_agent_case_insensitive(session_manager: SessionManager) -> None:
     """Case-insensitive mention matching still triggers orchestration."""
     router = _make_router_with_real_registry(session_manager)
-    ctx = router._build_tool_context(["worktree", "claude_code"])
+    ctx = router._context._build_tool_context(["worktree", "claude_code"])
     assert ctx is not None
     assert "Step 1" in ctx
     assert "Step 2" in ctx
@@ -569,7 +574,7 @@ def test_build_tool_context_worktree_and_agent_case_insensitive(session_manager:
 def test_build_tool_context_unknown_mention_ignored(session_manager: SessionManager) -> None:
     """Unknown tool mentions are silently ignored; valid ones still produce output."""
     router = _make_router_with_real_registry(session_manager)
-    ctx = router._build_tool_context(["NonExistentTool", "ClaudeCode"])
+    ctx = router._context._build_tool_context(["NonExistentTool", "ClaudeCode"])
     assert ctx is not None
     assert "MUST" in ctx
 
@@ -577,7 +582,7 @@ def test_build_tool_context_unknown_mention_ignored(session_manager: SessionMana
 def test_build_tool_context_all_unknown_returns_none(session_manager: SessionManager) -> None:
     """All-unknown mentions return None."""
     router = _make_router_with_real_registry(session_manager)
-    ctx = router._build_tool_context(["Foo", "Bar"])
+    ctx = router._context._build_tool_context(["Foo", "Bar"])
     assert ctx is None
 
 
@@ -590,7 +595,7 @@ def test_build_active_worktree_context_no_worktree(session_manager: SessionManag
     """Returns None when no worktree is selected for the session."""
     router = _make_router(session_manager)
     session = session_manager.create_session(SessionType.ONE_SHOT)
-    assert router._build_active_worktree_context(session) is None
+    assert router._context._build_active_worktree_context(session) is None
 
 
 def test_build_active_worktree_context_with_worktree(session_manager: SessionManager) -> None:
@@ -605,7 +610,7 @@ def test_build_active_worktree_context_with_worktree(session_manager: SessionMan
         "base": "main",
     }
 
-    ctx = router._build_active_worktree_context(session)
+    ctx = router._context._build_active_worktree_context(session)
 
     assert ctx is not None
     assert "/repos/myproject/.worktrees/feat-xyz" in ctx
@@ -619,7 +624,7 @@ def test_build_active_worktree_context_path_only(session_manager: SessionManager
     session = session_manager.create_session(SessionType.ONE_SHOT)
     session.metadata["selected_worktree_path"] = "/repos/myproject/.worktrees/feat-xyz"
 
-    ctx = router._build_active_worktree_context(session)
+    ctx = router._context._build_active_worktree_context(session)
 
     assert ctx is not None
     assert "/repos/myproject/.worktrees/feat-xyz" in ctx
@@ -645,7 +650,7 @@ def test_build_active_worktree_context_merge_direction_disambiguation(
         "base": "main",
     }
 
-    ctx = router._build_active_worktree_context(session)
+    ctx = router._context._build_active_worktree_context(session)
 
     assert ctx is not None
     # Disambiguation block must be present
@@ -970,7 +975,7 @@ async def test_relay_enter_plan_mode_denied_ends_session(
 ) -> None:
     """Denying plan mode ends the session with PLAN_MODE_DENIED error."""
     router = _make_router(session_manager)
-    router._end_claude_code_session = AsyncMock()  # type: ignore[method-assign]
+    router._claude._end_claude_code_session = AsyncMock()  # type: ignore[method-assign]
 
     session = session_manager.create_session(SessionType.LONG_RUNNING)
     session.set_active()
@@ -1017,7 +1022,7 @@ async def test_relay_enter_plan_mode_denied_ends_session(
     assert any(m.data.get("code") == "PLAN_MODE_DENIED" for m in error_msgs)
 
     # _end_claude_code_session should have been called
-    router._end_claude_code_session.assert_awaited_once_with(session)  # type: ignore[attr-defined]
+    router._claude._end_claude_code_session.assert_awaited_once_with(session)  # type: ignore[attr-defined]
 
 
 @pytest.mark.asyncio

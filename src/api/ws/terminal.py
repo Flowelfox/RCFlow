@@ -70,7 +70,7 @@ async def ws_terminal(
     send_lock = asyncio.Lock()
 
     async def send_output(terminal_id: str, data: bytes) -> None:
-        """Callback: send PTY output to client as binary frame."""
+        """Send PTY output to the client as a binary frame."""
         try:
             tid_bytes = uuid_mod.UUID(terminal_id).bytes
             frame = b"\x01" + tid_bytes + data
@@ -80,7 +80,7 @@ async def ws_terminal(
             pass
 
     async def handle_exit(terminal_id: str, exit_code: int | None) -> None:
-        """Callback: notify client when PTY process exits."""
+        """Notify the client when the PTY process exits."""
         connection_terminals.discard(terminal_id)
         # Remove from manager (it already exited, just clean up the entry)
         terminal_manager._sessions.pop(terminal_id, None)

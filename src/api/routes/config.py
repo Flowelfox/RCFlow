@@ -1,3 +1,5 @@
+"""HTTP routes for reading and updating server configuration."""
+
 from __future__ import annotations
 
 import asyncio
@@ -28,6 +30,7 @@ router = APIRouter()
     description="Returns server status. Does not require authentication.",
 )
 async def health() -> dict[str, str]:
+    """Return a simple health-check response."""
     return {"status": "ok"}
 
 
@@ -129,6 +132,7 @@ async def list_projects(
     request: Request,
     q: str | None = Query(None, description="Case-insensitive substring filter for project names"),
 ) -> dict[str, list[dict[str, str]]]:
+    """List projects."""
     settings: Settings = request.app.state.settings
     # Use a dict keyed by name so duplicate names across multiple projects_dirs
     # only appear once (first match wins, consistent with path resolution order).

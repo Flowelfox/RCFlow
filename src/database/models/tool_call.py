@@ -1,3 +1,5 @@
+"""SQLAlchemy model for per-tool-call telemetry rows."""
+
 from __future__ import annotations
 
 import uuid

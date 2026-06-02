@@ -5,6 +5,7 @@ import '../../../models/ws_messages.dart';
 import '../../../state/pane_state.dart';
 import '../../../theme.dart';
 import '../message_bubble.dart';
+import '../../../theme/spacing.dart';
 
 class AgentGroupBlock extends StatelessWidget {
   final DisplayMessage message;
@@ -21,11 +22,11 @@ class AgentGroupBlock extends StatelessWidget {
         message.displayName ?? message.toolName ?? 'Agent';
 
     return Padding(
-      padding: EdgeInsets.symmetric(vertical: 4),
+      padding: EdgeInsets.symmetric(vertical: kSpace1),
       child: Container(
         decoration: BoxDecoration(
           color: context.appColors.toolBg,
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(kRadiusMedium),
           border: Border.all(color: context.appColors.divider),
         ),
         clipBehavior: Clip.antiAlias,
@@ -42,7 +43,7 @@ class AgentGroupBlock extends StatelessWidget {
               child: Container(
                 color: Colors.transparent,
                 padding:
-                    EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    EdgeInsets.symmetric(horizontal: kSpace3, vertical: 10),
                 child: Row(
                   children: [
                     if (hasChildren)
@@ -55,7 +56,7 @@ class AgentGroupBlock extends StatelessWidget {
                       )
                     else
                       SizedBox(width: 18),
-                    SizedBox(width: 8),
+                    SizedBox(width: kGapTight),
                     if (running)
                       _SpinningIcon()
                     else
@@ -75,7 +76,7 @@ class AgentGroupBlock extends StatelessWidget {
                       ),
                     ),
                     if (toolCount > 0) ...[
-                      SizedBox(width: 8),
+                      SizedBox(width: kGapTight),
                       Container(
                         padding: EdgeInsets.symmetric(
                             horizontal: 6, vertical: 1),
@@ -99,7 +100,7 @@ class AgentGroupBlock extends StatelessWidget {
             ),
             if (expanded && children.isNotEmpty)
               Padding(
-                padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                padding: const EdgeInsets.fromLTRB(kSpace2, 0, kSpace2, kSpace2),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [

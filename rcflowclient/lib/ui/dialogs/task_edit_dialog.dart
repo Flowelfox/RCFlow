@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../../models/task_info.dart';
 import '../../theme.dart';
+import '../../theme/spacing.dart';
 
 /// Data class returned from the edit dialog with only changed fields.
 class TaskEditResult {
@@ -104,7 +105,7 @@ class _TaskEditDialogState extends State<_TaskEditDialog> {
               children: [
                 // Header
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
+                  padding: const EdgeInsets.fromLTRB(kSpace5, kSpace5, kSpace5, 0),
                   child: Text(
                     'Edit Task',
                     style: TextStyle(
@@ -118,7 +119,7 @@ class _TaskEditDialogState extends State<_TaskEditDialog> {
 
                 // Title
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 24),
+                  padding: const EdgeInsets.symmetric(horizontal: kSpace5),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -138,7 +139,7 @@ class _TaskEditDialogState extends State<_TaskEditDialog> {
                           counterText: '',
                           border: OutlineInputBorder(
                             borderSide: BorderSide.none,
-                            borderRadius: BorderRadius.circular(14),
+                            borderRadius: BorderRadius.circular(kRadiusLarge),
                           ),
                         ),
                         validator: (v) {
@@ -154,11 +155,11 @@ class _TaskEditDialogState extends State<_TaskEditDialog> {
                     ],
                   ),
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: kSpace4),
 
                 // Description
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 24),
+                  padding: const EdgeInsets.symmetric(horizontal: kSpace5),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -182,7 +183,7 @@ class _TaskEditDialogState extends State<_TaskEditDialog> {
                           filled: true,
                           border: OutlineInputBorder(
                             borderSide: BorderSide.none,
-                            borderRadius: BorderRadius.circular(14),
+                            borderRadius: BorderRadius.circular(kRadiusLarge),
                           ),
                         ),
                       ),
@@ -195,7 +196,7 @@ class _TaskEditDialogState extends State<_TaskEditDialog> {
 
                 // Actions
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(24, 12, 24, 16),
+                  padding: const EdgeInsets.fromLTRB(kSpace5, kSpace3, kSpace5, kSpace4),
                   child: Row(
                     children: [
                       Text(
@@ -215,7 +216,7 @@ class _TaskEditDialogState extends State<_TaskEditDialog> {
                           ),
                         ),
                       ),
-                      const SizedBox(width: 8),
+                      const SizedBox(width: kGapTight),
                       FilledButton(
                         style: FilledButton.styleFrom(
                           backgroundColor: context.appColors.accent,

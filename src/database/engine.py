@@ -1,3 +1,5 @@
+"""Async SQLAlchemy engine and session-factory setup."""
+
 from collections.abc import AsyncGenerator
 from pathlib import Path
 
@@ -17,6 +19,7 @@ def _is_sqlite(url: str) -> bool:
 
 
 def init_engine(settings: Settings) -> None:
+    """Init engine."""
     global _engine, _session_factory
 
     kwargs: dict = {}
@@ -58,6 +61,7 @@ async def check_connection() -> None:
 
 
 async def dispose_engine() -> None:
+    """Dispose engine."""
     global _engine, _session_factory
     if _engine is not None:
         await _engine.dispose()
@@ -77,6 +81,7 @@ def get_session_factory() -> async_sessionmaker[AsyncSession]:
 
 
 async def get_db_session() -> AsyncGenerator[AsyncSession]:
+    """Get db session."""
     if _session_factory is None:
         raise DatabaseNotInitializedError("Database engine not initialized. Call init_engine() first.")
     async with _session_factory() as session:

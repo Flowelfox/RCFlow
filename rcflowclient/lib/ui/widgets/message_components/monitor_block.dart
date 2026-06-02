@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../../../models/ws_messages.dart';
 import '../../../state/pane_state.dart';
 import '../../../theme.dart';
+import '../../../theme/spacing.dart';
 
 /// Card for a live Claude Code ``Monitor`` watch.
 ///
@@ -142,11 +143,11 @@ class _MonitorBlockState extends State<MonitorBlock> {
         : _formatElapsed(elapsed);
 
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.symmetric(vertical: kSpace1),
       child: Container(
         decoration: BoxDecoration(
           color: colors.toolBg,
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(kRadiusMedium),
           border: Border.all(
             color: approachingTimeout
                 ? colors.errorText.withValues(alpha: 0.5)
@@ -168,7 +169,7 @@ class _MonitorBlockState extends State<MonitorBlock> {
               child: Container(
                 color: Colors.transparent,
                 padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    const EdgeInsets.symmetric(horizontal: kSpace3, vertical: 10),
                 child: Row(
                   children: [
                     if (events.isNotEmpty) ...[
@@ -205,7 +206,7 @@ class _MonitorBlockState extends State<MonitorBlock> {
                                   label: 'persistent',
                                   color: colors.accentLight,
                                 ),
-                              if (persistent) const SizedBox(width: 4),
+                              if (persistent) const SizedBox(width: kGapInline),
                               Expanded(
                                 child: Text(
                                   description,
@@ -237,7 +238,7 @@ class _MonitorBlockState extends State<MonitorBlock> {
                                   color: statusColor,
                                   size: 11,
                                 ),
-                                const SizedBox(width: 4),
+                                const SizedBox(width: kGapInline),
                                 Text(
                                   timerText,
                                   style: TextStyle(
@@ -246,7 +247,7 @@ class _MonitorBlockState extends State<MonitorBlock> {
                                     fontFamily: 'monospace',
                                   ),
                                 ),
-                                const SizedBox(width: 8),
+                                const SizedBox(width: kGapTight),
                                 Text(
                                   statusLabel,
                                   style: TextStyle(
@@ -254,7 +255,7 @@ class _MonitorBlockState extends State<MonitorBlock> {
                                     fontSize: 11,
                                   ),
                                 ),
-                                const SizedBox(width: 8),
+                                const SizedBox(width: kGapTight),
                                 if (m.monitorTotalEvents > 0)
                                   Text(
                                     m.monitorTotalEvents > events.length
@@ -272,7 +273,7 @@ class _MonitorBlockState extends State<MonitorBlock> {
                         ],
                       ),
                     ),
-                    const SizedBox(width: 8),
+                    const SizedBox(width: kGapTight),
                     if (!m.finished)
                       _StopButton(
                         stopping: _stopping,
@@ -375,7 +376,7 @@ class _StopButton extends StatelessWidget {
       child: GestureDetector(
         onTap: stopping ? null : onTap,
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+          padding: const EdgeInsets.symmetric(horizontal: kSpace2, vertical: 3),
           decoration: BoxDecoration(
             color: stopping ? colors.bgElevated : colors.errorBg,
             borderRadius: BorderRadius.circular(5),

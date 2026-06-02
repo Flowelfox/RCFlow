@@ -219,8 +219,10 @@ class WorktreeExecutor(BaseExecutor):
         yield ExecutionChunk(stream="stdout", content=content)
 
     async def send_input(self, data: str) -> None:
+        """Send input."""
         raise NotImplementedError("Worktree executor does not support interactive input")
 
     async def cancel(self) -> None:
+        """Cancel."""
         # Worktree operations are run in a thread; no subprocess handle to kill
         pass

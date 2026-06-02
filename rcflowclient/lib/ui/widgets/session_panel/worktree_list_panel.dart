@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../../state/app_state.dart';
 import '../../../theme.dart';
 import '../create_worktree_dialog.dart';
+import '../../../theme/spacing.dart';
 
 /// Sidebar panel for git worktree management.
 ///
@@ -159,7 +160,7 @@ class _WorktreeListPanelState extends State<WorktreeListPanel> {
                   color: context.appColors.textMuted,
                   size: 40,
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: kGapRelaxed),
                 Text(
                   'No worktrees yet',
                   style: TextStyle(
@@ -168,7 +169,7 @@ class _WorktreeListPanelState extends State<WorktreeListPanel> {
                     fontWeight: FontWeight.w600,
                   ),
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: kGapInline),
                 Text(
                   'Worktrees appear here once\na session uses worktree tools',
                   textAlign: TextAlign.center,
@@ -183,7 +184,7 @@ class _WorktreeListPanelState extends State<WorktreeListPanel> {
         }
 
         return ListView.builder(
-          padding: const EdgeInsets.only(bottom: 16),
+          padding: const EdgeInsets.only(bottom: kSpace4),
           itemCount: groups.length,
           itemBuilder: (context, i) {
             final g = groups[i];
@@ -215,7 +216,7 @@ class _WorktreeListPanelState extends State<WorktreeListPanel> {
       children: [
         // Section header
         Padding(
-          padding: const EdgeInsets.fromLTRB(12, 12, 8, 4),
+          padding: const EdgeInsets.fromLTRB(kSpace3, kSpace3, kSpace2, kSpace1),
           child: Row(
             children: [
               Expanded(
@@ -263,12 +264,12 @@ class _WorktreeListPanelState extends State<WorktreeListPanel> {
         ),
         if (isLoading)
           const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            padding: EdgeInsets.symmetric(horizontal: kSpace4, vertical: kSpace2),
             child: LinearProgressIndicator(),
           )
         else if (error != null)
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            padding: const EdgeInsets.symmetric(horizontal: kSpace4, vertical: kSpace1),
             child: Text(
               error,
               style: TextStyle(
@@ -279,7 +280,7 @@ class _WorktreeListPanelState extends State<WorktreeListPanel> {
           )
         else if (list == null)
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            padding: const EdgeInsets.symmetric(horizontal: kSpace4, vertical: kSpace1),
             child: TextButton.icon(
               onPressed: () => _refresh(state, workerId, repoPath),
               icon: const Icon(Icons.refresh, size: 16),
@@ -288,7 +289,7 @@ class _WorktreeListPanelState extends State<WorktreeListPanel> {
           )
         else if (list.isEmpty)
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            padding: const EdgeInsets.symmetric(horizontal: kSpace4, vertical: kSpace1),
             child: Text(
               'No worktrees',
               style: TextStyle(
@@ -318,7 +319,7 @@ class _WorktreeListPanelState extends State<WorktreeListPanel> {
     final base = wt['base'] as String? ?? 'main';
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+      padding: const EdgeInsets.symmetric(horizontal: kSpace3, vertical: 2),
       child: Row(
         children: [
           Icon(Icons.call_split, size: 14, color: context.appColors.textMuted),
@@ -464,7 +465,7 @@ class _IconBtn extends StatelessWidget {
         borderRadius: BorderRadius.circular(4),
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.all(4),
+          padding: const EdgeInsets.all(kSpace1),
           child: Icon(
             icon,
             size: iconSize,

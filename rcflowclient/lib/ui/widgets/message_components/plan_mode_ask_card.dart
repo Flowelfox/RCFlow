@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../../models/ws_messages.dart';
 import '../../../state/pane_state.dart';
 import '../../../theme.dart';
+import '../../../theme/spacing.dart';
 
 class PlanModeAskCard extends StatelessWidget {
   final DisplayMessage message;
@@ -12,7 +13,7 @@ class PlanModeAskCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: EdgeInsets.symmetric(vertical: 8),
+      padding: EdgeInsets.symmetric(vertical: kSpace2),
       child: Container(
         width: double.infinity,
         padding: EdgeInsets.all(14),
@@ -39,7 +40,7 @@ class PlanModeAskCard extends StatelessWidget {
               color: context.appColors.accentLight,
               size: 18,
             ),
-            SizedBox(width: 8),
+            SizedBox(width: kGapTight),
             Expanded(
               child: Text(
                 'Claude Code wants to enter plan mode',
@@ -52,7 +53,7 @@ class PlanModeAskCard extends StatelessWidget {
             ),
           ],
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: kGapRelaxed),
         Row(
           children: [
             Expanded(
@@ -68,9 +69,9 @@ class PlanModeAskCard extends StatelessWidget {
                   foregroundColor: context.appColors.textSecondary,
                   side: BorderSide(color: context.appColors.divider),
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(kRadiusMedium),
                   ),
-                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  padding: const EdgeInsets.symmetric(vertical: kSpace3),
                 ),
                 child: const Text(
                   'Deny',
@@ -90,9 +91,9 @@ class PlanModeAskCard extends StatelessWidget {
                 style: FilledButton.styleFrom(
                   backgroundColor: context.appColors.accent,
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(kRadiusMedium),
                   ),
-                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  padding: const EdgeInsets.symmetric(vertical: kSpace3),
                 ),
                 child: const Text(
                   'Allow',
@@ -117,7 +118,7 @@ class PlanModeAskCard extends StatelessWidget {
               : context.appColors.textSecondary,
           size: 18,
         ),
-        SizedBox(width: 8),
+        SizedBox(width: kGapTight),
         Expanded(
           child: Text(
             allowed ? 'Plan mode allowed' : 'Plan mode denied',

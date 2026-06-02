@@ -1,3 +1,5 @@
+"""SQLAlchemy model for queued (pending) user messages."""
+
 import uuid
 from datetime import datetime
 

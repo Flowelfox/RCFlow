@@ -5,6 +5,7 @@ import '../../state/app_state.dart';
 import '../../state/setup_wizard_view_model.dart';
 import '../../theme.dart';
 import '../screens/server_config_screen.dart';
+import '../../theme/spacing.dart';
 
 /// Shows the first-run setup wizard as a non-dismissible full-screen dialog.
 ///
@@ -104,7 +105,7 @@ class _SetupWizardState extends State<_SetupWizard> {
     return Dialog(
       backgroundColor: context.appColors.bgSurface,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      insetPadding: const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 40, vertical: kSpace5),
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 600, maxHeight: 620),
         child: Column(
@@ -181,7 +182,7 @@ class _SetupWizardState extends State<_SetupWizard> {
                 style: TextStyle(color: context.appColors.textSecondary),
               ),
             ),
-          if (_vm.currentStep > 0) const SizedBox(width: 8),
+          if (_vm.currentStep > 0) const SizedBox(width: kGapTight),
           _buildForwardButton(),
         ],
       ),
@@ -260,7 +261,7 @@ class _SetupWizardState extends State<_SetupWizard> {
       backgroundColor: context.appColors.accent,
       disabledBackgroundColor: context.appColors.accentDim,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+      padding: const EdgeInsets.symmetric(horizontal: kSpace5, vertical: 14),
     );
   }
 
@@ -279,7 +280,7 @@ class _SetupWizardState extends State<_SetupWizard> {
             size: 64,
             color: context.appColors.accent,
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: kSpace5),
           Text(
             'Welcome to RCFlow',
             style: TextStyle(
@@ -288,7 +289,7 @@ class _SetupWizardState extends State<_SetupWizard> {
               fontWeight: FontWeight.bold,
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: kGapRelaxed),
           Text(
             'Manage AI coding agents from anywhere.\n'
             'Let\'s get you connected to your first server.',
@@ -310,7 +311,7 @@ class _SetupWizardState extends State<_SetupWizard> {
 
   Widget _buildWorkerStep() {
     return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
+      padding: const EdgeInsets.fromLTRB(kSpace5, kSpace4, kSpace5, kSpace2),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -322,7 +323,7 @@ class _SetupWizardState extends State<_SetupWizard> {
               fontWeight: FontWeight.w600,
             ),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: kGapInline),
           Text(
             'Enter your RCFlow server details.',
             style: TextStyle(color: context.appColors.textMuted, fontSize: 13),
@@ -375,7 +376,7 @@ class _SetupWizardState extends State<_SetupWizard> {
                   ],
                 ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: kGapRelaxed),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -432,7 +433,7 @@ class _SetupWizardState extends State<_SetupWizard> {
               if (_vm.submitted) setState(() {});
             },
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: kGapRelaxed),
           SwitchListTile(
             title: Text(
               'Use SSL (wss://)',
@@ -473,7 +474,7 @@ class _SetupWizardState extends State<_SetupWizard> {
             contentPadding: EdgeInsets.zero,
             onChanged: _vm.setAutoConnect,
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: kGapTight),
           Row(
             children: [
               OutlinedButton.icon(
@@ -490,7 +491,7 @@ class _SetupWizardState extends State<_SetupWizard> {
                   foregroundColor: context.appColors.textSecondary,
                   side: BorderSide(color: context.appColors.divider),
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(kRadiusMedium),
                   ),
                   padding: const EdgeInsets.symmetric(
                     horizontal: 14,
@@ -498,7 +499,7 @@ class _SetupWizardState extends State<_SetupWizard> {
                   ),
                 ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: kGapRelaxed),
               if (_vm.testStatus == SetupTestStatus.testing)
                 SizedBox(
                   width: 18,
@@ -548,7 +549,7 @@ class _SetupWizardState extends State<_SetupWizard> {
             ],
           ),
           if (_vm.connectError != null) ...[
-            const SizedBox(height: 8),
+            const SizedBox(height: kGapTight),
             Text(
               _vm.connectError!,
               style: TextStyle(
@@ -584,7 +585,7 @@ class _SetupWizardState extends State<_SetupWizard> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
+          padding: const EdgeInsets.fromLTRB(kSpace5, kSpace4, kSpace5, 0),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -596,7 +597,7 @@ class _SetupWizardState extends State<_SetupWizard> {
                   fontWeight: FontWeight.w600,
                 ),
               ),
-              const SizedBox(height: 4),
+              const SizedBox(height: kGapInline),
               Text(
                 'Configure the language model provider for your server.',
                 style: TextStyle(
@@ -626,7 +627,7 @@ class _SetupWizardState extends State<_SetupWizard> {
 
   Widget _buildAgentStep() {
     return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
+      padding: const EdgeInsets.fromLTRB(kSpace5, kSpace4, kSpace5, kSpace2),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -638,7 +639,7 @@ class _SetupWizardState extends State<_SetupWizard> {
               fontWeight: FontWeight.w600,
             ),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: kGapInline),
           Text(
             'Choose which agent to use by default for new sessions. '
             'You can always override this per-session with the # selector.',
@@ -656,7 +657,7 @@ class _SetupWizardState extends State<_SetupWizard> {
             )
           else if (_vm.toolsError != null)
             Padding(
-              padding: const EdgeInsets.symmetric(vertical: 16),
+              padding: const EdgeInsets.symmetric(vertical: kSpace4),
               child: Text(
                 'Could not load tool status: ${_vm.toolsError}',
                 style: TextStyle(
@@ -671,7 +672,7 @@ class _SetupWizardState extends State<_SetupWizard> {
             ),
           if (_vm.tools == null && !_vm.toolsLoading && _vm.toolsError == null)
             Padding(
-              padding: const EdgeInsets.symmetric(vertical: 16),
+              padding: const EdgeInsets.symmetric(vertical: kSpace4),
               child: Text(
                 'No tool information available.',
                 style: TextStyle(
@@ -722,9 +723,9 @@ class _SetupWizardState extends State<_SetupWizard> {
     final managed = info['managed'] == true;
 
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.only(bottom: kSpace2),
       child: Container(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(kSpace3),
         decoration: BoxDecoration(
           color: context.appColors.bgElevated,
           borderRadius: BorderRadius.circular(12),
@@ -743,7 +744,7 @@ class _SetupWizardState extends State<_SetupWizard> {
                   : context.appColors.textMuted,
               size: 24,
             ),
-            const SizedBox(width: 12),
+            const SizedBox(width: kGapRelaxed),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -819,22 +820,22 @@ class _SetupWizardState extends State<_SetupWizard> {
               fontWeight: FontWeight.bold,
             ),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: kSpace5),
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(kSpace4),
             decoration: BoxDecoration(
               color: context.appColors.bgElevated,
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: BorderRadius.circular(kRadiusLarge),
             ),
             child: Column(
               children: [
                 _summaryRow('Server', name.isNotEmpty ? name : 'My Server'),
-                const SizedBox(height: 8),
+                const SizedBox(height: kGapTight),
                 _summaryRow('Address', '$host:$port'),
-                const SizedBox(height: 8),
+                const SizedBox(height: kGapTight),
                 _summaryRow('SSL', _vm.useSSL ? 'Enabled' : 'Disabled'),
-                const SizedBox(height: 8),
+                const SizedBox(height: kGapTight),
                 _summaryRow('Default Agent', agentLabel),
               ],
             ),
@@ -909,7 +910,7 @@ class _SetupWizardState extends State<_SetupWizard> {
       fillColor: context.appColors.bgElevated,
       border: OutlineInputBorder(
         borderSide: BorderSide.none,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(kRadiusLarge),
       ),
       errorText: error,
     );
@@ -925,7 +926,7 @@ class _SetupWizardState extends State<_SetupWizard> {
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(icon, color: context.appColors.textMuted, size: 40),
-          const SizedBox(height: 16),
+          const SizedBox(height: kSpace4),
           Text(
             title,
             style: TextStyle(
@@ -933,7 +934,7 @@ class _SetupWizardState extends State<_SetupWizard> {
               fontSize: 15,
             ),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: kGapInline),
           Text(
             subtitle,
             style: TextStyle(color: context.appColors.textMuted, fontSize: 13),

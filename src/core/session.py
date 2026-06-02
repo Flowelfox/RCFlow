@@ -1,8 +1,9 @@
+"""Active-session model, session manager, and session enums."""
+
 import asyncio
 import contextlib
 import logging
 import uuid
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
@@ -12,6 +13,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.badges import BadgeState
 from src.core.buffer import BufferedMessage, MessageType, SessionBuffer
+from src.core.session_state import (
+    MonitorState,
+    PendingMessage,
+    ScheduledWake,
+    SessionPendingState,
+    SessionSubprocessTracker,
+    SessionTokenAccumulator,
+    SessionWakeMirror,
+)
 from src.database.models import Artifact as ArtifactModel
 from src.database.models import Session as SessionModel
 from src.database.models import SessionMessage as SessionMessageModel
@@ -48,6 +58,8 @@ def session_sort_key(item: dict[str, Any]) -> tuple[int, float]:
 
 
 class SessionStatus(StrEnum):
+    """Lifecycle state of a session."""
+
     CREATED = "created"
     ACTIVE = "active"
     EXECUTING = "executing"
@@ -59,6 +71,8 @@ class SessionStatus(StrEnum):
 
 
 class ActivityState(StrEnum):
+    """What a session is currently doing (drives the status badge)."""
+
     IDLE = "idle"
     PROCESSING_LLM = "processing_llm"
     EXECUTING_TOOL = "executing_tool"
@@ -67,59 +81,11 @@ class ActivityState(StrEnum):
 
 
 class SessionType(StrEnum):
+    """How a session is driven: one-shot, conversational, or long-running."""
+
     ONE_SHOT = "one-shot"
     CONVERSATIONAL = "conversational"
     LONG_RUNNING = "long-running"
-
-
-@dataclass
-class MonitorState:
-    """In-memory tracking for a live Claude Code ``Monitor`` tool invocation.
-
-    Keyed by the Claude Code ``tool_use_id`` so concurrent monitors stay
-    separated.  Each stdout-line batch from the watched script becomes a
-    ``MONITOR_EVENT`` buffer message; the entry is removed when the watch
-    terminates (script exit, timeout, cancel, or session end).
-    """
-
-    description: str
-    command: str
-    timeout_ms: int
-    persistent: bool
-    started_at: datetime
-    event_count: int = 0
-
-
-@dataclass
-class PendingMessage:
-    """A user message queued while the agent was busy with a prior turn.
-
-    Mirrors one row of the ``session_pending_messages`` DB table.  The
-    authoritative store is the DB; this in-memory copy lets the server
-    answer queue queries and broadcasts without a round-trip.  See
-    ``Queued User Messages`` in ``docs/design/sessions.md``.
-    """
-
-    queued_id: str
-    position: int
-    content: str
-    display_content: str
-    attachments_path: str | None
-    project_name: str | None
-    selected_worktree_path: str | None
-    task_id: str | None
-    submitted_at: datetime
-    updated_at: datetime
-
-    def to_snapshot(self) -> dict[str, Any]:
-        """Lightweight dict included in ``session_update.queued_messages``."""
-        return {
-            "queued_id": self.queued_id,
-            "position": self.position,
-            "display_content": self.display_content,
-            "submitted_at": self.submitted_at.isoformat(),
-            "updated_at": self.updated_at.isoformat(),
-        }
 
 
 class ActiveSession:
@@ -169,15 +135,10 @@ class ActiveSession:
         # the assistant proceeds as if the user had refused to answer.
         self._question_event: asyncio.Event | None = None
         self._question_response: str | None = None
-        # Token usage accumulators (running totals across all turns)
-        self.input_tokens: int = 0
-        self.output_tokens: int = 0
-        self.cache_creation_input_tokens: int = 0
-        self.cache_read_input_tokens: int = 0
-        # Tool agent token usage (Claude Code / Codex)
-        self.tool_input_tokens: int = 0
-        self.tool_output_tokens: int = 0
-        self.tool_cost_usd: float = 0.0
+        # Token usage accumulators (running totals across all turns).  Stored on
+        # a composed object; the historical flat attributes are re-exposed via
+        # delegating properties below.
+        self._tokens = SessionTokenAccumulator()
         # In-memory todo state — updated on each TodoWrite tool_use
         self._todos: list[dict[str, str]] = []
         # Reason why the session was paused (e.g. "max_turns"); None for manual pauses
@@ -193,12 +154,14 @@ class ActiveSession:
         # Cleared on the next successful project resolution. Not persisted to DB.
         self.project_name_error: str | None = None
         # Transient subprocess tracking — updated while a subprocess is running.
-        # Not persisted to DB; always None after session restore.
-        self.subprocess_started_at: datetime | None = None
-        self.subprocess_current_tool: str | None = None
-        self.subprocess_type: str | None = None
-        self.subprocess_display_name: str | None = None
-        self.subprocess_working_directory: str | None = None
+        # Not persisted to DB; always None after session restore.  The flat
+        # ``subprocess_*`` attributes are re-exposed via delegating properties.
+        self._subprocess = SessionSubprocessTracker()
+        # Live agent cwd — mirrors ``metadata["agent_cwd"]``.  Tracks where
+        # the managed agent (Claude Code / Codex / OpenCode) believes it is
+        # right now, updated on each Bash ``cd`` / ``git worktree …`` call.
+        # Used by the worktree-badge label and the session tooltip.
+        self.agent_cwd: str | None = None
         # Per-stream stack of pre-snapshots for Edit/Write diff computation.
         # Reset at the start of each stream; populated by agent_claude_code.
         self._pending_snapshots: list[tuple[str, str | None] | None] = []
@@ -219,10 +182,171 @@ class ActiveSession:
         # sequence have already been written to the DB by flush_dirty_sessions.
         self._last_flush_sequence: int = 0
         # In-memory mirror of the ``session_pending_messages`` DB table for this
-        # session.  Ordered by ``position`` ascending (FIFO).  Mutations go
-        # through :class:`SessionPendingMessageStore` which writes the DB then
-        # updates this list.  See ``Queued User Messages`` in ``docs/design/sessions.md``.
-        self.pending_user_messages: list[PendingMessage] = []
+        # session.  Mutations go through :class:`SessionPendingMessageStore`
+        # which writes the DB then updates this mirror.  See ``Queued User
+        # Messages`` in ``docs/design/sessions.md``.
+        self._pending = SessionPendingState()
+        # In-memory mirror of the agent's pending ScheduleWakeup calls
+        # (rows of ``session_scheduled_wakes``).  The badge label, the
+        # inline wakeup card, and ``broadcast_session_update`` all read from it.
+        self._wakes = SessionWakeMirror()
+
+    # ------------------------------------------------------------------
+    # Delegating properties — preserve the historical flat attribute surface
+    # while the underlying state lives on composed sub-objects (see
+    # :mod:`src.core.session_state`).
+    # ------------------------------------------------------------------
+
+    @property
+    def input_tokens(self) -> int:
+        """Running LLM input-token total."""
+        return self._tokens.input_tokens
+
+    @input_tokens.setter
+    def input_tokens(self, value: int) -> None:
+        """Set the LLM input-token total."""
+        self._tokens.input_tokens = value
+
+    @property
+    def output_tokens(self) -> int:
+        """Running LLM output-token total."""
+        return self._tokens.output_tokens
+
+    @output_tokens.setter
+    def output_tokens(self, value: int) -> None:
+        """Set the LLM output-token total."""
+        self._tokens.output_tokens = value
+
+    @property
+    def cache_creation_input_tokens(self) -> int:
+        """Running prompt-cache creation token total."""
+        return self._tokens.cache_creation_input_tokens
+
+    @cache_creation_input_tokens.setter
+    def cache_creation_input_tokens(self, value: int) -> None:
+        """Set the prompt-cache creation token total."""
+        self._tokens.cache_creation_input_tokens = value
+
+    @property
+    def cache_read_input_tokens(self) -> int:
+        """Running prompt-cache read token total."""
+        return self._tokens.cache_read_input_tokens
+
+    @cache_read_input_tokens.setter
+    def cache_read_input_tokens(self, value: int) -> None:
+        """Set the prompt-cache read token total."""
+        self._tokens.cache_read_input_tokens = value
+
+    @property
+    def tool_input_tokens(self) -> int:
+        """Running tool-agent input-token total."""
+        return self._tokens.tool_input_tokens
+
+    @tool_input_tokens.setter
+    def tool_input_tokens(self, value: int) -> None:
+        """Set the tool-agent input-token total."""
+        self._tokens.tool_input_tokens = value
+
+    @property
+    def tool_output_tokens(self) -> int:
+        """Running tool-agent output-token total."""
+        return self._tokens.tool_output_tokens
+
+    @tool_output_tokens.setter
+    def tool_output_tokens(self, value: int) -> None:
+        """Set the tool-agent output-token total."""
+        self._tokens.tool_output_tokens = value
+
+    @property
+    def tool_cost_usd(self) -> float:
+        """Running tool-agent cost in USD."""
+        return self._tokens.tool_cost_usd
+
+    @tool_cost_usd.setter
+    def tool_cost_usd(self, value: float) -> None:
+        """Set the tool-agent cost in USD."""
+        self._tokens.tool_cost_usd = value
+
+    @property
+    def subprocess_started_at(self) -> datetime | None:
+        """When the running subprocess started, or None."""
+        return self._subprocess.started_at
+
+    @subprocess_started_at.setter
+    def subprocess_started_at(self, value: datetime | None) -> None:
+        """Set the running-subprocess start time."""
+        self._subprocess.started_at = value
+
+    @property
+    def subprocess_started_at_iso(self) -> str | None:
+        """ISO-8601 string of the subprocess start time, or None when not running.
+
+        Convenience for ``SUBPROCESS_STATUS`` payloads: reading the
+        :attr:`subprocess_started_at` property does not narrow ``None`` away at
+        the call site, so this helper does the null-safe ``isoformat()`` once.
+        """
+        started_at = self._subprocess.started_at
+        return started_at.isoformat() if started_at is not None else None
+
+    @property
+    def subprocess_current_tool(self) -> str | None:
+        """Tool the running subprocess is currently executing, or None."""
+        return self._subprocess.current_tool
+
+    @subprocess_current_tool.setter
+    def subprocess_current_tool(self, value: str | None) -> None:
+        """Set the running-subprocess current tool."""
+        self._subprocess.current_tool = value
+
+    @property
+    def subprocess_type(self) -> str | None:
+        """Type of the running subprocess (claude_code / codex / opencode), or None."""
+        return self._subprocess.type
+
+    @subprocess_type.setter
+    def subprocess_type(self, value: str | None) -> None:
+        """Set the running-subprocess type."""
+        self._subprocess.type = value
+
+    @property
+    def subprocess_display_name(self) -> str | None:
+        """Display name of the running subprocess, or None."""
+        return self._subprocess.display_name
+
+    @subprocess_display_name.setter
+    def subprocess_display_name(self, value: str | None) -> None:
+        """Set the running-subprocess display name."""
+        self._subprocess.display_name = value
+
+    @property
+    def subprocess_working_directory(self) -> str | None:
+        """Working directory of the running subprocess, or None."""
+        return self._subprocess.working_directory
+
+    @subprocess_working_directory.setter
+    def subprocess_working_directory(self, value: str | None) -> None:
+        """Set the running-subprocess working directory."""
+        self._subprocess.working_directory = value
+
+    @property
+    def pending_user_messages(self) -> list[PendingMessage]:
+        """In-memory mirror of this session's queued user messages."""
+        return self._pending.messages
+
+    @pending_user_messages.setter
+    def pending_user_messages(self, value: list[PendingMessage]) -> None:
+        """Replace the queued-user-message mirror."""
+        self._pending.messages = value
+
+    @property
+    def scheduled_wakes(self) -> list[ScheduledWake]:
+        """In-memory mirror of this session's pending ScheduleWakeup calls."""
+        return self._wakes.wakes
+
+    @scheduled_wakes.setter
+    def scheduled_wakes(self, value: list[ScheduledWake]) -> None:
+        """Replace the scheduled-wake mirror."""
+        self._wakes.wakes = value
 
     @property
     def agent_type(self) -> str | None:
@@ -243,9 +367,11 @@ class ActiveSession:
 
     @property
     def todos(self) -> list[dict[str, str]]:
+        """Current in-memory todo list (from the latest TodoWrite)."""
         return list(self._todos)
 
     def update_todos(self, todos: list[dict[str, str]]) -> None:
+        """Replace the in-memory todo list."""
         self._todos = todos
 
     def touch(self) -> None:
@@ -254,6 +380,7 @@ class ActiveSession:
 
     @property
     def activity_state(self) -> ActivityState:
+        """Current activity state of the session."""
         return self._activity_state
 
     def set_activity(self, state: ActivityState) -> None:
@@ -271,11 +398,7 @@ class ActiveSession:
         (normal end, unexpected exit, cancel, pause, etc.) so the client
         hides the subprocess indicator bar.
         """
-        self.subprocess_started_at = None
-        self.subprocess_current_tool = None
-        self.subprocess_type = None
-        self.subprocess_display_name = None
-        self.subprocess_working_directory = None
+        self._subprocess.clear()
         self.buffer.push_ephemeral(
             MessageType.SUBPROCESS_STATUS,
             {"session_id": self.id, "subprocess_type": None},
@@ -318,54 +441,56 @@ class ActiveSession:
             return True
         if self._prompt_lock.locked():
             return True
+        # Paused sessions accept queued sends — they must be held
+        # until the user resumes, then drained in order.  Without this
+        # guard, a message that arrives during a pause would either
+        # auto-resume + skip the queue or be lost entirely.
+        if self.status == SessionStatus.PAUSED:
+            return True
         return self._activity_state != ActivityState.IDLE
 
     def pending_snapshot(self) -> list[dict[str, Any]]:
         """Return the current queue as a list of snapshot dicts (for ``session_update``)."""
-        return [p.to_snapshot() for p in self.pending_user_messages]
-
-    def _find_pending_index(self, queued_id: str) -> int | None:
-        for idx, p in enumerate(self.pending_user_messages):
-            if p.queued_id == queued_id:
-                return idx
-        return None
+        return self._pending.snapshot()
 
     def mirror_add_pending(self, entry: PendingMessage) -> None:
         """Insert *entry* into the in-memory queue at its ``position``."""
-        for idx, existing in enumerate(self.pending_user_messages):
-            if existing.position > entry.position:
-                self.pending_user_messages.insert(idx, entry)
-                return
-        self.pending_user_messages.append(entry)
+        self._pending.add(entry)
 
     def mirror_update_pending(self, queued_id: str, content: str, display_content: str, updated_at: datetime) -> None:
         """Update text fields on a queued entry."""
-        idx = self._find_pending_index(queued_id)
-        if idx is None:
-            return
-        entry = self.pending_user_messages[idx]
-        entry.content = content
-        entry.display_content = display_content
-        entry.updated_at = updated_at
+        self._pending.update(queued_id, content, display_content, updated_at)
 
     def mirror_remove_pending(self, queued_id: str) -> PendingMessage | None:
         """Remove the named entry and renumber positions densely from 0."""
-        idx = self._find_pending_index(queued_id)
-        if idx is None:
-            return None
-        removed = self.pending_user_messages.pop(idx)
-        for new_pos, entry in enumerate(self.pending_user_messages):
-            entry.position = new_pos
-        return removed
+        return self._pending.remove(queued_id)
 
     def mirror_clear_pending(self) -> list[PendingMessage]:
         """Drop all queued entries and return them (for per-entry cleanup by the caller)."""
-        dropped = list(self.pending_user_messages)
-        self.pending_user_messages.clear()
-        return dropped
+        return self._pending.clear()
+
+    # ------------------------------------------------------------------
+    # Scheduled wake mirror
+
+    def wakes_snapshot(self) -> list[dict[str, Any]]:
+        """Return the pending wake list as snapshot dicts."""
+        return self._wakes.snapshot()
+
+    def mirror_add_wake(self, entry: ScheduledWake) -> None:
+        """Insert *entry* into the in-memory wake list ordered by fire_at."""
+        self._wakes.add(entry)
+
+    def mirror_remove_wake(self, wake_id: str) -> ScheduledWake | None:
+        """Remove and return the named wake, or None if not present."""
+        return self._wakes.remove(wake_id)
+
+    def mirror_clear_wakes(self) -> list[ScheduledWake]:
+        """Drop all pending wakes; used on session end / cancel."""
+        return self._wakes.clear()
 
     @property
     def title(self) -> str | None:
+        """Human-readable session title, or None if not yet set."""
         return self._title
 
     @title.setter
@@ -380,6 +505,7 @@ class ActiveSession:
         self._dirty = True
 
     def set_active(self) -> None:
+        """Transition the session to the ACTIVE state."""
         if self.status in (
             SessionStatus.PAUSED,
             SessionStatus.COMPLETED,
@@ -395,6 +521,7 @@ class ActiveSession:
                 self._on_update()
 
     def set_executing(self) -> None:
+        """Transition the session to the EXECUTING state."""
         if self.status in (
             SessionStatus.PAUSED,
             SessionStatus.COMPLETED,
@@ -410,6 +537,7 @@ class ActiveSession:
                 self._on_update()
 
     def complete(self) -> None:
+        """Mark the session COMPLETED."""
         if self.status == SessionStatus.PAUSED:
             self.metadata["completed_while_paused"] = True
             return
@@ -422,6 +550,7 @@ class ActiveSession:
             self._on_update()
 
     def fail(self, error: str | None = None) -> None:
+        """Mark the session FAILED, optionally recording an error message."""
         self.status = SessionStatus.FAILED
         self._activity_state = ActivityState.IDLE
         self.ended_at = datetime.now(UTC)
@@ -434,6 +563,7 @@ class ActiveSession:
             self._on_update()
 
     def cancel(self) -> None:
+        """Mark the session CANCELLED."""
         self.status = SessionStatus.CANCELLED
         self._activity_state = ActivityState.IDLE
         self.ended_at = datetime.now(UTC)
@@ -525,6 +655,7 @@ class SessionManager:
         self._update_subscribers: dict[str, asyncio.Queue[dict[str, Any] | None]] = {}
 
     def create_session(self, session_type: SessionType = SessionType.ONE_SHOT) -> ActiveSession:
+        """Create, register, and return a new active session."""
         session_id = str(uuid.uuid4())
         session = ActiveSession(session_id, session_type)
         # Assign sort_order so new sessions appear at the top of the list.
@@ -573,6 +704,7 @@ class SessionManager:
             "paused_reason": session.paused_reason,
             "worktree": session.metadata.get("worktree"),
             "selected_worktree_path": session.metadata.get("selected_worktree_path"),
+            "agent_cwd": session.metadata.get("agent_cwd"),
             "main_project_path": session.main_project_path,
             "project_name_error": session.project_name_error,
             "agent_type": session.agent_type,
@@ -585,6 +717,9 @@ class SessionManager:
             # their local pinned-at-bottom queue from this list on every
             # receipt (reconnect-safe).
             "queued_messages": session.pending_snapshot(),
+            # Pending ``ScheduleWakeup`` calls — drives the wake badge
+            # and the inline wakeup-card replay on subscribe.
+            "scheduled_wakes": session.wakes_snapshot(),
         }
         for queue in self._update_subscribers.values():
             queue.put_nowait(update)
@@ -638,13 +773,16 @@ class SessionManager:
             queue.put_nowait(msg)
 
     def get_session(self, session_id: str) -> ActiveSession | None:
+        """Return the active session with *session_id*, or None."""
         return self._sessions.get(session_id)
 
     def list_active_sessions(self) -> list[ActiveSession]:
+        """Return all non-terminal in-memory sessions."""
         terminal = (SessionStatus.COMPLETED, SessionStatus.FAILED, SessionStatus.CANCELLED)
         return [s for s in self._sessions.values() if s.status not in terminal]
 
     def list_all_sessions(self) -> list[ActiveSession]:
+        """Return every in-memory session (active and terminal)."""
         return list(self._sessions.values())
 
     def compute_session_badges(self, session: ActiveSession) -> list[dict[str, Any]]:
@@ -869,6 +1007,7 @@ class SessionManager:
                     "tool_cost_usd": s.tool_cost_usd,
                     "worktree": s.metadata.get("worktree"),
                     "selected_worktree_path": s.metadata.get("selected_worktree_path"),
+                    "agent_cwd": s.metadata.get("agent_cwd"),
                     "main_project_path": s.main_project_path,
                     "agent_type": s.agent_type,
                     "sort_order": s.sort_order,
@@ -911,6 +1050,7 @@ class SessionManager:
                         "tool_cost_usd": row.tool_cost_usd or 0.0,
                         "worktree": archived_meta.get("worktree"),
                         "selected_worktree_path": archived_meta.get("selected_worktree_path"),
+                        "agent_cwd": archived_meta.get("agent_cwd"),
                         "main_project_path": row.main_project_path,
                         "agent_type": None,
                         "sort_order": row.sort_order,

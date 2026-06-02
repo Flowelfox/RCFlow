@@ -1,3 +1,5 @@
+"""HTTP routes for coding-agent CLI authentication (Claude Code / Codex login)."""
+
 from __future__ import annotations
 
 import asyncio
@@ -115,7 +117,7 @@ async def _stream_browser_auth(binary_path: str, config_dir: Path) -> AsyncGener
         return
 
     try:
-        assert proc.stdout is not None
+        assert proc.stdout is not None  # noqa: S101
         deadline = asyncio.get_event_loop().time() + _CODEX_LOGIN_TIMEOUT
         url_sent = False
 
@@ -212,7 +214,7 @@ async def _stream_device_auth(binary_path: str, config_dir: Path) -> AsyncGenera
     found_code: str | None = None
 
     try:
-        assert proc.stdout is not None
+        assert proc.stdout is not None  # noqa: S101
         deadline = asyncio.get_event_loop().time() + _CODEX_LOGIN_TIMEOUT
 
         while True:
@@ -341,7 +343,7 @@ async def codex_login_status(request: Request) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 _CLAUDE_OAUTH_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
-_CLAUDE_OAUTH_TOKEN_URL = "https://platform.claude.com/v1/oauth/token"
+_CLAUDE_OAUTH_TOKEN_URL = "https://platform.claude.com/v1/oauth/token"  # noqa: S105
 _CLAUDE_OAUTH_AUTHORIZE_URL = "https://claude.ai/oauth/authorize"
 _CLAUDE_OAUTH_REDIRECT_URI = "https://platform.claude.com/oauth/code/callback"
 _CLAUDE_OAUTH_SCOPES = "org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers"

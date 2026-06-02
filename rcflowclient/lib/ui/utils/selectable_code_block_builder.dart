@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:markdown/markdown.dart' as md;
+import '../../theme/spacing.dart';
 
 /// Custom code-block builder that renders `<pre>` content as a plain [Text]
 /// widget instead of wrapping it in a [SingleChildScrollView].
@@ -31,7 +32,7 @@ class SelectableCodeBlockBuilder extends MarkdownElementBuilder {
     // Strip trailing newline that the Markdown parser appends.
     final code = text.text.replaceAll(RegExp(r'\n$'), '');
     return Padding(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(kSpace3),
       child: Text.rich(
         TextSpan(style: preferredStyle ?? textStyle, text: code),
       ),

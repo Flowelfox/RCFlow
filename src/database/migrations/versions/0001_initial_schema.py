@@ -1,4 +1,4 @@
-"""initial schema (squashed)
+"""initial schema (squashed).
 
 Squashes all previous migrations into a single initial migration that
 creates the full database schema in one shot.

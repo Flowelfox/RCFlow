@@ -1,3 +1,5 @@
+"""SQLAlchemy model for per-session input drafts."""
+
 import uuid
 from datetime import datetime
 

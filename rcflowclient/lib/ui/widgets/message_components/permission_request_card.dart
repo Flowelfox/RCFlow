@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../../../models/ws_messages.dart';
 import '../../../state/pane_state.dart';
 import '../../../theme.dart';
+import '../../../theme/spacing.dart';
 
 /// Card shown when Claude Code or Codex requests permission to use a tool.
 ///
@@ -61,7 +62,7 @@ class _PermissionRequestCardState extends State<PermissionRequestCard> {
     final riskLevel = metadata['risk_level'] as String? ?? 'medium';
 
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.symmetric(vertical: kSpace2),
       child: Container(
         width: double.infinity,
         padding: const EdgeInsets.all(14),
@@ -101,7 +102,7 @@ class _PermissionRequestCardState extends State<PermissionRequestCard> {
               color: _riskIconColor(context, riskLevel),
               size: 18,
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: kGapTight),
             Expanded(
               child: Text(
                 'Permission Request',
@@ -114,10 +115,10 @@ class _PermissionRequestCardState extends State<PermissionRequestCard> {
             ),
             // Risk badge
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              padding: const EdgeInsets.symmetric(horizontal: kSpace2, vertical: 2),
               decoration: BoxDecoration(
                 color: _riskBgColor(context, riskLevel).withAlpha(120),
-                borderRadius: BorderRadius.circular(6),
+                borderRadius: BorderRadius.circular(kRadiusSmall),
               ),
               child: Text(
                 riskLevel.toUpperCase(),
@@ -176,7 +177,7 @@ class _PermissionRequestCardState extends State<PermissionRequestCard> {
                 fontSize: 12,
               ),
             ),
-            SizedBox(width: 4),
+            SizedBox(width: kGapInline),
             Expanded(
               child: DropdownButton<String>(
                 value: _selectedScope,
@@ -205,7 +206,7 @@ class _PermissionRequestCardState extends State<PermissionRequestCard> {
             ),
           ],
         ),
-        SizedBox(height: 12),
+        SizedBox(height: kGapRelaxed),
 
         // Buttons
         Row(
@@ -217,9 +218,9 @@ class _PermissionRequestCardState extends State<PermissionRequestCard> {
                   foregroundColor: context.appColors.errorText,
                   side: BorderSide(color: context.appColors.errorText),
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(kRadiusMedium),
                   ),
-                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  padding: const EdgeInsets.symmetric(vertical: kSpace3),
                 ),
                 child: const Text(
                   'Deny',
@@ -234,9 +235,9 @@ class _PermissionRequestCardState extends State<PermissionRequestCard> {
                 style: FilledButton.styleFrom(
                   backgroundColor: context.appColors.accent,
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(kRadiusMedium),
                   ),
-                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  padding: const EdgeInsets.symmetric(vertical: kSpace3),
                 ),
                 child: const Text(
                   'Allow',
@@ -248,7 +249,7 @@ class _PermissionRequestCardState extends State<PermissionRequestCard> {
         ),
 
         // Timeout indicator
-        SizedBox(height: 8),
+        SizedBox(height: kGapTight),
         Text(
           'Auto-deny in ${_secondsRemaining ~/ 60}:${(_secondsRemaining % 60).toString().padLeft(2, '0')}',
           style: TextStyle(color: context.appColors.textMuted, fontSize: 11),
@@ -270,7 +271,7 @@ class _PermissionRequestCardState extends State<PermissionRequestCard> {
               : context.appColors.errorText,
           size: 18,
         ),
-        SizedBox(width: 8),
+        SizedBox(width: kGapTight),
         Expanded(
           child: Text(
             '${allowed ? "Allowed" : "Denied"}: $description',

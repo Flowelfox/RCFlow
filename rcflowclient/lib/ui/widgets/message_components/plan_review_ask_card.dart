@@ -8,6 +8,7 @@ import '../../../theme.dart';
 import '../../utils/link_utils.dart';
 import '../../utils/markdown_copy_menu.dart';
 import '../../utils/selectable_code_block_builder.dart';
+import '../../../theme/spacing.dart';
 
 class PlanReviewAskCard extends StatefulWidget {
   final DisplayMessage message;
@@ -30,7 +31,7 @@ class _PlanReviewAskCardState extends State<PlanReviewAskCard> {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: EdgeInsets.symmetric(vertical: 8),
+      padding: EdgeInsets.symmetric(vertical: kSpace2),
       child: Container(
         width: double.infinity,
         padding: EdgeInsets.all(14),
@@ -57,7 +58,7 @@ class _PlanReviewAskCardState extends State<PlanReviewAskCard> {
               color: context.appColors.accentLight,
               size: 18,
             ),
-            SizedBox(width: 8),
+            SizedBox(width: kGapTight),
             Expanded(
               child: Text(
                 'Plan ready for review',
@@ -79,7 +80,7 @@ class _PlanReviewAskCardState extends State<PlanReviewAskCard> {
               color: context.appColors.bgOverlay,
               borderRadius: BorderRadius.circular(8),
             ),
-            child: MarkdownCopyMenu(
+            child: MessageSelectionArea(
               rawMarkdown: widget.message.content,
               child: MarkdownBody(
                 data: widget.message.content,
@@ -110,15 +111,15 @@ class _PlanReviewAskCardState extends State<PlanReviewAskCard> {
                   ),
                   codeblockDecoration: BoxDecoration(
                     color: context.appColors.toolBg,
-                    borderRadius: BorderRadius.circular(6),
+                    borderRadius: BorderRadius.circular(kRadiusSmall),
                   ),
-                  codeblockPadding: EdgeInsets.all(8),
+                  codeblockPadding: EdgeInsets.all(kSpace2),
                 ),
               ),
             ),
           ),
         ],
-        SizedBox(height: 12),
+        SizedBox(height: kGapRelaxed),
         if (_editing) ...[
           TextField(
             controller: _controller,
@@ -133,7 +134,7 @@ class _PlanReviewAskCardState extends State<PlanReviewAskCard> {
               hintText: 'Describe what to change...',
               isDense: true,
               contentPadding: EdgeInsets.symmetric(
-                horizontal: 12,
+                horizontal: kSpace3,
                 vertical: 10,
               ),
               fillColor: context.appColors.bgOverlay,
@@ -154,9 +155,9 @@ class _PlanReviewAskCardState extends State<PlanReviewAskCard> {
                     foregroundColor: context.appColors.textSecondary,
                     side: BorderSide(color: context.appColors.divider),
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
+                      borderRadius: BorderRadius.circular(kRadiusMedium),
                     ),
-                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    padding: const EdgeInsets.symmetric(vertical: kSpace3),
                   ),
                   child: const Text(
                     'Cancel',
@@ -180,9 +181,9 @@ class _PlanReviewAskCardState extends State<PlanReviewAskCard> {
                     backgroundColor: context.appColors.accent,
                     disabledBackgroundColor: context.appColors.bgElevated,
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
+                      borderRadius: BorderRadius.circular(kRadiusMedium),
                     ),
-                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    padding: const EdgeInsets.symmetric(vertical: kSpace3),
                   ),
                   child: const Text(
                     'Send Feedback',
@@ -202,9 +203,9 @@ class _PlanReviewAskCardState extends State<PlanReviewAskCard> {
                     foregroundColor: context.appColors.textSecondary,
                     side: BorderSide(color: context.appColors.divider),
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
+                      borderRadius: BorderRadius.circular(kRadiusMedium),
                     ),
-                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    padding: const EdgeInsets.symmetric(vertical: kSpace3),
                   ),
                   child: const Text(
                     'Edit',
@@ -224,9 +225,9 @@ class _PlanReviewAskCardState extends State<PlanReviewAskCard> {
                   style: FilledButton.styleFrom(
                     backgroundColor: context.appColors.accent,
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
+                      borderRadius: BorderRadius.circular(kRadiusMedium),
                     ),
-                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    padding: const EdgeInsets.symmetric(vertical: kSpace3),
                   ),
                   child: const Text(
                     'Approve',
@@ -251,7 +252,7 @@ class _PlanReviewAskCardState extends State<PlanReviewAskCard> {
               : context.appColors.accentLight,
           size: 18,
         ),
-        SizedBox(width: 8),
+        SizedBox(width: kGapTight),
         Expanded(
           child: Text(
             approved ? 'Plan approved' : 'Plan feedback sent',

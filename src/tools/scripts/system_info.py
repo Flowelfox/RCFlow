@@ -17,6 +17,7 @@ import sys
 
 
 def get_cpu() -> dict:
+    """Get cpu."""
     info: dict = {}
     if sys.platform == "win32":
         info["model"] = platform.processor() or "unknown"
@@ -56,6 +57,7 @@ def get_cpu() -> dict:
 
 
 def get_memory() -> dict:
+    """Get memory."""
     info: dict = {}
     if sys.platform == "win32":
         try:
@@ -104,6 +106,7 @@ def get_memory() -> dict:
 
 
 def get_disk() -> list[dict]:
+    """Get disk."""
     disks: list[dict] = []
     if sys.platform == "win32":
         try:
@@ -165,6 +168,7 @@ def get_disk() -> list[dict]:
 
 
 def get_network() -> list[dict]:
+    """Get network."""
     interfaces: list[dict] = []
     if sys.platform == "win32":
         try:
@@ -220,6 +224,7 @@ def get_network() -> list[dict]:
 
 
 def get_os() -> dict:
+    """Get os."""
     info: dict = {}
     info["system"] = platform.system()
     info["kernel"] = platform.release()
@@ -250,6 +255,7 @@ def get_os() -> dict:
 
 
 def main() -> None:
+    """Run the application entry point."""
     if len(sys.argv) < 2:
         print("Usage: python -m src.tools.scripts.system_info <category>", file=sys.stderr)
         sys.exit(1)

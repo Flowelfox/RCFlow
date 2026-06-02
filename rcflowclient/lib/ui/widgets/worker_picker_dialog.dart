@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import '../../state/app_state.dart';
 import '../../theme.dart';
+import '../../theme/spacing.dart';
 
 /// Shows a centered popup listing workers.
 /// Returns the selected worker ID, or null if dismissed.
@@ -147,13 +148,13 @@ class _WorkerPickerDialogState extends State<_WorkerPickerDialog> {
                   ),
                 ),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: kGapRelaxed),
               Divider(color: context.appColors.divider, height: 1),
 
               // Worker list
               if (!hasConnected)
                 Padding(
-                  padding: const EdgeInsets.all(24),
+                  padding: const EdgeInsets.all(kSpace5),
                   child: Column(
                     children: [
                       Icon(
@@ -161,7 +162,7 @@ class _WorkerPickerDialogState extends State<_WorkerPickerDialog> {
                         size: 32,
                         color: context.appColors.textMuted,
                       ),
-                      const SizedBox(height: 12),
+                      const SizedBox(height: kGapRelaxed),
                       Text(
                         'No connected workers',
                         style: TextStyle(
@@ -169,7 +170,7 @@ class _WorkerPickerDialogState extends State<_WorkerPickerDialog> {
                           fontSize: 14,
                         ),
                       ),
-                      const SizedBox(height: 4),
+                      const SizedBox(height: kGapInline),
                       Text(
                         'Connect a worker in Settings',
                         style: TextStyle(
@@ -185,7 +186,7 @@ class _WorkerPickerDialogState extends State<_WorkerPickerDialog> {
                   constraints: const BoxConstraints(maxHeight: 300),
                   child: ListView.builder(
                     shrinkWrap: true,
-                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    padding: const EdgeInsets.symmetric(vertical: kSpace2),
                     itemCount: _options.length,
                     itemBuilder: (ctx, index) {
                       final option = _options[index];
@@ -219,7 +220,7 @@ class _WorkerPickerDialogState extends State<_WorkerPickerDialog> {
                                   color: statusColor,
                                 ),
                               ),
-                              const SizedBox(width: 12),
+                              const SizedBox(width: kGapRelaxed),
                               Expanded(
                                 child: Text(
                                   option.name,
@@ -253,7 +254,7 @@ class _WorkerPickerDialogState extends State<_WorkerPickerDialog> {
               Padding(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 20,
-                  vertical: 12,
+                  vertical: kSpace3,
                 ),
                 child: Row(
                   children: [
@@ -264,7 +265,7 @@ class _WorkerPickerDialogState extends State<_WorkerPickerDialog> {
                         fontSize: 11,
                       ),
                     ),
-                    const SizedBox(width: 16),
+                    const SizedBox(width: kSpace4),
                     Text(
                       'Esc to cancel',
                       style: TextStyle(

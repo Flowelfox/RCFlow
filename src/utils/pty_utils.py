@@ -1,4 +1,4 @@
-"""Utilities for PTY-backed subprocess I/O.
+r"""Utilities for PTY-backed subprocess I/O.
 
 Unix-only. Provides:
 - ``configure_raw(fd)``  — set a PTY slave fd to raw mode (no echo, no line
@@ -61,7 +61,7 @@ def strip_ansi(text: str) -> str:
 
 
 def configure_raw(fd: int) -> None:
-    """Set a PTY slave file descriptor to raw mode.
+    r"""Set a PTY slave file descriptor to raw mode.
 
     Raw mode disables:
 
@@ -118,7 +118,7 @@ def set_winsize(fd: int, rows: int = 24, cols: int = 220) -> None:
 
 
 class PtyLineReader:
-    """Asynchronous line reader backed by a PTY master file descriptor.
+    r"""Asynchronous line reader backed by a PTY master file descriptor.
 
     Uses ``asyncio.get_event_loop().add_reader()`` to receive data-ready
     notifications from the OS.  When bytes arrive, they are appended to an
@@ -153,7 +153,7 @@ class PtyLineReader:
     # Internal event-loop callback
 
     def _on_readable(self) -> None:
-        """Invoked by the event loop when *master_fd* has data available."""
+        """Read available PTY output when *master_fd* becomes readable."""
         try:
             data = os.read(self._fd, 65536)
         except OSError as exc:
@@ -199,7 +199,7 @@ class PtyLineReader:
     # Public API
 
     async def readline(self) -> bytes:
-        """Return the next ``\\n``-terminated line from the PTY.
+        r"""Return the next ``\\n``-terminated line from the PTY.
 
         Blocks asynchronously (suspends the coroutine) until a complete line
         is available.  Returns ``b""`` on EOF.  Raises the underlying

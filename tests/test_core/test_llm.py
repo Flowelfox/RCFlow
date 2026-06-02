@@ -555,7 +555,8 @@ class TestRunAgenticLoop:
 
     async def test_loop_executes_tool_then_continues(self) -> None:
         """When the LLM requests a tool, it must be executed and the loop must
-        continue with a second turn."""
+        continue with a second turn.
+        """
         client = _make_llm_client("anthropic", "claude-sonnet-4-6")
 
         tc = ToolCallRequest(tool_use_id="t1", tool_name="echo", tool_input={"msg": "hello"})
@@ -588,7 +589,8 @@ class TestRunAgenticLoop:
 
     async def test_should_stop_after_tools_exits_loop(self) -> None:
         """When ``should_stop_after_tools`` returns True, the loop must not call
-        the LLM for a second turn."""
+        the LLM for a second turn.
+        """
         client = _make_llm_client("anthropic", "claude-sonnet-4-6")
 
         tc = ToolCallRequest(tool_use_id="t1", tool_name="echo", tool_input={})
@@ -611,7 +613,8 @@ class TestRunAgenticLoop:
 
     async def test_tool_exception_removes_orphaned_assistant_message(self) -> None:
         """If tool execution raises, the orphaned assistant message (with tool_use
-        blocks) must be removed from the conversation history to keep it valid."""
+        blocks) must be removed from the conversation history to keep it valid.
+        """
         client = _make_llm_client("anthropic", "claude-sonnet-4-6")
 
         tc = ToolCallRequest(tool_use_id="t1", tool_name="bad_tool", tool_input={})

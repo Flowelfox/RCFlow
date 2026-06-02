@@ -20,7 +20,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from src.core.agent_claude_code import (
-    ClaudeCodeAgentMixin,
+    ClaudeCodeAgent,
     _classify_monitor_termination,
     _is_monitor_terminal,
 )
@@ -109,11 +109,12 @@ def _make_executor_chunks(events: list[dict]):
     return _gen()
 
 
-def _make_mixin() -> ClaudeCodeAgentMixin:
-    mixin = ClaudeCodeAgentMixin.__new__(ClaudeCodeAgentMixin)
-    mixin._tool_settings = None
-    mixin._fire_text_artifact_scan = MagicMock()  # type: ignore[attr-defined]
-    return mixin
+def _make_mixin() -> ClaudeCodeAgent:
+    agent = ClaudeCodeAgent.__new__(ClaudeCodeAgent)
+    agent._r = MagicMock()
+    agent._r._tool_settings = None
+    agent._r._fire_text_artifact_scan = MagicMock()
+    return agent
 
 
 def _types(session: MagicMock) -> list[str]:

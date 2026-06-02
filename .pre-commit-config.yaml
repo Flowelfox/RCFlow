@@ -14,3 +14,11 @@ repos:
         language: system
         pass_filenames: false
         types: [python]
+
+      - id: pytest-fast
+        name: pytest-fast (core + executors)
+        entry: uv run pytest -x -q --no-cov tests/test_core tests/test_executors
+        language: system
+        pass_filenames: false
+        types: [python]
+        stages: [pre-commit]

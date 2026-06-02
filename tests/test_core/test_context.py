@@ -1,4 +1,4 @@
-"""Tests for src/core/context.py (ContextMixin).
+"""Tests for src/core/context.py (ContextBuilder).
 
 Covers:
 - ``_format_file_size`` — byte formatting helper
@@ -17,10 +17,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 from src.core.buffer import MessageType
-from src.core.context import ContextMixin, _format_file_size
+from src.core.context import ContextBuilder, _format_file_size
 from src.core.session import ActiveSession, SessionStatus, SessionType
 
 if TYPE_CHECKING:
@@ -31,8 +31,8 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 
-class _ContextHost(ContextMixin):
-    """Minimal concrete subclass used by all tests in this module."""
+class _ContextHost(ContextBuilder):
+    """ContextBuilder over a mock router carrying the shared attributes/helpers."""
 
     def __init__(
         self,
@@ -40,12 +40,11 @@ class _ContextHost(ContextMixin):
         settings: MagicMock | None = None,
         db_session_factory=None,
     ) -> None:
-        self._tool_registry = tool_registry or MagicMock()
-        self._settings = settings
-        self._db_session_factory = db_session_factory
-
-    async def _execute_tool(self, session, tool_call):
-        """Stub — not exercised here."""
+        router = MagicMock()
+        router._tool_registry = tool_registry or MagicMock()
+        router._settings = settings
+        router._db_session_factory = db_session_factory
+        super().__init__(router)
 
 
 # ---------------------------------------------------------------------------
@@ -493,14 +492,19 @@ class TestIsBareAgentMention:
 
 
 class _DirectModeHost(_ContextHost):
-    """Host that records fire_archive_task invocations for assertions."""
+    """Host that records fire_archive_task invocations for assertions.
+
+    Direct-mode helpers (`_execute_tool`, `_fire_archive_task`,
+    `_fire_persist_session_metadata`) are reached through the router back-ref,
+    so they are configured on ``self._r`` rather than on the builder.
+    """
 
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self.archived_session_ids: list[str] = []
-
-    def _fire_archive_task(self, session_id: str) -> None:
-        self.archived_session_ids.append(session_id)
+        self._r._fire_archive_task = self.archived_session_ids.append
+        self._r._execute_tool = AsyncMock()
+        self._r._fire_persist_session_metadata = MagicMock()
 
 
 class TestHandleDirectPromptParseFailure:

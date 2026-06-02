@@ -31,7 +31,7 @@ def settings(tmp_path: Path) -> Settings:
 
 @pytest.fixture
 def md_only_settings(tmp_path: Path) -> Settings:
-    """Settings with the default *.md include pattern."""
+    """Return settings with the default *.md include pattern."""
     return Settings(
         RCFLOW_HOST="127.0.0.1",
         RCFLOW_PORT=8765,

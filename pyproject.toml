@@ -77,10 +77,10 @@ omit = ["src/__main__.py"]
 [tool.coverage.report]
 show_missing = true
 skip_empty = true
-fail_under = 0
+fail_under = 54
 
 [tool.ty.src]
-exclude = ["scripts/", "src/gui/macos.py", "src/gui_macos.py"]
+exclude = ["scripts/", "src/gui/macos.py"]
 
 [[tool.ty.overrides]]
 include = ["tests/test_api/**"]
@@ -92,18 +92,63 @@ line-length = 120
 
 [tool.ruff.lint]
 select = [
-    "E",    # pycodestyle errors
-    "W",    # pycodestyle warnings
-    "F",    # pyflakes
-    "I",    # isort
-    "N",    # pep8-naming
-    "UP",   # pyupgrade
-    "B",    # flake8-bugbear
-    "SIM",  # flake8-simplify
-    "TCH",  # flake8-type-checking
-    "RUF",  # ruff-specific
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # pyflakes
+    "I",      # isort
+    "N",      # pep8-naming
+    "UP",     # pyupgrade
+    "B",      # flake8-bugbear
+    "SIM",    # flake8-simplify
+    "TCH",    # flake8-type-checking
+    "RUF",    # ruff-specific
     "PLC0415",  # import-outside-top-level
+    "C901",   # complexity
+    "ASYNC",  # flake8-async
+    "S",      # flake8-bandit (security)
+    "RET",    # flake8-return
+    "LOG",    # flake8-logging
+    "D",      # pydocstyle (docstring quality; see ignore list + convention)
+    # COM (trailing-comma) intentionally excluded — ruff's docs warn that
+    # COM812 / COM819 conflict with `ruff format` (which already handles
+    # trailing commas), so enabling both produces oscillating fixes.
 ]
+
+# Inherent to this CLI / WebSocket-server / build-tooling codebase. Enabling
+# the parent S rule still catches the high-signal subrules (hardcoded passwords,
+# tarfile unsafe extract, jinja autoescape, weak hashes, etc.).
+ignore = [
+    "S104",     # bind to 0.0.0.0 — intentional for the server listener
+    "S108",     # /tmp paths — used in tests and platform-specific bundling
+    "S110",     # try/except/pass — used for best-effort cleanup paths
+    "S310",     # urllib.request.urlopen — used for trusted release-asset fetches
+    "S603",     # subprocess without shell=False — we launch trusted CLIs
+    "S607",     # start-process with partial path — `claude`, `codex`, `opencode`
+    "S606",     # start-process without shell — intentional
+    "ASYNC240", # pathlib in async — synchronous fs calls are OK in our context
+    "D105",     # undocumented magic method — __eq__/__repr__ etc. are self-evident
+    "D107",     # undocumented __init__ — documented at the class level instead
+]
+
+# Complexity ratchet: the current ceiling is set high so that landing the rule
+# is a no-op for working code. Phase 2 (composition refactor) reduces this
+# organically by splitting the highest-complexity functions
+# (handle_prompt=43, ws_input_text=63, _relay_claude_code_stream=49, etc.).
+# Lower the ceiling step by step as those splits land.
+[tool.ruff.lint.pydocstyle]
+convention = "pep257"
+
+[tool.ruff.lint.mccabe]
+max-complexity = 70
+
+[tool.ruff.lint.per-file-ignores]
+# Tests use assert and rotate through local temp files / fake subprocesses.
+# Test functions/classes are self-documenting by name, so the docstring-content
+# rules (D1xx) don't apply.
+"tests/*" = ["S101", "S105", "S106", "D100", "D101", "D102", "D103", "D104", "D106", "D205"]
+# Database migrations are mechanically generated; complexity + docstring gates
+# don't fit generated code.
+"src/database/migrations/*" = ["C901", "D100", "D101", "D103"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["src"]

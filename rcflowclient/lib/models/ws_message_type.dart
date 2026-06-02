@@ -36,6 +36,9 @@ enum WsOutputType {
   monitorStart,
   monitorEvent,
   monitorEnd,
+  wakeupScheduled,
+  wakeupFired,
+  wakeupCancelled,
 
   // --- App-level (handled in AppState before pane dispatch) ---
   taskList,
@@ -89,6 +92,9 @@ enum WsOutputType {
       'monitor_start' => WsOutputType.monitorStart,
       'monitor_event' => WsOutputType.monitorEvent,
       'monitor_end' => WsOutputType.monitorEnd,
+      'wakeup_scheduled' => WsOutputType.wakeupScheduled,
+      'wakeup_fired' => WsOutputType.wakeupFired,
+      'wakeup_cancelled' => WsOutputType.wakeupCancelled,
       'task_list' => WsOutputType.taskList,
       'task_update' => WsOutputType.taskUpdate,
       'task_deleted' => WsOutputType.taskDeleted,

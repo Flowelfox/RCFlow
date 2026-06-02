@@ -1,4 +1,4 @@
-"""Tests for BackgroundTasksMixin._finalize_plan_session.
+"""Tests for BackgroundTasks._finalize_plan_session.
 
 Covers:
 - Returns early when plan_output_path metadata is missing
@@ -19,11 +19,10 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from sqlalchemy.exc import IntegrityError
 
-from src.core.background_tasks import BackgroundTasksMixin
+from src.core.background_tasks import BackgroundTasks
 from src.core.session import ActiveSession, SessionManager, SessionType
 
 if TYPE_CHECKING:
-    import asyncio
     from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -31,8 +30,8 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 
-class _Host(BackgroundTasksMixin):
-    """Minimal subclass for testing BackgroundTasksMixin in isolation."""
+class _Host(BackgroundTasks):
+    """BackgroundTasks over a mock router carrying the shared attributes."""
 
     def __init__(
         self,
@@ -40,13 +39,14 @@ class _Host(BackgroundTasksMixin):
         settings: MagicMock | None = None,
         session_manager: MagicMock | None = None,
     ) -> None:
-        self._db_session_factory = db_session_factory
-        self._settings = settings or _make_settings()
-        self._session_manager = session_manager or MagicMock()
-        self._pending_plan_finalization_tasks: set[asyncio.Task] = set()
-        # Other required attributes used by other methods (not under test here)
-        self._llm = None
-        self._pending_log_tasks: set = set()
+        router = MagicMock()
+        router._db_session_factory = db_session_factory
+        router._settings = settings or _make_settings()
+        router._session_manager = session_manager or MagicMock()
+        router._pending_plan_finalization_tasks = set()
+        router._llm = None
+        router._pending_log_tasks = set()
+        super().__init__(router)
 
 
 # ---------------------------------------------------------------------------
@@ -140,7 +140,7 @@ class TestFinalizePlanSessionGuards:
         session = _make_session(plan_output_path=str(plan_path), task_id=str(uuid.uuid4()))
         await host._finalize_plan_session(session)
         # No broadcast expected
-        host._session_manager.broadcast_task_update.assert_not_called()
+        host._r._session_manager.broadcast_task_update.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -248,7 +248,8 @@ class TestFinalizePlanSessionRaceCondition:
     @pytest.mark.asyncio
     async def test_integrity_error_on_insert_refetches_artifact(self, tmp_path: Path) -> None:
         """If flush raises IntegrityError (ArtifactScanner race), fall back to
-        a second SELECT to find the existing artifact."""
+        a second SELECT to find the existing artifact.
+        """
         plan_path = tmp_path / "plan.md"
         plan_path.write_text("# Plan")
 
@@ -284,7 +285,8 @@ class TestFinalizePlanSessionRaceCondition:
     @pytest.mark.asyncio
     async def test_existing_artifact_is_updated_not_inserted(self, tmp_path: Path) -> None:
         """When artifact already exists in DB (first SELECT finds it), update
-        its metadata in place rather than inserting a new row."""
+        its metadata in place rather than inserting a new row.
+        """
         plan_path = tmp_path / "plan.md"
         plan_path.write_text("# Plan")
 

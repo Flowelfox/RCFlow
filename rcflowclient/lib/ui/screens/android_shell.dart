@@ -10,6 +10,7 @@ import '../widgets/output_display.dart';
 import '../widgets/session_identity_bar.dart';
 import '../widgets/session_panel.dart';
 import '../widgets/settings_menu.dart';
+import '../../theme/spacing.dart';
 
 /// Root shell for Android — three-tab bottom navigation:
 ///   0 · Sessions  — scrollable session list with pull-to-refresh
@@ -125,7 +126,7 @@ class _SessionsTab extends StatelessWidget {
             tooltip: 'Refresh sessions',
             onPressed: () => context.read<AppState>().refreshSessions(),
           ),
-          const SizedBox(width: 4),
+          const SizedBox(width: kGapInline),
         ],
       ),
       body: SessionListPanel(onSessionSelected: onSessionSelected),
@@ -245,7 +246,7 @@ class _ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
           tooltip: 'Browse sessions',
           onPressed: onBrowseSessions,
         ),
-        const SizedBox(width: 4),
+        const SizedBox(width: kGapInline),
       ],
     );
   }
@@ -296,7 +297,7 @@ class _NoSessionView extends StatelessWidget {
                   fontWeight: FontWeight.w600,
                 ),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: kGapTight),
               Text(
                 'Select a session from the Sessions tab or start a new chat.',
                 textAlign: TextAlign.center,
@@ -307,8 +308,8 @@ class _NoSessionView extends StatelessWidget {
                 style: FilledButton.styleFrom(
                   backgroundColor: appColors.accent,
                   padding: const EdgeInsets.symmetric(
-                    horizontal: 24,
-                    vertical: 12,
+                    horizontal: kSpace5,
+                    vertical: kSpace3,
                   ),
                 ),
                 icon: const Icon(Icons.history_rounded, color: Colors.white),
@@ -318,7 +319,7 @@ class _NoSessionView extends StatelessWidget {
                 ),
                 onPressed: onBrowseSessions,
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: kGapRelaxed),
               OutlinedButton.icon(
                 icon: Icon(
                   Icons.add_rounded,
@@ -340,7 +341,7 @@ class _NoSessionView extends StatelessWidget {
                   ),
                   side: BorderSide(color: appColors.divider),
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(kRadiusMedium),
                   ),
                 ),
               ),

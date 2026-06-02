@@ -1,3 +1,5 @@
+"""Executor that runs the OpenCode CLI subprocess."""
+
 import asyncio
 import json
 import logging
@@ -60,10 +62,12 @@ class OpenCodeExecutor(BaseExecutor):
 
     @property
     def is_running(self) -> bool:
+        """Whether the process is currently running."""
         return self._process is not None and self._process.returncode is None
 
     @property
     def opencode_session_id(self) -> str | None:
+        """Return the opencode session id."""
         return self._session_id
 
     def _build_command(

@@ -5,6 +5,7 @@ import '../../models/session_info.dart';
 import '../../state/app_state.dart';
 import '../../state/pane_state.dart';
 import '../../theme.dart';
+import '../../theme/spacing.dart';
 
 /// Right-side dockable panel showing git worktree controls for the active
 /// session's repository.
@@ -189,7 +190,7 @@ class _WorktreePanelState extends State<WorktreePanel> {
           // Header
           Container(
             height: 36,
-            padding: const EdgeInsets.symmetric(horizontal: 12),
+            padding: const EdgeInsets.symmetric(horizontal: kSpace3),
             decoration: BoxDecoration(
               border: Border(
                   bottom: BorderSide(color: context.appColors.divider)),
@@ -238,7 +239,7 @@ class _WorktreePanelState extends State<WorktreePanel> {
           // Current branch info
           Container(
             padding:
-                const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                const EdgeInsets.symmetric(horizontal: kSpace3, vertical: 6),
             decoration: BoxDecoration(
               color: context.appColors.accent.withAlpha(10),
               border: Border(
@@ -251,7 +252,7 @@ class _WorktreePanelState extends State<WorktreePanel> {
                   children: [
                     Icon(Icons.call_split,
                         size: 12, color: context.appColors.textMuted),
-                    const SizedBox(width: 4),
+                    const SizedBox(width: kGapInline),
                     Expanded(
                       child: Text(
                         worktreeInfo.branch != null
@@ -266,11 +267,11 @@ class _WorktreePanelState extends State<WorktreePanel> {
                   ],
                 ),
                 if (selectedWorktreePath != null) ...[
-                  const SizedBox(height: 4),
+                  const SizedBox(height: kGapInline),
                   Row(
                     children: [
                       Icon(Icons.check_circle, size: 11, color: context.appColors.accent),
-                      const SizedBox(width: 4),
+                      const SizedBox(width: kGapInline),
                       Expanded(
                         child: Text(
                           'Active: ${selectedWorktreePath.split('/').last}',
@@ -309,13 +310,13 @@ class _WorktreePanelState extends State<WorktreePanel> {
       String repoPath, {String? selectedWorktreePath, String? sessionId}) {
     if (_loading) {
       return const Padding(
-        padding: EdgeInsets.all(12),
+        padding: EdgeInsets.all(kSpace3),
         child: LinearProgressIndicator(),
       );
     }
     if (_error != null) {
       return Padding(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(kSpace3),
         child: Text(_error!,
             style: TextStyle(
                 color: context.appColors.errorText, fontSize: 12)),
@@ -338,7 +339,7 @@ class _WorktreePanelState extends State<WorktreePanel> {
       );
     }
     return ListView.builder(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.symmetric(vertical: kSpace1),
       itemCount: _worktrees!.length,
       itemBuilder: (context, i) {
         final wt = _worktrees![i];
@@ -424,7 +425,7 @@ class _WorktreePanelState extends State<WorktreePanel> {
           // Header (same chrome as the populated state)
           Container(
             height: 36,
-            padding: const EdgeInsets.symmetric(horizontal: 12),
+            padding: const EdgeInsets.symmetric(horizontal: kSpace3),
             decoration: BoxDecoration(
               border: Border(
                   bottom: BorderSide(color: context.appColors.divider)),
@@ -462,7 +463,7 @@ class _WorktreePanelState extends State<WorktreePanel> {
                   children: [
                     Icon(Icons.device_hub_outlined,
                         color: context.appColors.textMuted, size: 36),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: kGapRelaxed),
                     Text(
                       'No worktree context',
                       style: TextStyle(
@@ -517,7 +518,7 @@ class _WorktreePanelState extends State<WorktreePanel> {
                     (v == null || v.trim().isEmpty) ? 'Required' : null,
                 autofocus: true,
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: kGapTight),
               TextFormField(
                 controller: baseCtrl,
                 decoration:
@@ -642,7 +643,7 @@ class _SmallIconBtn extends StatelessWidget {
         borderRadius: BorderRadius.circular(4),
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.all(4),
+          padding: const EdgeInsets.all(kSpace1),
           child: Icon(
             icon,
             size: iconSize,

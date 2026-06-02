@@ -1,3 +1,5 @@
+"""Logging configuration for the backend."""
+
 import logging
 import logging.config
 import sys
@@ -14,6 +16,7 @@ class MultiLineExceptionFormatter(logging.Formatter):
     """Formatter that gives each traceback line its own log prefix."""
 
     def format(self, record: logging.LogRecord) -> str:
+        """Format."""
         saved_exc_info = record.exc_info
         saved_exc_text = record.exc_text
         record.exc_info = None
@@ -42,6 +45,7 @@ class MultiLineExceptionFormatter(logging.Formatter):
 
 
 def setup_logging(settings: Settings) -> None:
+    """Set up application logging."""
     level = settings.LOG_LEVEL.upper()
 
     logs_folder = get_data_dir() / "logs"
@@ -162,7 +166,7 @@ def setup_logging(settings: Settings) -> None:
             datefmt=_DATE_FORMAT,
             stream=sys.stderr,
         )
-        logging.warning(
+        logging.getLogger(__name__).warning(
             "Could not configure file logging (%s: %s); falling back to console only",
             type(exc).__name__,
             exc,

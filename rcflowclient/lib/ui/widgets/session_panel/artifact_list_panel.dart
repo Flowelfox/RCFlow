@@ -6,6 +6,7 @@ import '../../../models/artifact_info.dart';
 import '../../../state/app_state.dart';
 import '../../../theme.dart';
 import 'helpers.dart';
+import '../../../theme/spacing.dart';
 
 /// Artifact list panel for the sidebar Artifacts tab.
 ///
@@ -134,7 +135,7 @@ class _ArtifactListPanelState extends State<ArtifactListPanel> {
                   color: context.appColors.textMuted,
                   size: 40,
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: kGapRelaxed),
                 Text(
                   'No artifacts yet',
                   style: TextStyle(
@@ -143,7 +144,7 @@ class _ArtifactListPanelState extends State<ArtifactListPanel> {
                     fontWeight: FontWeight.w600,
                   ),
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: kGapInline),
                 Text(
                   'Artifacts are extracted from\nsession messages',
                   textAlign: TextAlign.center,
@@ -388,7 +389,7 @@ class _ArtifactListPanelState extends State<ArtifactListPanel> {
     }
 
     return ListView(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.symmetric(vertical: kSpace1),
       children: children,
     );
   }
@@ -492,7 +493,7 @@ class _ArtifactListPanelState extends State<ArtifactListPanel> {
                 color: context.appColors.textSecondary,
                 size: 18,
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: kGapTight),
               Text(
                 'Open in pane',
                 style: TextStyle(color: context.appColors.textPrimary),
@@ -510,7 +511,7 @@ class _ArtifactListPanelState extends State<ArtifactListPanel> {
                 color: context.appColors.errorText,
                 size: 18,
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: kGapTight),
               Text(
                 'Delete artifact\u2026',
                 style: TextStyle(color: context.appColors.errorText),
@@ -541,7 +542,7 @@ class _ArtifactListPanelState extends State<ArtifactListPanel> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: context.appColors.bgSurface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(kRadiusLarge)),
         title: Text(
           'Delete Artifact',
           style: TextStyle(color: context.appColors.textPrimary, fontSize: 16),
@@ -626,7 +627,7 @@ class _ArtifactListPanelState extends State<ArtifactListPanel> {
                 color: context.appColors.errorText,
                 size: 18,
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: kGapTight),
               Text(
                 'Delete $count artifact${count == 1 ? '' : 's'}\u2026',
                 style: TextStyle(color: context.appColors.errorText),
@@ -644,7 +645,7 @@ class _ArtifactListPanelState extends State<ArtifactListPanel> {
                 color: context.appColors.textSecondary,
                 size: 18,
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: kGapTight),
               Text(
                 'Clear selection',
                 style: TextStyle(color: context.appColors.textPrimary),
@@ -670,7 +671,7 @@ class _ArtifactListPanelState extends State<ArtifactListPanel> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: context.appColors.bgSurface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(kRadiusLarge)),
         title: Text(
           'Delete $count artifact${count == 1 ? '' : 's'}',
           style: TextStyle(color: context.appColors.textPrimary, fontSize: 16),
@@ -739,7 +740,7 @@ class _ArtifactListPanelState extends State<ArtifactListPanel> {
     final count = _selectedArtifactIds.length;
     return Container(
       color: context.appColors.accent.withAlpha(18),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 5),
+      padding: const EdgeInsets.symmetric(horizontal: kSpace4, vertical: 5),
       child: Row(
         children: [
           Icon(
@@ -799,7 +800,7 @@ class _ArtifactListPanelState extends State<ArtifactListPanel> {
                     fontSize: 12,
                   ),
                   prefixIcon: Padding(
-                    padding: const EdgeInsets.only(left: 8, right: 4),
+                    padding: const EdgeInsets.only(left: kSpace2, right: kSpace1),
                     child: Icon(
                       Icons.search_rounded,
                       color: context.appColors.textMuted,
@@ -834,7 +835,7 @@ class _ArtifactListPanelState extends State<ArtifactListPanel> {
                   filled: true,
                   fillColor: context.appColors.bgElevated,
                   contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 8,
+                    horizontal: kSpace2,
                     vertical: 0,
                   ),
                   border: OutlineInputBorder(
@@ -880,7 +881,7 @@ class _ArtifactListPanelState extends State<ArtifactListPanel> {
                 },
               ),
             ),
-            const SizedBox(width: 4),
+            const SizedBox(width: kGapInline),
             SizedBox(
               width: 30,
               height: 30,
@@ -923,7 +924,7 @@ class _ArtifactListPanelState extends State<ArtifactListPanel> {
             color: context.appColors.textMuted,
             size: 32,
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: kGapTight),
           Text(
             'No matching artifacts',
             style: TextStyle(
@@ -931,7 +932,7 @@ class _ArtifactListPanelState extends State<ArtifactListPanel> {
               fontSize: 13,
             ),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: kGapInline),
           GestureDetector(
             onTap: () {
               _searchController.clear();
@@ -1024,7 +1025,7 @@ class _WorkerHeader extends StatelessWidget {
     return InkWell(
       onTap: onToggle,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: kSpace4, vertical: 6),
         child: Row(
           children: [
             Icon(
@@ -1090,7 +1091,7 @@ class _ProjectHeader extends StatelessWidget {
               color: context.appColors.textMuted,
               size: 16,
             ),
-            const SizedBox(width: 4),
+            const SizedBox(width: kGapInline),
             Icon(
               projectName != null
                   ? Icons.folder_outlined
@@ -1098,7 +1099,7 @@ class _ProjectHeader extends StatelessWidget {
               color: context.appColors.textMuted,
               size: 14,
             ),
-            const SizedBox(width: 4),
+            const SizedBox(width: kGapInline),
             Expanded(
               child: Text(
                 '$label ($artifactCount)',

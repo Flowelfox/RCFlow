@@ -75,14 +75,16 @@ class TestSettingsPersistence:
     def test_empty_model_stripped_on_write(self, manager: ToolSettingsManager):
         """Empty model string must not be persisted — upstream CLIs forward it
         to the API and trigger a 400 ("model: String should have at least 1
-        character") instead of using their default model."""
+        character") instead of using their default model.
+        """
         manager.update_settings("claude_code", {"model": ""})
         settings = manager.get_settings("claude_code")
         assert "model" not in settings
 
     def test_existing_empty_model_healed_on_next_update(self, manager: ToolSettingsManager):
         """Stale empty-model entries from prior versions are dropped the next
-        time settings are written, even when the update touches a different key."""
+        time settings are written, even when the update touches a different key.
+        """
         manager.update_settings("claude_code", {"model": "claude-sonnet-4-5-20250514"})
         # Simulate a stale empty-model entry on disk written by an older version.
         raw = manager.get_settings("claude_code")

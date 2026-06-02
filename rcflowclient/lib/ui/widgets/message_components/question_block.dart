@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../../models/ws_messages.dart';
 import '../../../state/pane_state.dart';
 import '../../../theme.dart';
+import '../../../theme/spacing.dart';
 
 /// Interactive question block for AskUserQuestion tool calls.
 class QuestionBlock extends StatefulWidget {
@@ -152,9 +153,9 @@ class _QuestionBlockState extends State<QuestionBlock> {
                   backgroundColor: context.appColors.accent,
                   disabledBackgroundColor: context.appColors.bgElevated,
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(kRadiusMedium),
                   ),
-                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  padding: const EdgeInsets.symmetric(vertical: kSpace3),
                 ),
                 child: const Text(
                   'Submit',
@@ -179,10 +180,10 @@ class _QuestionBlockState extends State<QuestionBlock> {
       children: [
         if (header != null) ...[
           Container(
-            padding: EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            padding: EdgeInsets.symmetric(horizontal: kSpace2, vertical: 3),
             decoration: BoxDecoration(
               color: context.appColors.accent.withAlpha(40),
-              borderRadius: BorderRadius.circular(6),
+              borderRadius: BorderRadius.circular(kRadiusSmall),
             ),
             child: Text(
               header,
@@ -218,7 +219,7 @@ class _QuestionBlockState extends State<QuestionBlock> {
         for (final opt in options)
           if (opt is Map<String, dynamic>) _buildOption(question, opt, multi),
         _buildOtherOption(question),
-        const SizedBox(height: 4),
+        const SizedBox(height: kGapInline),
       ],
     );
   }
@@ -256,7 +257,7 @@ class _QuestionBlockState extends State<QuestionBlock> {
         child: AnimatedContainer(
           duration: Duration(milliseconds: 150),
           width: double.infinity,
-          padding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          padding: EdgeInsets.symmetric(horizontal: kSpace3, vertical: 10),
           decoration: BoxDecoration(
             color: selected
                 ? context.appColors.accent.withAlpha(30)
@@ -337,7 +338,7 @@ class _QuestionBlockState extends State<QuestionBlock> {
         child: AnimatedContainer(
           duration: Duration(milliseconds: 150),
           width: double.infinity,
-          padding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          padding: EdgeInsets.symmetric(horizontal: kSpace3, vertical: 10),
           decoration: BoxDecoration(
             color: isOther
                 ? context.appColors.accent.withAlpha(30)
@@ -378,7 +379,7 @@ class _QuestionBlockState extends State<QuestionBlock> {
                 ],
               ),
               if (isOther) ...[
-                SizedBox(height: 8),
+                SizedBox(height: kGapTight),
                 TextField(
                   controller: _otherControllers[question],
                   style: TextStyle(
@@ -389,7 +390,7 @@ class _QuestionBlockState extends State<QuestionBlock> {
                     hintText: 'Type your answer...',
                     isDense: true,
                     contentPadding: EdgeInsets.symmetric(
-                      horizontal: 12,
+                      horizontal: kSpace3,
                       vertical: 10,
                     ),
                     fillColor: context.appColors.bgOverlay,
@@ -412,14 +413,14 @@ class _QuestionBlockState extends State<QuestionBlock> {
     final answers = widget.message.selectedAnswers ?? {};
 
     return Padding(
-      padding: EdgeInsets.symmetric(vertical: 4),
+      padding: EdgeInsets.symmetric(vertical: kSpace1),
       child: Container(
         decoration: BoxDecoration(
           color: context.appColors.toolBg,
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(kRadiusMedium),
           border: Border.all(color: context.appColors.divider),
         ),
-        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        padding: EdgeInsets.symmetric(horizontal: kSpace3, vertical: 10),
         child: Row(
           children: [
             Icon(
@@ -427,7 +428,7 @@ class _QuestionBlockState extends State<QuestionBlock> {
               color: context.appColors.successText,
               size: 16,
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: kGapTight),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,

@@ -21,7 +21,7 @@ class PromptBuilder:
         if not self._template_path.exists():
             msg = f"Template file not found: {self._template_path}"
             raise FileNotFoundError(msg)
-        self._env = Environment(
+        self._env = Environment(  # noqa: S701
             loader=FileSystemLoader(str(self._template_path.parent)),
             undefined=StrictUndefined,
             keep_trailing_newline=True,

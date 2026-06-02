@@ -1,3 +1,5 @@
+"""SQLAlchemy model for tasks and their session links."""
+
 from __future__ import annotations
 
 import uuid
@@ -15,6 +17,8 @@ if TYPE_CHECKING:
 
 
 class Task(Base):
+    """Task."""
+
     __tablename__ = "tasks"
     __table_args__ = (
         Index("ix_tasks_backend_id", "backend_id"),
@@ -49,6 +53,8 @@ class Task(Base):
 
 
 class TaskSession(Base):
+    """Task Session."""
+
     __tablename__ = "task_sessions"
     __table_args__ = (UniqueConstraint("task_id", "session_id"),)
 

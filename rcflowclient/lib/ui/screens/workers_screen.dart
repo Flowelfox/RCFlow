@@ -8,6 +8,7 @@ import '../../theme.dart';
 import '../dialogs/worker_edit_dialog.dart';
 import '../widgets/custom_title_bar.dart';
 import 'server_config_screen.dart';
+import '../../theme/spacing.dart';
 
 void showWorkersScreen(BuildContext context) {
   Navigator.of(context).push(MaterialPageRoute(builder: (_) => _WorkersPage()));
@@ -46,7 +47,7 @@ class _WorkersPage extends StatelessWidget {
             actions: [
               Consumer<AppState>(
                 builder: (context, state, _) => Padding(
-                  padding: const EdgeInsets.only(right: 12),
+                  padding: const EdgeInsets.only(right: kSpace3),
                   child: FilledButton.icon(
                     onPressed: () async {
                       final config = await showWorkerEditDialog(
@@ -63,11 +64,11 @@ class _WorkersPage extends StatelessWidget {
                       backgroundColor: context.appColors.accent,
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 8,
+                        horizontal: kSpace4,
+                        vertical: kSpace2,
                       ),
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
+                        borderRadius: BorderRadius.circular(kRadiusMedium),
                       ),
                     ),
                   ),
@@ -77,7 +78,7 @@ class _WorkersPage extends StatelessWidget {
           ),
           const Expanded(
             child: Padding(
-              padding: EdgeInsets.all(24),
+              padding: EdgeInsets.all(kSpace5),
               child: _WorkersContent(),
             ),
           ),
@@ -202,10 +203,10 @@ class _WorkersContentState extends State<_WorkersContent> {
             children: [
               Container(
                 width: double.infinity,
-                padding: EdgeInsets.all(24),
+                padding: EdgeInsets.all(kSpace5),
                 decoration: BoxDecoration(
                   color: context.appColors.bgElevated,
-                  borderRadius: BorderRadius.circular(14),
+                  borderRadius: BorderRadius.circular(kRadiusLarge),
                 ),
                 child: Column(
                   children: [
@@ -214,7 +215,7 @@ class _WorkersContentState extends State<_WorkersContent> {
                       color: context.appColors.textMuted,
                       size: 40,
                     ),
-                    SizedBox(height: 12),
+                    SizedBox(height: kGapRelaxed),
                     Text(
                       'No workers configured',
                       style: TextStyle(
@@ -222,7 +223,7 @@ class _WorkersContentState extends State<_WorkersContent> {
                         fontSize: 14,
                       ),
                     ),
-                    SizedBox(height: 4),
+                    SizedBox(height: kGapInline),
                     Text(
                       'Add a worker to connect to an RCFlow server',
                       style: TextStyle(
@@ -243,14 +244,14 @@ class _WorkersContentState extends State<_WorkersContent> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _buildFilterBar(context),
-            const SizedBox(height: 12),
+            const SizedBox(height: kGapRelaxed),
             Expanded(
               child: filtered.isEmpty && _hasActiveFilters
                   ? _buildNoResults(context)
                   : ListView.separated(
                       itemCount: filtered.length,
                       separatorBuilder: (context, index) =>
-                          const SizedBox(height: 8),
+                          const SizedBox(height: kGapTight),
                       itemBuilder: (context, index) {
                         final (config, worker) = filtered[index];
                         return _WorkerCard(
@@ -350,28 +351,28 @@ class _WorkersContentState extends State<_WorkersContent> {
               filled: true,
               fillColor: context.appColors.bgElevated,
               contentPadding: const EdgeInsets.symmetric(
-                horizontal: 12,
+                horizontal: kSpace3,
                 vertical: 0,
               ),
               border: OutlineInputBorder(
                 borderSide: BorderSide.none,
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(kRadiusMedium),
               ),
               enabledBorder: OutlineInputBorder(
                 borderSide: BorderSide.none,
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(kRadiusMedium),
               ),
               focusedBorder: OutlineInputBorder(
                 borderSide: BorderSide(
                   color: context.appColors.accent,
                   width: 1,
                 ),
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(kRadiusMedium),
               ),
             ),
           ),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: kGapTight),
         SizedBox(
           height: 28,
           child: Row(
@@ -431,7 +432,7 @@ class _WorkersContentState extends State<_WorkersContent> {
             color: context.appColors.textMuted,
             size: 40,
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: kGapRelaxed),
           Text(
             'No matching workers',
             style: TextStyle(
@@ -519,7 +520,7 @@ class _WorkerStatusFilterChip extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: kSpace1),
         decoration: BoxDecoration(
           color: selected ? color.withAlpha(40) : Colors.transparent,
           borderRadius: BorderRadius.circular(8),
@@ -585,10 +586,10 @@ class _WorkerCard extends StatelessWidget {
     };
 
     return Container(
-      padding: EdgeInsets.all(16),
+      padding: EdgeInsets.all(kSpace4),
       decoration: BoxDecoration(
         color: context.appColors.bgElevated,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(kRadiusLarge),
         border: status == WorkerConnectionStatus.connected
             ? Border.all(
                 color: context.appColors.successText.withAlpha(60),
@@ -630,14 +631,14 @@ class _WorkerCard extends StatelessWidget {
               ),
             ],
           ),
-          SizedBox(height: 8),
+          SizedBox(height: kGapTight),
           Text(
             '${config.hostWithPort}  \u00B7  $statusText',
             style: TextStyle(color: statusColor, fontSize: 12),
           ),
           if (worker?.serverOs != null)
             Padding(
-              padding: EdgeInsets.only(top: 4),
+              padding: EdgeInsets.only(top: kSpace1),
               child: Text(
                 'OS: ${worker!.serverOs}',
                 style: TextStyle(
@@ -648,7 +649,7 @@ class _WorkerCard extends StatelessWidget {
             ),
           if (config.autoConnect)
             Padding(
-              padding: EdgeInsets.only(top: 4),
+              padding: EdgeInsets.only(top: kSpace1),
               child: Text(
                 'Auto-connect: ON',
                 style: TextStyle(
@@ -657,7 +658,7 @@ class _WorkerCard extends StatelessWidget {
                 ),
               ),
             ),
-          const SizedBox(height: 12),
+          const SizedBox(height: kGapRelaxed),
           Wrap(
             spacing: 8,
             runSpacing: 4,

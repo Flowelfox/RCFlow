@@ -1,3 +1,5 @@
+"""Executor that runs the Claude Code CLI subprocess."""
+
 import asyncio
 import contextlib
 import json
@@ -25,7 +27,7 @@ if _HAS_PTY:
 
 
 class ClaudeCodeExecutor(BaseExecutor):
-    """Executor that manages a persistent Claude Code subprocess with bidirectional stream-json I/O.
+    r"""Executor that manages a persistent Claude Code subprocess with bidirectional stream-json I/O.
 
     On Unix (Linux/macOS), the subprocess is backed by a **PTY** by default so
     that Claude Code detects a real terminal on both stdin and stdout.  This
@@ -96,10 +98,12 @@ class ClaudeCodeExecutor(BaseExecutor):
 
     @property
     def is_running(self) -> bool:
+        """Whether the process is currently running."""
         return self._process is not None and self._process.returncode is None
 
     @property
     def session_id(self) -> str:
+        """Return the session id."""
         return self._session_id
 
     @property
@@ -330,7 +334,7 @@ class ClaudeCodeExecutor(BaseExecutor):
         resume: bool = False,
         prompt: str | None = None,
     ) -> asyncio.subprocess.Process:
-        """Spawn using a PTY so Claude Code detects a real terminal on stdin/stdout.
+        r"""Spawn using a PTY so Claude Code detects a real terminal on stdin/stdout.
 
         Architecture
         ------------

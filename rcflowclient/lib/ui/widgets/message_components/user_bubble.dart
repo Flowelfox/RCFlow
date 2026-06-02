@@ -6,6 +6,7 @@ import '../../../theme.dart';
 import '../../utils/link_utils.dart';
 import '../../utils/markdown_copy_menu.dart';
 import '../../utils/selectable_code_block_builder.dart';
+import '../../../theme/spacing.dart';
 
 class UserBubble extends StatelessWidget {
   final DisplayMessage message;
@@ -19,7 +20,7 @@ class UserBubble extends StatelessWidget {
       child: Align(
         alignment: Alignment.centerRight,
         child: Container(
-          padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          padding: EdgeInsets.symmetric(horizontal: kSpace4, vertical: kSpace3),
           decoration: BoxDecoration(
             color: context.appColors.userBubble,
             borderRadius: BorderRadius.only(
@@ -46,9 +47,9 @@ class UserBubble extends StatelessWidget {
                       ),
                   ],
                 ),
-                SizedBox(height: 8),
+                SizedBox(height: kGapTight),
               ],
-              MarkdownCopyMenu(
+              MessageSelectionArea(
                 rawMarkdown: message.content,
                 child: MarkdownBody(
                   data: message.content.replaceAll('\n', '  \n'),
@@ -79,7 +80,7 @@ class UserBubble extends StatelessWidget {
                       color: Colors.black.withValues(alpha: 0.25),
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    codeblockPadding: EdgeInsets.all(12),
+                    codeblockPadding: EdgeInsets.all(kSpace3),
                     a: TextStyle(color: context.appColors.accentLight),
                     listBullet: TextStyle(
                       color: context.appColors.textPrimary,
@@ -149,10 +150,10 @@ class _AttachmentChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: kSpace2, vertical: kSpace1),
       decoration: BoxDecoration(
         color: Colors.black.withValues(alpha: 0.2),
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(kRadiusSmall),
         border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
       ),
       child: Row(

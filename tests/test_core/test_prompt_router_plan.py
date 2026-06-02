@@ -54,14 +54,13 @@ def _make_router(
     db: AsyncMock | None = None,
     settings: MagicMock | None = None,
 ) -> PromptRouter:
-    router = PromptRouter(
+    return PromptRouter(
         llm_client=MagicMock(),
         session_manager=session_manager,
         tool_registry=MagicMock(),
         db_session_factory=_make_db_factory(db) if db is not None else None,
         settings=settings,
     )
-    return router
 
 
 # ---------------------------------------------------------------------------

@@ -10,9 +10,9 @@ import '../../state/pane_state.dart';
 import '../../theme.dart';
 import '../../tips.dart';
 import '../dialogs/worker_edit_dialog.dart';
-import '../utils/markdown_copy_menu.dart';
 import 'message_bubble.dart';
 import 'session_panel.dart';
+import '../../theme/spacing.dart';
 
 class OutputDisplay extends StatefulWidget {
   const OutputDisplay({super.key});
@@ -118,7 +118,7 @@ class _OutputDisplayState extends State<OutputDisplay> {
     required int remaining,
   }) {
     return Padding(
-      padding: EdgeInsets.symmetric(vertical: 8),
+      padding: EdgeInsets.symmetric(vertical: kSpace2),
       child: Center(
         child: loading
             ? SizedBox(
@@ -187,7 +187,7 @@ class _OutputDisplayState extends State<OutputDisplay> {
                       size: 48,
                       color: context.appColors.textMuted.withAlpha(80),
                     ),
-                    SizedBox(height: 16),
+                    SizedBox(height: kSpace4),
                     Text(
                       'Welcome to RCFlow',
                       style: TextStyle(
@@ -204,7 +204,7 @@ class _OutputDisplayState extends State<OutputDisplay> {
                         fontSize: 13,
                       ),
                     ),
-                    SizedBox(height: 24),
+                    SizedBox(height: kSpace5),
                     if (connected) ...[
                       FilledButton.icon(
                         onPressed: () => pane.startNewChat(),
@@ -214,15 +214,15 @@ class _OutputDisplayState extends State<OutputDisplay> {
                           backgroundColor: context.appColors.accent,
                           foregroundColor: Colors.white,
                           padding: const EdgeInsets.symmetric(
-                            horizontal: 24,
-                            vertical: 12,
+                            horizontal: kSpace5,
+                            vertical: kSpace3,
                           ),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),
                           ),
                         ),
                       ),
-                      SizedBox(height: 12),
+                      SizedBox(height: kGapRelaxed),
                       OutlinedButton.icon(
                         onPressed: () => showSessionSheet(context),
                         icon: Icon(Icons.history_rounded, size: 18),
@@ -231,8 +231,8 @@ class _OutputDisplayState extends State<OutputDisplay> {
                           foregroundColor: context.appColors.textSecondary,
                           side: BorderSide(color: context.appColors.divider),
                           padding: EdgeInsets.symmetric(
-                            horizontal: 24,
-                            vertical: 12,
+                            horizontal: kSpace5,
+                            vertical: kSpace3,
                           ),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),
@@ -266,7 +266,7 @@ class _OutputDisplayState extends State<OutputDisplay> {
                       size: 48,
                       color: context.appColors.textMuted.withAlpha(80),
                     ),
-                    SizedBox(height: 12),
+                    SizedBox(height: kGapRelaxed),
                     Text(
                       'Send a message to get started',
                       style: TextStyle(
@@ -310,41 +310,43 @@ class _OutputDisplayState extends State<OutputDisplay> {
             return _withLlmBanner(
               context,
               pane,
-              SelectionScope(
-                child: ListView.builder(
-                  controller: _scrollController,
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-                  itemCount: msgs.length + 1,
-                  itemBuilder: (context, index) {
-                    if (index == 0) {
-                      if (hasMore) {
-                        return _buildLoadMoreIndicator(
-                          loading: loadingMore,
-                          remaining: pane.totalMessageCount - msgs.length,
-                        );
-                      }
-                      return Padding(
-                        padding: EdgeInsets.symmetric(vertical: 12),
-                        child: Center(
-                          child: Text(
-                            'Beginning of session',
-                            style: TextStyle(
-                              color: context.appColors.textMuted,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ),
+              // Each assistant bubble owns its own `MessageSelectionArea`
+              // so the rawMarkdown for the copy action is unambiguous.
+              // The previous outer SelectionScope had no idea which
+              // message a selection came from and copied plain text only.
+              ListView.builder(
+                controller: _scrollController,
+                padding: const EdgeInsets.fromLTRB(kSpace4, kSpace2, kSpace4, kSpace4),
+                itemCount: msgs.length + 1,
+                itemBuilder: (context, index) {
+                  if (index == 0) {
+                    if (hasMore) {
+                      return _buildLoadMoreIndicator(
+                        loading: loadingMore,
+                        remaining: pane.totalMessageCount - msgs.length,
                       );
                     }
-                    final msg = msgs[index - 1];
-                    // ObjectKey by message identity — DisplayMessage instances
-                    // are stable across streaming (the same object grows in
-                    // place), so this lets Flutter reuse the existing element
-                    // and child state instead of treating each rebuild as a
-                    // brand-new list item.
-                    return MessageBubble(key: ObjectKey(msg), message: msg);
-                  },
-                ),
+                    return Padding(
+                      padding: EdgeInsets.symmetric(vertical: kSpace3),
+                      child: Center(
+                        child: Text(
+                          'Beginning of session',
+                          style: TextStyle(
+                            color: context.appColors.textMuted,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                    );
+                  }
+                  final msg = msgs[index - 1];
+                  // ObjectKey by message identity — DisplayMessage instances
+                  // are stable across streaming (the same object grows in
+                  // place), so this lets Flutter reuse the existing element
+                  // and child state instead of treating each rebuild as a
+                  // brand-new list item.
+                  return MessageBubble(key: ObjectKey(msg), message: msg);
+                },
               ),
             );
           },
@@ -366,7 +368,7 @@ class _OutputDisplayState extends State<OutputDisplay> {
                   duration: Duration(milliseconds: 250),
                   child: Container(
                     width: double.infinity,
-                    padding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                    padding: EdgeInsets.symmetric(horizontal: kSpace4, vertical: 10),
                     decoration: BoxDecoration(
                       color: context.appColors.bgElevated,
                       border: Border(
@@ -383,7 +385,7 @@ class _OutputDisplayState extends State<OutputDisplay> {
                             color: context.appColors.toolAccent,
                           ),
                         ),
-                        SizedBox(width: 12),
+                        SizedBox(width: kGapRelaxed),
                         Text(
                           'Reconnecting...',
                           style: TextStyle(
@@ -531,7 +533,7 @@ class _LlmNotConfiguredBanner extends StatelessWidget {
     final colors = context.appColors;
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: kSpace3, vertical: kSpace2),
       decoration: BoxDecoration(
         color: const Color(0xFFFFF7CC),
         border: Border(
@@ -545,7 +547,7 @@ class _LlmNotConfiguredBanner extends StatelessWidget {
             size: 18,
             color: Color(0xFF8A6D1A),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: kGapTight),
           const Expanded(
             child: Text(
               'LLM key is not configured.',
@@ -556,7 +558,7 @@ class _LlmNotConfiguredBanner extends StatelessWidget {
               ),
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: kGapTight),
           TextButton(
             onPressed: () => showWorkerEditDialog(
               context,
@@ -567,7 +569,7 @@ class _LlmNotConfiguredBanner extends StatelessWidget {
             ),
             style: TextButton.styleFrom(
               foregroundColor: const Color(0xFF8A6D1A),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              padding: const EdgeInsets.symmetric(horizontal: kSpace3, vertical: kSpace1),
               minimumSize: Size.zero,
               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
@@ -602,7 +604,7 @@ class _AgentNotConfiguredBanner extends StatelessWidget {
     final colors = context.appColors;
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: kSpace3, vertical: kSpace2),
       decoration: BoxDecoration(
         color: const Color(0xFFFFF7CC),
         border: Border(
@@ -616,7 +618,7 @@ class _AgentNotConfiguredBanner extends StatelessWidget {
             size: 18,
             color: Color(0xFF8A6D1A),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: kGapTight),
           Expanded(
             child: Text(
               issue,
@@ -627,7 +629,7 @@ class _AgentNotConfiguredBanner extends StatelessWidget {
               ),
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: kGapTight),
           TextButton(
             onPressed: () => showWorkerEditDialog(
               context,
@@ -638,7 +640,7 @@ class _AgentNotConfiguredBanner extends StatelessWidget {
             ),
             style: TextButton.styleFrom(
               foregroundColor: const Color(0xFF8A6D1A),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              padding: const EdgeInsets.symmetric(horizontal: kSpace3, vertical: kSpace1),
               minimumSize: Size.zero,
               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),

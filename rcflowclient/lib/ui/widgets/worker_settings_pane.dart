@@ -6,6 +6,7 @@ import '../../services/websocket_service.dart';
 import '../../state/app_state.dart';
 import '../../state/pane_state.dart';
 import '../../theme.dart';
+import '../../theme/spacing.dart';
 
 /// Full-pane worker settings view.
 ///
@@ -110,7 +111,7 @@ class _WorkerSettingsPaneHeader extends StatelessWidget {
             : context.appColors.bgSurface,
         border: Border(bottom: BorderSide(color: context.appColors.divider)),
       ),
-      padding: const EdgeInsets.symmetric(horizontal: 8),
+      padding: const EdgeInsets.symmetric(horizontal: kSpace2),
       child: Row(
         children: [
           if (appState.panes[paneId]?.canGoBack ?? false)
@@ -355,7 +356,7 @@ class _PluginsSectionState extends State<_PluginsSection> {
                 fontSize: 13,
               ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: kGapRelaxed),
             OutlinedButton(onPressed: _loadPlugins, child: const Text('Retry')),
           ],
         ),
@@ -371,7 +372,7 @@ class _PluginsSectionState extends State<_PluginsSection> {
       );
     }
     return ListView.separated(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.symmetric(vertical: kSpace2),
       itemCount: plugins.length,
       separatorBuilder: (_, _) =>
           Divider(height: 1, color: context.appColors.divider),
@@ -430,21 +431,21 @@ class _InstallBar extends StatelessWidget {
                     isDense: true,
                     contentPadding: const EdgeInsets.symmetric(
                       horizontal: 10,
-                      vertical: 8,
+                      vertical: kSpace2,
                     ),
                     border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(6),
+                      borderRadius: BorderRadius.circular(kRadiusSmall),
                       borderSide: BorderSide(color: context.appColors.divider),
                     ),
                     enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(6),
+                      borderRadius: BorderRadius.circular(kRadiusSmall),
                       borderSide: BorderSide(color: context.appColors.divider),
                     ),
                   ),
                   onSubmitted: (_) => onInstall(),
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: kGapTight),
               installing
                   ? const SizedBox(
                       width: 20,
@@ -460,9 +461,9 @@ class _InstallBar extends StatelessWidget {
                           style: TextStyle(fontSize: 12),
                         ),
                         style: ElevatedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          padding: const EdgeInsets.symmetric(horizontal: kSpace3),
                           shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(6),
+                            borderRadius: BorderRadius.circular(kRadiusSmall),
                           ),
                         ),
                         onPressed: onInstall,
@@ -471,7 +472,7 @@ class _InstallBar extends StatelessWidget {
             ],
           ),
           if (error != null) ...[
-            const SizedBox(height: 4),
+            const SizedBox(height: kGapInline),
             Text(
               error!,
               style: TextStyle(
@@ -512,7 +513,7 @@ class _PluginTile extends StatelessWidget {
     final enabled = plugin['enabled'] as bool? ?? true;
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: kSpace3, vertical: 6),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -559,7 +560,7 @@ class _PluginTile extends StatelessWidget {
                   ],
                 ),
                 if (commands.isNotEmpty) ...[
-                  const SizedBox(height: 4),
+                  const SizedBox(height: kGapInline),
                   Wrap(
                     spacing: 4,
                     runSpacing: 2,
@@ -618,7 +619,7 @@ class _PluginTile extends StatelessWidget {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: context.appColors.bgSurface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(kRadiusLarge)),
         title: const Text('Uninstall plugin'),
         content: Text('Remove "${plugin['name']}"? This cannot be undone.'),
         actions: [

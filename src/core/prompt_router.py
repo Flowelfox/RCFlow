@@ -1,19 +1,20 @@
 """Routes user prompts through the LLM pipeline with tool execution.
 
-The ``PromptRouter`` class is composed from five mixin modules:
+The ``PromptRouter`` is built entirely from composed collaborators it
+delegates to:
 
-- :class:`~src.core.session_lifecycle.SessionLifecycleMixin` — session
-  create/cancel/end/pause/resume/restore, permissions, inactivity reaper
-- :class:`~src.core.context.ContextMixin` — #tool, $file mention
-  extraction, project context building, direct tool mode
-- :class:`~src.core.agent_claude_code.ClaudeCodeAgentMixin` — Claude Code
+- :class:`~src.core.session_lifecycle.SessionLifecycle` (``self._lifecycle``) —
+  session create/cancel/end/pause/resume/restore, permissions, inactivity reaper
+- :class:`~src.core.context.ContextBuilder` (``self._context``) — #tool, $file
+  mention extraction, project context building, direct tool mode
+- :class:`~src.core.background_tasks.BackgroundTasks` (``self._background``) —
+  fire-and-forget logging, archiving, summaries, titles, tasks, artifacts
+- :class:`~src.core.agent_claude_code.ClaudeCodeAgent` (``self._claude``) —
+  Claude Code subprocess lifecycle
+- :class:`~src.core.agent_codex.CodexAgent` (``self._codex``) — Codex CLI
   subprocess lifecycle
-- :class:`~src.core.agent_codex.CodexAgentMixin` — Codex CLI subprocess
-  lifecycle
-- :class:`~src.core.agent_opencode.OpenCodeAgentMixin` — OpenCode CLI subprocess
-  lifecycle
-- :class:`~src.core.background_tasks.BackgroundTasksMixin` — fire-and-forget
-  background tasks (logging, archiving, summaries, titles, tasks, artifacts)
+- :class:`~src.core.agent_opencode.OpenCodeAgent` (``self._opencode``) —
+  OpenCode CLI subprocess lifecycle
 """
 
 import asyncio
@@ -21,24 +22,29 @@ import json
 import logging
 import os
 import uuid
+from collections.abc import AsyncGenerator
 from pathlib import Path
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from src.config import Settings
-from src.core.agent_claude_code import ClaudeCodeAgentMixin
-from src.core.agent_codex import CodexAgentMixin
-from src.core.agent_opencode import OpenCodeAgentMixin
+from src.core.agent_claude_code import ClaudeCodeAgent
+from src.core.agent_codex import CodexAgent
+from src.core.agent_opencode import OpenCodeAgent
 from src.core.agent_prompt import extract_code_blocks, format_agent_prompt
+from src.core.agents import MAX_TOOL_OUTPUT_CHARS, truncate_tool_output
 from src.core.attachment_store import ResolvedAttachment
-from src.core.background_tasks import BackgroundTasksMixin
+from src.core.background_tasks import BackgroundTasks
 from src.core.buffer import MessageType
-from src.core.context import ContextMixin
-from src.core.llm import LLMClient, StreamDone, TextChunk, ToolCallRequest, llm_configuration_issue
+from src.core.context import ContextBuilder
+from src.core.llm import LLMClient, StreamDone, TextChunk, ToolCallRequest, TurnUsage, llm_configuration_issue
 from src.core.pending_store import SessionPendingMessageStore
+from src.core.permissions import PermissionDecision
 from src.core.session import ActiveSession, ActivityState, SessionManager, SessionStatus, SessionType
-from src.core.session_lifecycle import SessionLifecycleMixin
+from src.core.session_lifecycle import SessionLifecycle
+from src.core.wakeup_scheduler import WakeupScheduler
+from src.core.wakeup_store import SessionScheduledWakeStore
 from src.database.models import Session as SessionModel
 from src.database.models import Task as TaskModel
 from src.database.models import TaskSession as TaskSessionModel
@@ -58,7 +64,7 @@ from src.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
 
-_MAX_TOOL_OUTPUT_CHARS = 100_000
+_MAX_TOOL_OUTPUT_CHARS = MAX_TOOL_OUTPUT_CHARS
 
 
 def _classify_llm_exception(exc: BaseException) -> tuple[str, str]:
@@ -81,11 +87,7 @@ def _classify_llm_exception(exc: BaseException) -> tuple[str, str]:
     return (str(exc), "PROMPT_PROCESSING_ERROR")
 
 
-def _truncate_tool_output(content: str) -> str:
-    """Truncate tool output that exceeds the size limit for client delivery."""
-    if len(content) > _MAX_TOOL_OUTPUT_CHARS:
-        return content[:_MAX_TOOL_OUTPUT_CHARS] + f"\n\n... (truncated, {len(content):,} total chars)"
-    return content
+_truncate_tool_output = truncate_tool_output
 
 
 def _build_planning_prompt(title: str, description: str, plan_path: Path) -> str:
@@ -114,15 +116,15 @@ def _build_planning_prompt(title: str, description: str, plan_path: Path) -> str
     return "\n".join(lines)
 
 
-class PromptRouter(
-    SessionLifecycleMixin,
-    ContextMixin,
-    ClaudeCodeAgentMixin,
-    CodexAgentMixin,
-    OpenCodeAgentMixin,
-    BackgroundTasksMixin,
-):
-    """Routes user prompts through the LLM pipeline with tool execution."""
+class PromptRouter:
+    """Routes user prompts through the LLM pipeline with tool execution.
+
+    Every concern is a composed collaborator that PromptRouter delegates to:
+    ``self._lifecycle`` (session lifecycle), ``self._context`` (context
+    building), ``self._background`` (fire-and-forget tasks), and
+    ``self._claude`` / ``self._codex`` / ``self._opencode`` (agent subprocess
+    lifecycles).
+    """
 
     def __init__(
         self,
@@ -136,6 +138,7 @@ class PromptRouter(
         artifact_scanner: ArtifactScanner | None = None,
         telemetry_service: TelemetryService | None = None,
         pending_store: SessionPendingMessageStore | None = None,
+        wakeup_store: SessionScheduledWakeStore | None = None,
     ) -> None:
         self._llm = llm_client
         self._session_manager = session_manager
@@ -148,6 +151,13 @@ class PromptRouter(
         self._artifact_scanner = artifact_scanner
         self._telemetry = telemetry_service
         self._pending_store = pending_store
+        self._wakeup_store = wakeup_store
+        # The scheduler is initialised lazily so the ``on_fire`` closure
+        # can capture ``self``.  It is created the first time a wake is
+        # armed (or on startup-recovery, whichever comes first).
+        self._wakeup_scheduler: WakeupScheduler | None = (
+            WakeupScheduler(self._fire_pending_wakeup) if wakeup_store is not None else None
+        )
         self._drain_tasks: set[asyncio.Task[None]] = set()
         # Holds strong references to in-flight ``handle_prompt`` tasks created
         # by the WebSocket input handler. Without this, the only reference to
@@ -166,6 +176,223 @@ class PromptRouter(
         self._pending_task_creation_tasks: set[asyncio.Task[None]] = set()
         self._pending_task_update_tasks: set[asyncio.Task[None]] = set()
         self._pending_plan_finalization_tasks: set[asyncio.Task[None]] = set()
+        # Composed collaborators (see their modules). PromptRouter delegates
+        # their public entry points so existing call sites stay unchanged.
+        self._background = BackgroundTasks(self)
+        self._context = ContextBuilder(self)
+        self._claude = ClaudeCodeAgent(self)
+        self._codex = CodexAgent(self)
+        self._opencode = OpenCodeAgent(self)
+        self._lifecycle = SessionLifecycle(self)
+
+    # ------------------------------------------------------------------
+    # Background-task delegation
+    #
+    # The fire-and-forget background work lives on the composed
+    # ``self._background`` collaborator; these thin wrappers preserve the
+    # historical ``router._fire_*`` / ``router._ensure_session_row_in_db``
+    # surface for the still-mixin agent/lifecycle code, the context
+    # collaborator, WebSocket / route handlers, and tests.
+    # ------------------------------------------------------------------
+
+    def _fire_log_task(
+        self,
+        *,
+        session_id: str,
+        usage: TurnUsage,
+        has_tool_calls: bool,
+        request_messages: list[dict[str, Any]],
+        response_text: str | None,
+    ) -> None:
+        self._background._fire_log_task(
+            session_id=session_id,
+            usage=usage,
+            has_tool_calls=has_tool_calls,
+            request_messages=request_messages,
+            response_text=response_text,
+        )
+
+    async def _ensure_session_row_in_db(self, session: ActiveSession) -> None:
+        await self._background._ensure_session_row_in_db(session)
+
+    def _fire_archive_task(self, session_id: str) -> None:
+        self._background._fire_archive_task(session_id)
+
+    def _fire_summary_task(self, session: ActiveSession, text: str) -> None:
+        self._background._fire_summary_task(session, text)
+
+    def _fire_title_task(self, session: ActiveSession, user_text: str, assistant_text: str) -> None:
+        self._background._fire_title_task(session, user_text, assistant_text)
+
+    def _fire_persist_session_metadata(self, session: ActiveSession) -> None:
+        self._background._fire_persist_session_metadata(session)
+
+    def _fire_task_creation_task(self, session: ActiveSession, user_text: str, assistant_text: str) -> None:
+        self._background._fire_task_creation_task(session, user_text, assistant_text)
+
+    def _fire_task_update_task(self, session: ActiveSession, session_result_text: str) -> None:
+        self._background._fire_task_update_task(session, session_result_text)
+
+    def _fire_task_update_on_session_end(self, session: ActiveSession) -> None:
+        self._background._fire_task_update_on_session_end(session)
+
+    def _fire_realtime_artifact_scan(self, session: ActiveSession) -> None:
+        self._background._fire_realtime_artifact_scan(session)
+
+    def _fire_text_artifact_scan(self, session: ActiveSession, texts: list[str]) -> None:
+        self._background._fire_text_artifact_scan(session, texts)
+
+    def _fire_plan_finalization_task(self, session: ActiveSession) -> None:
+        self._background._fire_plan_finalization_task(session)
+
+    @staticmethod
+    def _resolve_artifact_project(file_path: str, projects_dirs: list[Path]) -> str | None:
+        return BackgroundTasks._resolve_artifact_project(file_path, projects_dirs)
+
+    # ------------------------------------------------------------------
+    # Agent-subprocess delegation
+    #
+    # The Claude Code / Codex / OpenCode subprocess lifecycles live on composed
+    # collaborators; these wrappers preserve the historical ``router._start_*``
+    # / ``_forward_*`` / ``_end_*_session`` / ``_build_*_extra_env`` surface for
+    # the still-mixin session-lifecycle code, the agentic loop, WS/route
+    # handlers, and tests.
+    # ------------------------------------------------------------------
+
+    # --- Claude Code ---
+    def _build_claude_code_extra_env(self) -> dict[str, str]:
+        return self._claude._build_claude_code_extra_env()
+
+    async def _start_claude_code(
+        self, session: ActiveSession, tool_def: ToolDefinition, tool_call: ToolCallRequest
+    ) -> str:
+        return await self._claude._start_claude_code(session, tool_def, tool_call)
+
+    async def _handle_permission_check(
+        self, session: ActiveSession, tool_name: str, tool_input: dict[str, Any]
+    ) -> PermissionDecision:
+        return await self._claude._handle_permission_check(session, tool_name, tool_input)
+
+    async def _relay_claude_code_stream(
+        self, session: ActiveSession, stream: AsyncGenerator[ExecutionChunk, None]
+    ) -> None:
+        await self._claude._relay_claude_code_stream(session, stream)
+
+    async def _terminate_active_monitors(self, session: ActiveSession, reason: str) -> None:
+        await self._claude._terminate_active_monitors(session, reason)
+
+    async def cancel_monitor(self, session_id: str, monitor_id: str) -> None:
+        """Cancel monitor."""
+        await self._claude.cancel_monitor(session_id, monitor_id)
+
+    def _schedule_drain_after_stream_task(self, session: ActiveSession) -> None:
+        self._claude._schedule_drain_after_stream_task(session)
+
+    async def _end_claude_code_session(self, session: ActiveSession) -> None:
+        await self._claude._end_claude_code_session(session)
+
+    async def _forward_to_claude_code(self, session: ActiveSession, text: str) -> None:
+        await self._claude._forward_to_claude_code(session, text)
+
+    # --- Codex ---
+    def _build_codex_extra_env(self) -> dict[str, str]:
+        return self._codex._build_codex_extra_env()
+
+    async def _start_codex(self, session: ActiveSession, tool_def: ToolDefinition, tool_call: ToolCallRequest) -> str:
+        return await self._codex._start_codex(session, tool_def, tool_call)
+
+    async def _end_codex_session(self, session: ActiveSession) -> None:
+        await self._codex._end_codex_session(session)
+
+    async def _forward_to_codex(self, session: ActiveSession, text: str) -> None:
+        await self._codex._forward_to_codex(session, text)
+
+    # --- OpenCode ---
+    def _build_opencode_extra_env(self) -> dict[str, str]:
+        return self._opencode._build_opencode_extra_env()
+
+    async def _start_opencode(
+        self, session: ActiveSession, tool_def: ToolDefinition, tool_call: ToolCallRequest
+    ) -> str:
+        return await self._opencode._start_opencode(session, tool_def, tool_call)
+
+    async def _end_opencode_session(self, session: ActiveSession) -> None:
+        await self._opencode._end_opencode_session(session)
+
+    async def _forward_to_opencode(self, session: ActiveSession, text: str) -> None:
+        await self._opencode._forward_to_opencode(session, text)
+
+    # ------------------------------------------------------------------
+    # Session-lifecycle delegation
+    #
+    # Session create/cancel/end/pause/resume/restore, permission resolution,
+    # interactive responses, and the inactivity reaper live on the composed
+    # ``self._lifecycle`` collaborator; these wrappers preserve the historical
+    # ``router.<method>`` surface for WS/route handlers, main.py, the agentic
+    # loop, and tests.
+    # ------------------------------------------------------------------
+
+    @property
+    def is_direct_tool_mode(self) -> bool:
+        """Whether the router is in direct-tool (no-LLM) mode."""
+        return self._lifecycle.is_direct_tool_mode
+
+    async def cancel_pending_tasks(self) -> None:
+        """Cancel pending tasks."""
+        await self._lifecycle.cancel_pending_tasks()
+
+    def ensure_session(self, session_id: str | None = None) -> str:
+        """Ensure session."""
+        return self._lifecycle.ensure_session(session_id)
+
+    async def cancel_session(self, session_id: str) -> ActiveSession:
+        """Cancel session."""
+        return await self._lifecycle.cancel_session(session_id)
+
+    async def end_session(self, session_id: str) -> ActiveSession:
+        """End the session."""
+        return await self._lifecycle.end_session(session_id)
+
+    def resolve_permission(
+        self,
+        session_id: str,
+        request_id: str,
+        decision: str,
+        scope: str,
+        path_prefix: str | None = None,
+    ) -> None:
+        """Resolve permission."""
+        self._lifecycle.resolve_permission(session_id, request_id, decision, scope, path_prefix)
+
+    async def send_interactive_response(self, session_id: str, text: str, *, accepted: bool = True) -> None:
+        """Send interactive response."""
+        await self._lifecycle.send_interactive_response(session_id, text, accepted=accepted)
+
+    async def pause_session(self, session_id: str) -> ActiveSession:
+        """Pause session."""
+        return await self._lifecycle.pause_session(session_id)
+
+    async def interrupt_subprocess(self, session_id: str) -> ActiveSession:
+        """Interrupt subprocess."""
+        return await self._lifecycle.interrupt_subprocess(session_id)
+
+    async def resume_session(self, session_id: str) -> ActiveSession:
+        """Resume session."""
+        return await self._lifecycle.resume_session(session_id)
+
+    async def restore_session(self, session_id: str) -> ActiveSession:
+        """Restore session."""
+        return await self._lifecycle.restore_session(session_id)
+
+    async def run_inactivity_reaper(self) -> None:
+        """Run inactivity reaper."""
+        await self._lifecycle.run_inactivity_reaper()
+
+    def _check_token_limit_exceeded(self, session: ActiveSession) -> bool:
+        return self._lifecycle._check_token_limit_exceeded(session)
+
+    async def _reap_inactive_sessions(self) -> None:
+        await self._lifecycle._reap_inactive_sessions()
 
     # ------------------------------------------------------------------
     # Executor / config helpers
@@ -505,7 +732,7 @@ class PromptRouter(
         On failure: pushes an error buffer entry and sets ``session.project_name_error``
         so the client chip shows a red error state via the next session_update.
         """
-        resolved = self._resolve_project_path(project_name)
+        resolved = self._context._resolve_project_path(project_name)
         if resolved is None:
             self._push_project_error(
                 session,
@@ -685,7 +912,7 @@ class PromptRouter(
             return None
         if not session.is_busy_for_queue():
             return None
-        display = display_text if display_text is not None else self._TOOL_MENTION_RE.sub("", text).strip()
+        display = display_text if display_text is not None else self._context._TOOL_MENTION_RE.sub("", text).strip()
         entry = await self._pending_store.enqueue(
             session,
             content=text,
@@ -703,9 +930,11 @@ class PromptRouter(
         Called at the end of each turn (Claude Code / Codex / OpenCode result
         event, LLM ``_prompt_lock`` release).  Delivers the oldest pending
         message by invoking :meth:`handle_prompt`; any subsequent queued
-        messages are picked up by the next turn-end hook.
+        messages are picked up by :meth:`_drain_one`'s self-rescheduling
+        tail or the next turn-end hook.
         """
         if self._pending_store is None:
+            logger.info("schedule_pending_drain: no pending store (session=%s)", session.id)
             return
         if not session.pending_user_messages:
             return
@@ -715,7 +944,18 @@ class PromptRouter(
             SessionStatus.FAILED,
             SessionStatus.CANCELLED,
         ):
+            logger.info(
+                "schedule_pending_drain: session not eligible (session=%s, status=%s, queue_len=%d)",
+                session.id,
+                session.status.value,
+                len(session.pending_user_messages),
+            )
             return
+        logger.info(
+            "schedule_pending_drain: dispatching drain (session=%s, queue_len=%d)",
+            session.id,
+            len(session.pending_user_messages),
+        )
         task = asyncio.create_task(self._drain_one(session))
         self._drain_tasks.add(task)
         task.add_done_callback(self._drain_tasks.discard)
@@ -725,6 +965,7 @@ class PromptRouter(
         if self._pending_store is None or not session.pending_user_messages:
             return
         head = session.pending_user_messages[0]
+        logger.info("_drain_one: start (session=%s, queued_id=%s)", session.id, head.queued_id)
         try:
             attachments = await asyncio.to_thread(SessionPendingMessageStore.rehydrate_attachments, head)
         except OSError as e:
@@ -732,6 +973,7 @@ class PromptRouter(
             attachments = []
         # Remove the row + disk bytes; emits ``message_dequeued``.
         await self._pending_store.pop_head(session)
+        logger.info("_drain_one: popped head (session=%s, queued_id=%s)", session.id, head.queued_id)
         try:
             await self.handle_prompt(
                 text=head.content,
@@ -748,6 +990,65 @@ class PromptRouter(
                 "Failed to deliver drained queued message %s for session %s",
                 head.queued_id,
                 session.id,
+            )
+            # Surface the failure to the user instead of leaving the message
+            # silently disappeared from the queue.
+            session.buffer.push_text(
+                MessageType.ERROR,
+                {
+                    "session_id": session.id,
+                    "content": (
+                        "Failed to deliver a queued message — please resend it. Backend logs have the full traceback."
+                    ),
+                    "code": "QUEUED_MESSAGE_DELIVERY_FAILED",
+                },
+            )
+            return
+
+        logger.info("_drain_one: handle_prompt done (session=%s, queued_id=%s)", session.id, head.queued_id)
+
+        # Self-propel through multi-message queues: if more messages are still
+        # queued and the session is now idle, schedule the next drain instead
+        # of waiting for the next turn-end hook.  Single-message case (the one
+        # this fix targets) is unaffected — the queue is empty after one pop.
+        if session.pending_user_messages and not session.is_busy_for_queue():
+            logger.info(
+                "_drain_one: scheduling follow-up drain (session=%s, queue_len=%d)",
+                session.id,
+                len(session.pending_user_messages),
+            )
+            self.schedule_pending_drain(session)
+
+    async def _fire_pending_wakeup(self, session_id: str, wake) -> None:  # type: ignore[no-untyped-def]
+        """Handle a pending wake fired by the :class:`WakeupScheduler`.
+
+        Marks the wake fired in the store, then routes the prompt
+        through :meth:`handle_prompt` so it reuses all the normal
+        delivery machinery (forward to live CC, restart CC if exited,
+        queue if mid-turn, etc.).  Source-tagging keeps user-visible
+        flows distinguishable from wake-driven ones.
+        """
+        session = self._session_manager.get_session(session_id)
+        if session is None:
+            logger.info("Wake fired for missing session %s — dropping.", session_id)
+            return
+        store = self._wakeup_store
+        if store is None:
+            return
+        await store.mark_fired(session, wake.wake_id)
+        if self._session_manager is not None:
+            self._session_manager.broadcast_session_update(session)
+        try:
+            await self.handle_prompt(
+                text=wake.prompt,
+                session_id=session_id,
+                display_text=wake.prompt,
+            )
+        except Exception:
+            logger.exception(
+                "Wakeup delivery failed (session=%s wake=%s)",
+                session_id,
+                wake.wake_id,
             )
 
     async def handle_prompt(
@@ -788,7 +1089,7 @@ class PromptRouter(
         """
         resolved_id = self.ensure_session(session_id)
         session = self._session_manager.get_session(resolved_id)
-        assert session is not None  # ensure_session guarantees this
+        assert session is not None  # ensure_session guarantees this  # noqa: S101
 
         # Store task_id in session metadata so _build_plan_context can inject
         # the plan on the first LLM turn. Only set once to avoid overwriting if
@@ -817,8 +1118,29 @@ class PromptRouter(
 
         session.touch()
 
-        # Auto-resume paused sessions when a new prompt arrives
+        # Paused-session handling: the input WS path already enqueues
+        # before calling us, so most arrivals while paused are *internal*
+        # callers — wake fires, e2e tests, direct invocations.  Route
+        # them through the same queue + resume flow so the
+        # forwarding-vs-draining race we'd otherwise hit (drain task
+        # spawned by resume vs this handle_prompt's own forward) cannot
+        # happen.  Enqueue, kick off resume (which drains), return.
         if session.status == SessionStatus.PAUSED:
+            qid = await self.enqueue_user_prompt(
+                session,
+                text=text,
+                display_text=display_text,
+                attachments=attachments,
+                project_name=project_name,
+                selected_worktree_path=selected_worktree_path,
+                task_id=task_id,
+            )
+            if qid is not None:
+                await self.resume_session(resolved_id)
+                return session.id
+            # Pending store unavailable (test harness) — fall back to the
+            # legacy "just resume and proceed" path so we don't drop the
+            # prompt entirely.
             await self.resume_session(resolved_id)
 
         # Check session token limits before processing
@@ -834,7 +1156,7 @@ class PromptRouter(
         # directly instead of selecting it via the chip), derive display text
         # by stripping all #tool_mention markers so they never appear in chat.
         # The empty-string case (chip + empty input) must be preserved as-is.
-        _display = display_text if display_text is not None else self._TOOL_MENTION_RE.sub("", text).strip()
+        _display = display_text if display_text is not None else self._context._TOOL_MENTION_RE.sub("", text).strip()
 
         def _make_user_buffer_data() -> dict[str, Any]:
             """Build the TEXT_CHUNK(role=user) payload, optionally tagged with queued_id."""
@@ -869,16 +1191,16 @@ class PromptRouter(
         if self.is_direct_tool_mode:
             session.set_active()
             session.buffer.push_text(MessageType.TEXT_CHUNK, _make_user_buffer_data())
-            await self._handle_direct_prompt(session, text)
+            await self._context._handle_direct_prompt(session, text)
             return session.id
 
         # Bare agent mention: when the user sends only "#ClaudeCode" or "#Codex"
         # (with no task description), bypass the LLM and start the agent subprocess
         # directly so it is ready for follow-up instructions.
-        if self._is_bare_agent_mention(text):
+        if self._context._is_bare_agent_mention(text):
             session.set_active()
             session.buffer.push_text(MessageType.TEXT_CHUNK, _make_user_buffer_data())
-            await self._handle_direct_prompt(session, text)
+            await self._context._handle_direct_prompt(session, text)
             return session.id
 
         # Preflight LLM credentials. When the worker has a provider selected
@@ -910,24 +1232,26 @@ class PromptRouter(
             # Injected every turn so the LLM always has the project in context,
             # not only on the first turn where the picker selection was made.
             project_context = (
-                self._build_project_context_from_path(session.main_project_path) if session.main_project_path else None
+                self._context._build_project_context_from_path(session.main_project_path)
+                if session.main_project_path
+                else None
             )
 
-            tool_mentions = self._extract_tool_mentions(text)
-            tool_context = self._build_tool_context(tool_mentions) if tool_mentions else None
+            tool_mentions = self._context._extract_tool_mentions(text)
+            tool_context = self._context._build_tool_context(tool_mentions) if tool_mentions else None
 
-            file_refs = self._extract_file_references(text)
-            file_context = await self._build_file_context(file_refs) if file_refs else None
+            file_refs = self._context._extract_file_references(text)
+            file_context = await self._context._build_file_context(file_refs) if file_refs else None
 
             # Active worktree context: injected when a worktree is explicitly
             # selected for this session so the LLM knows which working directory
             # to pass when it calls an agent tool (claude_code / codex).
-            worktree_context = self._build_active_worktree_context(session)
+            worktree_context = self._context._build_active_worktree_context(session)
 
             # Plan context: injected on the first turn of implementation sessions
             # that have a task with a completed plan artifact. Skipped for planning
             # sessions themselves.
-            plan_context = await self._build_plan_context(session)
+            plan_context = await self._context._build_plan_context(session)
 
             context_blocks: list[dict[str, Any]] = []
             if project_context:
@@ -1015,7 +1339,7 @@ class PromptRouter(
 
             # Run the agentic loop
             try:
-                assert self._llm is not None, "LLM client not initialized"
+                assert self._llm is not None, "LLM client not initialized"  # noqa: S101
                 async for event in self._llm.run_agentic_loop(
                     messages=session.conversation_history,
                     execute_tool_fn=execute_tool,

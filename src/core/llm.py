@@ -1,3 +1,5 @@
+"""LLM client abstraction and streaming response/usage types."""
+
 import json
 import logging
 import platform
@@ -127,6 +129,8 @@ class ConversationTurn:
 
 
 class LLMClient:
+    """L L M Client."""
+
     def __init__(self, settings: Settings, tool_registry: ToolRegistry) -> None:
         self._provider = settings.LLM_PROVIDER.lower()
         self._tool_registry = tool_registry
@@ -255,7 +259,7 @@ class LLMClient:
         system: str | None = None,
     ) -> AsyncIterator[LLMStreamEvent]:
         """Stream a turn using the Anthropic/Bedrock client."""
-        assert self._anthropic_client is not None
+        assert self._anthropic_client is not None  # noqa: S101
         tools = self._tool_registry.to_anthropic_tools()
 
         kwargs: dict[str, Any] = {
@@ -342,7 +346,7 @@ class LLMClient:
         system: str | None = None,
     ) -> AsyncIterator[LLMStreamEvent]:
         """Stream a turn using the OpenAI client."""
-        assert self._openai_client is not None
+        assert self._openai_client is not None  # noqa: S101
         tools = self._tool_registry.to_openai_tools()
 
         # OpenAI uses a system message instead of a top-level system parameter.
@@ -580,7 +584,7 @@ class LLMClient:
 
     async def _anthropic_create(self, system: str, content: str, max_tokens: int, *, model: str | None = None) -> str:
         """Make a non-streaming Anthropic/Bedrock call and return the text."""
-        assert self._anthropic_client is not None
+        assert self._anthropic_client is not None  # noqa: S101
         use_model = model or self._model
         response = await self._anthropic_client.messages.create(
             model=use_model,
@@ -589,12 +593,12 @@ class LLMClient:
             messages=[{"role": "user", "content": content}],
         )
         block = response.content[0]
-        assert isinstance(block, anthropic.types.TextBlock), f"Expected TextBlock, got {type(block)}"
+        assert isinstance(block, anthropic.types.TextBlock), f"Expected TextBlock, got {type(block)}"  # noqa: S101
         return block.text.strip()
 
     async def _openai_create(self, system: str, content: str, max_tokens: int, *, model: str | None = None) -> str:
         """Make a non-streaming OpenAI call and return the text."""
-        assert self._openai_client is not None
+        assert self._openai_client is not None  # noqa: S101
         use_model = model or self._model
         response = await self._openai_client.chat.completions.create(
             model=use_model,
@@ -624,8 +628,7 @@ class LLMClient:
         else:
             title = await self._anthropic_create(system, content, max_tokens=30, model=self._title_model)
         # Safety net: strip markdown headers and take only the first line
-        title = title.split("\n")[0].lstrip("#").strip()
-        return title
+        return title.split("\n")[0].lstrip("#").strip()
 
     async def summarize(self, text: str) -> str:
         """Generate a concise 2-3 sentence summary of the given text."""
@@ -804,6 +807,7 @@ class LLMClient:
             return {"status": current_status, "description": task_description or ""}
 
     async def close(self) -> None:
+        """Close."""
         if self._anthropic_client is not None:
             await self._anthropic_client.close()
         if self._openai_client is not None:

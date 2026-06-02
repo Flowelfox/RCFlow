@@ -590,7 +590,7 @@ class LinuxGUI(RCFlowDashboard):
         self._journal_proc = proc
 
         def _pump() -> None:
-            assert proc.stdout is not None
+            assert proc.stdout is not None  # noqa: S101
             for line in proc.stdout:
                 self._log_buffer.append(line.rstrip("\n"))
             self._log_buffer.append(f"[journal] journalctl exited with code {proc.poll()}")
@@ -849,9 +849,10 @@ class LinuxGUI(RCFlowDashboard):
         return True
 
     def _build_indicator_menu(self) -> Any:
-        """Build the AppIndicator menu.  Re-built on each refresh so the
-        labels can reflect current server state without a separate update
-        path.
+        """Build the AppIndicator menu.
+
+        Re-built on each refresh so the labels can reflect current server
+        state without a separate update path.
         """
         gtk = self._gtk_module
         if gtk is None:
@@ -947,9 +948,11 @@ class LinuxGUI(RCFlowDashboard):
 
 
 class _AppIndicatorWrapper:
-    """Adapt :class:`gi.repository.AyatanaAppIndicator3.Indicator` to the
-    ``TrayIconProtocol`` shape (``update_menu``, ``stop``) used by the
-    base :class:`RCFlowDashboard` close-to-tray / quit logic.
+    """Adapt an AppIndicator3 indicator to the ``TrayIconProtocol`` shape.
+
+    Wraps :class:`gi.repository.AyatanaAppIndicator3.Indicator` in the
+    ``update_menu`` / ``stop`` shape used by the base
+    :class:`RCFlowDashboard` close-to-tray / quit logic.
     """
 
     def __init__(self, indicator: Any, gui: LinuxGUI) -> None:

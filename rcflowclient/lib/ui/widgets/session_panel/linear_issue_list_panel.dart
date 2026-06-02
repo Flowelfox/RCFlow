@@ -8,6 +8,7 @@ import '../../../models/linear_issue_info.dart';
 import '../../../state/app_state.dart';
 import '../../../theme.dart';
 import 'linear_issue_tile.dart';
+import '../../../theme/spacing.dart';
 
 /// Sidebar panel for the Integrations tab — shows cached Linear issues.
 class LinearIssueListPanel extends StatefulWidget {
@@ -186,7 +187,7 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
               child: filtered.isEmpty && _hasActiveFilters
                   ? _buildNoResults(context)
                   : ListView(
-                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      padding: const EdgeInsets.symmetric(vertical: kSpace1),
                       children: sections,
                     ),
             ),
@@ -251,7 +252,7 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
                 color: context.appColors.accent,
                 size: 20,
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: kGapTight),
               Text(
                 'Connect Linear',
                 style: TextStyle(
@@ -262,7 +263,7 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
               ),
             ],
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: kSpace4),
 
           // Step 1: API key entry.
           Text(
@@ -291,7 +292,7 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
               filled: true,
               fillColor: context.appColors.bgElevated,
               contentPadding: const EdgeInsets.symmetric(
-                horizontal: 12,
+                horizontal: kSpace3,
                 vertical: 10,
               ),
               border: OutlineInputBorder(
@@ -331,7 +332,7 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
           if (_setupError != null) ...[
             const SizedBox(height: 10),
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: kSpace3, vertical: kSpace2),
               decoration: BoxDecoration(
                 color: Colors.red.withAlpha(25),
                 borderRadius: BorderRadius.circular(8),
@@ -344,7 +345,7 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
             ),
           ],
 
-          const SizedBox(height: 12),
+          const SizedBox(height: kGapRelaxed),
 
           // "Test Connection" button.
           if (!showTeamStep)
@@ -403,7 +404,7 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
             ),
             const SizedBox(height: 6),
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
+              padding: const EdgeInsets.symmetric(horizontal: kSpace3),
               decoration: BoxDecoration(
                 color: context.appColors.bgElevated,
                 borderRadius: BorderRadius.circular(8),
@@ -577,7 +578,7 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
   Widget _buildEmptyState(BuildContext context, AppState state) {
     return Center(
       child: Padding(
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.all(kSpace5),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -586,7 +587,7 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
               color: context.appColors.textMuted,
               size: 40,
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: kGapRelaxed),
             Text(
               'No issues synced',
               style: TextStyle(
@@ -595,7 +596,7 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
                 fontWeight: FontWeight.w600,
               ),
             ),
-            const SizedBox(height: 4),
+            const SizedBox(height: kGapInline),
             Text(
               'Sync your Linear issues to get started.',
               textAlign: TextAlign.center,
@@ -604,7 +605,7 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
                 fontSize: 13,
               ),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: kSpace4),
             FilledButton.icon(
               onPressed: _syncing ? null : () => _sync(context, state),
               icon: _syncing
@@ -622,10 +623,10 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
                 backgroundColor: context.appColors.accent,
                 foregroundColor: Colors.white,
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(kRadiusMedium),
                 ),
                 padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
+                  horizontal: kSpace4,
                   vertical: 10,
                 ),
               ),
@@ -661,7 +662,7 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
                         fontSize: 12,
                       ),
                       prefixIcon: Padding(
-                        padding: const EdgeInsets.only(left: 8, right: 4),
+                        padding: const EdgeInsets.only(left: kSpace2, right: kSpace1),
                         child: Icon(
                           Icons.search_rounded,
                           color: context.appColors.textMuted,
@@ -695,7 +696,7 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
                       filled: true,
                       fillColor: context.appColors.bgElevated,
                       contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 8,
+                        horizontal: kSpace2,
                         vertical: 0,
                       ),
                       border: OutlineInputBorder(
@@ -754,7 +755,7 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
                     children: [
                       for (final stateType in _stateOrder)
                         Padding(
-                          padding: const EdgeInsets.only(right: 4),
+                          padding: const EdgeInsets.only(right: kSpace1),
                           child: _buildFilterChip(
                             context,
                             label: _stateLabels[stateType] ?? stateType,
@@ -778,7 +779,7 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
                   GestureDetector(
                     onTap: _clearFilters,
                     child: Padding(
-                      padding: const EdgeInsets.only(left: 4),
+                      padding: const EdgeInsets.only(left: kSpace1),
                       child: Icon(
                         Icons.filter_alt_off_outlined,
                         color: context.appColors.textMuted,
@@ -805,7 +806,7 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        padding: const EdgeInsets.symmetric(horizontal: kSpace2, vertical: 3),
         decoration: BoxDecoration(
           color: selected ? color.withAlpha(40) : context.appColors.bgElevated,
           borderRadius: BorderRadius.circular(12),
@@ -848,7 +849,7 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
             }
           }),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+            padding: const EdgeInsets.symmetric(horizontal: kSpace4, vertical: 6),
             child: Row(
               children: [
                 Container(
@@ -859,7 +860,7 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
                     shape: BoxShape.circle,
                   ),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: kGapTight),
                 Text(
                   label,
                   style: TextStyle(
@@ -906,12 +907,12 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(Icons.search_off, color: context.appColors.textMuted, size: 32),
-          const SizedBox(height: 8),
+          const SizedBox(height: kGapTight),
           Text(
             'No issues match filters',
             style: TextStyle(color: context.appColors.textMuted, fontSize: 13),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: kGapTight),
           TextButton(
             onPressed: _clearFilters,
             child: Text(

@@ -1,3 +1,5 @@
+"""Executor that runs the Codex CLI subprocess."""
+
 import asyncio
 import json
 import logging
@@ -54,10 +56,12 @@ class CodexExecutor(BaseExecutor):
 
     @property
     def is_running(self) -> bool:
+        """Whether the process is currently running."""
         return self._process is not None and self._process.returncode is None
 
     @property
     def thread_id(self) -> str | None:
+        """Return the thread id."""
         return self._thread_id
 
     def _build_command(self, parameters: dict[str, Any], config: dict[str, Any], *, resume: bool = False) -> list[str]:

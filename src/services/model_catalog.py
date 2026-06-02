@@ -167,6 +167,7 @@ class ModelEntry:
     label: str
 
     def to_dict(self) -> dict[str, str]:
+        """Serialize to a JSON-friendly dict."""
         return {"value": self.value, "label": self.label}
 
 
@@ -200,6 +201,7 @@ class CatalogResult:
     ttl_seconds: int
 
     def to_dict(self) -> dict[str, Any]:
+        """Serialize to a JSON-friendly dict."""
         return {
             "options": [opt.to_dict() for opt in self.options],
             "source": self.source,
@@ -219,7 +221,9 @@ class ProviderFetcher(Protocol):
 
     name: str
 
-    async def fetch(self, creds: Credentials) -> list[ModelEntry]: ...
+    async def fetch(self, creds: Credentials) -> list[ModelEntry]:
+        """Return the available models for *creds*."""
+        ...
 
 
 class AnthropicFetcher:
@@ -228,6 +232,7 @@ class AnthropicFetcher:
     name = "anthropic"
 
     async def fetch(self, creds: Credentials) -> list[ModelEntry]:
+        """Fetch."""
         if not creds.api_key:
             raise ValueError("Anthropic API key is required to list models")
         import anthropic  # noqa: PLC0415
@@ -252,6 +257,7 @@ class OpenAIFetcher:
     name = "openai"
 
     async def fetch(self, creds: Credentials) -> list[ModelEntry]:
+        """Fetch."""
         if not creds.api_key:
             raise ValueError("OpenAI API key is required to list models")
         import openai  # noqa: PLC0415
@@ -286,6 +292,7 @@ class BedrockFetcher:
     name = "bedrock"
 
     async def fetch(self, creds: Credentials) -> list[ModelEntry]:
+        """Fetch."""
         region = creds.aws_region or "us-east-1"
         prefix = _BEDROCK_REGION_PREFIXES.get(region, "")
 
@@ -326,6 +333,7 @@ class OpenRouterFetcher:
     name = "openrouter"
 
     async def fetch(self, creds: Credentials) -> list[ModelEntry]:
+        """Fetch."""
         async with httpx.AsyncClient(timeout=_OPENROUTER_TIMEOUT) as client:
             response = await client.get(_OPENROUTER_MODELS_URL)
             response.raise_for_status()

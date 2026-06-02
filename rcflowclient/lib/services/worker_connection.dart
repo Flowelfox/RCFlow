@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 
 import '../models/badge_spec.dart';
 import '../models/legacy_badge_adapter.dart';
+import '../models/scheduled_wake.dart';
 import '../models/session_info.dart';
 import '../models/worker_config.dart';
 import '../models/ws_message_type.dart';
@@ -392,6 +393,17 @@ class WorkerConnection extends ChangeNotifier {
       if (parsed.badges.isEmpty && existing != null && existing.badges.isNotEmpty) {
         parsed = parsed.copyWith(badges: existing.badges);
       }
+      // Preserve pending ScheduleWakeup timers when the list response omits
+      // them (REST list endpoints never carry scheduled_wakes). The
+      // authoritative list arrives via session_update, which always sets it
+      // explicitly — including the empty list when a wake fires or is
+      // cancelled — so this fallback only ever carries over still-pending
+      // wakes and never resurrects cleared ones.
+      if (parsed.scheduledWakes.isEmpty &&
+          existing != null &&
+          existing.scheduledWakes.isNotEmpty) {
+        parsed = parsed.copyWith(scheduledWakes: existing.scheduledWakes);
+      }
       // Server worker badge carries backend_id as label. Replace with the
       // user-configured worker name — same replacement that session_update
       // applies. Archived sessions never receive a session_update, so this
@@ -467,6 +479,15 @@ class WorkerConnection extends ChangeNotifier {
       'selected_worktree_path',
     );
     final newSelectedWorktreePath = msg['selected_worktree_path'] as String?;
+    final agentCwdProvided = msg.containsKey('agent_cwd');
+    final newAgentCwd = msg['agent_cwd'] as String?;
+    final scheduledWakesProvided = msg.containsKey('scheduled_wakes');
+    final newScheduledWakes = scheduledWakesProvided
+        ? ((msg['scheduled_wakes'] as List<dynamic>?) ?? const [])
+              .whereType<Map<String, dynamic>>()
+              .map(ScheduledWake.fromJson)
+              .toList()
+        : const <ScheduledWake>[];
 
     // Project name error — non-null when backend rejected the last project_name.
     final projectNameErrorProvided = msg.containsKey('project_name_error');
@@ -533,6 +554,10 @@ class WorkerConnection extends ChangeNotifier {
         selectedWorktreePath: selectedWorktreePathProvided
             ? newSelectedWorktreePath
             : existing.selectedWorktreePath,
+        agentCwd: agentCwdProvided ? newAgentCwd : existing.agentCwd,
+        scheduledWakes: scheduledWakesProvided
+            ? newScheduledWakes
+            : existing.scheduledWakes,
         mainProjectPath: mainProjectPathProvided
             ? newMainProjectPath
             : existing.mainProjectPath,
@@ -567,6 +592,8 @@ class WorkerConnection extends ChangeNotifier {
           toolCostUsd: toolCostUsd ?? 0.0,
           worktreeInfo: worktreeInfo,
           selectedWorktreePath: newSelectedWorktreePath,
+          agentCwd: newAgentCwd,
+          scheduledWakes: newScheduledWakes,
           mainProjectPath: newMainProjectPath,
           agentType: newAgentType,
           sortOrder: sortOrderProvided ? newSortOrder : null,
@@ -627,6 +654,28 @@ class WorkerConnection extends ChangeNotifier {
       final bTime = b.createdAt ?? DateTime(2000);
       return bTime.compareTo(aTime);
     });
+  }
+
+  /// Optimistically flip a session's status to a terminal value without
+  /// waiting for the server's `session_update` broadcast.
+  ///
+  /// Without this, every cancel/end click had to round-trip through the
+  /// HTTP call, then back through the WebSocket as a `session_update`,
+  /// before the End button hid itself.  In that window the user often
+  /// thought the click did nothing and clicked again — every duplicate
+  /// click then served as a no-op cancel on the server.  Returns true
+  /// when the local entry was updated (i.e. it existed and wasn't already
+  /// terminal); the caller can use the return value to decide whether
+  /// to broadcast its own listeners.
+  bool markSessionLocallyTerminal(String sessionId, String terminalStatus) {
+    final index = sessions.indexWhere((s) => s.sessionId == sessionId);
+    if (index < 0) return false;
+    final existing = sessions[index];
+    if (existing.status == terminalStatus) return false;
+    sessions[index] = existing.copyWith(status: terminalStatus);
+    _cacheSessions();
+    onSessionsChanged?.call();
+    return true;
   }
 
   /// Handle a lightweight session_reorder event from the server.

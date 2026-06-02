@@ -84,7 +84,7 @@ class TelemetryService:
         written by archive_session on session completion.
 
         If a row already exists (the common case, created by
-        _ensure_session_row_in_db in BackgroundTasksMixin) this is a cheap
+        _ensure_session_row_in_db in BackgroundTasks) this is a cheap
         no-op — one PK lookup and no write.
 
         Exceptions are logged and swallowed; callers must still handle the FK
@@ -129,7 +129,7 @@ class TelemetryService:
 
         Before inserting the turn row the method calls :meth:`_ensure_session_stub`
         so that the sessions FK-target always exists even when the normal
-        _ensure_session_row_in_db path in BackgroundTasksMixin failed silently.
+        _ensure_session_row_in_db path in BackgroundTasks failed silently.
         """
         if turn_index is None:
             turn_index = self._turn_counters.get(session_id, 0)

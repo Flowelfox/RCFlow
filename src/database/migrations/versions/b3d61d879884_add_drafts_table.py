@@ -1,4 +1,4 @@
-"""add drafts table
+"""add drafts table.
 
 Revision ID: b3d61d879884
 Revises: e4f5a6b7c8d9

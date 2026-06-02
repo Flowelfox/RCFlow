@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../models/ws_messages.dart';
+import '../../../theme/spacing.dart';
 
 class StatusChip extends StatelessWidget {
   final DisplayMessage message;
@@ -18,10 +19,10 @@ class StatusChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.symmetric(vertical: kSpace1),
       child: Container(
         width: double.infinity,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: kSpace3, vertical: 6),
         decoration: BoxDecoration(
           color: bg,
           borderRadius: BorderRadius.circular(20),

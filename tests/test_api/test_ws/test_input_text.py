@@ -62,7 +62,8 @@ def _ws_url() -> str:
 class TestInputWsListLinearIssues:
     def test_returns_empty_list_when_no_db(self, client: TestClient) -> None:
         """With db_session_factory=None the handler must return an empty list,
-        not an 'Unknown message type' error — even on the input channel."""
+        not an 'Unknown message type' error — even on the input channel.
+        """
         with client.websocket_connect(_ws_url()) as ws:
             ws.send_json({"type": "list_linear_issues"})
             data = ws.receive_json()
@@ -72,7 +73,8 @@ class TestInputWsListLinearIssues:
 
     def test_does_not_return_unknown_message_error(self, client: TestClient) -> None:
         """list_linear_issues on the input channel must not produce an error
-        that would surface in the session pane as 'Unknown message type'."""
+        that would surface in the session pane as 'Unknown message type'.
+        """
         with client.websocket_connect(_ws_url()) as ws:
             ws.send_json({"type": "list_linear_issues"})
             data = ws.receive_json()

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../theme.dart';
+import '../../theme/spacing.dart';
 
 // Fallback neutral colors, used when the [AppColors] theme extension is not
 // installed (e.g. bare widget tests). Production code runs under [AppTheme]
@@ -73,7 +74,7 @@ class BadgeChip extends StatelessWidget {
         color?.withAlpha(180) ?? appColors?.textMuted ?? _fallbackIcon;
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: kSpace1),
       decoration: BoxDecoration(
         color: bg,
         borderRadius: BorderRadius.circular(8),
@@ -95,7 +96,7 @@ class BadgeChip extends StatelessWidget {
             ),
           ),
           if (trailing != null) ...[
-            const SizedBox(width: 4),
+            const SizedBox(width: kGapInline),
             trailing!,
           ],
         ],

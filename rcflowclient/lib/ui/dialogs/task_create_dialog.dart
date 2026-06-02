@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import '../../state/app_state.dart';
 import '../../theme.dart';
+import '../../theme/spacing.dart';
 
 /// Shows a dialog to create a new user task.
 ///
@@ -125,7 +126,7 @@ class _TaskCreateDialogState extends State<_TaskCreateDialog> {
               children: [
                 // Header
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
+                  padding: const EdgeInsets.fromLTRB(kSpace5, kSpace5, kSpace5, 0),
                   child: Text(
                     'New Task',
                     style: TextStyle(
@@ -139,7 +140,7 @@ class _TaskCreateDialogState extends State<_TaskCreateDialog> {
 
                 // Title
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 24),
+                  padding: const EdgeInsets.symmetric(horizontal: kSpace5),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -164,7 +165,7 @@ class _TaskCreateDialogState extends State<_TaskCreateDialog> {
                           counterText: '',
                           border: OutlineInputBorder(
                             borderSide: BorderSide.none,
-                            borderRadius: BorderRadius.circular(14),
+                            borderRadius: BorderRadius.circular(kRadiusLarge),
                           ),
                         ),
                         validator: (v) {
@@ -180,11 +181,11 @@ class _TaskCreateDialogState extends State<_TaskCreateDialog> {
                     ],
                   ),
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: kSpace4),
 
                 // Description
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 24),
+                  padding: const EdgeInsets.symmetric(horizontal: kSpace5),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -208,7 +209,7 @@ class _TaskCreateDialogState extends State<_TaskCreateDialog> {
                           filled: true,
                           border: OutlineInputBorder(
                             borderSide: BorderSide.none,
-                            borderRadius: BorderRadius.circular(14),
+                            borderRadius: BorderRadius.circular(kRadiusLarge),
                           ),
                         ),
                       ),
@@ -218,9 +219,9 @@ class _TaskCreateDialogState extends State<_TaskCreateDialog> {
 
                 // Worker picker (only if multiple connected workers)
                 if (multiWorker) ...[
-                  const SizedBox(height: 16),
+                  const SizedBox(height: kSpace4),
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 24),
+                    padding: const EdgeInsets.symmetric(horizontal: kSpace5),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -238,7 +239,7 @@ class _TaskCreateDialogState extends State<_TaskCreateDialog> {
                             filled: true,
                             border: OutlineInputBorder(
                               borderSide: BorderSide.none,
-                              borderRadius: BorderRadius.circular(14),
+                              borderRadius: BorderRadius.circular(kRadiusLarge),
                             ),
                           ),
                           items: connectedWorkers.map((config) {
@@ -260,7 +261,7 @@ class _TaskCreateDialogState extends State<_TaskCreateDialog> {
 
                 // Actions
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(24, 12, 24, 16),
+                  padding: const EdgeInsets.fromLTRB(kSpace5, kSpace3, kSpace5, kSpace4),
                   child: Row(
                     children: [
                       Text(
@@ -280,7 +281,7 @@ class _TaskCreateDialogState extends State<_TaskCreateDialog> {
                           ),
                         ),
                       ),
-                      const SizedBox(width: 8),
+                      const SizedBox(width: kGapTight),
                       FilledButton(
                         style: FilledButton.styleFrom(
                           backgroundColor: context.appColors.accent,

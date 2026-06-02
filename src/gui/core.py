@@ -589,7 +589,7 @@ class ServerManager:
                     proc.kill()
                     proc.wait(timeout=5)
             else:
-                assert adopted_pid is not None
+                assert adopted_pid is not None  # noqa: S101
                 _kill_pid(adopted_pid)
                 self._wait_for_pid_exit(adopted_pid, timeout=10)
                 if _is_pid_alive(adopted_pid):
@@ -677,7 +677,7 @@ class ServerManager:
 
     def _read_output(self, proc: subprocess.Popen[str]) -> None:
         try:
-            assert proc.stdout is not None
+            assert proc.stdout is not None  # noqa: S101
             for raw in proc.stdout:
                 line = raw.rstrip("\n\r")
                 if line:
@@ -718,7 +718,7 @@ def remove_ipc_file() -> None:
 
 
 def start_ipc_server(on_show: Callable[[], None]) -> socket.socket | None:
-    """Bind a loopback TCP listener and record the port in ``.worker.ipc``.
+    r"""Bind a loopback TCP listener and record the port in ``.worker.ipc``.
 
     Spawns a daemon thread that accepts connections and invokes ``on_show()``
     when a client sends ``SHOW\\n``.  The callback is invoked from the daemon
@@ -781,7 +781,7 @@ def start_ipc_server(on_show: Callable[[], None]) -> socket.socket | None:
 
 
 def send_show_to_existing() -> bool:
-    """Try to hand a ``SHOW`` command to the running singleton.
+    r"""Try to hand a ``SHOW`` command to the running singleton.
 
     Reads the port from ``.worker.ipc``, connects, writes ``SHOW\\n``, and
     returns True when the write succeeds.  Returns False when the IPC file

@@ -14,6 +14,7 @@ import '../collapsible_group_header.dart';
 import '../panel_search_bar.dart';
 import 'linear_issue_tile.dart';
 import 'task_tile.dart';
+import '../../../theme/spacing.dart';
 
 /// Filters [issues] by a free-text [query], matching against title, identifier,
 /// and assignee name. Returns all issues unmodified when [query] is empty.
@@ -334,7 +335,7 @@ class _TaskListPanelState extends State<TaskListPanel> {
     final count = _selectedTaskIds.length;
     return Container(
       color: context.appColors.accent.withAlpha(18),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 5),
+      padding: const EdgeInsets.symmetric(horizontal: kSpace4, vertical: 5),
       child: Row(
         children: [
           Icon(
@@ -408,7 +409,7 @@ class _TaskListPanelState extends State<TaskListPanel> {
                 color: const Color(0xFF3B82F6),
                 size: 18,
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: kGapTight),
               Text(
                 'Mark all \u2192 In Progress',
                 style: TextStyle(color: context.appColors.textPrimary),
@@ -425,7 +426,7 @@ class _TaskListPanelState extends State<TaskListPanel> {
                 color: const Color(0xFF6B7280),
                 size: 18,
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: kGapTight),
               Text(
                 'Mark all \u2192 To Do',
                 style: TextStyle(color: context.appColors.textPrimary),
@@ -442,7 +443,7 @@ class _TaskListPanelState extends State<TaskListPanel> {
                 color: const Color(0xFFF59E0B),
                 size: 18,
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: kGapTight),
               Text(
                 'Mark all \u2192 Review',
                 style: TextStyle(color: context.appColors.textPrimary),
@@ -459,7 +460,7 @@ class _TaskListPanelState extends State<TaskListPanel> {
                 color: const Color(0xFF10B981),
                 size: 18,
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: kGapTight),
               Text(
                 'Mark all \u2192 Done',
                 style: TextStyle(color: context.appColors.textPrimary),
@@ -477,7 +478,7 @@ class _TaskListPanelState extends State<TaskListPanel> {
                 color: context.appColors.errorText,
                 size: 18,
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: kGapTight),
               Text(
                 'Delete $count task${count == 1 ? '' : 's'}\u2026',
                 style: TextStyle(color: context.appColors.errorText),
@@ -495,7 +496,7 @@ class _TaskListPanelState extends State<TaskListPanel> {
                 color: context.appColors.textSecondary,
                 size: 18,
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: kGapTight),
               Text(
                 'Clear selection',
                 style: TextStyle(color: context.appColors.textPrimary),
@@ -560,7 +561,7 @@ class _TaskListPanelState extends State<TaskListPanel> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: context.appColors.bgSurface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(kRadiusLarge)),
         title: Text(
           'Delete $count task${count == 1 ? '' : 's'}',
           style: TextStyle(color: context.appColors.textPrimary, fontSize: 16),
@@ -714,7 +715,7 @@ class _TaskListPanelState extends State<TaskListPanel> {
                 _buildSelectionBar(context, state),
               Expanded(
                 child: ListView(
-                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  padding: const EdgeInsets.symmetric(vertical: kSpace1),
                   children: listItems,
                 ),
               ),
@@ -735,7 +736,7 @@ class _TaskListPanelState extends State<TaskListPanel> {
             color: context.appColors.textMuted,
             size: 40,
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: kGapRelaxed),
           Text(
             'No tasks yet',
             style: TextStyle(
@@ -744,13 +745,13 @@ class _TaskListPanelState extends State<TaskListPanel> {
               fontWeight: FontWeight.w600,
             ),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: kGapInline),
           Text(
             'Create a task or let AI generate them',
             textAlign: TextAlign.center,
             style: TextStyle(color: context.appColors.textMuted, fontSize: 13),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: kSpace4),
           FilledButton.icon(
             onPressed: () => showTaskCreateDialog(context),
             icon: const Icon(Icons.add, size: 18),
@@ -759,9 +760,9 @@ class _TaskListPanelState extends State<TaskListPanel> {
               backgroundColor: context.appColors.accent,
               foregroundColor: Colors.white,
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(kRadiusMedium),
               ),
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              padding: const EdgeInsets.symmetric(horizontal: kSpace4, vertical: 10),
             ),
           ),
         ],
@@ -861,7 +862,7 @@ class _TaskListPanelState extends State<TaskListPanel> {
                     children: [
                       for (final status in _statusOrder)
                         Padding(
-                          padding: const EdgeInsets.only(right: 4),
+                          padding: const EdgeInsets.only(right: kSpace1),
                           child: _StatusFilterChip(
                             label: _statusLabels[status]!,
                             color: _statusColors[status]!,
@@ -885,7 +886,7 @@ class _TaskListPanelState extends State<TaskListPanel> {
                   GestureDetector(
                     onTap: _clearFilters,
                     child: Padding(
-                      padding: const EdgeInsets.only(left: 4),
+                      padding: const EdgeInsets.only(left: kSpace1),
                       child: Icon(
                         Icons.filter_alt_off_rounded,
                         color: context.appColors.textMuted,
@@ -896,7 +897,7 @@ class _TaskListPanelState extends State<TaskListPanel> {
               ],
             ),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: kGapInline),
           SizedBox(
             height: 24,
             child: ListView(
@@ -904,7 +905,7 @@ class _TaskListPanelState extends State<TaskListPanel> {
               children: [
                 for (final source in _sourceOrder)
                   Padding(
-                    padding: const EdgeInsets.only(right: 4),
+                    padding: const EdgeInsets.only(right: kSpace1),
                     child: _StatusFilterChip(
                       label: _sourceLabels[source]!,
                       color: _sourceColors[source]!,
@@ -939,7 +940,7 @@ class _TaskListPanelState extends State<TaskListPanel> {
             color: context.appColors.textMuted,
             size: 32,
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: kGapTight),
           Text(
             'No matching tasks',
             style: TextStyle(
@@ -947,7 +948,7 @@ class _TaskListPanelState extends State<TaskListPanel> {
               fontSize: 13,
             ),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: kGapInline),
           GestureDetector(
             onTap: _clearFilters,
             child: Text(
@@ -1034,7 +1035,7 @@ class _TaskListPanelState extends State<TaskListPanel> {
                     color: context.appColors.textMuted,
                     size: 11,
                   ),
-                  const SizedBox(width: 4),
+                  const SizedBox(width: kGapInline),
                   Text(
                     'Unlinked',
                     style: TextStyle(
@@ -1138,10 +1139,10 @@ class _StatusFilterChip extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        padding: const EdgeInsets.symmetric(horizontal: kSpace2, vertical: 3),
         decoration: BoxDecoration(
           color: selected ? color.withAlpha(40) : Colors.transparent,
-          borderRadius: BorderRadius.circular(6),
+          borderRadius: BorderRadius.circular(kRadiusSmall),
           border: Border.all(
             color: selected ? color.withAlpha(120) : context.appColors.divider,
             width: 1,

@@ -27,11 +27,15 @@ logger = logging.getLogger(__name__)
 
 
 class PermissionDecision(StrEnum):
+    """Permission Decision."""
+
     ALLOW = "allow"
     DENY = "deny"
 
 
 class PermissionScope(StrEnum):
+    """Permission Scope."""
+
     ONCE = "once"  # Single request only
     TOOL_SESSION = "tool_session"  # All uses of this tool in this session
     TOOL_PATH = "tool_path"  # This tool + files under a path prefix
@@ -298,7 +302,7 @@ class PermissionManager:
         pending.event.set()
         return True
 
-    async def wait_for_response(self, request_id: str, timeout: float | None = None) -> PendingPermission:
+    async def wait_for_response(self, request_id: str, timeout: float | None = None) -> PendingPermission:  # noqa: ASYNC109
         """Wait for a permission response.
 
         Returns the resolved :class:`PendingPermission`.  If the timeout

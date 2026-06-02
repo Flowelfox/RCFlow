@@ -17,9 +17,9 @@ _CREATE_NEW_PROCESS_GROUP = 0x00000200
 
 
 def new_session_kwargs() -> dict[str, Any]:
-    """Return kwargs for ``asyncio.create_subprocess_exec`` to isolate the child
-    process tree from the parent.
+    """Return subprocess kwargs that isolate the child from the parent tree.
 
+    Passed to ``asyncio.create_subprocess_exec``.
     On POSIX: ``start_new_session=True`` (creates a new process group).
     On Windows: ``creationflags=CREATE_NEW_PROCESS_GROUP``.
     """

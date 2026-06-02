@@ -6,6 +6,7 @@ import '../../../theme.dart';
 import '../../utils/link_utils.dart';
 import '../../utils/markdown_copy_menu.dart';
 import '../../utils/selectable_code_block_builder.dart';
+import '../../../theme/spacing.dart';
 
 class AssistantBubble extends StatefulWidget {
   final DisplayMessage message;
@@ -47,8 +48,8 @@ class _AssistantBubbleState extends State<AssistantBubble> {
       _cachedBody = _buildMarkdown(context, content);
     }
     return Padding(
-      padding: const EdgeInsets.only(top: 4, bottom: 4, right: 32),
-      child: MarkdownCopyMenu(rawMarkdown: content, child: _cachedBody!),
+      padding: const EdgeInsets.only(top: kSpace1, bottom: kSpace1, right: kSpace6),
+      child: MessageSelectionArea(rawMarkdown: content, child: _cachedBody!),
     );
   }
 
@@ -94,7 +95,7 @@ class _AssistantBubbleState extends State<AssistantBubble> {
           color: context.appColors.toolBg,
           borderRadius: BorderRadius.circular(8),
         ),
-        codeblockPadding: const EdgeInsets.all(12),
+        codeblockPadding: const EdgeInsets.all(kSpace3),
         a: TextStyle(color: context.appColors.accentLight),
         listBullet: TextStyle(
           color: context.appColors.assistantText,
@@ -121,7 +122,7 @@ class _AssistantBubbleState extends State<AssistantBubble> {
           ),
           color: context.appColors.toolBg.withValues(alpha: 0.3),
         ),
-        blockquotePadding: const EdgeInsets.only(left: 12, top: 4, bottom: 4),
+        blockquotePadding: const EdgeInsets.only(left: kSpace3, top: kSpace1, bottom: kSpace1),
         tableBorder: TableBorder.all(color: context.appColors.divider),
         tableHead: TextStyle(
           color: context.appColors.assistantText,

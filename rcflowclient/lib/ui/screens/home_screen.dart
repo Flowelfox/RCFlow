@@ -22,6 +22,7 @@ import '../widgets/session_panel.dart';
 import '../widgets/settings_menu.dart';
 import '../widgets/split_view.dart';
 import '../widgets/worker_picker_dialog.dart';
+import '../../theme/spacing.dart';
 
 bool get _isDesktop =>
     Platform.isWindows || Platform.isLinux || Platform.isMacOS;
@@ -509,7 +510,7 @@ class _WelcomePane extends StatelessWidget {
             size: 48,
             color: context.appColors.textMuted,
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: kSpace4),
           Text(
             'No open panes',
             style: TextStyle(
@@ -518,16 +519,16 @@ class _WelcomePane extends StatelessWidget {
               fontWeight: FontWeight.w600,
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: kGapTight),
           Text(
             'Start a new chat or select a session from the sidebar',
             style: TextStyle(color: context.appColors.textMuted, fontSize: 14),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: kSpace5),
           FilledButton.icon(
             style: FilledButton.styleFrom(
               backgroundColor: context.appColors.accent,
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: kSpace5, vertical: kSpace3),
             ),
             icon: const Icon(Icons.add_rounded, color: Colors.white),
             label: const Text(

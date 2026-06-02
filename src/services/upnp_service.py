@@ -237,7 +237,7 @@ def _is_conflict_error(exc: BaseException) -> bool:
 
 
 def _is_conflict_error_str(msg: str) -> bool:
-    """String variant of :func:`_is_conflict_error` — used when only the message survives."""
+    """Return whether *message* signals a conflict (string variant of :func:`_is_conflict_error`)."""
     low = msg.lower()
     return any(marker in low for marker in _CONFLICT_ERROR_MARKERS)
 
@@ -449,6 +449,8 @@ def _safe_attr(obj: Any, name: str) -> str | None:
 
 
 class UpnpStatus(StrEnum):
+    """Upnp Status."""
+
     DISABLED = "disabled"
     DISCOVERING = "discovering"
     MAPPED = "mapped"
@@ -458,6 +460,8 @@ class UpnpStatus(StrEnum):
 
 @dataclass
 class UpnpState:
+    """Upnp State."""
+
     status: UpnpStatus = UpnpStatus.DISABLED
     external_ip: str | None = None
     external_port: int | None = None

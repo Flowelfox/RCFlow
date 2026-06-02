@@ -8,6 +8,7 @@ import '../../services/server_url.dart';
 import '../../services/worker_connection.dart';
 import '../../theme.dart';
 import '../screens/server_config_screen.dart';
+import '../../theme/spacing.dart';
 
 /// Opens a dialog to create or edit a [WorkerConfig].
 ///
@@ -195,7 +196,7 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: context.appColors.bgSurface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(kRadiusLarge)),
         title: Text(
           'Discard changes?',
           style: TextStyle(color: context.appColors.textPrimary, fontSize: 16),
@@ -352,7 +353,7 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
           children: [
             // Title
             Padding(
-              padding: EdgeInsets.fromLTRB(24, 24, 24, 0),
+              padding: EdgeInsets.fromLTRB(kSpace5, kSpace5, kSpace5, 0),
               child: Align(
                 alignment: Alignment.centerLeft,
                 child: Text(
@@ -365,7 +366,7 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
                 ),
               ),
             ),
-            SizedBox(height: 16),
+            SizedBox(height: kSpace4),
             // Tab bar (only shown when Server tab is available)
             if (_hasWorker)
               TabBar(
@@ -396,7 +397,7 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
             Divider(height: 1, color: context.appColors.divider),
             // Action buttons
             Padding(
-              padding: EdgeInsets.fromLTRB(24, 12, 24, 16),
+              padding: EdgeInsets.fromLTRB(kSpace5, kSpace3, kSpace5, kSpace4),
               child: Row(
                 children: [
                   Spacer(),
@@ -407,7 +408,7 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
                       style: TextStyle(color: context.appColors.textSecondary),
                     ),
                   ),
-                  SizedBox(width: 8),
+                  SizedBox(width: kGapTight),
                   FilledButton(
                     style: FilledButton.styleFrom(
                       backgroundColor: context.appColors.accent,
@@ -452,7 +453,7 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
               fillColor: context.appColors.bgElevated,
               border: OutlineInputBorder(
                 borderSide: BorderSide.none,
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.circular(kRadiusLarge),
               ),
               errorText: _fieldError(_nameCtrl),
             ),
@@ -460,7 +461,7 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
               if (_submitted) setState(() {});
             },
           ),
-          SizedBox(height: 16),
+          SizedBox(height: kSpace4),
           _buildLabel('Host', required: true),
           SizedBox(height: 6),
           TextField(
@@ -479,7 +480,7 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
               fillColor: context.appColors.bgElevated,
               border: OutlineInputBorder(
                 borderSide: BorderSide.none,
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.circular(kRadiusLarge),
               ),
               errorText: _fieldError(_hostCtrl),
             ),
@@ -487,7 +488,7 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
               if (_submitted) setState(() {});
             },
           ),
-          SizedBox(height: 16),
+          SizedBox(height: kSpace4),
           _buildLabel('Port', required: true),
           SizedBox(height: 6),
           TextField(
@@ -507,7 +508,7 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
               fillColor: context.appColors.bgElevated,
               border: OutlineInputBorder(
                 borderSide: BorderSide.none,
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.circular(kRadiusLarge),
               ),
               errorText: _fieldError(_portCtrl),
             ),
@@ -515,7 +516,7 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
               if (_submitted) setState(() {});
             },
           ),
-          SizedBox(height: 16),
+          SizedBox(height: kSpace4),
           _buildLabel('API Key', required: true),
           SizedBox(height: 6),
           TextField(
@@ -545,7 +546,7 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
               fillColor: context.appColors.bgElevated,
               border: OutlineInputBorder(
                 borderSide: BorderSide.none,
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.circular(kRadiusLarge),
               ),
               errorText: _fieldError(_apiKeyCtrl),
             ),
@@ -553,7 +554,7 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
               if (_submitted) setState(() {});
             },
           ),
-          SizedBox(height: 16),
+          SizedBox(height: kSpace4),
           SwitchListTile(
             title: Text(
               'Use SSL (wss://)',
@@ -607,7 +608,7 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
             contentPadding: EdgeInsets.zero,
             onChanged: (v) => setState(() => _autoConnect = v),
           ),
-          SizedBox(height: 16),
+          SizedBox(height: kSpace4),
           _buildLabel('Default coding agent'),
           SizedBox(height: 6),
           DropdownButtonFormField<String?>(
@@ -626,7 +627,7 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
               fillColor: context.appColors.bgElevated,
               border: OutlineInputBorder(
                 borderSide: BorderSide.none,
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.circular(kRadiusLarge),
               ),
             ),
             items: const [
@@ -672,7 +673,7 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
             color: context.appColors.textMuted,
             size: 40,
           ),
-          SizedBox(height: 16),
+          SizedBox(height: kSpace4),
           Text(
             'Not connected to server',
             style: TextStyle(
@@ -680,7 +681,7 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
               fontSize: 15,
             ),
           ),
-          SizedBox(height: 4),
+          SizedBox(height: kGapInline),
           Text(
             'Connect to view and manage server settings',
             style: TextStyle(color: context.appColors.textMuted, fontSize: 13),
@@ -704,9 +705,9 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
               foregroundColor: Colors.white,
               disabledBackgroundColor: context.appColors.accentDim,
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(kRadiusMedium),
               ),
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: kSpace3),
             ),
           ),
         ],
@@ -716,7 +717,7 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
 
   Widget _buildTestArea() {
     return Padding(
-      padding: EdgeInsets.fromLTRB(24, 8, 24, 12),
+      padding: EdgeInsets.fromLTRB(kSpace5, kSpace2, kSpace5, kSpace3),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -732,13 +733,13 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
                   foregroundColor: context.appColors.textSecondary,
                   side: BorderSide(color: context.appColors.divider),
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(kRadiusMedium),
                   ),
                   padding: EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                 ),
               ),
               if (_testStatus == _TestStatus.testing) ...[
-                SizedBox(width: 12),
+                SizedBox(width: kGapRelaxed),
                 SizedBox(
                   width: 18,
                   height: 18,
@@ -751,7 +752,7 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
             ],
           ),
           if (_testStatus == _TestStatus.success) ...[
-            SizedBox(height: 8),
+            SizedBox(height: kGapTight),
             Row(
               children: [
                 Icon(
@@ -773,7 +774,7 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
             ),
           ],
           if (_testStatus == _TestStatus.failure) ...[
-            SizedBox(height: 8),
+            SizedBox(height: kGapTight),
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [

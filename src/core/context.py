@@ -9,8 +9,9 @@ Project context is now built from the session's ``main_project_path`` (set
 explicitly via the ``project_name`` field in the WS prompt message) rather
 than from ``@mention`` extraction.
 
-Used as a mixin class — ``PromptRouter`` inherits from
-``ContextMixin`` to gain these methods.
+Composition collaborator — ``PromptRouter`` owns a :class:`ContextBuilder`
+instance (``self._context``) and reaches shared router state / sibling
+behaviour through the ``self._r`` back-reference.
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ from src.database.models import Artifact as ArtifactModel
 from src.database.models import Task as TaskModel
 
 if TYPE_CHECKING:
+    from src.core.prompt_router import PromptRouter
     from src.tools.loader import ToolDefinition
 
 logger = logging.getLogger(__name__)
@@ -82,14 +84,16 @@ def _format_file_size(size_bytes: int) -> str:
     """Format a byte count to a human-readable string."""
     if size_bytes < 1024:
         return f"{size_bytes} B"
-    elif size_bytes < 1024 * 1024:
+    if size_bytes < 1024 * 1024:
         return f"{size_bytes / 1024:.1f} KB"
-    else:
-        return f"{size_bytes / (1024 * 1024):.1f} MB"
+    return f"{size_bytes / (1024 * 1024):.1f} MB"
 
 
-class ContextMixin:
-    """Mixin providing context building and direct tool mode methods for PromptRouter."""
+class ContextBuilder:
+    """Context building and direct-tool-mode collaborator for PromptRouter."""
+
+    def __init__(self, router: PromptRouter) -> None:
+        self._r = router
 
     # ------------------------------------------------------------------
     # Mention extraction
@@ -147,7 +151,7 @@ class ContextMixin:
         resolved: list[tuple[str, str, str]] = []  # (name, description, executor)
         seen: set[str] = set()
         for name in mentions:
-            tool = self._tool_registry.get(name)  # ty:ignore[unresolved-attribute]
+            tool = self._r._tool_registry.get(name)
             if tool is not None and tool.name not in seen:
                 seen.add(tool.name)
                 resolved.append((tool.name, tool.description, tool.executor))
@@ -223,9 +227,9 @@ class ContextMixin:
         Searches each configured projects_dir for a subdirectory matching ``name``.
         Returns None when no match is found.
         """
-        if not self._settings:  # ty:ignore[unresolved-attribute]
+        if not self._r._settings:
             return None
-        for projects_dir in self._settings.projects_dirs:  # ty:ignore[unresolved-attribute]
+        for projects_dir in self._r._settings.projects_dirs:
             project_path = projects_dir / name
             if project_path.is_dir():
                 return project_path
@@ -245,13 +249,13 @@ class ContextMixin:
 
         Returns None if no references resolve to valid artifacts.
         """
-        if not self._db_session_factory or not self._settings:  # ty:ignore[unresolved-attribute]
+        if not self._r._db_session_factory or not self._r._settings:
             return None
 
         context_parts: list[str] = []
         seen: set[str] = set()
 
-        async with self._db_session_factory() as db:  # ty:ignore[unresolved-attribute]
+        async with self._r._db_session_factory() as db:
             for ref_name in references:
                 lower_ref = ref_name.lower()
                 if lower_ref in seen:
@@ -260,7 +264,7 @@ class ContextMixin:
                 # Look up artifact by file_name (case-insensitive)
                 stmt = (
                     select(ArtifactModel)
-                    .where(ArtifactModel.backend_id == self._settings.RCFLOW_BACKEND_ID)  # ty:ignore[unresolved-attribute]
+                    .where(ArtifactModel.backend_id == self._r._settings.RCFLOW_BACKEND_ID)
                     .where(func.lower(ArtifactModel.file_name) == lower_ref)
                     .order_by(ArtifactModel.modified_at.desc())
                     .limit(1)
@@ -388,7 +392,7 @@ class ContextMixin:
             return None
 
         task_id_str = session.metadata.get("primary_task_id")
-        if not task_id_str or self._db_session_factory is None:  # ty:ignore[unresolved-attribute]
+        if not task_id_str or self._r._db_session_factory is None:
             return None
 
         try:
@@ -397,7 +401,7 @@ class ContextMixin:
             return None
 
         file_path: str | None = None
-        async with self._db_session_factory() as db:  # ty:ignore[unresolved-attribute]
+        async with self._r._db_session_factory() as db:
             task = await db.get(TaskModel, task_uuid)
             if task is None or task.plan_artifact_id is None:
                 return None
@@ -447,7 +451,7 @@ class ContextMixin:
         # Resolve the first valid tool mention
         tool_def: ToolDefinition | None = None
         for mention in tool_mentions:
-            candidate = self._tool_registry.get(mention)  # ty:ignore[unresolved-attribute]
+            candidate = self._r._tool_registry.get(mention)
             if candidate is not None:
                 tool_def = candidate
                 break
@@ -467,7 +471,7 @@ class ContextMixin:
 
     @staticmethod
     def _is_fresh_direct_mode_session(session: ActiveSession) -> bool:
-        """True when *session* has no successful prior turn.
+        """Return True when *session* has no successful prior turn.
 
         A direct-mode session is considered fresh when no agent has been
         attached, no tokens have been recorded, no title has been assigned,
@@ -483,12 +487,7 @@ class ContextMixin:
             or session.opencode_executor is not None
         ):
             return False
-        if (
-            session.input_tokens
-            or session.output_tokens
-            or session.tool_input_tokens
-            or session.tool_output_tokens
-        ):
+        if session.input_tokens or session.output_tokens or session.tool_input_tokens or session.tool_output_tokens:
             return False
         # The buffer contains only the just-pushed user TEXT_CHUNK and the
         # just-pushed ERROR for a truly fresh failed session.  Any other
@@ -517,21 +516,21 @@ class ContextMixin:
         # Find #tool mention anywhere in text
         tool_mentions = self._TOOL_MENTION_RE.findall(text)
         if not tool_mentions:
-            available = [t.name for t in self._tool_registry.list_tools()]  # ty:ignore[unresolved-attribute]
+            available = [t.name for t in self._r._tool_registry.list_tools()]
             return f"Direct tool mode requires #tool_name syntax. Available tools: {', '.join(available)}"
 
         # Resolve the first valid tool mention
         tool_def: ToolDefinition | None = None
         tool_mention_used: str = ""
         for mention in tool_mentions:
-            candidate = self._tool_registry.get(mention)  # ty:ignore[unresolved-attribute]
+            candidate = self._r._tool_registry.get(mention)
             if candidate is not None:
                 tool_def = candidate
                 tool_mention_used = mention
                 break
 
         if tool_def is None:
-            available = [t.name for t in self._tool_registry.list_tools()]  # ty:ignore[unresolved-attribute]
+            available = [t.name for t in self._r._tool_registry.list_tools()]
             return f"Unknown tool: #{tool_mentions[0]}. Available tools: {', '.join(available)}"
 
         # Strip the matched #tool from text
@@ -600,7 +599,7 @@ class ContextMixin:
                     {"session_id": session.id, "reason": "direct_tool_parse_error"},
                 )
                 session.fail(parsed)
-                self._fire_archive_task(session.id)  # ty:ignore[unresolved-attribute]
+                self._r._fire_archive_task(session.id)
             return
 
         tool_def, tool_input, display_text = parsed
@@ -624,7 +623,7 @@ class ContextMixin:
         )
 
         try:
-            await self._execute_tool(session, tool_call)  # ty:ignore[unresolved-attribute]
+            await self._r._execute_tool(session, tool_call)
         except Exception as e:
             logger.exception("Error executing direct tool in session %s", session.id)
             session.buffer.push_text(
@@ -647,7 +646,7 @@ class ContextMixin:
                     title = title[:space_idx]
                 title += "..."
             session.title = title
-            self._fire_persist_session_metadata(session)  # ty:ignore[unresolved-attribute]
+            self._r._fire_persist_session_metadata(session)
 
         # If non-agent tool completed, set IDLE and emit a turn-complete
         # signal so the client can finalize the tool block (switch the

@@ -4,8 +4,9 @@ Extracted from prompt_router.py to reduce file size. These methods handle
 starting, streaming, forwarding, restarting, and ending Codex CLI
 subprocess sessions.
 
-Used as a mixin class — ``PromptRouter`` inherits from
-``CodexAgentMixin`` to gain these methods.
+Composition collaborator — ``PromptRouter`` owns a :class:`CodexAgent`
+instance (``self._codex``) and delegates its public entry points to it.
+Shared router state / sibling behaviour is reached through ``self._r``.
 """
 
 from __future__ import annotations
@@ -18,7 +19,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from src.core.agent_auth import agent_configuration_issue
+from src.core.agents import truncate_tool_output
 from src.core.buffer import MessageType
+from src.core.cwd_tracking import (
+    apply_agent_cwd,
+    looks_like_git_worktree_mutation,
+    parse_cwd_change,
+    reset_worktree_cache,
+)
 from src.core.session import ActivityState, SessionStatus, SessionType
 from src.executors.codex import CodexExecutor
 
@@ -26,24 +34,21 @@ if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
     from src.core.llm import ToolCallRequest
+    from src.core.prompt_router import PromptRouter
     from src.core.session import ActiveSession
     from src.executors.base import ExecutionChunk
     from src.tools.loader import ToolDefinition
 
 logger = logging.getLogger(__name__)
 
-_MAX_TOOL_OUTPUT_CHARS = 100_000
+_truncate_tool_output = truncate_tool_output
 
 
-def _truncate_tool_output(content: str) -> str:
-    """Truncate tool output that exceeds the size limit for client delivery."""
-    if len(content) > _MAX_TOOL_OUTPUT_CHARS:
-        return content[:_MAX_TOOL_OUTPUT_CHARS] + f"\n\n... (truncated, {len(content):,} total chars)"
-    return content
+class CodexAgent:
+    """Codex CLI subprocess lifecycle collaborator for PromptRouter."""
 
-
-class CodexAgentMixin:
-    """Mixin providing Codex CLI agent lifecycle methods for PromptRouter."""
+    def __init__(self, router: PromptRouter) -> None:
+        self._r = router
 
     def _build_codex_extra_env(self) -> dict[str, str]:
         """Build extra environment variables for Codex CLI subprocesses."""
@@ -55,8 +60,8 @@ class CodexAgentMixin:
         # settings.json via CLAUDE_CONFIG_DIR), Codex CLI only reads API
         # keys from actual environment variables, so we must inject them.
         tool_settings: dict[str, Any] = {}
-        if self._tool_settings:  # ty:ignore[unresolved-attribute]
-            tool_settings = self._tool_settings.get_settings("codex")  # ty:ignore[unresolved-attribute]
+        if self._r._tool_settings:
+            tool_settings = self._r._tool_settings.get_settings("codex")
 
         tool_provider = tool_settings.get("provider", "")
 
@@ -70,8 +75,8 @@ class CodexAgentMixin:
             if isinstance(tool_env, dict):
                 extra_env.update(tool_env)
 
-        if self._tool_settings:  # ty:ignore[unresolved-attribute]
-            config_dir = self._tool_settings.get_config_dir("codex")  # ty:ignore[unresolved-attribute]
+        if self._r._tool_settings:
+            config_dir = self._r._tool_settings.get_config_dir("codex")
             config_dir.mkdir(parents=True, exist_ok=True)
             extra_env["CODEX_HOME"] = str(config_dir)
 
@@ -125,9 +130,9 @@ class CodexAgentMixin:
         """Start a Codex CLI session: spawn subprocess, begin background streaming."""
         auth_issue = agent_configuration_issue(
             "codex",
-            self._settings,  # ty:ignore[unresolved-attribute]
-            self._tool_settings,  # ty:ignore[unresolved-attribute]
-            self._tool_manager,  # ty:ignore[unresolved-attribute]
+            self._r._settings,
+            self._r._tool_settings,
+            self._r._tool_manager,
         )
         if auth_issue is not None:
             session.buffer.push_text(
@@ -147,7 +152,7 @@ class CodexAgentMixin:
         selected_wt = session.metadata.get("selected_worktree_path")
         if selected_wt:
             working_dir = selected_wt
-        working_path = self._resolve_working_directory(working_dir)  # ty:ignore[unresolved-attribute]
+        working_path = self._r._resolve_working_directory(working_dir)
         try:
             is_dir = working_path.is_dir()
         except OSError as e:
@@ -176,8 +181,8 @@ class CodexAgentMixin:
         # Replace the working_directory in tool_input with the resolved absolute path
         tool_call.tool_input["working_directory"] = str(working_path)
 
-        executor = self._get_executor(tool_def.executor, tool_def)  # ty:ignore[unresolved-attribute]
-        assert isinstance(executor, CodexExecutor)
+        executor = self._r._get_executor(tool_def.executor, tool_def)
+        assert isinstance(executor, CodexExecutor)  # noqa: S101
 
         session.codex_executor = executor
         session.session_type = SessionType.LONG_RUNNING
@@ -187,6 +192,9 @@ class CodexAgentMixin:
         session.metadata["codex_working_directory"] = str(working_path)
         session.metadata["codex_tool_name"] = tool_def.name
         session.metadata["codex_parameters"] = tool_call.tool_input
+        # Seed the live agent-cwd mirror so the worktree badge starts correct.
+        session.metadata["agent_cwd"] = str(working_path)
+        session.agent_cwd = str(working_path)
 
         # Start streaming in a background task that reads events and pushes to buffer
         task = asyncio.create_task(self._stream_codex_events(session, executor, tool_def, tool_call))
@@ -206,7 +214,7 @@ class CodexAgentMixin:
                 "display_name": session.subprocess_display_name,
                 "working_directory": session.subprocess_working_directory,
                 "current_tool": None,
-                "started_at": session.subprocess_started_at.isoformat(),
+                "started_at": session.subprocess_started_at_iso,
             },
         )
 
@@ -280,9 +288,20 @@ class CodexAgentMixin:
                                 "display_name": session.subprocess_display_name,
                                 "working_directory": session.subprocess_working_directory,
                                 "current_tool": "command_execution",
-                                "started_at": session.subprocess_started_at.isoformat(),
+                                "started_at": session.subprocess_started_at_iso,
                             },
                         )
+                    # Live worktree-badge tracking — same machinery the
+                    # Claude Code Bash interception uses.
+                    command = str(item.get("command", "") or "")
+                    if looks_like_git_worktree_mutation(command):
+                        reset_worktree_cache()
+                    new_cwd = parse_cwd_change(
+                        command,
+                        session.metadata.get("agent_cwd") or session.subprocess_working_directory,
+                    )
+                    if new_cwd and apply_agent_cwd(session, new_cwd) and self._r._session_manager is not None:
+                        self._r._session_manager.broadcast_session_update(session)
                 elif item_type == "file_change":
                     post_tool_text_chunks.clear()
                     session.buffer.push_text(
@@ -303,7 +322,7 @@ class CodexAgentMixin:
                                 "display_name": session.subprocess_display_name,
                                 "working_directory": session.subprocess_working_directory,
                                 "current_tool": "file_change",
-                                "started_at": session.subprocess_started_at.isoformat(),
+                                "started_at": session.subprocess_started_at_iso,
                             },
                         )
                 elif item_type == "mcp_tool_call":
@@ -327,7 +346,7 @@ class CodexAgentMixin:
                                 "display_name": session.subprocess_display_name,
                                 "working_directory": session.subprocess_working_directory,
                                 "current_tool": mcp_tool_name,
-                                "started_at": session.subprocess_started_at.isoformat(),
+                                "started_at": session.subprocess_started_at_iso,
                             },
                         )
 
@@ -374,7 +393,7 @@ class CodexAgentMixin:
                     last_agent_text.pop(item_id, None)
                     # Scan the complete agent message text for artifacts
                     if full_text:
-                        self._fire_text_artifact_scan(session, [full_text])  # ty:ignore[unresolved-attribute]
+                        self._r._fire_text_artifact_scan(session, [full_text])
                 elif item_type == "command_execution":
                     output = _truncate_tool_output(item.get("aggregated_output", ""))
                     exit_code = item.get("exit_code")
@@ -389,7 +408,7 @@ class CodexAgentMixin:
                                 "is_error": exit_code is not None and exit_code != 0,
                             },
                         )
-                        self._fire_text_artifact_scan(session, [output])  # ty:ignore[unresolved-attribute]
+                        self._r._fire_text_artifact_scan(session, [output])
                     session.subprocess_current_tool = None
                     if session.subprocess_started_at is not None:
                         session.buffer.push_ephemeral(
@@ -400,7 +419,7 @@ class CodexAgentMixin:
                                 "display_name": session.subprocess_display_name,
                                 "working_directory": session.subprocess_working_directory,
                                 "current_tool": None,
-                                "started_at": session.subprocess_started_at.isoformat(),
+                                "started_at": session.subprocess_started_at_iso,
                             },
                         )
                 elif item_type == "file_change":
@@ -417,7 +436,7 @@ class CodexAgentMixin:
                                 "stream": "stdout",
                             },
                         )
-                        self._fire_text_artifact_scan(session, [content])  # ty:ignore[unresolved-attribute]
+                        self._r._fire_text_artifact_scan(session, [content])
                     session.subprocess_current_tool = None
                     if session.subprocess_started_at is not None:
                         session.buffer.push_ephemeral(
@@ -428,7 +447,7 @@ class CodexAgentMixin:
                                 "display_name": session.subprocess_display_name,
                                 "working_directory": session.subprocess_working_directory,
                                 "current_tool": None,
-                                "started_at": session.subprocess_started_at.isoformat(),
+                                "started_at": session.subprocess_started_at_iso,
                             },
                         )
                 elif item_type == "mcp_tool_call":
@@ -447,7 +466,7 @@ class CodexAgentMixin:
                                 "stream": "stdout",
                             },
                         )
-                        self._fire_text_artifact_scan(session, [output])  # ty:ignore[unresolved-attribute]
+                        self._r._fire_text_artifact_scan(session, [output])
                     session.subprocess_current_tool = None
                     if session.subprocess_started_at is not None:
                         session.buffer.push_ephemeral(
@@ -458,7 +477,7 @@ class CodexAgentMixin:
                                 "display_name": session.subprocess_display_name,
                                 "working_directory": session.subprocess_working_directory,
                                 "current_tool": None,
-                                "started_at": session.subprocess_started_at.isoformat(),
+                                "started_at": session.subprocess_started_at_iso,
                             },
                         )
 
@@ -474,8 +493,8 @@ class CodexAgentMixin:
                     if session._on_update:
                         session._on_update()
                 summary_text = "".join(post_tool_text_chunks).strip() or "Codex task completed"
-                self._fire_summary_task(session, summary_text)  # ty:ignore[unresolved-attribute]
-                self._fire_task_update_task(session, summary_text)  # ty:ignore[unresolved-attribute]
+                self._r._fire_summary_task(session, summary_text)
+                self._r._fire_task_update_task(session, summary_text)
 
             elif event_type == "turn.failed":
                 error = event.get("error", {})
@@ -541,7 +560,7 @@ class CodexAgentMixin:
             "Codex initial streaming finished (session=%s)",
             session.id,
         )
-        self.schedule_pending_drain(session)  # ty:ignore[unresolved-attribute]
+        self._r.schedule_pending_drain(session)
 
     async def _end_codex_session(self, session: ActiveSession) -> None:
         """Clean up Codex state when the session ends."""
@@ -565,7 +584,7 @@ class CodexAgentMixin:
             },
         )
         session.complete()
-        self._fire_archive_task(session.id)  # ty:ignore[unresolved-attribute]
+        self._r._fire_archive_task(session.id)
 
     async def _forward_to_codex(self, session: ActiveSession, text: str) -> None:
         """Forward a follow-up message to the active Codex session.
@@ -586,7 +605,7 @@ class CodexAgentMixin:
         if session.subprocess_started_at is None:
             session.subprocess_started_at = datetime.now(UTC)
             session.subprocess_type = "codex"
-            codex_def_for_name = self._tool_registry.get("codex")  # ty:ignore[unresolved-attribute]
+            codex_def_for_name = self._r._tool_registry.get("codex")
             session.subprocess_display_name = (
                 codex_def_for_name.display_name if codex_def_for_name and codex_def_for_name.display_name else "Codex"
             )
@@ -600,12 +619,12 @@ class CodexAgentMixin:
                 "display_name": session.subprocess_display_name,
                 "working_directory": session.subprocess_working_directory,
                 "current_tool": None,
-                "started_at": session.subprocess_started_at.isoformat(),
+                "started_at": session.subprocess_started_at_iso,
             },
         )
 
         # Open a new agent group for this follow-up turn
-        codex_def = self._tool_registry.get("codex")  # ty:ignore[unresolved-attribute]
+        codex_def = self._r._tool_registry.get("codex")
         session.buffer.push_text(
             MessageType.AGENT_GROUP_START,
             {
@@ -650,4 +669,4 @@ class CodexAgentMixin:
             MessageType.AGENT_GROUP_END,
             {"session_id": session.id},
         )
-        self.schedule_pending_drain(session)  # ty:ignore[unresolved-attribute]
+        self._r.schedule_pending_drain(session)

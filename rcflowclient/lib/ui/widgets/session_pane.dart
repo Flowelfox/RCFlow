@@ -21,6 +21,7 @@ import 'terminal_pane.dart';
 import 'todo_panel.dart';
 import 'project_panel.dart';
 import 'worker_settings_pane.dart';
+import '../../theme/spacing.dart';
 
 /// Data carried during a session drag from the sidebar.
 class SessionDragData {
@@ -325,7 +326,7 @@ class _RightBookmarks extends StatelessWidget {
           iconColor: context.appColors.toolAccent,
           onTap: () => pane.toggleRightPanel('todo'),
         ),
-        const SizedBox(height: 4),
+        const SizedBox(height: kGapInline),
         _BookmarkTab(
           panelKey: 'project',
           icon: Icons.folder_outlined,
@@ -334,7 +335,7 @@ class _RightBookmarks extends StatelessWidget {
           iconColor: context.appColors.accent,
           onTap: () => pane.toggleRightPanel('project'),
         ),
-        const SizedBox(height: 4),
+        const SizedBox(height: kGapInline),
         _BookmarkTab(
           panelKey: 'statistics',
           icon: Icons.bar_chart_rounded,
@@ -383,7 +384,7 @@ class _BookmarkTab extends StatelessWidget {
         borderRadius: const BorderRadius.horizontal(left: Radius.circular(6)),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 150),
-          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
+          padding: const EdgeInsets.symmetric(horizontal: kSpace1, vertical: 10),
           decoration: BoxDecoration(
             color: isActive
                 ? context.appColors.bgSurface
@@ -410,7 +411,7 @@ class _BookmarkTab extends StatelessWidget {
                 size: 14,
                 color: isActive ? iconColor : context.appColors.textMuted,
               ),
-              const SizedBox(height: 4),
+              const SizedBox(height: kGapInline),
               RotatedBox(
                 quarterTurns: 1,
                 child: Text(
@@ -510,7 +511,7 @@ class _TerminalPaneHeader extends StatelessWidget {
           bottom: BorderSide(color: context.appColors.divider, width: 1),
         ),
       ),
-      padding: const EdgeInsets.symmetric(horizontal: 8),
+      padding: const EdgeInsets.symmetric(horizontal: kSpace2),
       child: Row(
         children: [
           Icon(

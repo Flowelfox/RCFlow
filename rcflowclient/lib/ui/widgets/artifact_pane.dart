@@ -9,6 +9,7 @@ import '../../state/pane_state.dart';
 import '../../theme.dart';
 import '../utils/markdown_copy_menu.dart';
 import '../utils/selectable_code_block_builder.dart';
+import '../../theme/spacing.dart';
 
 /// Full-pane artifact viewer.
 ///
@@ -102,7 +103,7 @@ class _ArtifactPaneHeader extends StatelessWidget {
             : context.appColors.bgSurface,
         border: Border(bottom: BorderSide(color: context.appColors.divider)),
       ),
-      padding: const EdgeInsets.symmetric(horizontal: 8),
+      padding: const EdgeInsets.symmetric(horizontal: kSpace2),
       child: Row(
         children: [
           if (appState.panes[paneId]?.canGoBack ?? false)
@@ -223,7 +224,7 @@ class _ArtifactPaneHeader extends StatelessWidget {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: context.appColors.bgSurface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(kRadiusLarge)),
         title: Text(
           'Delete Artifact',
           style: TextStyle(color: context.appColors.textPrimary, fontSize: 16),
@@ -375,7 +376,7 @@ class _ArtifactContentState extends State<_ArtifactContent> {
                 color: context.appColors.accent,
               ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: kGapRelaxed),
             Text(
               'Loading content...',
               style: TextStyle(
@@ -391,7 +392,7 @@ class _ArtifactContentState extends State<_ArtifactContent> {
     if (_error != null) {
       return Center(
         child: Padding(
-          padding: const EdgeInsets.all(24),
+          padding: const EdgeInsets.all(kSpace5),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -400,7 +401,7 @@ class _ArtifactContentState extends State<_ArtifactContent> {
                 color: context.appColors.textMuted,
                 size: 40,
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: kGapRelaxed),
               Text(
                 _error!,
                 textAlign: TextAlign.center,
@@ -409,7 +410,7 @@ class _ArtifactContentState extends State<_ArtifactContent> {
                   fontSize: 14,
                 ),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: kSpace4),
               OutlinedButton(
                 onPressed: _loadContent,
                 style: OutlinedButton.styleFrom(
@@ -431,7 +432,7 @@ class _ArtifactContentState extends State<_ArtifactContent> {
     }
 
     return ListView(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(kSpace4),
       children: [
         // File info header
         Row(
@@ -443,7 +444,7 @@ class _ArtifactContentState extends State<_ArtifactContent> {
               color: context.appColors.textMuted,
               size: 14,
             ),
-            const SizedBox(width: 4),
+            const SizedBox(width: kGapInline),
             Expanded(
               child: Text(
                 widget.artifact.filePath,
@@ -457,7 +458,7 @@ class _ArtifactContentState extends State<_ArtifactContent> {
             ),
             if (widget.artifact.isMarkdown)
               Padding(
-                padding: const EdgeInsets.only(right: 8),
+                padding: const EdgeInsets.only(right: kSpace2),
                 child: SizedBox(
                   height: 22,
                   child: SegmentedButton<bool>(
@@ -465,7 +466,7 @@ class _ArtifactContentState extends State<_ArtifactContent> {
                       visualDensity: VisualDensity.compact,
                       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                       padding: WidgetStatePropertyAll(
-                        EdgeInsets.symmetric(horizontal: 8),
+                        EdgeInsets.symmetric(horizontal: kSpace2),
                       ),
                       textStyle: WidgetStatePropertyAll(
                         TextStyle(fontSize: 11),
@@ -511,7 +512,7 @@ class _ArtifactContentState extends State<_ArtifactContent> {
             ),
           ],
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: kGapRelaxed),
         // Content display
         if (_renderMarkdown && widget.artifact.isMarkdown)
           _buildRenderedMarkdown(context)
@@ -522,10 +523,9 @@ class _ArtifactContentState extends State<_ArtifactContent> {
   }
 
   Widget _buildRenderedMarkdown(BuildContext context) {
-    return SelectionScope(
-      child: MarkdownCopyMenu(
-        rawMarkdown: _content!,
-        child: MarkdownBody(
+    return MessageSelectionArea(
+      rawMarkdown: _content!,
+      child: MarkdownBody(
           data: _content!,
           shrinkWrap: true,
           selectable: false,
@@ -566,7 +566,7 @@ class _ArtifactContentState extends State<_ArtifactContent> {
               color: context.appColors.bgElevated,
               borderRadius: BorderRadius.circular(8),
             ),
-            codeblockPadding: const EdgeInsets.all(12),
+            codeblockPadding: const EdgeInsets.all(kSpace3),
             a: TextStyle(color: context.appColors.accentLight),
             listBullet: TextStyle(
               color: context.appColors.textPrimary,
@@ -614,14 +614,13 @@ class _ArtifactContentState extends State<_ArtifactContent> {
             ),
           ),
         ),
-      ),
     );
   }
 
   Widget _buildRawContent(BuildContext context) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(kSpace3),
       decoration: BoxDecoration(
         color: context.appColors.bgElevated,
         borderRadius: BorderRadius.circular(8),

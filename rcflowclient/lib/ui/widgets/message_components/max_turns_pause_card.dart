@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../../models/ws_messages.dart';
 import '../../../state/pane_state.dart';
 import '../../../theme.dart';
+import '../../../theme/spacing.dart';
 
 /// Shown in the message stream when Claude Code automatically paused the
 /// session because it reached its configured --max-turns limit.
@@ -14,7 +15,7 @@ class MaxTurnsPauseCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.symmetric(vertical: kSpace2),
       child: Container(
         width: double.infinity,
         padding: const EdgeInsets.all(14),
@@ -83,7 +84,7 @@ class _ResumeButton extends StatelessWidget {
         foregroundColor: const Color(0xFFFBBF24),
         side: const BorderSide(color: Color(0xFFFBBF24), width: 1),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: kSpace3, vertical: kSpace2),
         textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
       ),
     );

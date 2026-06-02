@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../models/todo_item.dart';
 import '../../state/pane_state.dart';
 import '../../theme.dart';
+import '../../theme/spacing.dart';
 
 /// Persistent dockable panel showing the current session's todo list.
 ///
@@ -31,7 +32,7 @@ class TodoPanel extends StatelessWidget {
           // Header
           Container(
             height: 36,
-            padding: const EdgeInsets.symmetric(horizontal: 12),
+            padding: const EdgeInsets.symmetric(horizontal: kSpace3),
             decoration: BoxDecoration(
               border: Border(
                 bottom: BorderSide(color: context.appColors.divider),
@@ -53,7 +54,7 @@ class TodoPanel extends StatelessWidget {
                     fontWeight: FontWeight.w600,
                   ),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: kGapTight),
                 Text(
                   '$completed/$total',
                   style: TextStyle(
@@ -81,7 +82,7 @@ class TodoPanel extends StatelessWidget {
           ),
           // Progress bar
           Padding(
-            padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+            padding: const EdgeInsets.fromLTRB(kSpace3, kSpace2, kSpace3, kSpace1),
             child: ClipRRect(
               borderRadius: BorderRadius.circular(2),
               child: LinearProgressIndicator(
@@ -95,7 +96,7 @@ class TodoPanel extends StatelessWidget {
           // Todo list
           Expanded(
             child: ListView.builder(
-              padding: const EdgeInsets.symmetric(vertical: 4),
+              padding: const EdgeInsets.symmetric(vertical: kSpace1),
               itemCount: todos.length,
               itemBuilder: (context, index) =>
                   _TodoPanelItem(todo: todos[index]),
@@ -168,7 +169,7 @@ class _TodoPanelItemState extends State<_TodoPanelItem>
     );
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: kSpace3, vertical: kSpace1),
       color: isActive
           ? context.appColors.accent.withAlpha(15)
           : Colors.transparent,

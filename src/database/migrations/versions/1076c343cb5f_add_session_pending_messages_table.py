@@ -1,4 +1,4 @@
-"""add session_pending_messages table
+"""add session_pending_messages table.
 
 Revision ID: 1076c343cb5f
 Revises: b3d61d879884

@@ -189,25 +189,47 @@ class BadgeState:
 
     def _worktree_badge(self, session: ActiveSession) -> BadgeSpec | None:
         wt = session.metadata.get("worktree")
-        if not wt:
+        agent_cwd = session.metadata.get("agent_cwd")
+        # Without either a recorded worktree action or a live agent cwd
+        # there is nothing meaningful to show.
+        if not wt and not agent_cwd:
             return None
+
         # wt may be a plain dict (serialised from metadata) or a WorktreeInfo
         # dataclass; handle both.
-        if hasattr(wt, "branch"):
-            branch = wt.branch
-            repo_path = getattr(wt, "repo_path", None)
-            last_action = getattr(wt, "last_action", "")
-            base = getattr(wt, "base", None)
-            payload: dict[str, Any] = {
-                "repo_path": repo_path,
-                "branch": branch,
-                "base": base,
-                "last_action": last_action,
-            }
-        else:
-            branch = wt.get("branch")
-            payload = dict(wt)
-        label = branch or (wt.get("repo_path") if isinstance(wt, dict) else None) or "worktree"
+        branch: str | None = None
+        payload: dict[str, Any] = {}
+        if wt is not None:
+            if hasattr(wt, "branch"):
+                branch = wt.branch
+                payload = {
+                    "repo_path": getattr(wt, "repo_path", None),
+                    "branch": branch,
+                    "base": getattr(wt, "base", None),
+                    "last_action": getattr(wt, "last_action", ""),
+                }
+            elif isinstance(wt, dict):
+                branch = wt.get("branch")
+                payload = dict(wt)
+
+        if agent_cwd:
+            payload["agent_cwd"] = agent_cwd
+
+        # Label priority: explicit branch from the last worktree action,
+        # then a directory-name fallback derived from the agent's live cwd
+        # (useful when the agent ``cd``s into a worktree the user never
+        # explicitly attached), then whatever loose metadata we have.
+        label = branch
+        if not label and agent_cwd:
+            project = session.main_project_path
+            if project and agent_cwd.startswith(project):
+                rel = agent_cwd[len(project) :].strip("/\\")
+                if rel:
+                    # Last path segment reads cleanly in the chip
+                    # (e.g. ``.worktrees/foo`` → ``foo``).
+                    label = rel.rsplit("/", 1)[-1].rsplit("\\", 1)[-1] or rel
+        if not label:
+            label = (wt.get("repo_path") if isinstance(wt, dict) else None) or "worktree"
         return BadgeSpec(
             type="worktree",
             label=label,

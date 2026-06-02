@@ -7,6 +7,7 @@ import '../../state/pane_state.dart';
 import '../../theme.dart';
 import '../badges/badge_bar.dart';
 import '../badges/badge_chip.dart';
+import '../../theme/spacing.dart';
 
 /// A thin strip displayed above the chat output that shows which session is
 /// currently open — title, status badge, and worker badge.
@@ -52,7 +53,7 @@ class _GuidanceBar extends StatelessWidget {
     final appColors = context.appColors;
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: kSpace4, vertical: 6),
       color: appColors.bgElevated,
       child: Text(
         message,
@@ -82,7 +83,7 @@ class _NewChatBar extends StatelessWidget {
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: kSpace4, vertical: 6),
       color: appColors.bgElevated,
       child: Row(
         children: [
@@ -152,7 +153,7 @@ class _SessionBar extends StatelessWidget {
       onTap: () => _showSessionActions(context),
       child: Container(
         width: double.infinity,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: kSpace4, vertical: 6),
         decoration: BoxDecoration(
           color: appColors.bgElevated,
           border: Border(
@@ -168,7 +169,7 @@ class _SessionBar extends StatelessWidget {
               badges: session.badges,
               slotFilter: const {'status'},
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: kGapTight),
             // Session title
             Expanded(
               child: Text(
@@ -182,7 +183,7 @@ class _SessionBar extends StatelessWidget {
               ),
             ),
             // Chevron hint
-            const SizedBox(width: 4),
+            const SizedBox(width: kGapInline),
             Icon(
               Icons.keyboard_arrow_down_rounded,
               color: appColors.textMuted,
@@ -214,7 +215,7 @@ class _SessionBar extends StatelessWidget {
             children: [
               // Handle
               Padding(
-                padding: const EdgeInsets.symmetric(vertical: 12),
+                padding: const EdgeInsets.symmetric(vertical: kSpace3),
                 child: Container(
                   width: 40,
                   height: 4,
@@ -227,7 +228,7 @@ class _SessionBar extends StatelessWidget {
               // Session title header
               Padding(
                 padding:
-                    const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+                    const EdgeInsets.symmetric(horizontal: 20, vertical: kSpace1),
                 child: Row(
                   children: [
                     BadgeBar(
@@ -319,7 +320,7 @@ class _SessionBar extends StatelessWidget {
                     );
                   },
                 ),
-              const SizedBox(height: 8),
+              const SizedBox(height: kGapTight),
             ],
           ),
         );
@@ -336,7 +337,7 @@ class _SessionBar extends StatelessWidget {
       builder: (ctx) => AlertDialog(
         backgroundColor: appColors.bgSurface,
         shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(kRadiusLarge)),
         title: Text(
           'Rename session',
           style: TextStyle(

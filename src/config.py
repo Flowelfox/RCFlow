@@ -1,3 +1,5 @@
+"""Application configuration loaded from environment variables / ``.env``."""
+
 from __future__ import annotations
 
 import json
@@ -149,6 +151,8 @@ def _migrate_env_to_json(json_path: Path) -> None:
 
 
 class Settings(BaseSettings):
+    """Settings."""
+
     model_config = SettingsConfigDict(
         case_sensitive=False,
     )
@@ -325,6 +329,7 @@ def _populate_missing_defaults(settings: Settings) -> None:
 
 
 def get_settings() -> Settings:
+    """Get settings."""
     logger = logging.getLogger(__name__)
     settings = Settings()
     if not settings.RCFLOW_API_KEY:

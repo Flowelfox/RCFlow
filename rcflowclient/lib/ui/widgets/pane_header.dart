@@ -7,6 +7,7 @@ import '../../models/todo_item.dart';
 import '../../state/app_state.dart';
 import '../../state/pane_state.dart';
 import '../../theme.dart';
+import '../../theme/spacing.dart';
 
 /// Thin 32px header bar for a pane — shows session title and close button.
 /// Only displayed when there are multiple panes.
@@ -41,7 +42,7 @@ class PaneHeader extends StatelessWidget {
             : context.appColors.bgSurface,
         border: Border(bottom: BorderSide(color: context.appColors.divider)),
       ),
-      padding: EdgeInsets.symmetric(horizontal: 8),
+      padding: EdgeInsets.symmetric(horizontal: kSpace2),
       child: Row(
         children: [
           if (pane.canGoBack)
@@ -129,12 +130,12 @@ class PaneHeader extends StatelessWidget {
     final total = todos.length;
 
     return Padding(
-      padding: const EdgeInsets.only(right: 4),
+      padding: const EdgeInsets.only(right: kSpace1),
       child: InkWell(
         onTap: pane.toggleTodoPanel,
         borderRadius: BorderRadius.circular(4),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+          padding: const EdgeInsets.symmetric(horizontal: kSpace1, vertical: 2),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -209,7 +210,7 @@ class PaneHeader extends StatelessWidget {
       message: tooltipLines.join('\n'),
       preferBelow: false,
       child: Container(
-        margin: const EdgeInsets.only(right: 4),
+        margin: const EdgeInsets.only(right: kSpace1),
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
         decoration: BoxDecoration(
           color: usageColor.withAlpha(25),

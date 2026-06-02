@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../../models/ws_messages.dart';
 import '../../../state/pane_state.dart';
 import '../../../theme.dart';
+import '../../../theme/spacing.dart';
 
 class ToolBlock extends StatelessWidget {
   final DisplayMessage message;
@@ -84,11 +85,11 @@ class ToolBlock extends StatelessWidget {
         finished && (output.isNotEmpty || hasDiff);
 
     return Padding(
-      padding: EdgeInsets.symmetric(vertical: 4),
+      padding: EdgeInsets.symmetric(vertical: kSpace1),
       child: Container(
         decoration: BoxDecoration(
           color: context.appColors.toolBg,
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(kRadiusMedium),
           border: Border.all(color: context.appColors.divider),
         ),
         clipBehavior: Clip.antiAlias,
@@ -104,7 +105,7 @@ class ToolBlock extends StatelessWidget {
                   : null,
               child: Container(
                 color: Colors.transparent,
-                padding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                padding: EdgeInsets.symmetric(horizontal: kSpace3, vertical: 10),
                 child: Row(
                   children: [
                     if (hasExpandableContent) ...[
@@ -115,7 +116,7 @@ class ToolBlock extends StatelessWidget {
                         color: context.appColors.toolAccent,
                         size: 18,
                       ),
-                      SizedBox(width: 8),
+                      SizedBox(width: kGapTight),
                     ],
                     finished
                         ? Icon(
@@ -166,7 +167,7 @@ class ToolBlock extends StatelessWidget {
                       ),
                     ),
                     if (diffStats != null) ...[
-                      SizedBox(width: 8),
+                      SizedBox(width: kGapTight),
                       Text(
                         diffStats,
                         style: TextStyle(
@@ -275,12 +276,12 @@ class _DiffView extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 2, 12, 10),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(kRadiusSmall),
         child: Container(
           width: double.infinity,
           decoration: BoxDecoration(
             border: Border.all(color: colors.divider),
-            borderRadius: BorderRadius.circular(6),
+            borderRadius: BorderRadius.circular(kRadiusSmall),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -357,7 +358,7 @@ class _DiffView extends StatelessWidget {
               style: monoStyle.copyWith(color: colors.textMuted),
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: kGapTight),
           Expanded(
             child: Text(
               row.text,

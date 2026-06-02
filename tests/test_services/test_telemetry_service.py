@@ -367,7 +367,7 @@ class TestWorkerSummaryEndpoint:
         assert body["error_rate"] == 0.0
 
     def test_avg_and_p95_llm_duration_computed(self):
-        """avg of [100, 200, 300] = 200; p95 uses idx = int(n*0.95)-1 clamped to 0."""
+        """Avg of [100, 200, 300] = 200; p95 uses idx = int(n*0.95)-1 clamped to 0."""
         # For n=3: idx = max(0, int(3*0.95)-1) = max(0, 2-1) = 1 → sorted[1] = 200
         db = _mock_db_for_worker_summary(llm_durations=[100, 200, 300])
         client = self._client_with_db(db)

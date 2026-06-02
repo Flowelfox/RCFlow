@@ -1,4 +1,4 @@
-"""Tests for session lifecycle methods on PromptRouter / SessionLifecycleMixin.
+"""Tests for session lifecycle methods on PromptRouter / SessionLifecycle.
 
 Covers:
 - ``ensure_session`` — create/reuse/replace sessions
@@ -277,12 +277,15 @@ class TestResumeSession:
         msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.SESSION_RESUMED]
         assert len(msgs) == 1
 
-    async def test_resume_non_paused_raises(self, session_manager: SessionManager) -> None:
+    async def test_resume_non_paused_is_idempotent(self, session_manager: SessionManager) -> None:
+        # Concurrent sends to a paused session each fire resume; the
+        # later landings see status=ACTIVE and must no-op rather than
+        # raise so the user-visible "send during pause" stays smooth.
         router = _make_router(session_manager)
         session = session_manager.create_session(SessionType.CONVERSATIONAL)
         session.set_active()
-        with pytest.raises(RuntimeError):
-            await router.resume_session(session.id)
+        result = await router.resume_session(session.id)
+        assert result is session
 
     async def test_nonexistent_session_raises(self, session_manager: SessionManager) -> None:
         router = _make_router(session_manager)

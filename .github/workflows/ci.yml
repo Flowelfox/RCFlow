@@ -64,6 +64,8 @@ jobs:
       # ── Tests ───────────────────────────────────────────────────────────
 
       # RCFLOW_API_KEY is auto-generated at server startup; not needed here.
+      # Coverage floor lives in pyproject.toml [tool.coverage.report] fail_under;
+      # pytest --cov inherits it and fails the build if the floor is breached.
       - name: Run tests with coverage
         run: uv run pytest tests/ -v --tb=short --cov --cov-report=term-missing
 
@@ -114,6 +116,12 @@ jobs:
         run: flutter analyze --fatal-warnings
 
       # Unit + widget tests — no device or emulator required.
+      # --coverage emits coverage/lcov.info so the ratchet check below
+      # fails the build if line coverage drops below coverage_threshold.txt.
       - name: Test
         working-directory: rcflowclient
-        run: flutter test --reporter=expanded
+        run: flutter test --reporter=expanded --coverage
+
+      - name: Check Flutter coverage floor
+        working-directory: rcflowclient
+        run: bash tool/check_coverage.sh

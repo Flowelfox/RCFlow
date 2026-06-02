@@ -6,6 +6,13 @@ import 'dart:math';
 
 import '../models/artifact_info.dart';
 import '../models/linear_issue_info.dart';
+import 'clipboard_paste_controller.dart';
+import 'toast_notifier.dart';
+import 'stores/artifact_store.dart';
+import 'stores/linear_issue_store.dart';
+import 'stores/project_data_cache.dart';
+import 'stores/task_store.dart';
+import 'stores/terminal_session_store.dart';
 import '../models/session_info.dart';
 import '../models/split_tree.dart';
 import '../models/task_info.dart';
@@ -13,7 +20,6 @@ import '../models/worker_config.dart';
 import '../models/app_notification.dart';
 import '../services/foreground_service.dart';
 import '../services/hotkey_service.dart';
-import '../services/keyboard_state_reconciler.dart';
 import '../services/notification_service.dart';
 import '../services/notification_sound_service.dart';
 import '../services/settings_service.dart';
@@ -60,104 +66,28 @@ class AppState extends ChangeNotifier implements PaneHost {
   }
 
   // External paste with explicit text payload — used by the Windows clipboard
-  // sniffer in the runner. Wispr Flow's TSF text-injection path doesn't reach
-  // Flutter's TextField, but Wispr also writes the recognized text to the
-  // clipboard before injecting. The runner forwards that captured text here
-  // so the InputArea can insert it directly.
-  final ValueNotifier<int> externalPasteRequest = ValueNotifier(0);
-  String? externalPasteText;
+  // sniffer in the runner. The detection/dance logic lives on a composed
+  // [ClipboardPasteController]; AppState re-exposes its surface.
+  final ClipboardPasteController _clipboard = ClipboardPasteController();
 
-  // Delay-and-detect for the Wispr Flow paste pattern (and similar
-  // dictation tools that follow the same dance):
-  //
-  //   1. Save current clipboard X
-  //   2. Write recognized text Y      → poller emits {text=Y, prev=X}
-  //   3. SendInput Ctrl+V
-  //   4. Wait ~500ms
-  //   5. Restore X                    → poller emits {text=X, prev=Y}
-  //
-  // The C++ poller delivers `previousText` with each event so the restore
-  // detector matches directly against the prior clipboard contents — no
-  // dart-side baseline tracking, no timer races. Two restore detection
-  // paths:
-  //   - In-window: pending Y exists, incoming text equals what was on the
-  //     clipboard right before Y was written (i.e. Y's previousText).
-  //     Equivalently: incoming `previousText` equals pending Y.
-  //   - Late: timer already fired and committed Y. If a later event arrives
-  //     whose `previousText` equals the just-committed text within
-  //     [_lateRestoreWindow], it's Wispr's restore — drop it.
-  static const Duration _pasteHoldoff = Duration(milliseconds: 150);
-  static const Duration _lateRestoreWindow = Duration(seconds: 2);
+  ValueNotifier<int> get externalPasteRequest =>
+      _clipboard.externalPasteRequest;
+  String? get externalPasteText => _clipboard.externalPasteText;
 
-  String? _pendingPasteText;
-  Timer? _pasteHoldoffTimer;
-  String? _lastCommittedText;
-  DateTime _lastCommitAt = DateTime.fromMillisecondsSinceEpoch(0);
-
-  /// Single entry point for all clipboard change notifications from the
-  /// Win32 runner's polling thread. The runner pre-fills `previousText`
-  /// with what was on the clipboard immediately before this change, which
-  /// is what restore detection keys off of.
+  /// Single entry point for clipboard change notifications from the runner.
   void handleClipboardEvent({
     required String text,
     required String? previousText,
     required bool isOwn,
     required bool isForeground,
     required bool seqJumped,
-  }) {
-    // Wispr's hotkey holds Ctrl/Alt/Win via global hook; the release can
-    // miss RCFlow entirely. Reconcile modifier state with the OS on every
-    // clipboard event so stuck modifiers clear once dictation finishes.
-    KeyboardStateReconciler.reconcile();
-
-    if (text.isEmpty) return;
-    // Skip our own copies — Flutter's TextField copy menu, RCFlow copy
-    // buttons, etc.
-    if (isOwn) return;
-
-    // In-window restore: incoming event's previousText is the pending Y,
-    // which means the clipboard just transitioned Y → text. That's Wispr
-    // restoring its saved clipboard right after writing Y. Commit Y, drop
-    // this restore event.
-    if (_pendingPasteText != null && previousText == _pendingPasteText) {
-      _commitPendingPaste();
-      return;
-    }
-
-    // Late restore: timer already fired and committed Y. A later event
-    // reports a transition from Y → text within the late-restore window —
-    // drop it.
-    if (previousText != null &&
-        previousText == _lastCommittedText &&
-        DateTime.now().difference(_lastCommitAt) < _lateRestoreWindow) {
-      return;
-    }
-
-    // External write — buffer for restore detection. Final input-field-focus
-    // gate runs at insertion time in InputArea, so background-app writes
-    // while RCFlow happens to be foreground but no input is focused don't
-    // hijack the field. We deliberately don't gate on isForeground here:
-    // Wispr's hotkey timing can leave RCFlow non-foreground at the moment
-    // the clipboard is written.
-    if (_pendingPasteText != null) {
-      _commitPendingPaste();
-    }
-    _pendingPasteText = text;
-    _pasteHoldoffTimer?.cancel();
-    _pasteHoldoffTimer = Timer(_pasteHoldoff, _commitPendingPaste);
-  }
-
-  void _commitPendingPaste() {
-    _pasteHoldoffTimer?.cancel();
-    _pasteHoldoffTimer = null;
-    final text = _pendingPasteText;
-    if (text == null) return;
-    _pendingPasteText = null;
-    _lastCommittedText = text;
-    _lastCommitAt = DateTime.now();
-    externalPasteText = text;
-    externalPasteRequest.value++;
-  }
+  }) => _clipboard.handleClipboardEvent(
+    text: text,
+    previousText: previousText,
+    isOwn: isOwn,
+    isForeground: isForeground,
+    seqJumped: seqJumped,
+  );
 
   // --- Workers (delegated to WorkerRegistry) ---
   late final WorkerRegistry _registry;
@@ -244,6 +174,11 @@ class AppState extends ChangeNotifier implements PaneHost {
     try {
       _userEndedSessionIds.add(sessionId);
       await _wsForSession(workerId)?.cancelSession(sessionId);
+      // Optimistically mark the session terminal so the End button hides
+      // and the session moves to its post-end visual state without waiting
+      // for the server's `session_update` broadcast — that round-trip is
+      // what made repeat clicks feel necessary.
+      _registry[workerId]?.markSessionLocallyTerminal(sessionId, 'cancelled');
       // If any pane is viewing this session, clean it up
       for (final pane in _panes.values) {
         if (pane.sessionId == sessionId) {
@@ -311,9 +246,9 @@ class AppState extends ChangeNotifier implements PaneHost {
 
   // --- Terminal session tracking ---
   /// All terminal sessions keyed by terminalId. Survives pane close/reopen.
-  final Map<String, TerminalSessionInfo> _terminalSessions = {};
+  final TerminalSessionStore _terminals = TerminalSessionStore();
   Map<String, TerminalSessionInfo> get terminalSessions =>
-      Map.unmodifiable(_terminalSessions);
+      _terminals.unmodifiable;
 
   final Map<String, PaneType> _paneTypes = {};
   final Map<String, GlobalKey> _terminalPaneKeys = {};
@@ -325,51 +260,24 @@ class AppState extends ChangeNotifier implements PaneHost {
   PaneType getPaneType(String paneId) => _paneTypes[paneId] ?? PaneType.chat;
 
   /// Find the terminal session info attached to a given pane.
-  TerminalSessionInfo? getTerminalPaneInfo(String paneId) {
-    for (final info in _terminalSessions.values) {
-      if (info.paneId == paneId) return info;
-    }
-    return null;
-  }
+  TerminalSessionInfo? getTerminalPaneInfo(String paneId) =>
+      _terminals.findByPane(paneId);
 
   /// Terminal sessions grouped by workerId (for sidebar display).
-  Map<String, List<TerminalSessionInfo>> get terminalsByWorker {
-    final map = <String, List<TerminalSessionInfo>>{};
-    for (final info in _terminalSessions.values) {
-      map.putIfAbsent(info.workerId, () => []).add(info);
-    }
-    for (final list in map.values) {
-      list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
-    }
-    return map;
-  }
+  Map<String, List<TerminalSessionInfo>> get terminalsByWorker =>
+      _terminals.byWorker();
 
   // --- Task tracking ---
-  final Map<String, TaskInfo> _tasks = {};
+  final TaskStore _taskStore = TaskStore();
 
   /// All tasks sorted by updatedAt descending.
-  List<TaskInfo> get tasks {
-    final all = _tasks.values.toList();
-    all.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
-    return all;
-  }
+  List<TaskInfo> get tasks => _taskStore.all();
 
   /// Tasks grouped by workerId (for sidebar display).
-  Map<String, List<TaskInfo>> get tasksByWorker {
-    final map = <String, List<TaskInfo>>{};
-    for (final config in _registry.configs) {
-      map[config.id] = [];
-    }
-    for (final t in _tasks.values) {
-      map.putIfAbsent(t.workerId, () => []).add(t);
-    }
-    for (final list in map.values) {
-      list.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
-    }
-    return map;
-  }
+  Map<String, List<TaskInfo>> get tasksByWorker =>
+      _taskStore.byWorker(_registry.configs);
 
-  TaskInfo? getTask(String taskId) => _tasks[taskId];
+  TaskInfo? getTask(String taskId) => _taskStore.get(taskId);
 
   /// Look up a [SessionInfo] by its ID across all connected workers.
   /// Returns null if the session is not currently known to any worker.
@@ -383,18 +291,12 @@ class AppState extends ChangeNotifier implements PaneHost {
   }
 
   /// Check if a session is attached to any task (for sidebar indicator).
-  bool isSessionAttachedToTask(String sessionId) {
-    return _tasks.values.any(
-      (t) => t.sessions.any((s) => s.sessionId == sessionId),
-    );
-  }
+  bool isSessionAttachedToTask(String sessionId) =>
+      _taskStore.isAttachedToSession(sessionId);
 
   /// Get all tasks that a session is attached to.
-  List<TaskInfo> tasksForSession(String sessionId) {
-    return _tasks.values
-        .where((t) => t.sessions.any((s) => s.sessionId == sessionId))
-        .toList();
-  }
+  List<TaskInfo> tasksForSession(String sessionId) =>
+      _taskStore.forSession(sessionId);
 
   /// Return the display name for the given workerId (falls back to first worker).
   String _workerName(String workerId) {
@@ -406,49 +308,38 @@ class AppState extends ChangeNotifier implements PaneHost {
   }
 
   void _handleTaskList(List<dynamic> list, String workerId) {
-    // Remove existing tasks from this worker
-    _tasks.removeWhere((_, t) => t.workerId == workerId);
-    final workerName = _workerName(workerId);
-    for (final raw in list) {
-      final t = TaskInfo.fromJson(
-        raw as Map<String, dynamic>,
-        workerId: workerId,
-        workerName: workerName,
-      );
-      _tasks[t.taskId] = t;
-    }
+    _taskStore.replaceWorker(workerId, _workerName(workerId), list);
     notifyListeners();
   }
 
   void _handleTaskUpdate(Map<String, dynamic> msg, String workerId) {
     final taskId = msg['task_id'] as String?;
     if (taskId == null) return;
-    final workerName = _workerName(workerId);
-    final existing = _tasks[taskId];
+    final existing = _taskStore.get(taskId);
     final updated = TaskInfo.fromJson(
       msg,
       workerId: workerId,
-      workerName: workerName,
+      workerName: _workerName(workerId),
     );
-    _tasks[taskId] = updated;
+    _taskStore.upsert(updated);
 
     // N3: Task created (new task ID)
     if (existing == null) {
-      _showToast(
+      _toasts.show(
         level: NotificationLevel.info,
         title: 'Task Created',
         body: updated.title,
-        category: _ToastCategory.task,
+        category: ToastCategory.task,
         onAction: () => openTaskInPane(taskId),
       );
     }
     // N2: Task status changed
     else if (existing.status != updated.status) {
-      _showToast(
+      _toasts.show(
         level: NotificationLevel.warning,
         title: 'Task Status Changed',
         body: '${updated.title}: ${existing.status} \u2192 ${updated.status}',
-        category: _ToastCategory.task,
+        category: ToastCategory.task,
         onAction: () => openTaskInPane(taskId),
       );
     }
@@ -459,7 +350,7 @@ class AppState extends ChangeNotifier implements PaneHost {
   void _handleTaskDeleted(Map<String, dynamic> msg) {
     final taskId = msg['task_id'] as String?;
     if (taskId == null) return;
-    _tasks.remove(taskId);
+    _taskStore.remove(taskId);
 
     // Close any pane currently viewing this task
     for (final entry in _panes.entries.toList()) {
@@ -473,21 +364,14 @@ class AppState extends ChangeNotifier implements PaneHost {
   }
 
   // --- Artifact tracking ---
-  final Map<String, ArtifactInfo> _artifacts = {};
+  final ArtifactStore _artifactStore = ArtifactStore();
 
   /// All artifacts sorted by discoveredAt descending.
-  List<ArtifactInfo> get artifacts {
-    final all = _artifacts.values.toList();
-    all.sort((a, b) {
-      final aTime = a.discoveredAt ?? DateTime(1970);
-      final bTime = b.discoveredAt ?? DateTime(1970);
-      return bTime.compareTo(aTime);
-    });
-    return all;
-  }
+  List<ArtifactInfo> get artifacts => _artifactStore.all();
 
   /// Get a single artifact by ID.
-  ArtifactInfo? getArtifact(String artifactId) => _artifacts[artifactId];
+  ArtifactInfo? getArtifact(String artifactId) =>
+      _artifactStore.get(artifactId);
 
   /// Load artifacts from all connected workers.
   void loadArtifacts() {
@@ -499,37 +383,27 @@ class AppState extends ChangeNotifier implements PaneHost {
   }
 
   void _handleArtifactList(List<dynamic> list, String workerId) {
-    // Remove existing artifacts from this worker
-    _artifacts.removeWhere((_, a) => a.workerId == workerId);
-    final workerName = _workerName(workerId);
-    for (final raw in list) {
-      final a = ArtifactInfo.fromJson(
-        raw as Map<String, dynamic>,
-        workerId: workerId,
-        workerName: workerName,
-      );
-      _artifacts[a.artifactId] = a;
-    }
+    _artifactStore.replaceWorker(workerId, _workerName(workerId), list);
     notifyListeners();
   }
 
   void _handleArtifactUpdate(Map<String, dynamic> msg, String workerId) {
     final artifactId = msg['artifact_id'] as String?;
     if (artifactId == null) return;
-    final workerName = _workerName(workerId);
-    final updated = ArtifactInfo.fromJson(
-      msg,
-      workerId: workerId,
-      workerName: workerName,
+    _artifactStore.upsert(
+      ArtifactInfo.fromJson(
+        msg,
+        workerId: workerId,
+        workerName: _workerName(workerId),
+      ),
     );
-    _artifacts[artifactId] = updated;
     notifyListeners();
   }
 
   void _handleArtifactDeleted(Map<String, dynamic> msg) {
     final artifactId = msg['artifact_id'] as String?;
     if (artifactId == null) return;
-    _artifacts.remove(artifactId);
+    _artifactStore.remove(artifactId);
 
     // Close any pane currently viewing this artifact
     for (final entry in _panes.entries.toList()) {
@@ -547,36 +421,21 @@ class AppState extends ChangeNotifier implements PaneHost {
   /// Cached worktree/artifact lists per `'workerId:projectPath'` key.
   /// Populated by [ProjectPanel] after each successful fetch so that reopening
   /// the panel shows the last-known data immediately while a fresh fetch runs.
-  final Map<
-    String,
-    ({
-      List<Map<String, dynamic>>? worktrees,
-      List<Map<String, dynamic>>? artifacts,
-      bool noGitRepo,
-    })
-  >
-  _projectDataCache = {};
+  final ProjectDataCache _projectData = ProjectDataCache();
 
-  ({
-    List<Map<String, dynamic>>? worktrees,
-    List<Map<String, dynamic>>? artifacts,
-    bool noGitRepo,
-  })?
-  getProjectDataCache(String key) => _projectDataCache[key];
+  ProjectData? getProjectDataCache(String key) => _projectData.get(key);
 
   void setProjectDataCache(
     String key, {
     List<Map<String, dynamic>>? worktrees,
     List<Map<String, dynamic>>? artifacts,
     bool? noGitRepo,
-  }) {
-    final existing = _projectDataCache[key];
-    _projectDataCache[key] = (
-      worktrees: worktrees ?? existing?.worktrees,
-      artifacts: artifacts ?? existing?.artifacts,
-      noGitRepo: noGitRepo ?? existing?.noGitRepo ?? false,
-    );
-  }
+  }) => _projectData.set(
+    key,
+    worktrees: worktrees,
+    artifacts: artifacts,
+    noGitRepo: noGitRepo,
+  );
 
   /// Show an artifact in the active pane (converting it in-place).
   void openArtifactInPane(String artifactId) {
@@ -586,7 +445,7 @@ class AppState extends ChangeNotifier implements PaneHost {
 
       // Detach any existing terminal from this pane
       if (_paneTypes[_activePaneId] == PaneType.terminal) {
-        for (final info in _terminalSessions.values) {
+        for (final info in _terminals.values) {
           if (info.paneId == _activePaneId) {
             info.paneId = null;
             break;
@@ -620,79 +479,46 @@ class AppState extends ChangeNotifier implements PaneHost {
   }
 
   // --- Linear issue tracking ---
-  final Map<String, LinearIssueInfo> _linearIssues = {};
+  final LinearIssueStore _linearStore = LinearIssueStore();
 
   /// All Linear issues sorted by updatedAt descending.
-  List<LinearIssueInfo> get linearIssues {
-    final all = _linearIssues.values.toList();
-    all.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
-    return all;
-  }
+  List<LinearIssueInfo> get linearIssues => _linearStore.all();
 
   /// Linear issues grouped by workerId (for sidebar display).
-  Map<String, List<LinearIssueInfo>> get linearIssuesByWorker {
-    final map = <String, List<LinearIssueInfo>>{};
-    for (final config in _registry.configs) {
-      map[config.id] = [];
-    }
-    for (final i in _linearIssues.values) {
-      map.putIfAbsent(i.workerId, () => []).add(i);
-    }
-    for (final list in map.values) {
-      list.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
-    }
-    return map;
-  }
+  Map<String, List<LinearIssueInfo>> get linearIssuesByWorker =>
+      _linearStore.byWorker(_registry.configs);
 
-  LinearIssueInfo? getLinearIssue(String issueId) => _linearIssues[issueId];
+  LinearIssueInfo? getLinearIssue(String issueId) => _linearStore.get(issueId);
 
   /// All Linear issues linked to the given task, sorted by updatedAt descending.
-  List<LinearIssueInfo> linearIssuesForTask(String taskId) {
-    final result = _linearIssues.values
-        .where((i) => i.taskId == taskId)
-        .toList();
-    result.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
-    return result;
-  }
+  List<LinearIssueInfo> linearIssuesForTask(String taskId) =>
+      _linearStore.forTask(taskId);
 
   /// All Linear issues not yet linked to any task, sorted by updatedAt descending.
-  List<LinearIssueInfo> get unlinkedLinearIssues {
-    final result = _linearIssues.values.where((i) => i.taskId == null).toList();
-    result.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
-    return result;
-  }
+  List<LinearIssueInfo> get unlinkedLinearIssues => _linearStore.unlinked();
 
   void _handleLinearIssueList(List<dynamic> list, String workerId) {
-    _linearIssues.removeWhere((_, i) => i.workerId == workerId);
-    final workerName = _workerName(workerId);
-    for (final raw in list) {
-      final issue = LinearIssueInfo.fromJson(
-        raw as Map<String, dynamic>,
-        workerId: workerId,
-        workerName: workerName,
-      );
-      _linearIssues[issue.id] = issue;
-    }
+    _linearStore.replaceWorker(workerId, _workerName(workerId), list);
     notifyListeners();
   }
 
   void _handleLinearIssueUpdate(Map<String, dynamic> msg, String workerId) {
     final issueId = msg['id'] as String?;
     if (issueId == null) return;
-    final workerName = _workerName(workerId);
-    final updated = LinearIssueInfo.fromJson(
-      msg,
-      workerId: workerId,
-      workerName: workerName,
+    _linearStore.upsert(
+      LinearIssueInfo.fromJson(
+        msg,
+        workerId: workerId,
+        workerName: _workerName(workerId),
+      ),
     );
-    _linearIssues[issueId] = updated;
     notifyListeners();
   }
 
   void _handleLinearIssueDeleted(Map<String, dynamic> msg) {
     final issueId = msg['id'] as String?;
     if (issueId == null) return;
-    _linearIssues.remove(issueId);
+    _linearStore.remove(issueId);
 
     // Close any pane currently viewing this issue
     for (final entry in _panes.entries.toList()) {
@@ -710,7 +536,7 @@ class AppState extends ChangeNotifier implements PaneHost {
       activePane.pushNavHistory(_currentNavEntry(_activePaneId));
 
       if (_paneTypes[_activePaneId] == PaneType.terminal) {
-        for (final info in _terminalSessions.values) {
+        for (final info in _terminals.values) {
           if (info.paneId == _activePaneId) {
             info.paneId = null;
             break;
@@ -749,7 +575,7 @@ class AppState extends ChangeNotifier implements PaneHost {
       activePane.pushNavHistory(_currentNavEntry(_activePaneId));
 
       if (_paneTypes[_activePaneId] == PaneType.terminal) {
-        for (final info in _terminalSessions.values) {
+        for (final info in _terminals.values) {
           if (info.paneId == _activePaneId) {
             info.paneId = null;
             break;
@@ -790,7 +616,7 @@ class AppState extends ChangeNotifier implements PaneHost {
 
       // Detach any existing terminal from this pane
       if (_paneTypes[_activePaneId] == PaneType.terminal) {
-        for (final info in _terminalSessions.values) {
+        for (final info in _terminals.values) {
           if (info.paneId == _activePaneId) {
             info.paneId = null;
             break;
@@ -952,6 +778,7 @@ class AppState extends ChangeNotifier implements PaneHost {
       _activePaneId = 'pane_0' {
     _soundService = NotificationSoundService(settings: _settings);
     _notificationService = NotificationService();
+    _toasts = ToastNotifier(_settings, _notificationService);
     _hotkeyService = HotkeyService(settings: _settings);
     _updateService = UpdateService(settings: _settings);
     _panes['pane_0'] = PaneState(paneId: 'pane_0', host: this)
@@ -1027,33 +854,8 @@ class AppState extends ChangeNotifier implements PaneHost {
     await _registry.wakeAll();
   }
 
-  // --- Toast notification helpers ---
-
-  void _showToast({
-    required NotificationLevel level,
-    required String title,
-    String? body,
-    required _ToastCategory category,
-    String? actionLabel,
-    VoidCallback? onAction,
-  }) {
-    if (!_settings.toastEnabled) return;
-    switch (category) {
-      case _ToastCategory.connection:
-        if (!_settings.toastConnections) return;
-      case _ToastCategory.task:
-        if (!_settings.toastTasks) return;
-      case _ToastCategory.session:
-        if (!_settings.toastBackgroundSessions) return;
-    }
-    _notificationService.show(
-      level: level,
-      title: title,
-      body: body,
-      actionLabel: actionLabel,
-      onAction: onAction,
-    );
-  }
+  // --- Toast notifications (settings-gated; see [ToastNotifier]) ---
+  late final ToastNotifier _toasts;
 
   String _sessionLabel(String sessionId) {
     for (final w in _registry.all) {
@@ -1102,11 +904,11 @@ class AppState extends ChangeNotifier implements PaneHost {
               activePane.addSystemMessage('Connected to ${config.name}');
             }
           } catch (e) {
-            _showToast(
+            _toasts.show(
               level: NotificationLevel.error,
               title: 'Connection Failed',
               body: 'Failed to connect to ${config.name}: $e',
-              category: _ToastCategory.connection,
+              category: ToastCategory.connection,
             );
           }
         }
@@ -1120,8 +922,11 @@ class AppState extends ChangeNotifier implements PaneHost {
 
   /// Look up a worker matching the host+port+token triple from a deep link.
   /// Returns null when no duplicate exists.
-  WorkerConfig? findWorkerByHostPortToken(String host, int port, String token) =>
-      _registry.findByHostPortToken(host, port, token);
+  WorkerConfig? findWorkerByHostPortToken(
+    String host,
+    int port,
+    String token,
+  ) => _registry.findByHostPortToken(host, port, token);
 
   void updateWorker(WorkerConfig config) => _registry.update(config);
 
@@ -1152,7 +957,8 @@ class AppState extends ChangeNotifier implements PaneHost {
   // --- PaneHost interface ---
 
   @override
-  WebSocketService wsForWorker(String workerId) => _registry.wsForWorker(workerId);
+  WebSocketService wsForWorker(String workerId) =>
+      _registry.wsForWorker(workerId);
 
   @override
   String? workerIdForSession(String sessionId) =>
@@ -1369,7 +1175,7 @@ class AppState extends ChangeNotifier implements PaneHost {
 
     // For terminal panes: detach but keep the session alive
     if (paneType == PaneType.terminal) {
-      for (final info in _terminalSessions.values) {
+      for (final info in _terminals.values) {
         if (info.paneId == paneId) {
           closedTerminalId = info.terminalId;
           info.paneId = null; // Detach from pane, PTY stays alive
@@ -1444,7 +1250,7 @@ class AppState extends ChangeNotifier implements PaneHost {
 
     if (record.paneType == PaneType.terminal && record.terminalId != null) {
       // Reopen terminal pane if the terminal session still exists
-      if (_terminalSessions.containsKey(record.terminalId)) {
+      if (_terminals.get(record.terminalId!) != null) {
         if (hasNoPanes) {
           showTerminalInPane(record.terminalId!);
         } else {
@@ -1461,7 +1267,7 @@ class AppState extends ChangeNotifier implements PaneHost {
 
     // Task pane: reopen if the task still exists
     if (record.paneType == PaneType.task && record.taskId != null) {
-      if (_tasks.containsKey(record.taskId)) {
+      if (_taskStore.get(record.taskId!) != null) {
         if (hasNoPanes) {
           openTaskInPane(record.taskId!);
         } else {
@@ -1476,7 +1282,7 @@ class AppState extends ChangeNotifier implements PaneHost {
 
     // Artifact pane: reopen if the artifact still exists
     if (record.paneType == PaneType.artifact && record.artifactId != null) {
-      if (_artifacts.containsKey(record.artifactId)) {
+      if (_artifactStore.get(record.artifactId!) != null) {
         if (hasNoPanes) {
           openArtifactInPane(record.artifactId!);
         } else {
@@ -1492,7 +1298,7 @@ class AppState extends ChangeNotifier implements PaneHost {
     // Linear issue pane: reopen if the issue still exists
     if (record.paneType == PaneType.linearIssue &&
         record.linearIssueId != null) {
-      if (_linearIssues.containsKey(record.linearIssueId)) {
+      if (_linearStore.get(record.linearIssueId!) != null) {
         if (hasNoPanes) {
           openLinearIssueInPane(record.linearIssueId!);
         } else {
@@ -1558,7 +1364,7 @@ class AppState extends ChangeNotifier implements PaneHost {
     // Active pane is a terminal — convert it to a chat pane in-place.
     // Detach the terminal session (PTY stays alive server-side).
     if (paneType == PaneType.terminal) {
-      for (final info in _terminalSessions.values) {
+      for (final info in _terminals.values) {
         if (info.paneId == _activePaneId) {
           info.paneId = null;
           break;
@@ -1603,7 +1409,7 @@ class AppState extends ChangeNotifier implements PaneHost {
     if (_splitRoot != null && _panes.containsKey(_activePaneId)) {
       // Detach any existing terminal from this pane
       if (_paneTypes[_activePaneId] == PaneType.terminal) {
-        for (final other in _terminalSessions.values) {
+        for (final other in _terminals.values) {
           if (other.paneId == _activePaneId) {
             other.paneId = null;
             break;
@@ -1618,7 +1424,7 @@ class AppState extends ChangeNotifier implements PaneHost {
         maxLines: _settings.terminalScrollback,
         paneId: _activePaneId,
       );
-      _terminalSessions[terminalId] = info;
+      _terminals.put(terminalId, info);
       _paneTypes[_activePaneId] = PaneType.terminal;
       _terminalPaneKeys[_activePaneId] = GlobalKey();
       notifyListeners();
@@ -1634,7 +1440,7 @@ class AppState extends ChangeNotifier implements PaneHost {
       maxLines: _settings.terminalScrollback,
       paneId: newId,
     );
-    _terminalSessions[terminalId] = info;
+    _terminals.put(terminalId, info);
 
     final newPane = PaneState(paneId: newId, host: this)
       ..addListener(_onPaneChanged);
@@ -1650,7 +1456,7 @@ class AppState extends ChangeNotifier implements PaneHost {
   /// If already visible, switch active pane to it. Otherwise convert the
   /// active pane in-place (or create a new pane if none exist).
   void showTerminalInPane(String terminalId) {
-    final info = _terminalSessions[terminalId];
+    final info = _terminals.get(terminalId);
     if (info == null) return;
 
     // If already shown in a pane, just focus it
@@ -1664,7 +1470,7 @@ class AppState extends ChangeNotifier implements PaneHost {
     if (_splitRoot != null && _panes.containsKey(_activePaneId)) {
       // If the active pane is currently showing a different terminal, detach it
       if (_paneTypes[_activePaneId] == PaneType.terminal) {
-        for (final other in _terminalSessions.values) {
+        for (final other in _terminals.values) {
           if (other.paneId == _activePaneId) {
             other.paneId = null;
             break;
@@ -1695,7 +1501,7 @@ class AppState extends ChangeNotifier implements PaneHost {
 
   /// Actually kill a terminal session (sends close command to server).
   void closeTerminalSession(String terminalId) {
-    final info = _terminalSessions.remove(terminalId);
+    final info = _terminals.remove(terminalId);
     if (info == null) return;
 
     // Send close command to server if still connected
@@ -1724,7 +1530,7 @@ class AppState extends ChangeNotifier implements PaneHost {
 
   /// Rename a terminal session.
   void renameTerminal(String terminalId, String newTitle) {
-    final info = _terminalSessions[terminalId];
+    final info = _terminals.get(terminalId);
     if (info == null) return;
     info.title = newTitle.isEmpty ? 'Terminal' : newTitle;
     notifyListeners();
@@ -1733,7 +1539,7 @@ class AppState extends ChangeNotifier implements PaneHost {
   /// Split a pane with a terminal via drag-and-drop.
   void splitPaneWithTerminal(String paneId, DropZone zone, String terminalId) {
     if (_splitRoot == null || !_panes.containsKey(paneId)) return;
-    final info = _terminalSessions[terminalId];
+    final info = _terminals.get(terminalId);
     if (info == null) return;
 
     // If terminal is already in a pane, close that pane first
@@ -1924,11 +1730,11 @@ class AppState extends ChangeNotifier implements PaneHost {
         // N4: Session awaiting input (not visible in any pane)
         if (wsType != null && _awaitingInputTypes.contains(wsType)) {
           final label = _sessionLabel(sessionId);
-          _showToast(
+          _toasts.show(
             level: NotificationLevel.warning,
             title: 'Waiting for Input',
             body: label,
-            category: _ToastCategory.session,
+            category: ToastCategory.session,
             onAction: () => _navigateToSession(sessionId),
           );
         }
@@ -1937,11 +1743,11 @@ class AppState extends ChangeNotifier implements PaneHost {
         if (wsType == WsOutputType.error) {
           final label = _sessionLabel(sessionId);
           final content = msg['content'] as String? ?? 'Unknown error';
-          _showToast(
+          _toasts.show(
             level: NotificationLevel.error,
             title: 'Session Error',
             body: '$label: $content',
-            category: _ToastCategory.session,
+            category: ToastCategory.session,
             onAction: () => _navigateToSession(sessionId),
           );
         }
@@ -1949,11 +1755,11 @@ class AppState extends ChangeNotifier implements PaneHost {
         // N12: Session completed (background)
         if (wsType == WsOutputType.sessionEnd) {
           final label = _sessionLabel(sessionId);
-          _showToast(
+          _toasts.show(
             level: NotificationLevel.info,
             title: 'Session Completed',
             body: label,
-            category: _ToastCategory.session,
+            category: ToastCategory.session,
             onAction: () => _navigateToSession(sessionId),
           );
         }
@@ -1964,11 +1770,11 @@ class AppState extends ChangeNotifier implements PaneHost {
         final code = msg['code'] as String?;
         if (code == 'TOKEN_LIMIT_REACHED') {
           final label = _sessionLabel(sessionId);
-          _showToast(
+          _toasts.show(
             level: NotificationLevel.warning,
             title: 'Token Limit Reached',
             body: label,
-            category: _ToastCategory.session,
+            category: ToastCategory.session,
             onAction: () => _navigateToSession(sessionId),
           );
         }
@@ -1982,21 +1788,21 @@ class AppState extends ChangeNotifier implements PaneHost {
         final status = msg['status'] as String?;
         if (status == 'failed') {
           final label = _sessionLabel(sessionId);
-          _showToast(
+          _toasts.show(
             level: NotificationLevel.error,
             title: 'Session Failed',
             body: label,
-            category: _ToastCategory.session,
+            category: ToastCategory.session,
             onAction: () => _navigateToSession(sessionId),
           );
         } else if (status == 'cancelled') {
           if (!_userEndedSessionIds.remove(sessionId)) {
             final label = _sessionLabel(sessionId);
-            _showToast(
+            _toasts.show(
               level: NotificationLevel.error,
               title: 'Session Cancelled',
               body: label,
-              category: _ToastCategory.session,
+              category: ToastCategory.session,
               onAction: () => _navigateToSession(sessionId),
             );
           }
@@ -2061,7 +1867,7 @@ class AppState extends ChangeNotifier implements PaneHost {
 
     // Detach terminal if current pane is a terminal
     if (_paneTypes[paneId] == PaneType.terminal) {
-      for (final info in _terminalSessions.values) {
+      for (final info in _terminals.values) {
         if (info.paneId == paneId) {
           info.paneId = null;
           break;
@@ -2229,8 +2035,7 @@ class AppState extends ChangeNotifier implements PaneHost {
     _notificationService.dispose();
     inputFocusRequest.dispose();
     pasteToInputRequest.dispose();
-    externalPasteRequest.dispose();
-    _pasteHoldoffTimer?.cancel();
+    _clipboard.dispose();
     ForegroundServiceHelper.stop();
     super.dispose();
   }
@@ -2262,8 +2067,6 @@ SplitNode treeSplitPaneAtPosition(
   axis,
   insertFirst: insertFirst,
 );
-
-enum _ToastCategory { connection, task, session }
 
 /// Snapshot of a closed pane's essential state for the reopen stack.
 class _ClosedPaneRecord {

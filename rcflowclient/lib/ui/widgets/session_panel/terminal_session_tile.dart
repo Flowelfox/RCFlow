@@ -5,6 +5,7 @@ import '../../../theme.dart';
 import '../terminal_pane.dart';
 import 'drag_data.dart';
 import 'helpers.dart';
+import '../../../theme/spacing.dart';
 
 class TerminalSessionTile extends StatelessWidget {
   final TerminalSessionInfo info;
@@ -128,7 +129,7 @@ class TerminalSessionTile extends StatelessWidget {
       feedback: Material(
         color: Colors.transparent,
         child: Container(
-          padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          padding: EdgeInsets.symmetric(horizontal: kSpace3, vertical: 6),
           decoration: BoxDecoration(
             color: context.appColors.bgElevated,
             borderRadius: BorderRadius.circular(16),
@@ -202,7 +203,7 @@ class TerminalSessionTile extends StatelessWidget {
                 color: context.appColors.textSecondary,
                 size: 18,
               ),
-              SizedBox(width: 8),
+              SizedBox(width: kGapTight),
               Text(
                 'Rename',
                 style: TextStyle(color: context.appColors.textPrimary),
@@ -219,7 +220,7 @@ class TerminalSessionTile extends StatelessWidget {
                 color: context.appColors.errorText,
                 size: 18,
               ),
-              SizedBox(width: 8),
+              SizedBox(width: kGapTight),
               Text(
                 'Close terminal',
                 style: TextStyle(color: context.appColors.errorText),

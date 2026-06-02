@@ -42,7 +42,10 @@ coverage:
 check:
     uv run ruff check src/ tests/
     uvx ty check src/
+    uv run pytest tests/ -q --cov=src
     cd rcflowclient && flutter analyze
+    cd rcflowclient && flutter test --coverage
+    bash rcflowclient/tool/check_coverage.sh
 
 # Run the server
 run:

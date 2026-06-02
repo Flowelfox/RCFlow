@@ -1,5 +1,5 @@
 ---
-updated: 2026-04-26
+updated: 2026-06-01
 ---
 
 # RCFlow Design
@@ -57,6 +57,7 @@ This file is the **index**. Detailed sections live in sibling files (`./architec
 | [Telemetry](telemetry.md) | Three-phase pipeline (raw → minutely → retention), REST endpoints |
 | [Project Structure](project-structure.md) | Repo layout |
 | [Deployment](deployment.md) | Platform support, systemd / Windows GUI / macOS menu bar, bundling, code signing |
+| [Refactoring](refactoring.md) | Multi-phase code-structure improvement plan: status, deferred items, coverage ratchet |
 
 ## Technology Stack
 

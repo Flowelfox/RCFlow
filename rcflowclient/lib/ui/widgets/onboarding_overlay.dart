@@ -5,6 +5,7 @@ import '../../services/settings_service.dart';
 import '../../state/app_state.dart';
 import '../../theme.dart';
 import '../onboarding_keys.dart' as keys;
+import '../../theme/spacing.dart';
 
 /// Title bar height — the overlay leaves this area interactive so the window
 /// remains draggable and the traffic-light / window buttons stay clickable.
@@ -304,7 +305,7 @@ class _OnboardingOverlayState extends State<_OnboardingOverlay>
                   fontWeight: FontWeight.w600,
                 ),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: kGapTight),
               Text(
                 step.description,
                 style: TextStyle(
@@ -313,7 +314,7 @@ class _OnboardingOverlayState extends State<_OnboardingOverlay>
                   height: 1.5,
                 ),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: kSpace4),
               Row(
                 children: [
                   // Step counter
@@ -335,15 +336,15 @@ class _OnboardingOverlayState extends State<_OnboardingOverlay>
                       ),
                     ),
                   ),
-                  const SizedBox(width: 4),
+                  const SizedBox(width: kGapInline),
                   FilledButton(
                     style: FilledButton.styleFrom(
                       backgroundColor: context.appColors.accent,
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
+                        borderRadius: BorderRadius.circular(kRadiusMedium),
                       ),
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
+                        horizontal: kSpace4,
                         vertical: 10,
                       ),
                     ),

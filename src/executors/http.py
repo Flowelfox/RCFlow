@@ -1,3 +1,5 @@
+"""Executor that performs HTTP-tool requests."""
+
 import asyncio
 import ipaddress
 import json
@@ -99,6 +101,8 @@ def _substitute_env_vars(text: str) -> str:
 
 
 class HttpExecutor(BaseExecutor):
+    """Http Executor."""
+
     def __init__(self) -> None:
         self._client: httpx.AsyncClient | None = None
 
@@ -107,6 +111,7 @@ class HttpExecutor(BaseExecutor):
         tool: ToolDefinition,
         parameters: dict[str, Any],
     ) -> ExecutionResult:
+        """Execute the tool."""
         config = tool.get_http_config()
 
         url = _substitute_env_vars(config.url_template.format(**parameters))
@@ -165,6 +170,7 @@ class HttpExecutor(BaseExecutor):
         tool: ToolDefinition,
         parameters: dict[str, Any],
     ) -> AsyncGenerator[ExecutionChunk, None]:
+        """Execute the tool, streaming output chunks."""
         config = tool.get_http_config()
 
         url = _substitute_env_vars(config.url_template.format(**parameters))
@@ -184,16 +190,18 @@ class HttpExecutor(BaseExecutor):
         self._client = None
 
     async def send_input(self, data: str) -> None:
+        """Send input."""
         raise RuntimeError("HTTP executor does not support interactive input")
 
     async def cancel(self) -> None:
+        """Cancel."""
         if self._client:
             await self._client.aclose()
             self._client = None
 
 
 def _extract_json_path(data: Any, path: str) -> Any:
-    """Simple JSON path extraction supporting dot notation (e.g., '$.data.summary')."""
+    """Extract a value by JSON path with dot notation (e.g. '$.data.summary')."""
     parts = path.lstrip("$").lstrip(".").split(".")
     current = data
     for part in parts:

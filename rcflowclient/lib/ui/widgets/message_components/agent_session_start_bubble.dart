@@ -7,6 +7,7 @@ import '../../../state/pane_state.dart';
 import '../../../theme.dart';
 import '../../utils/link_utils.dart';
 import '../../utils/markdown_copy_menu.dart';
+import '../../../theme/spacing.dart';
 
 class AgentSessionStartBubble extends StatefulWidget {
   final DisplayMessage message;
@@ -59,7 +60,7 @@ class _AgentSessionStartBubbleState extends State<AgentSessionStartBubble> {
       child: Container(
         decoration: BoxDecoration(
           color: context.appColors.accent.withAlpha(20),
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(kRadiusMedium),
           border: Border(
             left: BorderSide(color: context.appColors.accent, width: 3),
           ),
@@ -75,7 +76,7 @@ class _AgentSessionStartBubbleState extends State<AgentSessionStartBubble> {
                   color: context.appColors.accentLight,
                   size: 16,
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: kGapTight),
                 Text(
                   '$displayName started',
                   style: TextStyle(
@@ -88,14 +89,14 @@ class _AgentSessionStartBubbleState extends State<AgentSessionStartBubble> {
               ],
             ),
             if (prompt.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              MarkdownCopyMenu(
+              const SizedBox(height: kGapTight),
+              MessageSelectionArea(
                 rawMarkdown: prompt,
                 child: _cachedMarkdownBody(context, displayPrompt),
               ),
               if (shouldTruncate)
                 Padding(
-                  padding: const EdgeInsets.only(top: 4),
+                  padding: const EdgeInsets.only(top: kSpace1),
                   child: MouseRegion(
                     cursor: SystemMouseCursors.click,
                     child: GestureDetector(
@@ -124,7 +125,7 @@ class _AgentSessionStartBubbleState extends State<AgentSessionStartBubble> {
                     color: context.appColors.textSecondary,
                     size: 12,
                   ),
-                  const SizedBox(width: 4),
+                  const SizedBox(width: kGapInline),
                   Flexible(
                     child: Text(
                       workingDir,

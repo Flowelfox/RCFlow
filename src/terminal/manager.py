@@ -44,18 +44,22 @@ class TerminalSessionManager:
         return session
 
     def get_session(self, terminal_id: str) -> PTYSession | None:
+        """Get session."""
         return self._sessions.get(terminal_id)
 
     async def close_session(self, terminal_id: str) -> None:
+        """Close session."""
         session = self._sessions.pop(terminal_id, None)
         if session:
             await session.close()
 
     async def close_all(self) -> None:
+        """Close all."""
         for session in list(self._sessions.values()):
             await session.close()
         self._sessions.clear()
 
     @property
     def active_count(self) -> int:
+        """Return the active count."""
         return len(self._sessions)

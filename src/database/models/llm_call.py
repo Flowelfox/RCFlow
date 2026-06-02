@@ -1,3 +1,5 @@
+"""SQLAlchemy model for logged LLM calls."""
+
 import uuid
 from datetime import datetime
 

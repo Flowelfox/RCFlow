@@ -1,3 +1,5 @@
+"""Console-script entry point for the ``rcflow`` command (``python -m src``)."""
+
 # ── Startup trace — uses only stdlib builtins available before any other import ──
 import datetime as _dt
 import os as _os
@@ -662,6 +664,7 @@ def _cmd_set_api_key(args: argparse.Namespace) -> None:
 
 
 def main() -> None:
+    """Run the application entry point."""
     parser = argparse.ArgumentParser(prog="rcflow", description="RCFlow action server")
     subparsers = parser.add_subparsers(dest="command")
 

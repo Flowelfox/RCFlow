@@ -17,6 +17,7 @@ import 'artifact_list_panel.dart';
 import 'helpers.dart';
 import 'task_list_panel.dart';
 import 'worker_group.dart';
+import '../../../theme/spacing.dart';
 
 /// Cheap value-equality fingerprint of every AppState field that visibly
 /// affects the workers/sessions tab. Excludes high-frequency fields the tab
@@ -244,8 +245,8 @@ class _SessionListPanelState extends State<SessionListPanel>
                   dividerHeight: 0,
                   tabAlignment: TabAlignment.start,
                   isScrollable: true,
-                  padding: const EdgeInsets.only(left: 12),
-                  labelPadding: const EdgeInsets.symmetric(horizontal: 8),
+                  padding: const EdgeInsets.only(left: kSpace3),
+                  labelPadding: const EdgeInsets.symmetric(horizontal: kSpace2),
                   tabs: const [
                     Tab(text: 'Workers'),
                     Tab(text: 'Tasks'),
@@ -253,7 +254,7 @@ class _SessionListPanelState extends State<SessionListPanel>
                   ],
                 ),
               ),
-              const SizedBox(width: 4),
+              const SizedBox(width: kGapInline),
             ],
           ),
         ),
@@ -290,16 +291,16 @@ class _SessionListPanelState extends State<SessionListPanel>
                 // Bottom bar: Settings
                 Padding(
                   padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 8,
+                    horizontal: kSpace3,
+                    vertical: kSpace2,
                   ),
                   child: InkWell(
                     key: onboarding.settingsButtonKey,
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(kRadiusMedium),
                     onTap: () => showSettingsMenu(context),
                     child: Padding(
                       padding: EdgeInsets.symmetric(
-                        horizontal: 8,
+                        horizontal: kSpace2,
                         vertical: 10,
                       ),
                       child: Row(
@@ -459,7 +460,7 @@ class _SessionListPanelState extends State<SessionListPanel>
     final count = _selectedSessionIds.length;
     return Container(
       color: context.appColors.accent.withAlpha(18),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 5),
+      padding: const EdgeInsets.symmetric(horizontal: kSpace4, vertical: 5),
       child: Row(
         children: [
           Icon(
@@ -543,7 +544,7 @@ class _SessionListPanelState extends State<SessionListPanel>
                   color: context.appColors.accentLight,
                   size: 18,
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: kGapTight),
                 Text(
                   'Pause all running',
                   style: TextStyle(color: context.appColors.textPrimary),
@@ -561,7 +562,7 @@ class _SessionListPanelState extends State<SessionListPanel>
                   color: context.appColors.accentLight,
                   size: 18,
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: kGapTight),
                 Text(
                   'Resume all paused',
                   style: TextStyle(color: context.appColors.textPrimary),
@@ -579,7 +580,7 @@ class _SessionListPanelState extends State<SessionListPanel>
                   color: context.appColors.errorText,
                   size: 18,
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: kGapTight),
                 Text(
                   'End $count session${count == 1 ? '' : 's'}\u2026',
                   style: TextStyle(color: context.appColors.errorText),
@@ -597,7 +598,7 @@ class _SessionListPanelState extends State<SessionListPanel>
                 color: context.appColors.textSecondary,
                 size: 18,
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: kGapTight),
               Text(
                 'Clear selection',
                 style: TextStyle(color: context.appColors.textPrimary),
@@ -654,7 +655,7 @@ class _SessionListPanelState extends State<SessionListPanel>
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: context.appColors.bgSurface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(kRadiusLarge)),
         title: Text(
           'End $count session${count == 1 ? '' : 's'}',
           style: TextStyle(color: context.appColors.textPrimary, fontSize: 16),
@@ -956,7 +957,7 @@ class _SessionListPanelState extends State<SessionListPanel>
                                 filled: true,
                                 fillColor: context.appColors.bgElevated,
                                 contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 8,
+                                  horizontal: kSpace2,
                                   vertical: 0,
                                 ),
                                 border: OutlineInputBorder(
@@ -1005,7 +1006,7 @@ class _SessionListPanelState extends State<SessionListPanel>
                               },
                             ),
                           ),
-                          const SizedBox(width: 4),
+                          const SizedBox(width: kGapInline),
                           SizedBox(
                             width: 30,
                             height: 30,
@@ -1043,7 +1044,7 @@ class _SessionListPanelState extends State<SessionListPanel>
                               children: [
                                 for (final status in _statusOrder)
                                   Padding(
-                                    padding: const EdgeInsets.only(right: 4),
+                                    padding: const EdgeInsets.only(right: kSpace1),
                                     child: _SessionStatusFilterChip(
                                       label: _statusLabels[status]!,
                                       color: _statusColors[status]!,
@@ -1071,7 +1072,7 @@ class _SessionListPanelState extends State<SessionListPanel>
                             GestureDetector(
                               onTap: _clearFilters,
                               child: Padding(
-                                padding: const EdgeInsets.only(left: 4),
+                                padding: const EdgeInsets.only(left: kSpace1),
                                 child: Icon(
                                   Icons.filter_alt_off_rounded,
                                   color: context.appColors.textMuted,
@@ -1098,7 +1099,7 @@ class _SessionListPanelState extends State<SessionListPanel>
                               color: context.appColors.textMuted,
                               size: 32,
                             ),
-                            const SizedBox(height: 8),
+                            const SizedBox(height: kGapTight),
                             Text(
                               'No matching results',
                               style: TextStyle(
@@ -1106,7 +1107,7 @@ class _SessionListPanelState extends State<SessionListPanel>
                                 fontSize: 13,
                               ),
                             ),
-                            const SizedBox(height: 4),
+                            const SizedBox(height: kGapInline),
                             GestureDetector(
                               onTap: _clearFilters,
                               child: Text(
@@ -1167,13 +1168,13 @@ class _SidebarNotifications extends StatelessWidget {
           children: [
             const Divider(height: 1),
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              padding: const EdgeInsets.symmetric(horizontal: kSpace2, vertical: 6),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   for (final n in notifications)
                     Padding(
-                      padding: const EdgeInsets.only(bottom: 4),
+                      padding: const EdgeInsets.only(bottom: kSpace1),
                       child: NotificationToast(
                         notification: n,
                         onDismiss: () => service.dismiss(n.id),
@@ -1221,8 +1222,8 @@ class _UpdateBanner extends StatelessWidget {
               onTap: () => showSettingsMenu(context),
               child: Padding(
                 padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 8,
+                  horizontal: kSpace3,
+                  vertical: kSpace2,
                 ),
                 child: Row(
                   children: [
@@ -1231,7 +1232,7 @@ class _UpdateBanner extends StatelessWidget {
                       size: 16,
                       color: context.appColors.accent,
                     ),
-                    const SizedBox(width: 8),
+                    const SizedBox(width: kGapTight),
                     Expanded(
                       child: Text(
                         'v$latest available',
@@ -1279,10 +1280,10 @@ class _SessionStatusFilterChip extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        padding: const EdgeInsets.symmetric(horizontal: kSpace2, vertical: 3),
         decoration: BoxDecoration(
           color: selected ? color.withAlpha(40) : Colors.transparent,
-          borderRadius: BorderRadius.circular(6),
+          borderRadius: BorderRadius.circular(kRadiusSmall),
           border: Border.all(
             color: selected ? color.withAlpha(120) : context.appColors.divider,
             width: 1,

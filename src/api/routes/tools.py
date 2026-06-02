@@ -1,3 +1,5 @@
+"""HTTP routes for managed-tool status, install/update, and settings."""
+
 from __future__ import annotations
 
 import json as json_mod
@@ -39,6 +41,7 @@ async def list_tools(
     request: Request,
     q: str | None = Query(None, description="Case-insensitive substring filter for tool names"),
 ) -> dict[str, Any]:
+    """List tools."""
     tool_registry = request.app.state.tool_registry
     all_tools = tool_registry.list_tools()
 

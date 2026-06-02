@@ -447,7 +447,7 @@ class RCFlowDashboard:
     # ── Update event handlers ────────────────────────────────────────────
 
     def _on_updater_change(self) -> None:
-        """Listener invoked from the updater worker thread."""
+        """Handle an update event from the updater worker thread."""
         self._pending_ui.put_nowait(self._refresh_update_ui)
 
     def _refresh_update_ui(self) -> None:
