@@ -106,16 +106,28 @@ is already factored into `models/split_tree.dart`; what remains on `AppState`
 the `PaneHost` coordinator itself, which can't move to a store without a
 high-risk Provider-tree change for little gain.
 
-**PaneState (2073 → 2059):** the "what non-chat content is this pane showing"
-cluster is carved into a composed `PaneViewTarget`
-(`lib/state/pane_view_target.dart`: pendingWorktreePath/pendingTaskId/taskId/
-artifactId/linearIssueId/workerSettings*), PaneState delegating. **Remaining
-PaneState carves (test-protected by `pane_state_queue_test` /
-`pane_state_message_test` / `output_handlers_test`, but large internal
-rewrites — own focused commits):** the queued-messages cluster (~29 refs:
-`_queuedMessages` + apply/upsert/dequeue/reconcile) and the message/stream
-cluster (~70 refs: `_messages`/`_nextCursor`/`_activeMonitors` + the streaming
-+ pagination logic — the biggest and most intricate).
+**PaneState (2073 → 2032):** two cohesive clusters carved into composed holders
+(PaneState keeps notify + WebSocket-send, delegates storage):
+
+- `PaneViewTarget` (`lib/state/pane_view_target.dart`) — the "what non-chat
+  content is this pane showing" fields (pendingWorktreePath/pendingTaskId/
+  taskId/artifactId/linearIssueId/workerSettings*).
+- `PaneQueueState` (`lib/state/pane_queue_state.dart`) — the queued-message
+  mirror (ordered list + upsert/dequeue+renumber/update/replaceSnapshot/
+  editText), with its own unit test.
+
+**Message/stream cluster — assessed, intentionally not extracted.** The
+`_messages`/`_nextCursor`/`_activeMonitors` bulk is *behaviour*, not data:
+streaming insertion with agent-group nesting, `finalizeStream`, pagination, and
+monitor-block lifecycle, all bound to `notifyListeners` and the pane. A holder
+would only relocate the list (a ~40-ref rename) while the logic stays on
+PaneState — churn without real decomposition — and a true behavioural split is
+high-risk for low gain. Left as-is.
+
+**Net step 3:** every cleanly-separable cluster on `AppState` (5 stores +
+clipboard + toast) and `PaneState` (view-target + queue) is extracted; the
+pane-host (already factored via `split_tree.dart`) and PaneState's
+behaviour-bound message/stream core are intentionally left in place.
 
 ## Phase 6 — Flutter Tests + Final Lint
 
