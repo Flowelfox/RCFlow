@@ -38,7 +38,7 @@ def _mock_httpx_transport(handler):
             kwargs["transport"] = httpx.MockTransport(handler)
             super().__init__(**kwargs)
 
-    with patch("src.services.tool_manager.httpx.AsyncClient", _PatchedClient):
+    with patch("src.services.tools.manager.httpx.AsyncClient", _PatchedClient):
         yield
 
 
@@ -108,45 +108,45 @@ class TestParseVersion:
 
 
 class TestPlatformDetection:
-    @patch("src.services.tool_manager.sys.platform", "linux")
-    @patch("src.services.tool_manager.platform.machine", return_value="x86_64")
-    @patch("src.services.tool_manager._is_musl", return_value=False)
+    @patch("src.services.tools.platform_detect.sys.platform", "linux")
+    @patch("src.services.tools.platform_detect.platform.machine", return_value="x86_64")
+    @patch("src.services.tools.platform_detect._is_musl", return_value=False)
     def test_claude_platform_x64(self, _musl, _machine):
         assert _detect_claude_platform() == "linux-x64"
 
-    @patch("src.services.tool_manager.sys.platform", "linux")
-    @patch("src.services.tool_manager.platform.machine", return_value="aarch64")
-    @patch("src.services.tool_manager._is_musl", return_value=False)
+    @patch("src.services.tools.platform_detect.sys.platform", "linux")
+    @patch("src.services.tools.platform_detect.platform.machine", return_value="aarch64")
+    @patch("src.services.tools.platform_detect._is_musl", return_value=False)
     def test_claude_platform_arm64(self, _musl, _machine):
         assert _detect_claude_platform() == "linux-arm64"
 
-    @patch("src.services.tool_manager.sys.platform", "linux")
-    @patch("src.services.tool_manager.platform.machine", return_value="x86_64")
-    @patch("src.services.tool_manager._is_musl", return_value=True)
+    @patch("src.services.tools.platform_detect.sys.platform", "linux")
+    @patch("src.services.tools.platform_detect.platform.machine", return_value="x86_64")
+    @patch("src.services.tools.platform_detect._is_musl", return_value=True)
     def test_claude_platform_musl(self, _musl, _machine):
         assert _detect_claude_platform() == "linux-x64-musl"
 
-    @patch("src.services.tool_manager.sys.platform", "linux")
-    @patch("src.services.tool_manager.platform.machine", return_value="x86_64")
-    @patch("src.services.tool_manager._is_musl", return_value=False)
-    @patch("src.services.tool_manager._glibc_too_old", return_value=False)
+    @patch("src.services.tools.platform_detect.sys.platform", "linux")
+    @patch("src.services.tools.platform_detect.platform.machine", return_value="x86_64")
+    @patch("src.services.tools.platform_detect._is_musl", return_value=False)
+    @patch("src.services.tools.platform_detect._glibc_too_old", return_value=False)
     def test_codex_target_x64_gnu(self, _glibc, _musl, _machine):
         assert _detect_codex_target() == "x86_64-unknown-linux-gnu"
 
-    @patch("src.services.tool_manager.sys.platform", "linux")
-    @patch("src.services.tool_manager.platform.machine", return_value="aarch64")
-    @patch("src.services.tool_manager._is_musl", return_value=True)
+    @patch("src.services.tools.platform_detect.sys.platform", "linux")
+    @patch("src.services.tools.platform_detect.platform.machine", return_value="aarch64")
+    @patch("src.services.tools.platform_detect._is_musl", return_value=True)
     def test_codex_target_arm64_musl(self, _musl, _machine):
         assert _detect_codex_target() == "aarch64-unknown-linux-musl"
 
-    @patch("src.services.tool_manager.sys.platform", "linux")
-    @patch("src.services.tool_manager.platform.machine", return_value="ppc64le")
+    @patch("src.services.tools.platform_detect.sys.platform", "linux")
+    @patch("src.services.tools.platform_detect.platform.machine", return_value="ppc64le")
     def test_unsupported_arch_claude(self, _machine):
         with pytest.raises(RuntimeError, match="Unsupported"):
             _detect_claude_platform()
 
-    @patch("src.services.tool_manager.sys.platform", "linux")
-    @patch("src.services.tool_manager.platform.machine", return_value="ppc64le")
+    @patch("src.services.tools.platform_detect.sys.platform", "linux")
+    @patch("src.services.tools.platform_detect.platform.machine", return_value="ppc64le")
     def test_unsupported_arch_codex(self, _machine):
         with pytest.raises(RuntimeError, match="Unsupported"):
             _detect_codex_target()
@@ -493,46 +493,46 @@ class TestVersionQueries:
 
 
 class TestOpenCodePlatformDetection:
-    @patch("src.services.tool_manager.sys.platform", "linux")
-    @patch("src.services.tool_manager.platform.machine", return_value="x86_64")
-    @patch("src.services.tool_manager._is_musl", return_value=False)
+    @patch("src.services.tools.platform_detect.sys.platform", "linux")
+    @patch("src.services.tools.platform_detect.platform.machine", return_value="x86_64")
+    @patch("src.services.tools.platform_detect._is_musl", return_value=False)
     def test_linux_x64_glibc(self, _musl, _machine):
         base, ext = _detect_opencode_asset()
         assert base == "opencode-linux-x64"
         assert ext == ".tar.gz"
 
-    @patch("src.services.tool_manager.sys.platform", "linux")
-    @patch("src.services.tool_manager.platform.machine", return_value="x86_64")
-    @patch("src.services.tool_manager._is_musl", return_value=True)
+    @patch("src.services.tools.platform_detect.sys.platform", "linux")
+    @patch("src.services.tools.platform_detect.platform.machine", return_value="x86_64")
+    @patch("src.services.tools.platform_detect._is_musl", return_value=True)
     def test_linux_x64_musl(self, _musl, _machine):
         base, ext = _detect_opencode_asset()
         assert base == "opencode-linux-x64-musl"
         assert ext == ".tar.gz"
 
-    @patch("src.services.tool_manager.sys.platform", "linux")
-    @patch("src.services.tool_manager.platform.machine", return_value="aarch64")
-    @patch("src.services.tool_manager._is_musl", return_value=False)
+    @patch("src.services.tools.platform_detect.sys.platform", "linux")
+    @patch("src.services.tools.platform_detect.platform.machine", return_value="aarch64")
+    @patch("src.services.tools.platform_detect._is_musl", return_value=False)
     def test_linux_arm64(self, _musl, _machine):
         base, ext = _detect_opencode_asset()
         assert base == "opencode-linux-arm64"
         assert ext == ".tar.gz"
 
-    @patch("src.services.tool_manager.sys.platform", "darwin")
-    @patch("src.services.tool_manager.platform.machine", return_value="arm64")
+    @patch("src.services.tools.platform_detect.sys.platform", "darwin")
+    @patch("src.services.tools.platform_detect.platform.machine", return_value="arm64")
     def test_darwin_arm64(self, _machine):
         base, ext = _detect_opencode_asset()
         assert base == "opencode-darwin-arm64"
         assert ext == ".zip"
 
-    @patch("src.services.tool_manager.sys.platform", "darwin")
-    @patch("src.services.tool_manager.platform.machine", return_value="x86_64")
+    @patch("src.services.tools.platform_detect.sys.platform", "darwin")
+    @patch("src.services.tools.platform_detect.platform.machine", return_value="x86_64")
     def test_darwin_x64(self, _machine):
         base, ext = _detect_opencode_asset()
         assert base == "opencode-darwin-x64"
         assert ext == ".zip"
 
-    @patch("src.services.tool_manager.sys.platform", "linux")
-    @patch("src.services.tool_manager.platform.machine", return_value="ppc64le")
+    @patch("src.services.tools.platform_detect.sys.platform", "linux")
+    @patch("src.services.tools.platform_detect.platform.machine", return_value="ppc64le")
     def test_unsupported_arch(self, _machine):
         with pytest.raises(RuntimeError, match="Unsupported"):
             _detect_opencode_asset()
@@ -545,9 +545,9 @@ class TestOpenCodePlatformDetection:
 
 class TestInstallOpenCode:
     @pytest.mark.asyncio
-    @patch("src.services.tool_manager.sys.platform", "linux")
-    @patch("src.services.tool_manager.platform.machine", return_value="x86_64")
-    @patch("src.services.tool_manager._is_musl", return_value=False)
+    @patch("src.services.tools.platform_detect.sys.platform", "linux")
+    @patch("src.services.tools.platform_detect.platform.machine", return_value="x86_64")
+    @patch("src.services.tools.platform_detect._is_musl", return_value=False)
     async def test_install_opencode(self, _musl, _machine, tool_manager: ToolManager, tmp_path: Path):
         """Test OpenCode installation with mocked HTTP responses."""
         member_name = "opencode"
@@ -569,7 +569,7 @@ class TestInstallOpenCode:
                 return_value="1.3.7",
             ),
             patch(
-                "src.services.tool_manager._verify_binary",
+                "src.services.tools.manager._verify_binary",
                 new_callable=AsyncMock,
                 return_value=(True, ""),
             ),
@@ -583,9 +583,9 @@ class TestInstallOpenCode:
         assert Path(tool.binary_path).exists()
 
     @pytest.mark.asyncio
-    @patch("src.services.tool_manager.sys.platform", "linux")
-    @patch("src.services.tool_manager.platform.machine", return_value="x86_64")
-    @patch("src.services.tool_manager._is_musl", return_value=False)
+    @patch("src.services.tools.platform_detect.sys.platform", "linux")
+    @patch("src.services.tools.platform_detect.platform.machine", return_value="x86_64")
+    @patch("src.services.tools.platform_detect._is_musl", return_value=False)
     async def test_install_opencode_streaming_updates_tools_dict(
         self, _musl, _machine, tool_manager: ToolManager, tmp_path: Path
     ):
@@ -614,7 +614,7 @@ class TestInstallOpenCode:
                 return_value="1.3.7",
             ),
             patch(
-                "src.services.tool_manager._verify_binary",
+                "src.services.tools.manager._verify_binary",
                 new_callable=AsyncMock,
                 return_value=(True, ""),
             ),
@@ -663,7 +663,7 @@ class TestAtomicInstallBinary:
 
     def test_windows_park_path_used_when_replace_denied(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """When ``replace`` raises PermissionError on Windows, fall back to rename-aside."""
-        monkeypatch.setattr("src.services.tool_manager.sys.platform", "win32")
+        monkeypatch.setattr("src.services.tools.platform_detect.sys.platform", "win32")
         tmp_src = tmp_path / "new.tmp"
         tmp_src.write_bytes(b"new")
         target = tmp_path / "binary.exe"

@@ -1,5 +1,5 @@
 ---
-updated: 2026-06-01
+updated: 2026-06-02
 ---
 
 # Refactoring Log
@@ -31,7 +31,7 @@ Current floors: Python **52%**, Flutter **14%**.
 | Slice | Status | Notes |
 |-------|--------|-------|
 | 2a — Shared agent base | ✅ done | `src/core/agents/base.py` houses `MAX_TOOL_OUTPUT_CHARS` + `truncate_tool_output`; three agent modules + `prompt_router` now import the shared helper instead of defining it locally |
-| 2b — ToolManager split | ⏳ deferred | `tests/test_services/test_tool_manager.py` imports six private helpers (`_detect_*`, `_parse_version`, `_atomic_install_binary`) by name. The split should land alongside an update to the test fixtures and is its own focused PR |
+| 2b — ToolManager split | ✅ done | `tool_manager.py` is now a back-compat shim re-exporting from the new `src/services/tools/` package: `constants.py`, `models.py` (`ManagedTool`), `platform_detect.py` (`_is_musl`/`_glibc_too_old`/`_detect_*`/`_parse_version`), `binary_install.py` (`_atomic_install_binary`/`_verify_binary`/checksum + archive helpers), `manager.py` (`ToolManager`). Test patch targets repointed to the new module paths; all 47 tool-manager tests pass |
 | 2c — ActiveSession partition | ⏳ deferred | Plan calls for splitting into `SessionPendingState`, `SessionWakeMirror`, `SessionTokenAccumulator`, `SessionSubprocessTracker` with the existing attribute surface preserved via properties. Mechanical but every property is a potential breakage seam — dedicated PR with full session test pass |
 | 2d — PromptRouter mixins → composition | ⏳ deferred | The largest piece. Every agent / lifecycle / context method on `PromptRouter` already carries `# ty:ignore[unresolved-attribute]` for cross-mixin state, so the refactor is straight-line; the risk is fan-out into every WebSocket and route handler. Land after 2b and 2c so the helpers it composes (SessionPendingState, BaseToolInstaller) already exist |
 
