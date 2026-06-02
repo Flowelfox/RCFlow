@@ -11,6 +11,7 @@ import 'toast_notifier.dart';
 import 'stores/artifact_store.dart';
 import 'stores/linear_issue_store.dart';
 import 'stores/task_store.dart';
+import 'stores/terminal_session_store.dart';
 import '../models/session_info.dart';
 import '../models/split_tree.dart';
 import '../models/task_info.dart';
@@ -244,9 +245,9 @@ class AppState extends ChangeNotifier implements PaneHost {
 
   // --- Terminal session tracking ---
   /// All terminal sessions keyed by terminalId. Survives pane close/reopen.
-  final Map<String, TerminalSessionInfo> _terminalSessions = {};
+  final TerminalSessionStore _terminals = TerminalSessionStore();
   Map<String, TerminalSessionInfo> get terminalSessions =>
-      Map.unmodifiable(_terminalSessions);
+      _terminals.unmodifiable;
 
   final Map<String, PaneType> _paneTypes = {};
   final Map<String, GlobalKey> _terminalPaneKeys = {};
@@ -258,24 +259,12 @@ class AppState extends ChangeNotifier implements PaneHost {
   PaneType getPaneType(String paneId) => _paneTypes[paneId] ?? PaneType.chat;
 
   /// Find the terminal session info attached to a given pane.
-  TerminalSessionInfo? getTerminalPaneInfo(String paneId) {
-    for (final info in _terminalSessions.values) {
-      if (info.paneId == paneId) return info;
-    }
-    return null;
-  }
+  TerminalSessionInfo? getTerminalPaneInfo(String paneId) =>
+      _terminals.findByPane(paneId);
 
   /// Terminal sessions grouped by workerId (for sidebar display).
-  Map<String, List<TerminalSessionInfo>> get terminalsByWorker {
-    final map = <String, List<TerminalSessionInfo>>{};
-    for (final info in _terminalSessions.values) {
-      map.putIfAbsent(info.workerId, () => []).add(info);
-    }
-    for (final list in map.values) {
-      list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
-    }
-    return map;
-  }
+  Map<String, List<TerminalSessionInfo>> get terminalsByWorker =>
+      _terminals.byWorker();
 
   // --- Task tracking ---
   final TaskStore _taskStore = TaskStore();
@@ -470,7 +459,7 @@ class AppState extends ChangeNotifier implements PaneHost {
 
       // Detach any existing terminal from this pane
       if (_paneTypes[_activePaneId] == PaneType.terminal) {
-        for (final info in _terminalSessions.values) {
+        for (final info in _terminals.values) {
           if (info.paneId == _activePaneId) {
             info.paneId = null;
             break;
@@ -561,7 +550,7 @@ class AppState extends ChangeNotifier implements PaneHost {
       activePane.pushNavHistory(_currentNavEntry(_activePaneId));
 
       if (_paneTypes[_activePaneId] == PaneType.terminal) {
-        for (final info in _terminalSessions.values) {
+        for (final info in _terminals.values) {
           if (info.paneId == _activePaneId) {
             info.paneId = null;
             break;
@@ -600,7 +589,7 @@ class AppState extends ChangeNotifier implements PaneHost {
       activePane.pushNavHistory(_currentNavEntry(_activePaneId));
 
       if (_paneTypes[_activePaneId] == PaneType.terminal) {
-        for (final info in _terminalSessions.values) {
+        for (final info in _terminals.values) {
           if (info.paneId == _activePaneId) {
             info.paneId = null;
             break;
@@ -641,7 +630,7 @@ class AppState extends ChangeNotifier implements PaneHost {
 
       // Detach any existing terminal from this pane
       if (_paneTypes[_activePaneId] == PaneType.terminal) {
-        for (final info in _terminalSessions.values) {
+        for (final info in _terminals.values) {
           if (info.paneId == _activePaneId) {
             info.paneId = null;
             break;
@@ -1200,7 +1189,7 @@ class AppState extends ChangeNotifier implements PaneHost {
 
     // For terminal panes: detach but keep the session alive
     if (paneType == PaneType.terminal) {
-      for (final info in _terminalSessions.values) {
+      for (final info in _terminals.values) {
         if (info.paneId == paneId) {
           closedTerminalId = info.terminalId;
           info.paneId = null; // Detach from pane, PTY stays alive
@@ -1275,7 +1264,7 @@ class AppState extends ChangeNotifier implements PaneHost {
 
     if (record.paneType == PaneType.terminal && record.terminalId != null) {
       // Reopen terminal pane if the terminal session still exists
-      if (_terminalSessions.containsKey(record.terminalId)) {
+      if (_terminals.get(record.terminalId!) != null) {
         if (hasNoPanes) {
           showTerminalInPane(record.terminalId!);
         } else {
@@ -1389,7 +1378,7 @@ class AppState extends ChangeNotifier implements PaneHost {
     // Active pane is a terminal — convert it to a chat pane in-place.
     // Detach the terminal session (PTY stays alive server-side).
     if (paneType == PaneType.terminal) {
-      for (final info in _terminalSessions.values) {
+      for (final info in _terminals.values) {
         if (info.paneId == _activePaneId) {
           info.paneId = null;
           break;
@@ -1434,7 +1423,7 @@ class AppState extends ChangeNotifier implements PaneHost {
     if (_splitRoot != null && _panes.containsKey(_activePaneId)) {
       // Detach any existing terminal from this pane
       if (_paneTypes[_activePaneId] == PaneType.terminal) {
-        for (final other in _terminalSessions.values) {
+        for (final other in _terminals.values) {
           if (other.paneId == _activePaneId) {
             other.paneId = null;
             break;
@@ -1449,7 +1438,7 @@ class AppState extends ChangeNotifier implements PaneHost {
         maxLines: _settings.terminalScrollback,
         paneId: _activePaneId,
       );
-      _terminalSessions[terminalId] = info;
+      _terminals.put(terminalId, info);
       _paneTypes[_activePaneId] = PaneType.terminal;
       _terminalPaneKeys[_activePaneId] = GlobalKey();
       notifyListeners();
@@ -1465,7 +1454,7 @@ class AppState extends ChangeNotifier implements PaneHost {
       maxLines: _settings.terminalScrollback,
       paneId: newId,
     );
-    _terminalSessions[terminalId] = info;
+    _terminals.put(terminalId, info);
 
     final newPane = PaneState(paneId: newId, host: this)
       ..addListener(_onPaneChanged);
@@ -1481,7 +1470,7 @@ class AppState extends ChangeNotifier implements PaneHost {
   /// If already visible, switch active pane to it. Otherwise convert the
   /// active pane in-place (or create a new pane if none exist).
   void showTerminalInPane(String terminalId) {
-    final info = _terminalSessions[terminalId];
+    final info = _terminals.get(terminalId);
     if (info == null) return;
 
     // If already shown in a pane, just focus it
@@ -1495,7 +1484,7 @@ class AppState extends ChangeNotifier implements PaneHost {
     if (_splitRoot != null && _panes.containsKey(_activePaneId)) {
       // If the active pane is currently showing a different terminal, detach it
       if (_paneTypes[_activePaneId] == PaneType.terminal) {
-        for (final other in _terminalSessions.values) {
+        for (final other in _terminals.values) {
           if (other.paneId == _activePaneId) {
             other.paneId = null;
             break;
@@ -1526,7 +1515,7 @@ class AppState extends ChangeNotifier implements PaneHost {
 
   /// Actually kill a terminal session (sends close command to server).
   void closeTerminalSession(String terminalId) {
-    final info = _terminalSessions.remove(terminalId);
+    final info = _terminals.remove(terminalId);
     if (info == null) return;
 
     // Send close command to server if still connected
@@ -1555,7 +1544,7 @@ class AppState extends ChangeNotifier implements PaneHost {
 
   /// Rename a terminal session.
   void renameTerminal(String terminalId, String newTitle) {
-    final info = _terminalSessions[terminalId];
+    final info = _terminals.get(terminalId);
     if (info == null) return;
     info.title = newTitle.isEmpty ? 'Terminal' : newTitle;
     notifyListeners();
@@ -1564,7 +1553,7 @@ class AppState extends ChangeNotifier implements PaneHost {
   /// Split a pane with a terminal via drag-and-drop.
   void splitPaneWithTerminal(String paneId, DropZone zone, String terminalId) {
     if (_splitRoot == null || !_panes.containsKey(paneId)) return;
-    final info = _terminalSessions[terminalId];
+    final info = _terminals.get(terminalId);
     if (info == null) return;
 
     // If terminal is already in a pane, close that pane first
@@ -1892,7 +1881,7 @@ class AppState extends ChangeNotifier implements PaneHost {
 
     // Detach terminal if current pane is a terminal
     if (_paneTypes[paneId] == PaneType.terminal) {
-      for (final info in _terminalSessions.values) {
+      for (final info in _terminals.values) {
         if (info.paneId == paneId) {
           info.paneId = null;
           break;
