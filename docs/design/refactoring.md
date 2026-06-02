@@ -86,20 +86,23 @@ six worktree/project-artifact HTTP methods in step 1 — those moved into
 state. `websocket_service.dart` 767 → 521 lines; flutter analyze clean, all
 479 client tests pass.
 
-**Step 3 (AppState / PaneState → feature stores) — in progress.** The three
-entity collections are carved into owned stores under `lib/state/stores/`:
-`LinearIssueStore`, `TaskStore`, `ArtifactStore` (each holds its map + the
-read-only query projections + list/upsert/remove mutations). `AppState` owns
-one of each and delegates its getters/handlers, keeping the notify, toast, and
-pane-management responsibilities, so the read-sites and Provider tree are
-unchanged. Two more self-contained clusters are also extracted:
-`ClipboardPasteController` (`lib/state/clipboard_paste_controller.dart` — the
-dictation-tool paste-detection dance) and `ToastNotifier`
-(`lib/state/toast_notifier.dart` — settings-gated toast wrapper, with a public
-`ToastCategory`). `AppState` is down 2292 → 2115 lines; all 485 client tests
-pass. Remaining for step 3: the pane-host cluster (`splitRoot`/`panes`/
-`activePaneId` + the `open*InPane` methods) and the `PaneState` (2073-line)
-carve — the central, interwoven UI state, best done as its own focused pass.
+**Step 3 (AppState / PaneState → feature stores) — in progress.** Every cleanly
+separable cluster on `AppState` is carved out, with `AppState` owning each and
+delegating so the read-sites and Provider tree are unchanged:
+
+- `lib/state/stores/`: `LinearIssueStore`, `TaskStore`, `ArtifactStore`
+  (entity collections — map + query projections + list/upsert/remove),
+  `TerminalSessionStore` (terminal-session collection), `ProjectDataCache`
+  (per-project worktree/artifact panel cache).
+- `lib/state/clipboard_paste_controller.dart` — dictation-tool paste detection.
+- `lib/state/toast_notifier.dart` — settings-gated toast wrapper (public
+  `ToastCategory`).
+
+`AppState` 2292 → 2090 lines; all 485 client tests pass. **Remaining for step 3
+(needs a design-first pass, not a store extraction):** the session-direct
+command methods, the pane-host split-tree (`splitRoot`/`panes`/`activePaneId` +
+`open*InPane`/split/close/nav-history) and `PaneState` (2073 lines) — all bound
+to the pane system + subscriptions, the central interwoven UI state.
 
 ## Phase 6 — Flutter Tests + Final Lint
 
