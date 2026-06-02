@@ -1,11 +1,10 @@
 """Routes user prompts through the LLM pipeline with tool execution.
 
-The ``PromptRouter`` is built from one mixin plus composed collaborators it
+The ``PromptRouter`` is built entirely from composed collaborators it
 delegates to:
 
-- :class:`~src.core.session_lifecycle.SessionLifecycleMixin` — session
-  create/cancel/end/pause/resume/restore, permissions, inactivity reaper
-  (still inherited, pending its own conversion)
+- :class:`~src.core.session_lifecycle.SessionLifecycle` (``self._lifecycle``) —
+  session create/cancel/end/pause/resume/restore, permissions, inactivity reaper
 - :class:`~src.core.context.ContextBuilder` (``self._context``) — #tool, $file
   mention extraction, project context building, direct tool mode
 - :class:`~src.core.background_tasks.BackgroundTasks` (``self._background``) —
@@ -43,7 +42,7 @@ from src.core.llm import LLMClient, StreamDone, TextChunk, ToolCallRequest, Turn
 from src.core.pending_store import SessionPendingMessageStore
 from src.core.permissions import PermissionDecision
 from src.core.session import ActiveSession, ActivityState, SessionManager, SessionStatus, SessionType
-from src.core.session_lifecycle import SessionLifecycleMixin
+from src.core.session_lifecycle import SessionLifecycle
 from src.core.wakeup_scheduler import WakeupScheduler
 from src.core.wakeup_store import SessionScheduledWakeStore
 from src.database.models import Session as SessionModel
@@ -117,16 +116,14 @@ def _build_planning_prompt(title: str, description: str, plan_path: Path) -> str
     return "\n".join(lines)
 
 
-class PromptRouter(
-    SessionLifecycleMixin,
-):
+class PromptRouter:
     """Routes user prompts through the LLM pipeline with tool execution.
 
-    Most concerns are composed collaborators that PromptRouter delegates to —
-    ``self._context`` (context building), ``self._background`` (fire-and-forget
-    tasks), and ``self._claude`` / ``self._codex`` / ``self._opencode`` (agent
-    subprocess lifecycles).  Session lifecycle is still a mixin pending its own
-    conversion.
+    Every concern is a composed collaborator that PromptRouter delegates to:
+    ``self._lifecycle`` (session lifecycle), ``self._context`` (context
+    building), ``self._background`` (fire-and-forget tasks), and
+    ``self._claude`` / ``self._codex`` / ``self._opencode`` (agent subprocess
+    lifecycles).
     """
 
     def __init__(
@@ -186,6 +183,7 @@ class PromptRouter(
         self._claude = ClaudeCodeAgent(self)
         self._codex = CodexAgent(self)
         self._opencode = OpenCodeAgent(self)
+        self._lifecycle = SessionLifecycle(self)
 
     # ------------------------------------------------------------------
     # Background-task delegation
@@ -322,6 +320,66 @@ class PromptRouter(
 
     async def _forward_to_opencode(self, session: ActiveSession, text: str) -> None:
         await self._opencode._forward_to_opencode(session, text)
+
+    # ------------------------------------------------------------------
+    # Session-lifecycle delegation
+    #
+    # Session create/cancel/end/pause/resume/restore, permission resolution,
+    # interactive responses, and the inactivity reaper live on the composed
+    # ``self._lifecycle`` collaborator; these wrappers preserve the historical
+    # ``router.<method>`` surface for WS/route handlers, main.py, the agentic
+    # loop, and tests.
+    # ------------------------------------------------------------------
+
+    @property
+    def is_direct_tool_mode(self) -> bool:
+        return self._lifecycle.is_direct_tool_mode
+
+    async def cancel_pending_tasks(self) -> None:
+        await self._lifecycle.cancel_pending_tasks()
+
+    def ensure_session(self, session_id: str | None = None) -> str:
+        return self._lifecycle.ensure_session(session_id)
+
+    async def cancel_session(self, session_id: str) -> ActiveSession:
+        return await self._lifecycle.cancel_session(session_id)
+
+    async def end_session(self, session_id: str) -> ActiveSession:
+        return await self._lifecycle.end_session(session_id)
+
+    def resolve_permission(
+        self,
+        session_id: str,
+        request_id: str,
+        decision: str,
+        scope: str,
+        path_prefix: str | None = None,
+    ) -> None:
+        self._lifecycle.resolve_permission(session_id, request_id, decision, scope, path_prefix)
+
+    async def send_interactive_response(self, session_id: str, text: str, *, accepted: bool = True) -> None:
+        await self._lifecycle.send_interactive_response(session_id, text, accepted=accepted)
+
+    async def pause_session(self, session_id: str) -> ActiveSession:
+        return await self._lifecycle.pause_session(session_id)
+
+    async def interrupt_subprocess(self, session_id: str) -> ActiveSession:
+        return await self._lifecycle.interrupt_subprocess(session_id)
+
+    async def resume_session(self, session_id: str) -> ActiveSession:
+        return await self._lifecycle.resume_session(session_id)
+
+    async def restore_session(self, session_id: str) -> ActiveSession:
+        return await self._lifecycle.restore_session(session_id)
+
+    async def run_inactivity_reaper(self) -> None:
+        await self._lifecycle.run_inactivity_reaper()
+
+    def _check_token_limit_exceeded(self, session: ActiveSession) -> bool:
+        return self._lifecycle._check_token_limit_exceeded(session)
+
+    async def _reap_inactive_sessions(self) -> None:
+        await self._lifecycle._reap_inactive_sessions()
 
     # ------------------------------------------------------------------
     # Executor / config helpers

@@ -1,4 +1,4 @@
-"""Tests for session lifecycle methods on PromptRouter / SessionLifecycleMixin.
+"""Tests for session lifecycle methods on PromptRouter / SessionLifecycle.
 
 Covers:
 - ``ensure_session`` — create/reuse/replace sessions
