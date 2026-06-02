@@ -252,7 +252,7 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
                 color: context.appColors.accent,
                 size: 20,
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: kGapTight),
               Text(
                 'Connect Linear',
                 style: TextStyle(
@@ -263,7 +263,7 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
               ),
             ],
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: kSpace4),
 
           // Step 1: API key entry.
           Text(
@@ -345,7 +345,7 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
             ),
           ],
 
-          const SizedBox(height: 12),
+          const SizedBox(height: kGapRelaxed),
 
           // "Test Connection" button.
           if (!showTeamStep)
@@ -587,7 +587,7 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
               color: context.appColors.textMuted,
               size: 40,
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: kGapRelaxed),
             Text(
               'No issues synced',
               style: TextStyle(
@@ -596,7 +596,7 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
                 fontWeight: FontWeight.w600,
               ),
             ),
-            const SizedBox(height: 4),
+            const SizedBox(height: kGapInline),
             Text(
               'Sync your Linear issues to get started.',
               textAlign: TextAlign.center,
@@ -605,7 +605,7 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
                 fontSize: 13,
               ),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: kSpace4),
             FilledButton.icon(
               onPressed: _syncing ? null : () => _sync(context, state),
               icon: _syncing
@@ -662,7 +662,7 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
                         fontSize: 12,
                       ),
                       prefixIcon: Padding(
-                        padding: const EdgeInsets.only(left: 8, right: 4),
+                        padding: const EdgeInsets.only(left: kSpace2, right: kSpace1),
                         child: Icon(
                           Icons.search_rounded,
                           color: context.appColors.textMuted,
@@ -755,7 +755,7 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
                     children: [
                       for (final stateType in _stateOrder)
                         Padding(
-                          padding: const EdgeInsets.only(right: 4),
+                          padding: const EdgeInsets.only(right: kSpace1),
                           child: _buildFilterChip(
                             context,
                             label: _stateLabels[stateType] ?? stateType,
@@ -779,7 +779,7 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
                   GestureDetector(
                     onTap: _clearFilters,
                     child: Padding(
-                      padding: const EdgeInsets.only(left: 4),
+                      padding: const EdgeInsets.only(left: kSpace1),
                       child: Icon(
                         Icons.filter_alt_off_outlined,
                         color: context.appColors.textMuted,
@@ -860,7 +860,7 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
                     shape: BoxShape.circle,
                   ),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: kGapTight),
                 Text(
                   label,
                   style: TextStyle(
@@ -907,12 +907,12 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(Icons.search_off, color: context.appColors.textMuted, size: 32),
-          const SizedBox(height: 8),
+          const SizedBox(height: kGapTight),
           Text(
             'No issues match filters',
             style: TextStyle(color: context.appColors.textMuted, fontSize: 13),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: kGapTight),
           TextButton(
             onPressed: _clearFilters,
             child: Text(

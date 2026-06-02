@@ -62,7 +62,7 @@ class PanelSearchBar extends StatelessWidget {
                   fontSize: 12,
                 ),
                 prefixIcon: Padding(
-                  padding: const EdgeInsets.only(left: 8, right: 4),
+                  padding: const EdgeInsets.only(left: kSpace2, right: kSpace1),
                   child: Icon(
                     Icons.search_rounded,
                     color: context.appColors.textMuted,

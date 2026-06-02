@@ -140,7 +140,7 @@ class TaskTile extends StatelessWidget {
                               horizontal: 5,
                               vertical: 2,
                             ),
-                            margin: const EdgeInsets.only(right: 4),
+                            margin: const EdgeInsets.only(right: kSpace1),
                             decoration: BoxDecoration(
                               color: const Color(0xFF10B981).withAlpha(30),
                               borderRadius: BorderRadius.circular(8),
@@ -162,7 +162,7 @@ class TaskTile extends StatelessWidget {
                             horizontal: 5,
                             vertical: 2,
                           ),
-                          margin: const EdgeInsets.only(right: 4),
+                          margin: const EdgeInsets.only(right: kSpace1),
                           decoration: BoxDecoration(
                             color: const Color(0xFF8B5CF6).withAlpha(30),
                             borderRadius: BorderRadius.circular(8),
@@ -212,7 +212,7 @@ class TaskTile extends StatelessWidget {
               : null,
           dense: true,
           visualDensity: const VisualDensity(vertical: -4),
-          contentPadding: const EdgeInsets.only(left: 16, right: 8),
+          contentPadding: const EdgeInsets.only(left: kSpace4, right: kSpace2),
           onTap:
               onTapOverride ??
               () {
@@ -315,7 +315,7 @@ class TaskTile extends StatelessWidget {
                 color: context.appColors.textSecondary,
                 size: 18,
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: kGapTight),
               Text(
                 'Start Session',
                 style: TextStyle(color: context.appColors.textPrimary),
@@ -332,7 +332,7 @@ class TaskTile extends StatelessWidget {
                 color: context.appColors.textSecondary,
                 size: 18,
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: kGapTight),
               Text(
                 'Make plan',
                 style: TextStyle(color: context.appColors.textPrimary),
@@ -350,7 +350,7 @@ class TaskTile extends StatelessWidget {
                   color: Color(0xFF10B981),
                   size: 18,
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: kGapTight),
                 Text(
                   'Open plan',
                   style: TextStyle(color: context.appColors.textPrimary),
@@ -369,7 +369,7 @@ class TaskTile extends StatelessWidget {
                   color: const Color(0xFF10B981),
                   size: 18,
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: kGapTight),
                 Text(
                   'Mark done',
                   style: TextStyle(color: context.appColors.textPrimary),
@@ -387,7 +387,7 @@ class TaskTile extends StatelessWidget {
                   color: context.appColors.textSecondary,
                   size: 18,
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: kGapTight),
                 Text(
                   'Reopen',
                   style: TextStyle(color: context.appColors.textPrimary),
@@ -404,7 +404,7 @@ class TaskTile extends StatelessWidget {
                 color: context.appColors.errorText,
                 size: 18,
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: kGapTight),
               Text(
                 'Delete',
                 style: TextStyle(color: context.appColors.errorText),

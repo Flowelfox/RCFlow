@@ -219,7 +219,7 @@ class _QuestionBlockState extends State<QuestionBlock> {
         for (final opt in options)
           if (opt is Map<String, dynamic>) _buildOption(question, opt, multi),
         _buildOtherOption(question),
-        const SizedBox(height: 4),
+        const SizedBox(height: kGapInline),
       ],
     );
   }
@@ -379,7 +379,7 @@ class _QuestionBlockState extends State<QuestionBlock> {
                 ],
               ),
               if (isOther) ...[
-                SizedBox(height: 8),
+                SizedBox(height: kGapTight),
                 TextField(
                   controller: _otherControllers[question],
                   style: TextStyle(
@@ -428,7 +428,7 @@ class _QuestionBlockState extends State<QuestionBlock> {
               color: context.appColors.successText,
               size: 16,
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: kGapTight),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,

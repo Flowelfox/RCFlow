@@ -203,7 +203,7 @@ class TerminalSessionTile extends StatelessWidget {
                 color: context.appColors.textSecondary,
                 size: 18,
               ),
-              SizedBox(width: 8),
+              SizedBox(width: kGapTight),
               Text(
                 'Rename',
                 style: TextStyle(color: context.appColors.textPrimary),
@@ -220,7 +220,7 @@ class TerminalSessionTile extends StatelessWidget {
                 color: context.appColors.errorText,
                 size: 18,
               ),
-              SizedBox(width: 8),
+              SizedBox(width: kGapTight),
               Text(
                 'Close terminal',
                 style: TextStyle(color: context.appColors.errorText),

@@ -1393,7 +1393,7 @@ class _InputAreaState extends State<InputArea> {
                 ),
                 const SizedBox(width: 2),
                 Expanded(child: textField),
-                SizedBox(width: 8),
+                SizedBox(width: kGapTight),
                 if (sessionEnded && sessionId != null)
                   Tooltip(
                     message: 'Restore session',

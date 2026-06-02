@@ -305,7 +305,7 @@ class _OnboardingOverlayState extends State<_OnboardingOverlay>
                   fontWeight: FontWeight.w600,
                 ),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: kGapTight),
               Text(
                 step.description,
                 style: TextStyle(
@@ -314,7 +314,7 @@ class _OnboardingOverlayState extends State<_OnboardingOverlay>
                   height: 1.5,
                 ),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: kSpace4),
               Row(
                 children: [
                   // Step counter
@@ -336,7 +336,7 @@ class _OnboardingOverlayState extends State<_OnboardingOverlay>
                       ),
                     ),
                   ),
-                  const SizedBox(width: 4),
+                  const SizedBox(width: kGapInline),
                   FilledButton(
                     style: FilledButton.styleFrom(
                       backgroundColor: context.appColors.accent,

@@ -169,7 +169,7 @@ class _SessionBar extends StatelessWidget {
               badges: session.badges,
               slotFilter: const {'status'},
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: kGapTight),
             // Session title
             Expanded(
               child: Text(
@@ -183,7 +183,7 @@ class _SessionBar extends StatelessWidget {
               ),
             ),
             // Chevron hint
-            const SizedBox(width: 4),
+            const SizedBox(width: kGapInline),
             Icon(
               Icons.keyboard_arrow_down_rounded,
               color: appColors.textMuted,
@@ -320,7 +320,7 @@ class _SessionBar extends StatelessWidget {
                     );
                   },
                 ),
-              const SizedBox(height: 8),
+              const SizedBox(height: kGapTight),
             ],
           ),
         );

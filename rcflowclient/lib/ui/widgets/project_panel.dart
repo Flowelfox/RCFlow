@@ -456,7 +456,7 @@ class _ProjectPanelState extends State<ProjectPanel> {
                 color: context.appColors.textMuted,
               ),
             ),
-            const SizedBox(width: 4),
+            const SizedBox(width: kGapInline),
             Icon(icon, size: 12, color: context.appColors.textMuted),
             const SizedBox(width: 5),
             Text(
@@ -535,7 +535,7 @@ class _ProjectPanelState extends State<ProjectPanel> {
       child: Row(
         children: [
           Icon(Icons.check_circle, size: 11, color: context.appColors.accent),
-          const SizedBox(width: 4),
+          const SizedBox(width: kGapInline),
           Expanded(
             child: Text(
               'Active: ${selectedWorktreePath.split('/').last}',
@@ -743,7 +743,7 @@ class _ProjectPanelState extends State<ProjectPanel> {
                       color: context.appColors.textMuted,
                       size: 36,
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: kGapRelaxed),
                     Text(
                       'No project attached',
                       style: TextStyle(
@@ -752,7 +752,7 @@ class _ProjectPanelState extends State<ProjectPanel> {
                         fontWeight: FontWeight.w600,
                       ),
                     ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: kGapTight),
                     Text(
                       'Type @ProjectName in the input field to attach a project. Worktrees will appear here.',
                       textAlign: TextAlign.center,
@@ -799,7 +799,7 @@ class _ProjectPanelState extends State<ProjectPanel> {
                     (v == null || v.trim().isEmpty) ? 'Required' : null,
                 autofocus: true,
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: kGapTight),
               TextFormField(
                 controller: baseCtrl,
                 decoration: const InputDecoration(labelText: 'Base branch'),

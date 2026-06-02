@@ -245,7 +245,7 @@ class _SessionListPanelState extends State<SessionListPanel>
                   dividerHeight: 0,
                   tabAlignment: TabAlignment.start,
                   isScrollable: true,
-                  padding: const EdgeInsets.only(left: 12),
+                  padding: const EdgeInsets.only(left: kSpace3),
                   labelPadding: const EdgeInsets.symmetric(horizontal: kSpace2),
                   tabs: const [
                     Tab(text: 'Workers'),
@@ -254,7 +254,7 @@ class _SessionListPanelState extends State<SessionListPanel>
                   ],
                 ),
               ),
-              const SizedBox(width: 4),
+              const SizedBox(width: kGapInline),
             ],
           ),
         ),
@@ -544,7 +544,7 @@ class _SessionListPanelState extends State<SessionListPanel>
                   color: context.appColors.accentLight,
                   size: 18,
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: kGapTight),
                 Text(
                   'Pause all running',
                   style: TextStyle(color: context.appColors.textPrimary),
@@ -562,7 +562,7 @@ class _SessionListPanelState extends State<SessionListPanel>
                   color: context.appColors.accentLight,
                   size: 18,
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: kGapTight),
                 Text(
                   'Resume all paused',
                   style: TextStyle(color: context.appColors.textPrimary),
@@ -580,7 +580,7 @@ class _SessionListPanelState extends State<SessionListPanel>
                   color: context.appColors.errorText,
                   size: 18,
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: kGapTight),
                 Text(
                   'End $count session${count == 1 ? '' : 's'}\u2026',
                   style: TextStyle(color: context.appColors.errorText),
@@ -598,7 +598,7 @@ class _SessionListPanelState extends State<SessionListPanel>
                 color: context.appColors.textSecondary,
                 size: 18,
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: kGapTight),
               Text(
                 'Clear selection',
                 style: TextStyle(color: context.appColors.textPrimary),
@@ -1006,7 +1006,7 @@ class _SessionListPanelState extends State<SessionListPanel>
                               },
                             ),
                           ),
-                          const SizedBox(width: 4),
+                          const SizedBox(width: kGapInline),
                           SizedBox(
                             width: 30,
                             height: 30,
@@ -1044,7 +1044,7 @@ class _SessionListPanelState extends State<SessionListPanel>
                               children: [
                                 for (final status in _statusOrder)
                                   Padding(
-                                    padding: const EdgeInsets.only(right: 4),
+                                    padding: const EdgeInsets.only(right: kSpace1),
                                     child: _SessionStatusFilterChip(
                                       label: _statusLabels[status]!,
                                       color: _statusColors[status]!,
@@ -1072,7 +1072,7 @@ class _SessionListPanelState extends State<SessionListPanel>
                             GestureDetector(
                               onTap: _clearFilters,
                               child: Padding(
-                                padding: const EdgeInsets.only(left: 4),
+                                padding: const EdgeInsets.only(left: kSpace1),
                                 child: Icon(
                                   Icons.filter_alt_off_rounded,
                                   color: context.appColors.textMuted,
@@ -1099,7 +1099,7 @@ class _SessionListPanelState extends State<SessionListPanel>
                               color: context.appColors.textMuted,
                               size: 32,
                             ),
-                            const SizedBox(height: 8),
+                            const SizedBox(height: kGapTight),
                             Text(
                               'No matching results',
                               style: TextStyle(
@@ -1107,7 +1107,7 @@ class _SessionListPanelState extends State<SessionListPanel>
                                 fontSize: 13,
                               ),
                             ),
-                            const SizedBox(height: 4),
+                            const SizedBox(height: kGapInline),
                             GestureDetector(
                               onTap: _clearFilters,
                               child: Text(
@@ -1174,7 +1174,7 @@ class _SidebarNotifications extends StatelessWidget {
                 children: [
                   for (final n in notifications)
                     Padding(
-                      padding: const EdgeInsets.only(bottom: 4),
+                      padding: const EdgeInsets.only(bottom: kSpace1),
                       child: NotificationToast(
                         notification: n,
                         onDismiss: () => service.dismiss(n.id),
@@ -1232,7 +1232,7 @@ class _UpdateBanner extends StatelessWidget {
                       size: 16,
                       color: context.appColors.accent,
                     ),
-                    const SizedBox(width: 8),
+                    const SizedBox(width: kGapTight),
                     Expanded(
                       child: Text(
                         'v$latest available',

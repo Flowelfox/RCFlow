@@ -96,7 +96,7 @@ class BadgeChip extends StatelessWidget {
             ),
           ),
           if (trailing != null) ...[
-            const SizedBox(width: 4),
+            const SizedBox(width: kGapInline),
             trailing!,
           ],
         ],

@@ -105,7 +105,7 @@ class _TaskEditDialogState extends State<_TaskEditDialog> {
               children: [
                 // Header
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
+                  padding: const EdgeInsets.fromLTRB(kSpace5, kSpace5, kSpace5, 0),
                   child: Text(
                     'Edit Task',
                     style: TextStyle(
@@ -155,7 +155,7 @@ class _TaskEditDialogState extends State<_TaskEditDialog> {
                     ],
                   ),
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: kSpace4),
 
                 // Description
                 Padding(
@@ -196,7 +196,7 @@ class _TaskEditDialogState extends State<_TaskEditDialog> {
 
                 // Actions
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(24, 12, 24, 16),
+                  padding: const EdgeInsets.fromLTRB(kSpace5, kSpace3, kSpace5, kSpace4),
                   child: Row(
                     children: [
                       Text(
@@ -216,7 +216,7 @@ class _TaskEditDialogState extends State<_TaskEditDialog> {
                           ),
                         ),
                       ),
-                      const SizedBox(width: 8),
+                      const SizedBox(width: kGapTight),
                       FilledButton(
                         style: FilledButton.styleFrom(
                           backgroundColor: context.appColors.accent,

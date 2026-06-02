@@ -116,7 +116,7 @@ class ToolBlock extends StatelessWidget {
                         color: context.appColors.toolAccent,
                         size: 18,
                       ),
-                      SizedBox(width: 8),
+                      SizedBox(width: kGapTight),
                     ],
                     finished
                         ? Icon(
@@ -167,7 +167,7 @@ class ToolBlock extends StatelessWidget {
                       ),
                     ),
                     if (diffStats != null) ...[
-                      SizedBox(width: 8),
+                      SizedBox(width: kGapTight),
                       Text(
                         diffStats,
                         style: TextStyle(
@@ -358,7 +358,7 @@ class _DiffView extends StatelessWidget {
               style: monoStyle.copyWith(color: colors.textMuted),
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: kGapTight),
           Expanded(
             child: Text(
               row.text,

@@ -252,7 +252,7 @@ class _WorktreePanelState extends State<WorktreePanel> {
                   children: [
                     Icon(Icons.call_split,
                         size: 12, color: context.appColors.textMuted),
-                    const SizedBox(width: 4),
+                    const SizedBox(width: kGapInline),
                     Expanded(
                       child: Text(
                         worktreeInfo.branch != null
@@ -267,11 +267,11 @@ class _WorktreePanelState extends State<WorktreePanel> {
                   ],
                 ),
                 if (selectedWorktreePath != null) ...[
-                  const SizedBox(height: 4),
+                  const SizedBox(height: kGapInline),
                   Row(
                     children: [
                       Icon(Icons.check_circle, size: 11, color: context.appColors.accent),
-                      const SizedBox(width: 4),
+                      const SizedBox(width: kGapInline),
                       Expanded(
                         child: Text(
                           'Active: ${selectedWorktreePath.split('/').last}',
@@ -463,7 +463,7 @@ class _WorktreePanelState extends State<WorktreePanel> {
                   children: [
                     Icon(Icons.device_hub_outlined,
                         color: context.appColors.textMuted, size: 36),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: kGapRelaxed),
                     Text(
                       'No worktree context',
                       style: TextStyle(
@@ -518,7 +518,7 @@ class _WorktreePanelState extends State<WorktreePanel> {
                     (v == null || v.trim().isEmpty) ? 'Required' : null,
                 autofocus: true,
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: kGapTight),
               TextFormField(
                 controller: baseCtrl,
                 decoration:

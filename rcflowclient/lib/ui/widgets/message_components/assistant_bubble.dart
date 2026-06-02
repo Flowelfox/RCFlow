@@ -48,7 +48,7 @@ class _AssistantBubbleState extends State<AssistantBubble> {
       _cachedBody = _buildMarkdown(context, content);
     }
     return Padding(
-      padding: const EdgeInsets.only(top: 4, bottom: 4, right: 32),
+      padding: const EdgeInsets.only(top: kSpace1, bottom: kSpace1, right: kSpace6),
       child: MessageSelectionArea(rawMarkdown: content, child: _cachedBody!),
     );
   }
@@ -122,7 +122,7 @@ class _AssistantBubbleState extends State<AssistantBubble> {
           ),
           color: context.appColors.toolBg.withValues(alpha: 0.3),
         ),
-        blockquotePadding: const EdgeInsets.only(left: 12, top: 4, bottom: 4),
+        blockquotePadding: const EdgeInsets.only(left: kSpace3, top: kSpace1, bottom: kSpace1),
         tableBorder: TableBorder.all(color: context.appColors.divider),
         tableHead: TextStyle(
           color: context.appColors.assistantText,

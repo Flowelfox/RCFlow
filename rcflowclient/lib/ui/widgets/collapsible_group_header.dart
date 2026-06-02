@@ -59,10 +59,10 @@ class CollapsibleGroupHeader extends StatelessWidget {
               size: 18,
             ),
             if (icon != null) ...[
-              const SizedBox(width: 4),
+              const SizedBox(width: kGapInline),
               Icon(icon, color: context.appColors.textMuted, size: 13),
             ],
-            const SizedBox(width: 4),
+            const SizedBox(width: kGapInline),
             Expanded(
               child: Text(
                 '$label ($count)',

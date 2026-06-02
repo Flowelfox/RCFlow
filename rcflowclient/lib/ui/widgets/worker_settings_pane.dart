@@ -356,7 +356,7 @@ class _PluginsSectionState extends State<_PluginsSection> {
                 fontSize: 13,
               ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: kGapRelaxed),
             OutlinedButton(onPressed: _loadPlugins, child: const Text('Retry')),
           ],
         ),
@@ -445,7 +445,7 @@ class _InstallBar extends StatelessWidget {
                   onSubmitted: (_) => onInstall(),
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: kGapTight),
               installing
                   ? const SizedBox(
                       width: 20,
@@ -472,7 +472,7 @@ class _InstallBar extends StatelessWidget {
             ],
           ),
           if (error != null) ...[
-            const SizedBox(height: 4),
+            const SizedBox(height: kGapInline),
             Text(
               error!,
               style: TextStyle(
@@ -560,7 +560,7 @@ class _PluginTile extends StatelessWidget {
                   ],
                 ),
                 if (commands.isNotEmpty) ...[
-                  const SizedBox(height: 4),
+                  const SizedBox(height: kGapInline),
                   Wrap(
                     spacing: 4,
                     runSpacing: 2,

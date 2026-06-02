@@ -326,7 +326,7 @@ class _RightBookmarks extends StatelessWidget {
           iconColor: context.appColors.toolAccent,
           onTap: () => pane.toggleRightPanel('todo'),
         ),
-        const SizedBox(height: 4),
+        const SizedBox(height: kGapInline),
         _BookmarkTab(
           panelKey: 'project',
           icon: Icons.folder_outlined,
@@ -335,7 +335,7 @@ class _RightBookmarks extends StatelessWidget {
           iconColor: context.appColors.accent,
           onTap: () => pane.toggleRightPanel('project'),
         ),
-        const SizedBox(height: 4),
+        const SizedBox(height: kGapInline),
         _BookmarkTab(
           panelKey: 'statistics',
           icon: Icons.bar_chart_rounded,
@@ -411,7 +411,7 @@ class _BookmarkTab extends StatelessWidget {
                 size: 14,
                 color: isActive ? iconColor : context.appColors.textMuted,
               ),
-              const SizedBox(height: 4),
+              const SizedBox(height: kGapInline),
               RotatedBox(
                 quarterTurns: 1,
                 child: Text(

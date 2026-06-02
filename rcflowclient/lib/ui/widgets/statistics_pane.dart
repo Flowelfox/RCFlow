@@ -133,7 +133,7 @@ class _FilterBar extends StatelessWidget {
           // Zoom level selector
           for (final zoom in ZoomLevel.values)
             Padding(
-              padding: const EdgeInsets.only(left: 4),
+              padding: const EdgeInsets.only(left: kSpace1),
               child: _ZoomChip(
                 label: zoom.label,
                 active: state.zoomLevel == zoom,
@@ -143,7 +143,7 @@ class _FilterBar extends StatelessWidget {
                 },
               ),
             ),
-          const SizedBox(width: 4),
+          const SizedBox(width: kGapInline),
           SizedBox(
             width: 24,
             height: 24,
@@ -242,7 +242,7 @@ class _ChartsBody extends StatelessWidget {
               zoomLevel: state.zoomLevel,
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: kGapRelaxed),
           _ChartSection(
             title: 'Avg LLM Duration',
             child: TelemetryChart(
@@ -251,7 +251,7 @@ class _ChartsBody extends StatelessWidget {
               zoomLevel: state.zoomLevel,
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: kGapRelaxed),
           _ChartSection(
             title: 'Avg Tool Duration',
             child: TelemetryChart(
@@ -260,7 +260,7 @@ class _ChartsBody extends StatelessWidget {
               zoomLevel: state.zoomLevel,
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: kGapRelaxed),
           _ChartSection(
             title: 'Turns / Tool Calls',
             child: TelemetryChart(
@@ -272,7 +272,7 @@ class _ChartsBody extends StatelessWidget {
           ),
         ],
         if (state.sessionSummary != null) ...[
-          const SizedBox(height: 12),
+          const SizedBox(height: kGapRelaxed),
           _SessionSummaryCard(summary: state.sessionSummary!),
         ],
       ],
@@ -362,7 +362,7 @@ class _SessionSummaryCard extends StatelessWidget {
               ),
           ],
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: kGapTight),
         // Turn table
         if (summary.turns.isNotEmpty) ...[
           Text(
@@ -373,7 +373,7 @@ class _SessionSummaryCard extends StatelessWidget {
               fontWeight: FontWeight.w500,
             ),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: kGapInline),
           ...summary.turns.map((t) => _TurnRow(turn: t)),
         ],
       ],
@@ -420,7 +420,7 @@ class _StatPill extends StatelessWidget {
             label,
             style: TextStyle(color: context.appColors.textMuted, fontSize: 10),
           ),
-          const SizedBox(width: 4),
+          const SizedBox(width: kGapInline),
           Text(
             value,
             style: TextStyle(

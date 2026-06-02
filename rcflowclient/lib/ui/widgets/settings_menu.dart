@@ -240,7 +240,7 @@ class _MobileSettingsSheet extends StatelessWidget {
                   ),
                 ),
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: kSpace5),
               _WorkersSection(onClose: () => Navigator.of(ctx).pop()),
               _SectionDivider(),
               _AppearanceSection(),
@@ -362,11 +362,11 @@ class _SectionHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: EdgeInsets.only(bottom: 16),
+      padding: EdgeInsets.only(bottom: kSpace4),
       child: Row(
         children: [
           Icon(icon, color: context.appColors.accentLight, size: 20),
-          SizedBox(width: 8),
+          SizedBox(width: kGapTight),
           Text(
             title,
             style: TextStyle(

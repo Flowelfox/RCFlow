@@ -102,7 +102,7 @@ class _PermissionRequestCardState extends State<PermissionRequestCard> {
               color: _riskIconColor(context, riskLevel),
               size: 18,
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: kGapTight),
             Expanded(
               child: Text(
                 'Permission Request',
@@ -177,7 +177,7 @@ class _PermissionRequestCardState extends State<PermissionRequestCard> {
                 fontSize: 12,
               ),
             ),
-            SizedBox(width: 4),
+            SizedBox(width: kGapInline),
             Expanded(
               child: DropdownButton<String>(
                 value: _selectedScope,
@@ -206,7 +206,7 @@ class _PermissionRequestCardState extends State<PermissionRequestCard> {
             ),
           ],
         ),
-        SizedBox(height: 12),
+        SizedBox(height: kGapRelaxed),
 
         // Buttons
         Row(
@@ -249,7 +249,7 @@ class _PermissionRequestCardState extends State<PermissionRequestCard> {
         ),
 
         // Timeout indicator
-        SizedBox(height: 8),
+        SizedBox(height: kGapTight),
         Text(
           'Auto-deny in ${_secondsRemaining ~/ 60}:${(_secondsRemaining % 60).toString().padLeft(2, '0')}',
           style: TextStyle(color: context.appColors.textMuted, fontSize: 11),
@@ -271,7 +271,7 @@ class _PermissionRequestCardState extends State<PermissionRequestCard> {
               : context.appColors.errorText,
           size: 18,
         ),
-        SizedBox(width: 8),
+        SizedBox(width: kGapTight),
         Expanded(
           child: Text(
             '${allowed ? "Allowed" : "Denied"}: $description',

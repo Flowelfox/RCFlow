@@ -54,7 +54,7 @@ class TodoPanel extends StatelessWidget {
                     fontWeight: FontWeight.w600,
                   ),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: kGapTight),
                 Text(
                   '$completed/$total',
                   style: TextStyle(
@@ -82,7 +82,7 @@ class TodoPanel extends StatelessWidget {
           ),
           // Progress bar
           Padding(
-            padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+            padding: const EdgeInsets.fromLTRB(kSpace3, kSpace2, kSpace3, kSpace1),
             child: ClipRRect(
               borderRadius: BorderRadius.circular(2),
               child: LinearProgressIndicator(

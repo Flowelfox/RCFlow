@@ -56,7 +56,7 @@ class AgentGroupBlock extends StatelessWidget {
                       )
                     else
                       SizedBox(width: 18),
-                    SizedBox(width: 8),
+                    SizedBox(width: kGapTight),
                     if (running)
                       _SpinningIcon()
                     else
@@ -76,7 +76,7 @@ class AgentGroupBlock extends StatelessWidget {
                       ),
                     ),
                     if (toolCount > 0) ...[
-                      SizedBox(width: 8),
+                      SizedBox(width: kGapTight),
                       Container(
                         padding: EdgeInsets.symmetric(
                             horizontal: 6, vertical: 1),
@@ -100,7 +100,7 @@ class AgentGroupBlock extends StatelessWidget {
             ),
             if (expanded && children.isNotEmpty)
               Padding(
-                padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                padding: const EdgeInsets.fromLTRB(kSpace2, 0, kSpace2, kSpace2),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [

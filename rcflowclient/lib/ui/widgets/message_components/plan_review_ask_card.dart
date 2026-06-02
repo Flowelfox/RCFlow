@@ -58,7 +58,7 @@ class _PlanReviewAskCardState extends State<PlanReviewAskCard> {
               color: context.appColors.accentLight,
               size: 18,
             ),
-            SizedBox(width: 8),
+            SizedBox(width: kGapTight),
             Expanded(
               child: Text(
                 'Plan ready for review',
@@ -119,7 +119,7 @@ class _PlanReviewAskCardState extends State<PlanReviewAskCard> {
             ),
           ),
         ],
-        SizedBox(height: 12),
+        SizedBox(height: kGapRelaxed),
         if (_editing) ...[
           TextField(
             controller: _controller,
@@ -252,7 +252,7 @@ class _PlanReviewAskCardState extends State<PlanReviewAskCard> {
               : context.appColors.accentLight,
           size: 18,
         ),
-        SizedBox(width: 8),
+        SizedBox(width: kGapTight),
         Expanded(
           child: Text(
             approved ? 'Plan approved' : 'Plan feedback sent',

@@ -376,7 +376,7 @@ class _ArtifactContentState extends State<_ArtifactContent> {
                 color: context.appColors.accent,
               ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: kGapRelaxed),
             Text(
               'Loading content...',
               style: TextStyle(
@@ -401,7 +401,7 @@ class _ArtifactContentState extends State<_ArtifactContent> {
                 color: context.appColors.textMuted,
                 size: 40,
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: kGapRelaxed),
               Text(
                 _error!,
                 textAlign: TextAlign.center,
@@ -410,7 +410,7 @@ class _ArtifactContentState extends State<_ArtifactContent> {
                   fontSize: 14,
                 ),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: kSpace4),
               OutlinedButton(
                 onPressed: _loadContent,
                 style: OutlinedButton.styleFrom(
@@ -444,7 +444,7 @@ class _ArtifactContentState extends State<_ArtifactContent> {
               color: context.appColors.textMuted,
               size: 14,
             ),
-            const SizedBox(width: 4),
+            const SizedBox(width: kGapInline),
             Expanded(
               child: Text(
                 widget.artifact.filePath,
@@ -458,7 +458,7 @@ class _ArtifactContentState extends State<_ArtifactContent> {
             ),
             if (widget.artifact.isMarkdown)
               Padding(
-                padding: const EdgeInsets.only(right: 8),
+                padding: const EdgeInsets.only(right: kSpace2),
                 child: SizedBox(
                   height: 22,
                   child: SegmentedButton<bool>(
@@ -512,7 +512,7 @@ class _ArtifactContentState extends State<_ArtifactContent> {
             ),
           ],
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: kGapRelaxed),
         // Content display
         if (_renderMarkdown && widget.artifact.isMarkdown)
           _buildRenderedMarkdown(context)

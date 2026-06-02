@@ -126,7 +126,7 @@ class _SessionsTab extends StatelessWidget {
             tooltip: 'Refresh sessions',
             onPressed: () => context.read<AppState>().refreshSessions(),
           ),
-          const SizedBox(width: 4),
+          const SizedBox(width: kGapInline),
         ],
       ),
       body: SessionListPanel(onSessionSelected: onSessionSelected),
@@ -246,7 +246,7 @@ class _ChatAppBar extends StatelessWidget implements PreferredSizeWidget {
           tooltip: 'Browse sessions',
           onPressed: onBrowseSessions,
         ),
-        const SizedBox(width: 4),
+        const SizedBox(width: kGapInline),
       ],
     );
   }
@@ -297,7 +297,7 @@ class _NoSessionView extends StatelessWidget {
                   fontWeight: FontWeight.w600,
                 ),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: kGapTight),
               Text(
                 'Select a session from the Sessions tab or start a new chat.',
                 textAlign: TextAlign.center,
@@ -319,7 +319,7 @@ class _NoSessionView extends StatelessWidget {
                 ),
                 onPressed: onBrowseSessions,
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: kGapRelaxed),
               OutlinedButton.icon(
                 icon: Icon(
                   Icons.add_rounded,

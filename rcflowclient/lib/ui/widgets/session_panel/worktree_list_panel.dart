@@ -160,7 +160,7 @@ class _WorktreeListPanelState extends State<WorktreeListPanel> {
                   color: context.appColors.textMuted,
                   size: 40,
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: kGapRelaxed),
                 Text(
                   'No worktrees yet',
                   style: TextStyle(
@@ -169,7 +169,7 @@ class _WorktreeListPanelState extends State<WorktreeListPanel> {
                     fontWeight: FontWeight.w600,
                   ),
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: kGapInline),
                 Text(
                   'Worktrees appear here once\na session uses worktree tools',
                   textAlign: TextAlign.center,
@@ -184,7 +184,7 @@ class _WorktreeListPanelState extends State<WorktreeListPanel> {
         }
 
         return ListView.builder(
-          padding: const EdgeInsets.only(bottom: 16),
+          padding: const EdgeInsets.only(bottom: kSpace4),
           itemCount: groups.length,
           itemBuilder: (context, i) {
             final g = groups[i];
@@ -216,7 +216,7 @@ class _WorktreeListPanelState extends State<WorktreeListPanel> {
       children: [
         // Section header
         Padding(
-          padding: const EdgeInsets.fromLTRB(12, 12, 8, 4),
+          padding: const EdgeInsets.fromLTRB(kSpace3, kSpace3, kSpace2, kSpace1),
           child: Row(
             children: [
               Expanded(

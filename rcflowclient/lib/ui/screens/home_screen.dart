@@ -510,7 +510,7 @@ class _WelcomePane extends StatelessWidget {
             size: 48,
             color: context.appColors.textMuted,
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: kSpace4),
           Text(
             'No open panes',
             style: TextStyle(
@@ -519,12 +519,12 @@ class _WelcomePane extends StatelessWidget {
               fontWeight: FontWeight.w600,
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: kGapTight),
           Text(
             'Start a new chat or select a session from the sidebar',
             style: TextStyle(color: context.appColors.textMuted, fontSize: 14),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: kSpace5),
           FilledButton.icon(
             style: FilledButton.styleFrom(
               backgroundColor: context.appColors.accent,

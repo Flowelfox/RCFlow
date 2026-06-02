@@ -206,7 +206,7 @@ class _MonitorBlockState extends State<MonitorBlock> {
                                   label: 'persistent',
                                   color: colors.accentLight,
                                 ),
-                              if (persistent) const SizedBox(width: 4),
+                              if (persistent) const SizedBox(width: kGapInline),
                               Expanded(
                                 child: Text(
                                   description,
@@ -238,7 +238,7 @@ class _MonitorBlockState extends State<MonitorBlock> {
                                   color: statusColor,
                                   size: 11,
                                 ),
-                                const SizedBox(width: 4),
+                                const SizedBox(width: kGapInline),
                                 Text(
                                   timerText,
                                   style: TextStyle(
@@ -247,7 +247,7 @@ class _MonitorBlockState extends State<MonitorBlock> {
                                     fontFamily: 'monospace',
                                   ),
                                 ),
-                                const SizedBox(width: 8),
+                                const SizedBox(width: kGapTight),
                                 Text(
                                   statusLabel,
                                   style: TextStyle(
@@ -255,7 +255,7 @@ class _MonitorBlockState extends State<MonitorBlock> {
                                     fontSize: 11,
                                   ),
                                 ),
-                                const SizedBox(width: 8),
+                                const SizedBox(width: kGapTight),
                                 if (m.monitorTotalEvents > 0)
                                   Text(
                                     m.monitorTotalEvents > events.length
@@ -273,7 +273,7 @@ class _MonitorBlockState extends State<MonitorBlock> {
                         ],
                       ),
                     ),
-                    const SizedBox(width: 8),
+                    const SizedBox(width: kGapTight),
                     if (!m.finished)
                       _StopButton(
                         stopping: _stopping,

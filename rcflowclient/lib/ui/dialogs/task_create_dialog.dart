@@ -126,7 +126,7 @@ class _TaskCreateDialogState extends State<_TaskCreateDialog> {
               children: [
                 // Header
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
+                  padding: const EdgeInsets.fromLTRB(kSpace5, kSpace5, kSpace5, 0),
                   child: Text(
                     'New Task',
                     style: TextStyle(
@@ -181,7 +181,7 @@ class _TaskCreateDialogState extends State<_TaskCreateDialog> {
                     ],
                   ),
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: kSpace4),
 
                 // Description
                 Padding(
@@ -219,7 +219,7 @@ class _TaskCreateDialogState extends State<_TaskCreateDialog> {
 
                 // Worker picker (only if multiple connected workers)
                 if (multiWorker) ...[
-                  const SizedBox(height: 16),
+                  const SizedBox(height: kSpace4),
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: kSpace5),
                     child: Column(
@@ -261,7 +261,7 @@ class _TaskCreateDialogState extends State<_TaskCreateDialog> {
 
                 // Actions
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(24, 12, 24, 16),
+                  padding: const EdgeInsets.fromLTRB(kSpace5, kSpace3, kSpace5, kSpace4),
                   child: Row(
                     children: [
                       Text(
@@ -281,7 +281,7 @@ class _TaskCreateDialogState extends State<_TaskCreateDialog> {
                           ),
                         ),
                       ),
-                      const SizedBox(width: 8),
+                      const SizedBox(width: kGapTight),
                       FilledButton(
                         style: FilledButton.styleFrom(
                           backgroundColor: context.appColors.accent,

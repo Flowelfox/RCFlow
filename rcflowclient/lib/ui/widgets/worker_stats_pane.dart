@@ -135,7 +135,7 @@ class _WorkerFilterBar extends StatelessWidget {
           ),
           for (final zoom in ZoomLevel.values)
             Padding(
-              padding: const EdgeInsets.only(left: 4),
+              padding: const EdgeInsets.only(left: kSpace1),
               child: _ZoomChip(
                 label: zoom.label,
                 active: state.zoomLevel == zoom,
@@ -145,7 +145,7 @@ class _WorkerFilterBar extends StatelessWidget {
                 },
               ),
             ),
-          const SizedBox(width: 4),
+          const SizedBox(width: kGapInline),
           SizedBox(
             width: 24,
             height: 24,
@@ -237,7 +237,7 @@ class _WorkerChartsBody extends StatelessWidget {
       children: [
         if (workerSummary != null) ...[
           _WorkerSummaryCard(summary: workerSummary!),
-          const SizedBox(height: 12),
+          const SizedBox(height: kGapRelaxed),
         ],
         if (state.series.isNotEmpty) ...[
           _ChartSection(
@@ -249,7 +249,7 @@ class _WorkerChartsBody extends StatelessWidget {
               zoomLevel: state.zoomLevel,
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: kGapRelaxed),
           _ChartSection(
             title: 'Avg LLM Duration',
             child: TelemetryChart(
@@ -258,7 +258,7 @@ class _WorkerChartsBody extends StatelessWidget {
               zoomLevel: state.zoomLevel,
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: kGapRelaxed),
           _ChartSection(
             title: 'Avg Tool Duration',
             child: TelemetryChart(
@@ -267,7 +267,7 @@ class _WorkerChartsBody extends StatelessWidget {
               zoomLevel: state.zoomLevel,
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: kGapRelaxed),
           _ChartSection(
             title: 'Turns / Tool Calls',
             child: TelemetryChart(
@@ -371,7 +371,7 @@ class _WorkerSummaryCard extends StatelessWidget {
           ],
         ),
         if (summary.topTools.isNotEmpty) ...[
-          const SizedBox(height: 8),
+          const SizedBox(height: kGapTight),
           Text(
             'Top tools',
             style: TextStyle(
@@ -380,7 +380,7 @@ class _WorkerSummaryCard extends StatelessWidget {
               fontWeight: FontWeight.w500,
             ),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: kGapInline),
           ...summary.topTools.map((t) => _ToolRow(tool: t)),
         ],
       ],
@@ -459,7 +459,7 @@ class _StatPill extends StatelessWidget {
             label,
             style: TextStyle(color: context.appColors.textMuted, fontSize: 10),
           ),
-          const SizedBox(width: 4),
+          const SizedBox(width: kGapInline),
           Text(
             value,
             style: TextStyle(
@@ -531,7 +531,7 @@ Future<void> showWorkerStatsDialog(
               child: Row(
                 children: [
                   Icon(Icons.bar_chart_rounded, size: 16, color: Colors.teal),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: kGapTight),
                   Expanded(
                     child: Text(
                       workerName,

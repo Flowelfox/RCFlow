@@ -187,7 +187,7 @@ class _OutputDisplayState extends State<OutputDisplay> {
                       size: 48,
                       color: context.appColors.textMuted.withAlpha(80),
                     ),
-                    SizedBox(height: 16),
+                    SizedBox(height: kSpace4),
                     Text(
                       'Welcome to RCFlow',
                       style: TextStyle(
@@ -204,7 +204,7 @@ class _OutputDisplayState extends State<OutputDisplay> {
                         fontSize: 13,
                       ),
                     ),
-                    SizedBox(height: 24),
+                    SizedBox(height: kSpace5),
                     if (connected) ...[
                       FilledButton.icon(
                         onPressed: () => pane.startNewChat(),
@@ -222,7 +222,7 @@ class _OutputDisplayState extends State<OutputDisplay> {
                           ),
                         ),
                       ),
-                      SizedBox(height: 12),
+                      SizedBox(height: kGapRelaxed),
                       OutlinedButton.icon(
                         onPressed: () => showSessionSheet(context),
                         icon: Icon(Icons.history_rounded, size: 18),
@@ -266,7 +266,7 @@ class _OutputDisplayState extends State<OutputDisplay> {
                       size: 48,
                       color: context.appColors.textMuted.withAlpha(80),
                     ),
-                    SizedBox(height: 12),
+                    SizedBox(height: kGapRelaxed),
                     Text(
                       'Send a message to get started',
                       style: TextStyle(
@@ -316,7 +316,7 @@ class _OutputDisplayState extends State<OutputDisplay> {
               // message a selection came from and copied plain text only.
               ListView.builder(
                 controller: _scrollController,
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                padding: const EdgeInsets.fromLTRB(kSpace4, kSpace2, kSpace4, kSpace4),
                 itemCount: msgs.length + 1,
                 itemBuilder: (context, index) {
                   if (index == 0) {
@@ -385,7 +385,7 @@ class _OutputDisplayState extends State<OutputDisplay> {
                             color: context.appColors.toolAccent,
                           ),
                         ),
-                        SizedBox(width: 12),
+                        SizedBox(width: kGapRelaxed),
                         Text(
                           'Reconnecting...',
                           style: TextStyle(
@@ -547,7 +547,7 @@ class _LlmNotConfiguredBanner extends StatelessWidget {
             size: 18,
             color: Color(0xFF8A6D1A),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: kGapTight),
           const Expanded(
             child: Text(
               'LLM key is not configured.',
@@ -558,7 +558,7 @@ class _LlmNotConfiguredBanner extends StatelessWidget {
               ),
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: kGapTight),
           TextButton(
             onPressed: () => showWorkerEditDialog(
               context,
@@ -618,7 +618,7 @@ class _AgentNotConfiguredBanner extends StatelessWidget {
             size: 18,
             color: Color(0xFF8A6D1A),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: kGapTight),
           Expanded(
             child: Text(
               issue,
@@ -629,7 +629,7 @@ class _AgentNotConfiguredBanner extends StatelessWidget {
               ),
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: kGapTight),
           TextButton(
             onPressed: () => showWorkerEditDialog(
               context,

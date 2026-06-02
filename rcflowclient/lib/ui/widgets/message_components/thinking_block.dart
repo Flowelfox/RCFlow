@@ -44,7 +44,7 @@ class ThinkingBlock extends StatelessWidget {
                       color: context.appColors.toolAccent,
                       size: 18,
                     ),
-                    SizedBox(width: 8),
+                    SizedBox(width: kGapTight),
                     Icon(
                       Icons.psychology_rounded,
                       color: context.appColors.toolAccent,

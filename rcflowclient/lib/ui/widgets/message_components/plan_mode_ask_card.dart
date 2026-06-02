@@ -40,7 +40,7 @@ class PlanModeAskCard extends StatelessWidget {
               color: context.appColors.accentLight,
               size: 18,
             ),
-            SizedBox(width: 8),
+            SizedBox(width: kGapTight),
             Expanded(
               child: Text(
                 'Claude Code wants to enter plan mode',
@@ -53,7 +53,7 @@ class PlanModeAskCard extends StatelessWidget {
             ),
           ],
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: kGapRelaxed),
         Row(
           children: [
             Expanded(
@@ -118,7 +118,7 @@ class PlanModeAskCard extends StatelessWidget {
               : context.appColors.textSecondary,
           size: 18,
         ),
-        SizedBox(width: 8),
+        SizedBox(width: kGapTight),
         Expanded(
           child: Text(
             allowed ? 'Plan mode allowed' : 'Plan mode denied',

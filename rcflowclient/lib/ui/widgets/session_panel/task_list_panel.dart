@@ -409,7 +409,7 @@ class _TaskListPanelState extends State<TaskListPanel> {
                 color: const Color(0xFF3B82F6),
                 size: 18,
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: kGapTight),
               Text(
                 'Mark all \u2192 In Progress',
                 style: TextStyle(color: context.appColors.textPrimary),
@@ -426,7 +426,7 @@ class _TaskListPanelState extends State<TaskListPanel> {
                 color: const Color(0xFF6B7280),
                 size: 18,
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: kGapTight),
               Text(
                 'Mark all \u2192 To Do',
                 style: TextStyle(color: context.appColors.textPrimary),
@@ -443,7 +443,7 @@ class _TaskListPanelState extends State<TaskListPanel> {
                 color: const Color(0xFFF59E0B),
                 size: 18,
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: kGapTight),
               Text(
                 'Mark all \u2192 Review',
                 style: TextStyle(color: context.appColors.textPrimary),
@@ -460,7 +460,7 @@ class _TaskListPanelState extends State<TaskListPanel> {
                 color: const Color(0xFF10B981),
                 size: 18,
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: kGapTight),
               Text(
                 'Mark all \u2192 Done',
                 style: TextStyle(color: context.appColors.textPrimary),
@@ -478,7 +478,7 @@ class _TaskListPanelState extends State<TaskListPanel> {
                 color: context.appColors.errorText,
                 size: 18,
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: kGapTight),
               Text(
                 'Delete $count task${count == 1 ? '' : 's'}\u2026',
                 style: TextStyle(color: context.appColors.errorText),
@@ -496,7 +496,7 @@ class _TaskListPanelState extends State<TaskListPanel> {
                 color: context.appColors.textSecondary,
                 size: 18,
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: kGapTight),
               Text(
                 'Clear selection',
                 style: TextStyle(color: context.appColors.textPrimary),
@@ -736,7 +736,7 @@ class _TaskListPanelState extends State<TaskListPanel> {
             color: context.appColors.textMuted,
             size: 40,
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: kGapRelaxed),
           Text(
             'No tasks yet',
             style: TextStyle(
@@ -745,13 +745,13 @@ class _TaskListPanelState extends State<TaskListPanel> {
               fontWeight: FontWeight.w600,
             ),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: kGapInline),
           Text(
             'Create a task or let AI generate them',
             textAlign: TextAlign.center,
             style: TextStyle(color: context.appColors.textMuted, fontSize: 13),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: kSpace4),
           FilledButton.icon(
             onPressed: () => showTaskCreateDialog(context),
             icon: const Icon(Icons.add, size: 18),
@@ -862,7 +862,7 @@ class _TaskListPanelState extends State<TaskListPanel> {
                     children: [
                       for (final status in _statusOrder)
                         Padding(
-                          padding: const EdgeInsets.only(right: 4),
+                          padding: const EdgeInsets.only(right: kSpace1),
                           child: _StatusFilterChip(
                             label: _statusLabels[status]!,
                             color: _statusColors[status]!,
@@ -886,7 +886,7 @@ class _TaskListPanelState extends State<TaskListPanel> {
                   GestureDetector(
                     onTap: _clearFilters,
                     child: Padding(
-                      padding: const EdgeInsets.only(left: 4),
+                      padding: const EdgeInsets.only(left: kSpace1),
                       child: Icon(
                         Icons.filter_alt_off_rounded,
                         color: context.appColors.textMuted,
@@ -897,7 +897,7 @@ class _TaskListPanelState extends State<TaskListPanel> {
               ],
             ),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: kGapInline),
           SizedBox(
             height: 24,
             child: ListView(
@@ -905,7 +905,7 @@ class _TaskListPanelState extends State<TaskListPanel> {
               children: [
                 for (final source in _sourceOrder)
                   Padding(
-                    padding: const EdgeInsets.only(right: 4),
+                    padding: const EdgeInsets.only(right: kSpace1),
                     child: _StatusFilterChip(
                       label: _sourceLabels[source]!,
                       color: _sourceColors[source]!,
@@ -940,7 +940,7 @@ class _TaskListPanelState extends State<TaskListPanel> {
             color: context.appColors.textMuted,
             size: 32,
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: kGapTight),
           Text(
             'No matching tasks',
             style: TextStyle(
@@ -948,7 +948,7 @@ class _TaskListPanelState extends State<TaskListPanel> {
               fontSize: 13,
             ),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: kGapInline),
           GestureDetector(
             onTap: _clearFilters,
             child: Text(
@@ -1035,7 +1035,7 @@ class _TaskListPanelState extends State<TaskListPanel> {
                     color: context.appColors.textMuted,
                     size: 11,
                   ),
-                  const SizedBox(width: 4),
+                  const SizedBox(width: kGapInline),
                   Text(
                     'Unlinked',
                     style: TextStyle(

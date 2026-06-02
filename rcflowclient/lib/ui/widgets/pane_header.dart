@@ -130,7 +130,7 @@ class PaneHeader extends StatelessWidget {
     final total = todos.length;
 
     return Padding(
-      padding: const EdgeInsets.only(right: 4),
+      padding: const EdgeInsets.only(right: kSpace1),
       child: InkWell(
         onTap: pane.toggleTodoPanel,
         borderRadius: BorderRadius.circular(4),
@@ -210,7 +210,7 @@ class PaneHeader extends StatelessWidget {
       message: tooltipLines.join('\n'),
       preferBelow: false,
       child: Container(
-        margin: const EdgeInsets.only(right: 4),
+        margin: const EdgeInsets.only(right: kSpace1),
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
         decoration: BoxDecoration(
           color: usageColor.withAlpha(25),

@@ -242,7 +242,7 @@ class _WorkerGroupState extends State<WorkerGroup> {
                       ),
                     ),
                   ],
-                  const SizedBox(width: 4),
+                  const SizedBox(width: kGapInline),
                   Container(
                     width: 8,
                     height: 8,
@@ -483,7 +483,7 @@ class _WorkerGroupState extends State<WorkerGroup> {
               color: context.appColors.textMuted,
               size: 14,
             ),
-            const SizedBox(width: 4),
+            const SizedBox(width: kGapInline),
             Icon(
               projectName != null
                   ? Icons.folder_outlined
@@ -491,7 +491,7 @@ class _WorkerGroupState extends State<WorkerGroup> {
               color: context.appColors.textMuted,
               size: 12,
             ),
-            const SizedBox(width: 4),
+            const SizedBox(width: kGapInline),
             Expanded(
               child: Text(
                 '${projectName ?? 'Other'} ($count)',
@@ -1090,7 +1090,7 @@ class _WorkerGroupState extends State<WorkerGroup> {
                   color: context.appColors.accentLight,
                   size: 18,
                 ),
-                SizedBox(width: 8),
+                SizedBox(width: kGapTight),
                 Text(
                   'Connect',
                   style: TextStyle(color: context.appColors.textPrimary),
@@ -1108,7 +1108,7 @@ class _WorkerGroupState extends State<WorkerGroup> {
                   color: context.appColors.textSecondary,
                   size: 18,
                 ),
-                SizedBox(width: 8),
+                SizedBox(width: kGapTight),
                 Text(
                   'Disconnect',
                   style: TextStyle(color: context.appColors.textPrimary),
@@ -1122,7 +1122,7 @@ class _WorkerGroupState extends State<WorkerGroup> {
             child: Row(
               children: [
                 Icon(Icons.bar_chart_rounded, color: Colors.teal, size: 18),
-                SizedBox(width: 8),
+                SizedBox(width: kGapTight),
                 Text(
                   'Stats',
                   style: TextStyle(color: context.appColors.textPrimary),
@@ -1139,7 +1139,7 @@ class _WorkerGroupState extends State<WorkerGroup> {
                 color: context.appColors.textSecondary,
                 size: 18,
               ),
-              SizedBox(width: 8),
+              SizedBox(width: kGapTight),
               Text(
                 'Edit Worker',
                 style: TextStyle(color: context.appColors.textPrimary),
@@ -1156,7 +1156,7 @@ class _WorkerGroupState extends State<WorkerGroup> {
                 color: context.appColors.errorText,
                 size: 18,
               ),
-              SizedBox(width: 8),
+              SizedBox(width: kGapTight),
               Text(
                 'Remove',
                 style: TextStyle(color: context.appColors.errorText),
@@ -1261,7 +1261,7 @@ class _WorkerGroupState extends State<WorkerGroup> {
                 color: context.appColors.textSecondary,
                 size: 18,
               ),
-              SizedBox(width: 8),
+              SizedBox(width: kGapTight),
               Text(
                 'Rename',
                 style: TextStyle(color: context.appColors.textPrimary),
@@ -1280,7 +1280,7 @@ class _WorkerGroupState extends State<WorkerGroup> {
                   color: context.appColors.accentLight,
                   size: 18,
                 ),
-                SizedBox(width: 8),
+                SizedBox(width: kGapTight),
                 Expanded(
                   child: Text(
                     linkedTasks.length == 1
@@ -1303,7 +1303,7 @@ class _WorkerGroupState extends State<WorkerGroup> {
                   color: context.appColors.accentLight,
                   size: 18,
                 ),
-                SizedBox(width: 8),
+                SizedBox(width: kGapTight),
                 Expanded(
                   child: Text(
                     linkedTasks.length == 1
@@ -1328,7 +1328,7 @@ class _WorkerGroupState extends State<WorkerGroup> {
                   color: context.appColors.accentLight,
                   size: 18,
                 ),
-                SizedBox(width: 8),
+                SizedBox(width: kGapTight),
                 Text(
                   'Pause session',
                   style: TextStyle(color: context.appColors.textPrimary),
@@ -1346,7 +1346,7 @@ class _WorkerGroupState extends State<WorkerGroup> {
                   color: context.appColors.accentLight,
                   size: 18,
                 ),
-                SizedBox(width: 8),
+                SizedBox(width: kGapTight),
                 Text(
                   'Resume session',
                   style: TextStyle(color: context.appColors.textPrimary),
@@ -1364,7 +1364,7 @@ class _WorkerGroupState extends State<WorkerGroup> {
                   color: context.appColors.accentLight,
                   size: 18,
                 ),
-                SizedBox(width: 8),
+                SizedBox(width: kGapTight),
                 Text(
                   'Restore session',
                   style: TextStyle(color: context.appColors.textPrimary),
@@ -1382,7 +1382,7 @@ class _WorkerGroupState extends State<WorkerGroup> {
                   color: context.appColors.errorText,
                   size: 18,
                 ),
-                SizedBox(width: 8),
+                SizedBox(width: kGapTight),
                 Text(
                   'End session',
                   style: TextStyle(color: context.appColors.errorText),

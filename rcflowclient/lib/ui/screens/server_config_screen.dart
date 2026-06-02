@@ -914,7 +914,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
               color: context.appColors.errorText,
               size: 40,
             ),
-            SizedBox(height: 12),
+            SizedBox(height: kGapRelaxed),
             Text(
               _error!,
               style: TextStyle(
@@ -922,7 +922,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
                 fontSize: 13,
               ),
             ),
-            SizedBox(height: 16),
+            SizedBox(height: kSpace4),
             TextButton(
               onPressed: _loadConfig,
               child: Text(
@@ -1054,7 +1054,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
                         ),
                     ],
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: kSpace4),
                 ],
                 Expanded(
                   child: SingleChildScrollView(
@@ -1096,7 +1096,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
         ),
         for (final opt in groupOpts) ...[
           _buildOptionWidget(opt),
-          const SizedBox(height: 8),
+          const SizedBox(height: kGapTight),
         ],
       ],
     );
@@ -1159,7 +1159,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
                   : _refreshToolStatus,
             ),
             if (_hasUpdatesAvailable) ...[
-              const SizedBox(width: 8),
+              const SizedBox(width: kGapTight),
               _ToolActionButton(
                 label: 'Update All',
                 loading: _toolsUpdating,
@@ -1174,7 +1174,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
         ),
         if (_toolsError != null)
           Padding(
-            padding: const EdgeInsets.only(top: 8),
+            padding: const EdgeInsets.only(top: kSpace2),
             child: Text(
               _toolsError!,
               style: TextStyle(
@@ -1185,7 +1185,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
           ),
         // Options from groups merged into Tools (e.g. "Tool Management")
         ..._buildMergedToolsOptions(),
-        const SizedBox(height: 16),
+        const SizedBox(height: kSpace4),
         Text(
           'Select a tool from the sidebar to view its settings.',
           style: TextStyle(color: context.appColors.textMuted, fontSize: 13),
@@ -1208,10 +1208,10 @@ class ServerConfigContentState extends State<ServerConfigContent> {
       if (groupOpts.isEmpty) continue;
       widgets.add(const SizedBox(height: 20));
       widgets.add(Divider(color: context.appColors.divider, height: 1));
-      widgets.add(const SizedBox(height: 16));
+      widgets.add(const SizedBox(height: kSpace4));
       for (final opt in groupOpts) {
         widgets.add(_buildOptionWidget(opt));
-        widgets.add(const SizedBox(height: 8));
+        widgets.add(const SizedBox(height: kGapTight));
       }
     }
     return widgets;
@@ -1238,7 +1238,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: const EdgeInsets.only(bottom: 16),
+          padding: const EdgeInsets.only(bottom: kSpace4),
           child: Row(
             children: [
               Icon(
@@ -1246,7 +1246,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
                 color: context.appColors.accentLight,
                 size: 20,
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: kGapTight),
               Text(
                 displayName,
                 style: TextStyle(
@@ -1255,7 +1255,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
                   fontWeight: FontWeight.w600,
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: kGapTight),
               if (!installed)
                 Text(
                   'not installed',
@@ -1273,13 +1273,13 @@ class ServerConfigContentState extends State<ServerConfigContent> {
                   ),
                 ),
                 if (updateAvailable && latestVersion != null) ...[
-                  const SizedBox(width: 4),
+                  const SizedBox(width: kGapInline),
                   Icon(
                     Icons.arrow_forward_rounded,
                     color: context.appColors.textMuted,
                     size: 13,
                   ),
-                  const SizedBox(width: 4),
+                  const SizedBox(width: kGapInline),
                   Text(
                     'v$latestVersion',
                     style: TextStyle(
@@ -1343,7 +1343,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
                     : () => _confirmUninstall(key),
               ),
               if (updateAvailable && installed) ...[
-                const SizedBox(width: 8),
+                const SizedBox(width: kGapTight),
                 _ToolActionButton(
                   label: 'Update',
                   loading: isUpdating,
@@ -1357,7 +1357,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
         // Error
         if (error != null)
           Padding(
-            padding: const EdgeInsets.only(top: 4),
+            padding: const EdgeInsets.only(top: kSpace1),
             child: Text(
               error,
               style: TextStyle(
@@ -1376,12 +1376,12 @@ class ServerConfigContentState extends State<ServerConfigContent> {
         // un-installed coding agent has nothing meaningful to configure;
         // showing the form would just confuse users.
         if (installed) ...[
-          const SizedBox(height: 12),
+          const SizedBox(height: kGapRelaxed),
           Divider(color: context.appColors.divider, height: 1),
-          const SizedBox(height: 12),
+          const SizedBox(height: kGapRelaxed),
           _buildToolSettingsPanel(key),
         ] else ...[
-          const SizedBox(height: 12),
+          const SizedBox(height: kGapRelaxed),
           Text(
             'Install ${_toolDisplayNames[key] ?? key} to configure it.',
             style: TextStyle(
@@ -1481,7 +1481,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
                     color: context.appColors.textMuted,
                   ),
                 ),
-                SizedBox(width: 8),
+                SizedBox(width: kGapTight),
                 Text(
                   'Checking status...',
                   style: TextStyle(
@@ -1534,7 +1534,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
                 ),
               ],
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: kGapTight),
             Row(
               children: [
                 Expanded(
@@ -1545,7 +1545,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
                     onPressed: () => _startCodexLogin(),
                   ),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: kGapTight),
                 Expanded(
                   child: _ToolActionButton(
                     label: 'Use device code',
@@ -1561,7 +1561,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
           if (_codexLoggingIn) ...[
             // Browser OAuth flow — URL opened automatically
             if (_codexAuthUrl != null) ...[
-              SizedBox(height: 8),
+              SizedBox(height: kGapTight),
               Container(
                 width: double.infinity,
                 padding: EdgeInsets.all(10),
@@ -1586,7 +1586,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
                         fontSize: 10,
                       ),
                     ),
-                    const SizedBox(height: 4),
+                    const SizedBox(height: kGapInline),
                     GestureDetector(
                       onTap: () => launchUrl(
                         Uri.parse(_codexAuthUrl!),
@@ -1618,7 +1618,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
                       color: context.appColors.accent,
                     ),
                   ),
-                  SizedBox(width: 8),
+                  SizedBox(width: kGapTight),
                   Text(
                     'Waiting for browser authentication...',
                     style: TextStyle(
@@ -1631,7 +1631,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
             ]
             // Device code flow
             else if (_codexDeviceCode != null && _codexDeviceUrl != null) ...[
-              SizedBox(height: 8),
+              SizedBox(height: kGapTight),
               Container(
                 width: double.infinity,
                 padding: EdgeInsets.all(10),
@@ -1688,7 +1688,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
                       color: context.appColors.accent,
                     ),
                   ),
-                  SizedBox(width: 8),
+                  SizedBox(width: kGapTight),
                   Text(
                     'Waiting for browser authentication...',
                     style: TextStyle(
@@ -1710,7 +1710,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
                       color: context.appColors.accent,
                     ),
                   ),
-                  SizedBox(width: 8),
+                  SizedBox(width: kGapTight),
                   Text(
                     'Starting login...',
                     style: TextStyle(
@@ -1724,7 +1724,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
           ],
           if (_codexLoginError != null)
             Padding(
-              padding: EdgeInsets.only(top: 4),
+              padding: EdgeInsets.only(top: kSpace1),
               child: Text(
                 _codexLoginError!,
                 style: TextStyle(
@@ -1779,7 +1779,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
                     color: context.appColors.textMuted,
                   ),
                 ),
-                SizedBox(width: 8),
+                SizedBox(width: kGapTight),
                 Text(
                   'Checking status...',
                   style: TextStyle(
@@ -1837,7 +1837,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
                       accent: false,
                       onPressed: () => _startClaudeCodeLogin(),
                     ),
-                    SizedBox(width: 8),
+                    SizedBox(width: kGapTight),
                     _ToolActionButton(
                       label: 'Logout',
                       loading: false,
@@ -1866,7 +1866,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
                 ),
               ],
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: kGapTight),
             Row(
               children: [
                 Expanded(
@@ -1883,7 +1883,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
           // Active login flow — show URL + code input
           if (_claudeCodeLoggingIn) ...[
             if (_claudeCodeAuthUrl != null) ...[
-              SizedBox(height: 8),
+              SizedBox(height: kGapTight),
               Container(
                 width: double.infinity,
                 padding: EdgeInsets.all(10),
@@ -1963,7 +1963,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
                             ),
                           ),
                         ),
-                        SizedBox(width: 8),
+                        SizedBox(width: kGapTight),
                         _ToolActionButton(
                           label: 'Submit',
                           loading: _claudeCodeSubmittingCode,
@@ -1989,7 +1989,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
                       color: context.appColors.accent,
                     ),
                   ),
-                  SizedBox(width: 8),
+                  SizedBox(width: kGapTight),
                   Text(
                     'Starting login...',
                     style: TextStyle(
@@ -2003,7 +2003,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
           ],
           if (_claudeCodeLoginError != null)
             Padding(
-              padding: EdgeInsets.only(top: 4),
+              padding: EdgeInsets.only(top: kSpace1),
               child: Text(
                 _claudeCodeLoginError!,
                 style: TextStyle(
@@ -2057,7 +2057,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
           for (final field in fields) ...[
             if (_isToolFieldVisible(toolName, field))
               Padding(
-                padding: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.only(bottom: kSpace2),
                 child: _buildToolSettingField(toolName, field),
               ),
             // Show ChatGPT login section right after the provider field
@@ -2065,7 +2065,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
                 field['key'] == 'provider' &&
                 _getToolFieldValue(toolName, 'provider') == 'chatgpt')
               Padding(
-                padding: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.only(bottom: kSpace2),
                 child: _buildCodexLoginSection(),
               ),
             // Show Anthropic login section right after the provider field
@@ -2073,7 +2073,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
                 field['key'] == 'provider' &&
                 _getToolFieldValue(toolName, 'provider') == 'anthropic_login')
               Padding(
-                padding: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.only(bottom: kSpace2),
                 child: _buildClaudeCodeLoginSection(),
               ),
           ],
@@ -2090,7 +2090,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
             ),
           if (error != null)
             Padding(
-              padding: EdgeInsets.only(top: 4),
+              padding: EdgeInsets.only(top: kSpace1),
               child: Text(
                 error,
                 style: TextStyle(
@@ -2338,7 +2338,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
             fontSize: 11,
           ),
         ),
-        SizedBox(height: 4),
+        SizedBox(height: kGapInline),
         input,
         if (description.isNotEmpty)
           Padding(

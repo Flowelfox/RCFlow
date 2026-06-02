@@ -40,7 +40,7 @@ class QueuedMessagesBar extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Padding(
-            padding: const EdgeInsets.only(bottom: 4, left: 4),
+            padding: const EdgeInsets.only(bottom: kSpace1, left: kSpace1),
             child: Text(
               queue.length == 1
                   ? '1 message queued'

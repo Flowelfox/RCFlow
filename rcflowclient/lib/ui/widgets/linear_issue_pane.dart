@@ -241,7 +241,7 @@ class _LinearIssueContentState extends State<_LinearIssueContent> {
               fontWeight: FontWeight.w600,
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: kSpace4),
 
           // Metadata row
           Wrap(
@@ -293,7 +293,7 @@ class _LinearIssueContentState extends State<_LinearIssueContent> {
           ),
 
           if (issue.labels.isNotEmpty) ...[
-            const SizedBox(height: 12),
+            const SizedBox(height: kGapRelaxed),
             Wrap(
               spacing: 6,
               runSpacing: 6,
@@ -339,7 +339,7 @@ class _LinearIssueContentState extends State<_LinearIssueContent> {
                 fontWeight: FontWeight.w600,
               ),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: kGapTight),
             SelectableText(
               issue.description!,
               style: TextStyle(
@@ -359,20 +359,20 @@ class _LinearIssueContentState extends State<_LinearIssueContent> {
             time: issue.createdAt,
             context: context,
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: kGapInline),
           _TimestampRow(
             label: 'Updated',
             time: issue.updatedAt,
             context: context,
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: kGapInline),
           _TimestampRow(
             label: 'Synced',
             time: issue.syncedAt,
             context: context,
           ),
 
-          const SizedBox(height: 24),
+          const SizedBox(height: kSpace5),
 
           // Action buttons
           Row(
@@ -402,7 +402,7 @@ class _LinearIssueContentState extends State<_LinearIssueContent> {
                   ),
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: kGapTight),
               if (issue.taskId == null)
                 OutlinedButton.icon(
                   onPressed: _creatingTask

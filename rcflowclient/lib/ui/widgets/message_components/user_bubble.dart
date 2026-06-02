@@ -47,7 +47,7 @@ class UserBubble extends StatelessWidget {
                       ),
                   ],
                 ),
-                SizedBox(height: 8),
+                SizedBox(height: kGapTight),
               ],
               MessageSelectionArea(
                 rawMarkdown: message.content,
