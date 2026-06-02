@@ -6,6 +6,7 @@ import '../../models/linear_issue_info.dart';
 import '../../state/app_state.dart';
 import '../../state/pane_state.dart';
 import '../../theme.dart';
+import '../../theme/spacing.dart';
 
 /// Full-pane detail view for a cached Linear issue.
 ///
@@ -305,7 +306,7 @@ class _LinearIssueContentState extends State<_LinearIssueContent> {
                       ),
                       decoration: BoxDecoration(
                         color: context.appColors.bgElevated,
-                        borderRadius: BorderRadius.circular(10),
+                        borderRadius: BorderRadius.circular(kRadiusMedium),
                         border: Border.all(
                           color: context.appColors.divider,
                           width: 0.5,

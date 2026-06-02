@@ -65,7 +65,7 @@ class _ToolSecretFieldState extends State<_ToolSecretField> {
                     foregroundColor: context.appColors.accent,
                     padding: const EdgeInsets.symmetric(horizontal: 8),
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(6),
+                      borderRadius: BorderRadius.circular(kRadiusSmall),
                     ),
                   ),
                   child: Text(

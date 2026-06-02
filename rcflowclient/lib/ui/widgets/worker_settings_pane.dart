@@ -6,6 +6,7 @@ import '../../services/websocket_service.dart';
 import '../../state/app_state.dart';
 import '../../state/pane_state.dart';
 import '../../theme.dart';
+import '../../theme/spacing.dart';
 
 /// Full-pane worker settings view.
 ///
@@ -433,11 +434,11 @@ class _InstallBar extends StatelessWidget {
                       vertical: 8,
                     ),
                     border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(6),
+                      borderRadius: BorderRadius.circular(kRadiusSmall),
                       borderSide: BorderSide(color: context.appColors.divider),
                     ),
                     enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(6),
+                      borderRadius: BorderRadius.circular(kRadiusSmall),
                       borderSide: BorderSide(color: context.appColors.divider),
                     ),
                   ),
@@ -462,7 +463,7 @@ class _InstallBar extends StatelessWidget {
                         style: ElevatedButton.styleFrom(
                           padding: const EdgeInsets.symmetric(horizontal: 12),
                           shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(6),
+                            borderRadius: BorderRadius.circular(kRadiusSmall),
                           ),
                         ),
                         onPressed: onInstall,
@@ -618,7 +619,7 @@ class _PluginTile extends StatelessWidget {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: context.appColors.bgSurface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(kRadiusLarge)),
         title: const Text('Uninstall plugin'),
         content: Text('Remove "${plugin['name']}"? This cannot be undone.'),
         actions: [

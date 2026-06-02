@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../models/todo_item.dart';
 import '../../../models/ws_messages.dart';
 import '../../../theme.dart';
+import '../../../theme/spacing.dart';
 
 /// Compact inline indicator for `todo_update` messages.
 /// Rendered in the same box style as ToolBlock (icon + progress bar, no spinner).
@@ -36,7 +37,7 @@ class TodoListBlock extends StatelessWidget {
       child: Container(
         decoration: BoxDecoration(
           color: context.appColors.toolBg,
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(kRadiusMedium),
           border: Border.all(color: context.appColors.divider),
         ),
         clipBehavior: Clip.antiAlias,

@@ -19,7 +19,7 @@ class _AttachmentChip extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: context.appColors.bgElevated,
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(kRadiusSmall),
         border: Border.all(color: context.appColors.divider),
       ),
       child: Row(
@@ -88,7 +88,7 @@ class _WorkerChip extends StatelessWidget {
           ),
           color: context.appColors.bgSurface,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(kRadiusMedium),
           ),
           items: workers
               .map(
@@ -327,7 +327,7 @@ class _WorktreeChip extends StatelessWidget {
             ),
             color: context.appColors.bgSurface,
             shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: BorderRadius.circular(kRadiusMedium),
             ),
             items: items,
           ).then((value) {

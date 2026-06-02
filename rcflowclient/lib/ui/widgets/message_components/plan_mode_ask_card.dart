@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../../models/ws_messages.dart';
 import '../../../state/pane_state.dart';
 import '../../../theme.dart';
+import '../../../theme/spacing.dart';
 
 class PlanModeAskCard extends StatelessWidget {
   final DisplayMessage message;
@@ -68,7 +69,7 @@ class PlanModeAskCard extends StatelessWidget {
                   foregroundColor: context.appColors.textSecondary,
                   side: BorderSide(color: context.appColors.divider),
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(kRadiusMedium),
                   ),
                   padding: const EdgeInsets.symmetric(vertical: 12),
                 ),
@@ -90,7 +91,7 @@ class PlanModeAskCard extends StatelessWidget {
                 style: FilledButton.styleFrom(
                   backgroundColor: context.appColors.accent,
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(kRadiusMedium),
                   ),
                   padding: const EdgeInsets.symmetric(vertical: 12),
                 ),

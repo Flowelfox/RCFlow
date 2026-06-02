@@ -91,7 +91,7 @@ class _HotkeysSectionState extends State<_HotkeysSection> {
               foregroundColor: context.appColors.textSecondary,
               side: BorderSide(color: context.appColors.divider),
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(kRadiusMedium),
               ),
             ),
             child: Text(
@@ -165,7 +165,7 @@ class _HotkeyRow extends StatelessWidget {
                 )
               else
                 InkWell(
-                  borderRadius: BorderRadius.circular(6),
+                  borderRadius: BorderRadius.circular(kRadiusSmall),
                   onTap: onStartRecording,
                   child: Container(
                     padding: const EdgeInsets.symmetric(
@@ -174,7 +174,7 @@ class _HotkeyRow extends StatelessWidget {
                     ),
                     decoration: BoxDecoration(
                       color: context.appColors.bgElevated,
-                      borderRadius: BorderRadius.circular(6),
+                      borderRadius: BorderRadius.circular(kRadiusSmall),
                     ),
                     child: Text(
                       binding.label,
@@ -321,7 +321,7 @@ class _HotkeyRecorderState extends State<_HotkeyRecorder> {
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         decoration: BoxDecoration(
           color: context.appColors.bgElevated,
-          borderRadius: BorderRadius.circular(6),
+          borderRadius: BorderRadius.circular(kRadiusSmall),
           border: Border.all(color: context.appColors.accent, width: 1.5),
         ),
         child: Text(

@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import '../../state/app_state.dart';
 import '../../theme.dart';
+import '../../theme/spacing.dart';
 
 /// Shows a dialog to create a new user task.
 ///
@@ -164,7 +165,7 @@ class _TaskCreateDialogState extends State<_TaskCreateDialog> {
                           counterText: '',
                           border: OutlineInputBorder(
                             borderSide: BorderSide.none,
-                            borderRadius: BorderRadius.circular(14),
+                            borderRadius: BorderRadius.circular(kRadiusLarge),
                           ),
                         ),
                         validator: (v) {
@@ -208,7 +209,7 @@ class _TaskCreateDialogState extends State<_TaskCreateDialog> {
                           filled: true,
                           border: OutlineInputBorder(
                             borderSide: BorderSide.none,
-                            borderRadius: BorderRadius.circular(14),
+                            borderRadius: BorderRadius.circular(kRadiusLarge),
                           ),
                         ),
                       ),
@@ -238,7 +239,7 @@ class _TaskCreateDialogState extends State<_TaskCreateDialog> {
                             filled: true,
                             border: OutlineInputBorder(
                               borderSide: BorderSide.none,
-                              borderRadius: BorderRadius.circular(14),
+                              borderRadius: BorderRadius.circular(kRadiusLarge),
                             ),
                           ),
                           items: connectedWorkers.map((config) {

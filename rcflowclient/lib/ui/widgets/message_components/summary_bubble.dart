@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../models/ws_messages.dart';
 import '../../../theme.dart';
+import '../../../theme/spacing.dart';
 
 class SummaryBubble extends StatelessWidget {
   final DisplayMessage message;
@@ -16,7 +17,7 @@ class SummaryBubble extends StatelessWidget {
         padding: EdgeInsets.all(12),
         decoration: BoxDecoration(
           color: context.appColors.summaryBg,
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(kRadiusMedium),
           border: Border.all(color: context.appColors.accentDim),
         ),
         child: Row(

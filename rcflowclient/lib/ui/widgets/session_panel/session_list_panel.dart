@@ -17,6 +17,7 @@ import 'artifact_list_panel.dart';
 import 'helpers.dart';
 import 'task_list_panel.dart';
 import 'worker_group.dart';
+import '../../../theme/spacing.dart';
 
 /// Cheap value-equality fingerprint of every AppState field that visibly
 /// affects the workers/sessions tab. Excludes high-frequency fields the tab
@@ -295,7 +296,7 @@ class _SessionListPanelState extends State<SessionListPanel>
                   ),
                   child: InkWell(
                     key: onboarding.settingsButtonKey,
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(kRadiusMedium),
                     onTap: () => showSettingsMenu(context),
                     child: Padding(
                       padding: EdgeInsets.symmetric(
@@ -654,7 +655,7 @@ class _SessionListPanelState extends State<SessionListPanel>
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: context.appColors.bgSurface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(kRadiusLarge)),
         title: Text(
           'End $count session${count == 1 ? '' : 's'}',
           style: TextStyle(color: context.appColors.textPrimary, fontSize: 16),
@@ -1282,7 +1283,7 @@ class _SessionStatusFilterChip extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
         decoration: BoxDecoration(
           color: selected ? color.withAlpha(40) : Colors.transparent,
-          borderRadius: BorderRadius.circular(6),
+          borderRadius: BorderRadius.circular(kRadiusSmall),
           border: Border.all(
             color: selected ? color.withAlpha(120) : context.appColors.divider,
             width: 1,

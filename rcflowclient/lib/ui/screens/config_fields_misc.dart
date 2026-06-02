@@ -169,7 +169,7 @@ class _StringListFieldState extends State<_StringListField> {
                         filled: true,
                         border: OutlineInputBorder(
                           borderSide: BorderSide.none,
-                          borderRadius: BorderRadius.circular(10),
+                          borderRadius: BorderRadius.circular(kRadiusMedium),
                         ),
                         contentPadding: const EdgeInsets.symmetric(
                           horizontal: 12,

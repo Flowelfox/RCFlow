@@ -417,7 +417,7 @@ class _TaskDetailContentState extends State<_TaskDetailContent> {
                 backgroundColor: context.appColors.accent,
                 foregroundColor: Colors.white,
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(kRadiusMedium),
                 ),
                 padding: const EdgeInsets.symmetric(
                   horizontal: 14,
@@ -435,7 +435,7 @@ class _TaskDetailContentState extends State<_TaskDetailContent> {
                 style: OutlinedButton.styleFrom(
                   side: BorderSide(color: context.appColors.divider),
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(kRadiusMedium),
                   ),
                   padding: const EdgeInsets.symmetric(
                     horizontal: 14,
@@ -463,7 +463,7 @@ class _TaskDetailContentState extends State<_TaskDetailContent> {
                 style: OutlinedButton.styleFrom(
                   side: BorderSide(color: context.appColors.divider),
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(kRadiusMedium),
                   ),
                   padding: const EdgeInsets.symmetric(
                     horizontal: 14,
@@ -489,7 +489,7 @@ class _TaskDetailContentState extends State<_TaskDetailContent> {
                 style: OutlinedButton.styleFrom(
                   side: BorderSide(color: context.appColors.divider),
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(kRadiusMedium),
                   ),
                   padding: const EdgeInsets.symmetric(
                     horizontal: 14,

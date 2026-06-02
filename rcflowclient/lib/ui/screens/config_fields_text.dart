@@ -27,7 +27,7 @@ class _TextField extends StatelessWidget {
           fillColor: context.appColors.bgElevated,
           border: OutlineInputBorder(
             borderSide: BorderSide.none,
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(kRadiusMedium),
           ),
           contentPadding: const EdgeInsets.symmetric(
             horizontal: 12,
@@ -69,7 +69,7 @@ class _TextAreaField extends StatelessWidget {
           fillColor: context.appColors.bgElevated,
           border: OutlineInputBorder(
             borderSide: BorderSide.none,
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(kRadiusMedium),
           ),
           contentPadding: const EdgeInsets.symmetric(
             horizontal: 12,
@@ -121,7 +121,7 @@ class _SecretFieldState extends State<_SecretField> {
                 fillColor: context.appColors.bgElevated,
                 border: OutlineInputBorder(
                   borderSide: BorderSide.none,
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(kRadiusMedium),
                 ),
                 contentPadding: EdgeInsets.symmetric(
                   horizontal: 12,
@@ -146,7 +146,7 @@ class _SecretFieldState extends State<_SecretField> {
                     padding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                     decoration: BoxDecoration(
                       color: context.appColors.bgElevated,
-                      borderRadius: BorderRadius.circular(10),
+                      borderRadius: BorderRadius.circular(kRadiusMedium),
                     ),
                     child: Text(
                       widget.option.value?.toString() ?? '',
@@ -201,7 +201,7 @@ class _SelectField extends StatelessWidget {
         padding: EdgeInsets.symmetric(horizontal: 12),
         decoration: BoxDecoration(
           color: context.appColors.bgElevated,
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(kRadiusMedium),
         ),
         child: DropdownButtonHideUnderline(
           child: DropdownButton<String>(

@@ -6,6 +6,7 @@ import '../../services/websocket_service.dart';
 import '../../services/worker_connection.dart';
 import '../../theme.dart';
 import '../widgets/custom_title_bar.dart';
+import '../../theme/spacing.dart';
 
 part 'config_layout.dart';
 part 'config_fields_text.dart';
@@ -1037,7 +1038,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
                               vertical: 8,
                             ),
                             shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10),
+                              borderRadius: BorderRadius.circular(kRadiusMedium),
                             ),
                           ),
                           child: _saving
@@ -1453,7 +1454,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
       padding: EdgeInsets.all(10),
       decoration: BoxDecoration(
         color: context.appColors.bgSurface,
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(kRadiusSmall),
         border: Border.all(color: context.appColors.bgOverlay),
       ),
       child: Column(
@@ -1749,7 +1750,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
       padding: EdgeInsets.all(10),
       decoration: BoxDecoration(
         color: context.appColors.bgSurface,
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(kRadiusSmall),
         border: Border.all(color: context.appColors.bgOverlay),
       ),
       child: Column(

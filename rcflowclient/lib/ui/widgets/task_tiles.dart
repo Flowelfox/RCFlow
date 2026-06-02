@@ -226,7 +226,7 @@ class _LinkedIssueTile extends StatelessWidget {
             height: 28,
             decoration: BoxDecoration(
               color: stateColor.withAlpha(30),
-              borderRadius: BorderRadius.circular(6),
+              borderRadius: BorderRadius.circular(kRadiusSmall),
             ),
             child: Icon(priorityIcon, color: priorityColor, size: 14),
           ),

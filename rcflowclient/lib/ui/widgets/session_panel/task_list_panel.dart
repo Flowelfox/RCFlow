@@ -14,6 +14,7 @@ import '../collapsible_group_header.dart';
 import '../panel_search_bar.dart';
 import 'linear_issue_tile.dart';
 import 'task_tile.dart';
+import '../../../theme/spacing.dart';
 
 /// Filters [issues] by a free-text [query], matching against title, identifier,
 /// and assignee name. Returns all issues unmodified when [query] is empty.
@@ -560,7 +561,7 @@ class _TaskListPanelState extends State<TaskListPanel> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: context.appColors.bgSurface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(kRadiusLarge)),
         title: Text(
           'Delete $count task${count == 1 ? '' : 's'}',
           style: TextStyle(color: context.appColors.textPrimary, fontSize: 16),
@@ -759,7 +760,7 @@ class _TaskListPanelState extends State<TaskListPanel> {
               backgroundColor: context.appColors.accent,
               foregroundColor: Colors.white,
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(kRadiusMedium),
               ),
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             ),
@@ -1141,7 +1142,7 @@ class _StatusFilterChip extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
         decoration: BoxDecoration(
           color: selected ? color.withAlpha(40) : Colors.transparent,
-          borderRadius: BorderRadius.circular(6),
+          borderRadius: BorderRadius.circular(kRadiusSmall),
           border: Border.all(
             color: selected ? color.withAlpha(120) : context.appColors.divider,
             width: 1,

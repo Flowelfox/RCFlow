@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../../models/ws_messages.dart';
 import '../../../state/pane_state.dart';
 import '../../../theme.dart';
+import '../../../theme/spacing.dart';
 
 class ThinkingBlock extends StatelessWidget {
   final DisplayMessage message;
@@ -19,7 +20,7 @@ class ThinkingBlock extends StatelessWidget {
       child: Container(
         decoration: BoxDecoration(
           color: context.appColors.toolBg,
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(kRadiusMedium),
           border: Border.all(color: context.appColors.divider),
         ),
         clipBehavior: Clip.antiAlias,

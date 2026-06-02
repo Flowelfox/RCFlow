@@ -17,6 +17,7 @@ import '../dialogs/setup_wizard.dart';
 import '../dialogs/worker_edit_dialog.dart';
 import '../screens/workers_screen.dart';
 import 'onboarding_overlay.dart';
+import '../../theme/spacing.dart';
 
 part 'settings_sections_workers.dart';
 part 'settings_sections_appearance.dart';
@@ -156,9 +157,9 @@ class _SidebarItem extends StatelessWidget {
       padding: EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       child: Material(
         color: selected ? context.appColors.bgElevated : Colors.transparent,
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(kRadiusMedium),
         child: InkWell(
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(kRadiusMedium),
           onTap: onTap,
           child: Padding(
             padding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),

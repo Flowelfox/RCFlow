@@ -11,6 +11,7 @@ import '../../state/pane_state.dart';
 import '../../theme.dart';
 import '../utils/markdown_copy_menu.dart';
 import '../utils/selectable_code_block_builder.dart';
+import '../../theme/spacing.dart';
 
 part 'task_pane_header.dart';
 part 'task_detail_content.dart';

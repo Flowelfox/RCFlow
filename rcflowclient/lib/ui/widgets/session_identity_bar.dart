@@ -7,6 +7,7 @@ import '../../state/pane_state.dart';
 import '../../theme.dart';
 import '../badges/badge_bar.dart';
 import '../badges/badge_chip.dart';
+import '../../theme/spacing.dart';
 
 /// A thin strip displayed above the chat output that shows which session is
 /// currently open — title, status badge, and worker badge.
@@ -336,7 +337,7 @@ class _SessionBar extends StatelessWidget {
       builder: (ctx) => AlertDialog(
         backgroundColor: appColors.bgSurface,
         shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(kRadiusLarge)),
         title: Text(
           'Rename session',
           style: TextStyle(

@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../../models/task_info.dart';
 import '../../theme.dart';
+import '../../theme/spacing.dart';
 
 /// Data class returned from the edit dialog with only changed fields.
 class TaskEditResult {
@@ -138,7 +139,7 @@ class _TaskEditDialogState extends State<_TaskEditDialog> {
                           counterText: '',
                           border: OutlineInputBorder(
                             borderSide: BorderSide.none,
-                            borderRadius: BorderRadius.circular(14),
+                            borderRadius: BorderRadius.circular(kRadiusLarge),
                           ),
                         ),
                         validator: (v) {
@@ -182,7 +183,7 @@ class _TaskEditDialogState extends State<_TaskEditDialog> {
                           filled: true,
                           border: OutlineInputBorder(
                             borderSide: BorderSide.none,
-                            borderRadius: BorderRadius.circular(14),
+                            borderRadius: BorderRadius.circular(kRadiusLarge),
                           ),
                         ),
                       ),

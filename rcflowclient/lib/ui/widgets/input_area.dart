@@ -19,6 +19,7 @@ import '../badges/badge_chip.dart';
 import '../utils/markdown_copy_menu.dart' show readClipboardAsMarkdown;
 import 'create_worktree_dialog.dart';
 import 'session_identity_bar.dart' show CavemanPreviewBadge, WorkerBadge;
+import '../../theme/spacing.dart';
 
 part 'input_chips.dart';
 part 'input_mention_items.dart';

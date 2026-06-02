@@ -61,7 +61,7 @@ class _LinkIssueDialogState extends State<_LinkIssueDialog> {
 
     return Dialog(
       backgroundColor: context.appColors.bgSurface,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(kRadiusLarge)),
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 480, maxHeight: 500),
         child: Column(

@@ -10,6 +10,7 @@ import '../widgets/output_display.dart';
 import '../widgets/session_identity_bar.dart';
 import '../widgets/session_panel.dart';
 import '../widgets/settings_menu.dart';
+import '../../theme/spacing.dart';
 
 /// Root shell for Android — three-tab bottom navigation:
 ///   0 · Sessions  — scrollable session list with pull-to-refresh
@@ -340,7 +341,7 @@ class _NoSessionView extends StatelessWidget {
                   ),
                   side: BorderSide(color: appColors.divider),
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(kRadiusMedium),
                   ),
                 ),
               ),

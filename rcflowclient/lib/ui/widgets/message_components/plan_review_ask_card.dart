@@ -8,6 +8,7 @@ import '../../../theme.dart';
 import '../../utils/link_utils.dart';
 import '../../utils/markdown_copy_menu.dart';
 import '../../utils/selectable_code_block_builder.dart';
+import '../../../theme/spacing.dart';
 
 class PlanReviewAskCard extends StatefulWidget {
   final DisplayMessage message;
@@ -110,7 +111,7 @@ class _PlanReviewAskCardState extends State<PlanReviewAskCard> {
                   ),
                   codeblockDecoration: BoxDecoration(
                     color: context.appColors.toolBg,
-                    borderRadius: BorderRadius.circular(6),
+                    borderRadius: BorderRadius.circular(kRadiusSmall),
                   ),
                   codeblockPadding: EdgeInsets.all(8),
                 ),
@@ -154,7 +155,7 @@ class _PlanReviewAskCardState extends State<PlanReviewAskCard> {
                     foregroundColor: context.appColors.textSecondary,
                     side: BorderSide(color: context.appColors.divider),
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
+                      borderRadius: BorderRadius.circular(kRadiusMedium),
                     ),
                     padding: const EdgeInsets.symmetric(vertical: 12),
                   ),
@@ -180,7 +181,7 @@ class _PlanReviewAskCardState extends State<PlanReviewAskCard> {
                     backgroundColor: context.appColors.accent,
                     disabledBackgroundColor: context.appColors.bgElevated,
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
+                      borderRadius: BorderRadius.circular(kRadiusMedium),
                     ),
                     padding: const EdgeInsets.symmetric(vertical: 12),
                   ),
@@ -202,7 +203,7 @@ class _PlanReviewAskCardState extends State<PlanReviewAskCard> {
                     foregroundColor: context.appColors.textSecondary,
                     side: BorderSide(color: context.appColors.divider),
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
+                      borderRadius: BorderRadius.circular(kRadiusMedium),
                     ),
                     padding: const EdgeInsets.symmetric(vertical: 12),
                   ),
@@ -224,7 +225,7 @@ class _PlanReviewAskCardState extends State<PlanReviewAskCard> {
                   style: FilledButton.styleFrom(
                     backgroundColor: context.appColors.accent,
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
+                      borderRadius: BorderRadius.circular(kRadiusMedium),
                     ),
                     padding: const EdgeInsets.symmetric(vertical: 12),
                   ),

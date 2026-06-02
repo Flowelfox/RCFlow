@@ -178,7 +178,7 @@ class _TaskPaneHeader extends StatelessWidget {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: context.appColors.bgSurface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(kRadiusLarge)),
         title: Text(
           'Delete Task',
           style: TextStyle(color: context.appColors.textPrimary, fontSize: 16),

@@ -19,7 +19,7 @@ class _PlanBanner extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
         color: _green.withAlpha(18),
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(kRadiusMedium),
         border: Border.all(color: _green.withAlpha(60)),
       ),
       child: Row(

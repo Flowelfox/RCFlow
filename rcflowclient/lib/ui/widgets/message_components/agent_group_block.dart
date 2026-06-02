@@ -5,6 +5,7 @@ import '../../../models/ws_messages.dart';
 import '../../../state/pane_state.dart';
 import '../../../theme.dart';
 import '../message_bubble.dart';
+import '../../../theme/spacing.dart';
 
 class AgentGroupBlock extends StatelessWidget {
   final DisplayMessage message;
@@ -25,7 +26,7 @@ class AgentGroupBlock extends StatelessWidget {
       child: Container(
         decoration: BoxDecoration(
           color: context.appColors.toolBg,
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(kRadiusMedium),
           border: Border.all(color: context.appColors.divider),
         ),
         clipBehavior: Clip.antiAlias,

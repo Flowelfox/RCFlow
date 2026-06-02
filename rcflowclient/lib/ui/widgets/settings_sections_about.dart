@@ -18,7 +18,7 @@ class _AboutSection extends StatelessWidget {
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
             color: context.appColors.bgElevated,
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(kRadiusLarge),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -227,7 +227,7 @@ class _AboutSection extends StatelessWidget {
                       foregroundColor: context.appColors.textSecondary,
                       side: BorderSide(color: context.appColors.divider),
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
+                        borderRadius: BorderRadius.circular(kRadiusMedium),
                       ),
                       padding: const EdgeInsets.symmetric(
                         horizontal: 14,
@@ -263,7 +263,7 @@ class _AboutSection extends StatelessWidget {
                       foregroundColor: context.appColors.textSecondary,
                       side: BorderSide(color: context.appColors.divider),
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
+                        borderRadius: BorderRadius.circular(kRadiusMedium),
                       ),
                       padding: const EdgeInsets.symmetric(
                         horizontal: 14,

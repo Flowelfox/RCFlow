@@ -8,6 +8,7 @@ import '../../../models/linear_issue_info.dart';
 import '../../../state/app_state.dart';
 import '../../../theme.dart';
 import 'linear_issue_tile.dart';
+import '../../../theme/spacing.dart';
 
 /// Sidebar panel for the Integrations tab — shows cached Linear issues.
 class LinearIssueListPanel extends StatefulWidget {
@@ -622,7 +623,7 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
                 backgroundColor: context.appColors.accent,
                 foregroundColor: Colors.white,
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(kRadiusMedium),
                 ),
                 padding: const EdgeInsets.symmetric(
                   horizontal: 16,

@@ -5,6 +5,7 @@ import '../../services/settings_service.dart';
 import '../../state/app_state.dart';
 import '../../theme.dart';
 import '../onboarding_keys.dart' as keys;
+import '../../theme/spacing.dart';
 
 /// Title bar height — the overlay leaves this area interactive so the window
 /// remains draggable and the traffic-light / window buttons stay clickable.
@@ -340,7 +341,7 @@ class _OnboardingOverlayState extends State<_OnboardingOverlay>
                     style: FilledButton.styleFrom(
                       backgroundColor: context.appColors.accent,
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
+                        borderRadius: BorderRadius.circular(kRadiusMedium),
                       ),
                       padding: const EdgeInsets.symmetric(
                         horizontal: 16,

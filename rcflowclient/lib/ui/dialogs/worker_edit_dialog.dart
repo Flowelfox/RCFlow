@@ -8,6 +8,7 @@ import '../../services/server_url.dart';
 import '../../services/worker_connection.dart';
 import '../../theme.dart';
 import '../screens/server_config_screen.dart';
+import '../../theme/spacing.dart';
 
 /// Opens a dialog to create or edit a [WorkerConfig].
 ///
@@ -195,7 +196,7 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: context.appColors.bgSurface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(kRadiusLarge)),
         title: Text(
           'Discard changes?',
           style: TextStyle(color: context.appColors.textPrimary, fontSize: 16),
@@ -452,7 +453,7 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
               fillColor: context.appColors.bgElevated,
               border: OutlineInputBorder(
                 borderSide: BorderSide.none,
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.circular(kRadiusLarge),
               ),
               errorText: _fieldError(_nameCtrl),
             ),
@@ -479,7 +480,7 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
               fillColor: context.appColors.bgElevated,
               border: OutlineInputBorder(
                 borderSide: BorderSide.none,
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.circular(kRadiusLarge),
               ),
               errorText: _fieldError(_hostCtrl),
             ),
@@ -507,7 +508,7 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
               fillColor: context.appColors.bgElevated,
               border: OutlineInputBorder(
                 borderSide: BorderSide.none,
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.circular(kRadiusLarge),
               ),
               errorText: _fieldError(_portCtrl),
             ),
@@ -545,7 +546,7 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
               fillColor: context.appColors.bgElevated,
               border: OutlineInputBorder(
                 borderSide: BorderSide.none,
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.circular(kRadiusLarge),
               ),
               errorText: _fieldError(_apiKeyCtrl),
             ),
@@ -626,7 +627,7 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
               fillColor: context.appColors.bgElevated,
               border: OutlineInputBorder(
                 borderSide: BorderSide.none,
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.circular(kRadiusLarge),
               ),
             ),
             items: const [
@@ -704,7 +705,7 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
               foregroundColor: Colors.white,
               disabledBackgroundColor: context.appColors.accentDim,
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(kRadiusMedium),
               ),
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
             ),
@@ -732,7 +733,7 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
                   foregroundColor: context.appColors.textSecondary,
                   side: BorderSide(color: context.appColors.divider),
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(kRadiusMedium),
                   ),
                   padding: EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                 ),

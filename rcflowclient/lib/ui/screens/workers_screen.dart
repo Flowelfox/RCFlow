@@ -8,6 +8,7 @@ import '../../theme.dart';
 import '../dialogs/worker_edit_dialog.dart';
 import '../widgets/custom_title_bar.dart';
 import 'server_config_screen.dart';
+import '../../theme/spacing.dart';
 
 void showWorkersScreen(BuildContext context) {
   Navigator.of(context).push(MaterialPageRoute(builder: (_) => _WorkersPage()));
@@ -67,7 +68,7 @@ class _WorkersPage extends StatelessWidget {
                         vertical: 8,
                       ),
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
+                        borderRadius: BorderRadius.circular(kRadiusMedium),
                       ),
                     ),
                   ),
@@ -205,7 +206,7 @@ class _WorkersContentState extends State<_WorkersContent> {
                 padding: EdgeInsets.all(24),
                 decoration: BoxDecoration(
                   color: context.appColors.bgElevated,
-                  borderRadius: BorderRadius.circular(14),
+                  borderRadius: BorderRadius.circular(kRadiusLarge),
                 ),
                 child: Column(
                   children: [
@@ -355,18 +356,18 @@ class _WorkersContentState extends State<_WorkersContent> {
               ),
               border: OutlineInputBorder(
                 borderSide: BorderSide.none,
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(kRadiusMedium),
               ),
               enabledBorder: OutlineInputBorder(
                 borderSide: BorderSide.none,
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(kRadiusMedium),
               ),
               focusedBorder: OutlineInputBorder(
                 borderSide: BorderSide(
                   color: context.appColors.accent,
                   width: 1,
                 ),
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(kRadiusMedium),
               ),
             ),
           ),
@@ -588,7 +589,7 @@ class _WorkerCard extends StatelessWidget {
       padding: EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: context.appColors.bgElevated,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(kRadiusLarge),
         border: status == WorkerConnectionStatus.connected
             ? Border.all(
                 color: context.appColors.successText.withAlpha(60),

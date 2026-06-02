@@ -136,7 +136,7 @@ class _NotificationsSectionState extends State<_NotificationsSection> {
           Container(
             decoration: BoxDecoration(
               color: context.appColors.bgElevated,
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: BorderRadius.circular(kRadiusLarge),
             ),
             clipBehavior: Clip.antiAlias,
             child: Column(

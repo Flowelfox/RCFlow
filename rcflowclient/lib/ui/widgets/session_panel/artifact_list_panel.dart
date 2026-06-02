@@ -6,6 +6,7 @@ import '../../../models/artifact_info.dart';
 import '../../../state/app_state.dart';
 import '../../../theme.dart';
 import 'helpers.dart';
+import '../../../theme/spacing.dart';
 
 /// Artifact list panel for the sidebar Artifacts tab.
 ///
@@ -541,7 +542,7 @@ class _ArtifactListPanelState extends State<ArtifactListPanel> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: context.appColors.bgSurface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(kRadiusLarge)),
         title: Text(
           'Delete Artifact',
           style: TextStyle(color: context.appColors.textPrimary, fontSize: 16),
@@ -670,7 +671,7 @@ class _ArtifactListPanelState extends State<ArtifactListPanel> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: context.appColors.bgSurface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(kRadiusLarge)),
         title: Text(
           'Delete $count artifact${count == 1 ? '' : 's'}',
           style: TextStyle(color: context.appColors.textPrimary, fontSize: 16),

@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../../../models/ws_messages.dart';
 import '../../../state/pane_state.dart';
 import '../../../theme.dart';
+import '../../../theme/spacing.dart';
 
 /// Card for a live Claude Code ``Monitor`` watch.
 ///
@@ -146,7 +147,7 @@ class _MonitorBlockState extends State<MonitorBlock> {
       child: Container(
         decoration: BoxDecoration(
           color: colors.toolBg,
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(kRadiusMedium),
           border: Border.all(
             color: approachingTimeout
                 ? colors.errorText.withValues(alpha: 0.5)

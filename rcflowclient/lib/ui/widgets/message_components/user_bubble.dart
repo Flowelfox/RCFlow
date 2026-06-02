@@ -6,6 +6,7 @@ import '../../../theme.dart';
 import '../../utils/link_utils.dart';
 import '../../utils/markdown_copy_menu.dart';
 import '../../utils/selectable_code_block_builder.dart';
+import '../../../theme/spacing.dart';
 
 class UserBubble extends StatelessWidget {
   final DisplayMessage message;
@@ -152,7 +153,7 @@ class _AttachmentChip extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: Colors.black.withValues(alpha: 0.2),
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(kRadiusSmall),
         border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
       ),
       child: Row(

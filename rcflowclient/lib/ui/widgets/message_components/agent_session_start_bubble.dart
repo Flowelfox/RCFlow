@@ -7,6 +7,7 @@ import '../../../state/pane_state.dart';
 import '../../../theme.dart';
 import '../../utils/link_utils.dart';
 import '../../utils/markdown_copy_menu.dart';
+import '../../../theme/spacing.dart';
 
 class AgentSessionStartBubble extends StatefulWidget {
   final DisplayMessage message;
@@ -59,7 +60,7 @@ class _AgentSessionStartBubbleState extends State<AgentSessionStartBubble> {
       child: Container(
         decoration: BoxDecoration(
           color: context.appColors.accent.withAlpha(20),
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(kRadiusMedium),
           border: Border(
             left: BorderSide(color: context.appColors.accent, width: 3),
           ),

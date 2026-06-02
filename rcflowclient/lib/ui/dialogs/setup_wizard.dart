@@ -5,6 +5,7 @@ import '../../state/app_state.dart';
 import '../../state/setup_wizard_view_model.dart';
 import '../../theme.dart';
 import '../screens/server_config_screen.dart';
+import '../../theme/spacing.dart';
 
 /// Shows the first-run setup wizard as a non-dismissible full-screen dialog.
 ///
@@ -490,7 +491,7 @@ class _SetupWizardState extends State<_SetupWizard> {
                   foregroundColor: context.appColors.textSecondary,
                   side: BorderSide(color: context.appColors.divider),
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(kRadiusMedium),
                   ),
                   padding: const EdgeInsets.symmetric(
                     horizontal: 14,
@@ -825,7 +826,7 @@ class _SetupWizardState extends State<_SetupWizard> {
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
               color: context.appColors.bgElevated,
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: BorderRadius.circular(kRadiusLarge),
             ),
             child: Column(
               children: [
@@ -909,7 +910,7 @@ class _SetupWizardState extends State<_SetupWizard> {
       fillColor: context.appColors.bgElevated,
       border: OutlineInputBorder(
         borderSide: BorderSide.none,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(kRadiusLarge),
       ),
       errorText: error,
     );

@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../../models/ws_messages.dart';
 import '../../../state/pane_state.dart';
 import '../../../theme.dart';
+import '../../../theme/spacing.dart';
 
 /// Interactive question block for AskUserQuestion tool calls.
 class QuestionBlock extends StatefulWidget {
@@ -152,7 +153,7 @@ class _QuestionBlockState extends State<QuestionBlock> {
                   backgroundColor: context.appColors.accent,
                   disabledBackgroundColor: context.appColors.bgElevated,
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(kRadiusMedium),
                   ),
                   padding: const EdgeInsets.symmetric(vertical: 12),
                 ),
@@ -182,7 +183,7 @@ class _QuestionBlockState extends State<QuestionBlock> {
             padding: EdgeInsets.symmetric(horizontal: 8, vertical: 3),
             decoration: BoxDecoration(
               color: context.appColors.accent.withAlpha(40),
-              borderRadius: BorderRadius.circular(6),
+              borderRadius: BorderRadius.circular(kRadiusSmall),
             ),
             child: Text(
               header,
@@ -416,7 +417,7 @@ class _QuestionBlockState extends State<QuestionBlock> {
       child: Container(
         decoration: BoxDecoration(
           color: context.appColors.toolBg,
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(kRadiusMedium),
           border: Border.all(color: context.appColors.divider),
         ),
         padding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),

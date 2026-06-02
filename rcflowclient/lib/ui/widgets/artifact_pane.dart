@@ -9,6 +9,7 @@ import '../../state/pane_state.dart';
 import '../../theme.dart';
 import '../utils/markdown_copy_menu.dart';
 import '../utils/selectable_code_block_builder.dart';
+import '../../theme/spacing.dart';
 
 /// Full-pane artifact viewer.
 ///
@@ -223,7 +224,7 @@ class _ArtifactPaneHeader extends StatelessWidget {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: context.appColors.bgSurface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(kRadiusLarge)),
         title: Text(
           'Delete Artifact',
           style: TextStyle(color: context.appColors.textPrimary, fontSize: 16),

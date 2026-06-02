@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../../../models/ws_messages.dart';
 import '../../../state/pane_state.dart';
 import '../../../theme.dart';
+import '../../../theme/spacing.dart';
 
 /// Card shown when Claude Code or Codex requests permission to use a tool.
 ///
@@ -117,7 +118,7 @@ class _PermissionRequestCardState extends State<PermissionRequestCard> {
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
               decoration: BoxDecoration(
                 color: _riskBgColor(context, riskLevel).withAlpha(120),
-                borderRadius: BorderRadius.circular(6),
+                borderRadius: BorderRadius.circular(kRadiusSmall),
               ),
               child: Text(
                 riskLevel.toUpperCase(),
@@ -217,7 +218,7 @@ class _PermissionRequestCardState extends State<PermissionRequestCard> {
                   foregroundColor: context.appColors.errorText,
                   side: BorderSide(color: context.appColors.errorText),
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(kRadiusMedium),
                   ),
                   padding: const EdgeInsets.symmetric(vertical: 12),
                 ),
@@ -234,7 +235,7 @@ class _PermissionRequestCardState extends State<PermissionRequestCard> {
                 style: FilledButton.styleFrom(
                   backgroundColor: context.appColors.accent,
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(kRadiusMedium),
                   ),
                   padding: const EdgeInsets.symmetric(vertical: 12),
                 ),
