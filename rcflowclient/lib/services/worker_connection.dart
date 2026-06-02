@@ -393,6 +393,17 @@ class WorkerConnection extends ChangeNotifier {
       if (parsed.badges.isEmpty && existing != null && existing.badges.isNotEmpty) {
         parsed = parsed.copyWith(badges: existing.badges);
       }
+      // Preserve pending ScheduleWakeup timers when the list response omits
+      // them (REST list endpoints never carry scheduled_wakes). The
+      // authoritative list arrives via session_update, which always sets it
+      // explicitly — including the empty list when a wake fires or is
+      // cancelled — so this fallback only ever carries over still-pending
+      // wakes and never resurrects cleared ones.
+      if (parsed.scheduledWakes.isEmpty &&
+          existing != null &&
+          existing.scheduledWakes.isNotEmpty) {
+        parsed = parsed.copyWith(scheduledWakes: existing.scheduledWakes);
+      }
       // Server worker badge carries backend_id as label. Replace with the
       // user-configured worker name — same replacement that session_update
       // applies. Archived sessions never receive a session_update, so this

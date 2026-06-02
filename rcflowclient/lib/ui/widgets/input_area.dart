@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
+import '../../models/scheduled_wake.dart';
 import '../../models/subprocess_info.dart';
 import '../../models/worker_config.dart';
 import '../../models/ws_messages.dart';
@@ -2329,11 +2330,13 @@ class _SubprocessStatusBarState extends State<_SubprocessStatusBar> {
   }
 }
 
-/// Compact strip listing live ``Monitor`` watches for the current pane.
+/// Compact strip listing live ``Monitor`` watches and pending
+/// ``ScheduleWakeup`` timers for the current pane.
 ///
-/// Renders nothing when no monitors are active.  Each entry shows the
-/// description and a live elapsed-time counter that ticks every second
-/// independently of the rest of the UI.
+/// Renders nothing when neither is active.  Monitor entries show a live
+/// elapsed-time counter (counting up); wake entries show an alarm icon and a
+/// countdown to their fire time.  Both tick every second independently of the
+/// rest of the UI.
 class _MonitorStatusStrip extends StatefulWidget {
   const _MonitorStatusStrip();
 
@@ -2368,14 +2371,75 @@ class _MonitorStatusStripState extends State<_MonitorStatusStrip> {
     return '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
   }
 
+  /// Format a remaining duration as a countdown.  Wakes that are due (or
+  /// overdue) collapse to ``now`` rather than showing a negative timer.
+  String _fmtRemaining(Duration d) {
+    if (d.isNegative || d.inSeconds <= 0) return 'now';
+    return _fmt(d);
+  }
+
+  /// One activity entry: a monospace timer plus a muted description, with an
+  /// optional leading [icon] used to distinguish wake entries from monitors.
+  Widget _entry(
+    AppColors colors, {
+    IconData? icon,
+    required String time,
+    required String desc,
+  }) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (icon != null) ...[
+          Icon(icon, size: 11, color: colors.accentLight),
+          const SizedBox(width: 3),
+        ],
+        Text(
+          time,
+          style: TextStyle(
+            color: colors.accentLight,
+            fontSize: 11,
+            fontFamily: 'monospace',
+          ),
+        ),
+        const SizedBox(width: 4),
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 220),
+          child: Text(
+            desc,
+            style: TextStyle(color: colors.textMuted, fontSize: 11),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final monitors = context.select<PaneState, List<DisplayMessage>>(
       (s) => s.liveMonitors,
     );
-    if (monitors.isEmpty) return const SizedBox.shrink();
+    final wakes = context.select<PaneState, List<ScheduledWake>>(
+      (s) => s.currentScheduledWakes,
+    );
+    if (monitors.isEmpty && wakes.isEmpty) return const SizedBox.shrink();
     final colors = context.appColors;
     final now = DateTime.now();
+
+    // Leading indicator reflects whichever activity is live; monitors take
+    // precedence for the icon/count when both are present (wake entries carry
+    // their own alarm icon inline so they stay distinguishable either way).
+    final IconData leadIcon;
+    final String leadLabel;
+    if (monitors.isNotEmpty) {
+      leadIcon = Icons.podcasts_rounded;
+      leadLabel =
+          monitors.length == 1 ? '1 monitor' : '${monitors.length} monitors';
+    } else {
+      leadIcon = Icons.alarm_rounded;
+      leadLabel = wakes.length == 1 ? '1 wake' : '${wakes.length} wakes';
+    }
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
       child: Container(
@@ -2387,12 +2451,10 @@ class _MonitorStatusStripState extends State<_MonitorStatusStrip> {
         ),
         child: Row(
           children: [
-            Icon(Icons.podcasts_rounded, size: 12, color: colors.accentLight),
+            Icon(leadIcon, size: 12, color: colors.accentLight),
             const SizedBox(width: 6),
             Text(
-              monitors.length == 1
-                  ? '1 monitor'
-                  : '${monitors.length} monitors',
+              leadLabel,
               style: TextStyle(
                 color: colors.textPrimary,
                 fontSize: 11,
@@ -2406,39 +2468,21 @@ class _MonitorStatusStripState extends State<_MonitorStatusStrip> {
                 runSpacing: 2,
                 children: [
                   for (final m in monitors)
-                    Builder(
-                      builder: (_) {
-                        final started = m.monitorStartedAt;
-                        final elapsed = started != null
-                            ? now.difference(started)
-                            : Duration.zero;
-                        final desc = m.displayName ?? 'Monitor';
-                        return Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              _fmt(elapsed),
-                              style: TextStyle(
-                                color: colors.accentLight,
-                                fontSize: 11,
-                                fontFamily: 'monospace',
-                              ),
-                            ),
-                            const SizedBox(width: 4),
-                            ConstrainedBox(
-                              constraints: const BoxConstraints(maxWidth: 220),
-                              child: Text(
-                                desc,
-                                style: TextStyle(
-                                  color: colors.textMuted,
-                                  fontSize: 11,
-                                ),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          ],
-                        );
-                      },
+                    _entry(
+                      colors,
+                      time: _fmt(
+                        m.monitorStartedAt != null
+                            ? now.difference(m.monitorStartedAt!)
+                            : Duration.zero,
+                      ),
+                      desc: m.displayName ?? 'Monitor',
+                    ),
+                  for (final w in wakes)
+                    _entry(
+                      colors,
+                      icon: Icons.alarm_rounded,
+                      time: _fmtRemaining(w.fireAt.difference(now)),
+                      desc: w.reason.isNotEmpty ? w.reason : 'Wake',
                     ),
                 ],
               ),

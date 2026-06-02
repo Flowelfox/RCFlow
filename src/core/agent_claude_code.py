@@ -868,8 +868,9 @@ class ClaudeCodeAgentMixin:
 
         Validates the input, writes a row via the wakeup store, asks
         the scheduler to arm a timer, and pushes a TOOL_START so the
-        chat history reflects the call.  The actual badge / inline
-        card update is fired by the store as part of WAKEUP_SCHEDULED.
+        chat history reflects the call.  The actual inline card /
+        activity strip update is fired by the store as part of
+        WAKEUP_SCHEDULED.
         """
         store = self._wakeup_store  # ty:ignore[unresolved-attribute]
         scheduler = self._wakeup_scheduler  # ty:ignore[unresolved-attribute]

@@ -10,6 +10,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../models/app_notification.dart';
+import '../models/scheduled_wake.dart';
 import '../models/session_info.dart';
 import '../models/split_tree.dart';
 import '../models/subprocess_info.dart';
@@ -536,6 +537,19 @@ class PaneState extends ChangeNotifier {
         .cast<SessionInfo?>()
         .firstWhere((s) => s?.sessionId == _sessionId, orElse: () => null)
         ?.worktreeInfo;
+  }
+
+  /// Pending ``ScheduleWakeup`` calls for the session currently shown in this
+  /// pane, fire-time order.  Empty when none are queued or the pane has no
+  /// real session yet.  Drives the live countdown entries in the activity
+  /// strip above the input field.
+  List<ScheduledWake> get currentScheduledWakes {
+    if (_sessionId == null) return const [];
+    return _host.sessions
+            .cast<SessionInfo?>()
+            .firstWhere((s) => s?.sessionId == _sessionId, orElse: () => null)
+            ?.scheduledWakes ??
+        const [];
   }
 
   /// The selected worktree path for the session currently shown in this pane,

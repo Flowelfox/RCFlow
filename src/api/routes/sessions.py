@@ -796,7 +796,7 @@ async def get_draft(
     description=(
         "Cancel one pending ``ScheduleWakeup`` call.  The associated timer "
         "is dropped, the DB row is marked cancelled, and the client sees a "
-        "``WAKEUP_CANCELLED`` event so the badge / inline card update."
+        "``WAKEUP_CANCELLED`` event so the inline card / activity strip update."
     ),
     dependencies=[Depends(verify_http_api_key)],
 )
