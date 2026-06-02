@@ -22,6 +22,8 @@ import '../models/ws_messages.dart';
 import '../services/websocket_service.dart';
 import 'output_handlers.dart';
 
+part 'pane_message_store.dart';
+
 /// Snapshot of a pane's view state, used for back-navigation history.
 class PaneNavEntry {
   final PaneType paneType;
@@ -123,6 +125,10 @@ abstract class PaneHost {
 class PaneState extends ChangeNotifier {
   final String paneId;
   final PaneHost _host;
+
+  /// Owns the chat content (messages, streaming, todos, queue, pagination).
+  /// PaneState forwards the message/stream surface to this store.
+  late final PaneMessageStore _msg = PaneMessageStore(this);
 
   bool _disposed = false;
 
@@ -468,33 +474,14 @@ class PaneState extends ChangeNotifier {
     setPendingInputText(content);
   }
 
-  // Message display
-  final List<DisplayMessage> _messages = [];
-  List<DisplayMessage> get messages => _messages;
-
-  // Pagination state (archived session message loading)
-  int? _nextCursor;
-  int _totalMessageCount = 0;
-  bool _loadingMore = false;
-  bool get loadingMore => _loadingMore;
-  bool get hasMoreMessages => _nextCursor != null;
-  int get totalMessageCount => _totalMessageCount;
-
-  // Counter for locally-added user messages not yet echoed by server.
-  // Prevents duplicate display when the server replays user messages.
-  int _pendingLocalUserMessages = 0;
-
-  // Queued user messages — pinned at the bottom of the chat while the agent
-  // is busy processing a prior turn.  Sourced from ``message_queued`` /
-  // ``message_dequeued`` / ``message_queued_updated`` events and the
-  // ``queued_messages`` snapshot on ``session_update``.  See
-  // ``Queued User Messages`` in ``docs/design/sessions.md``.
-  final PaneQueueState _queue = PaneQueueState();
-  List<QueuedMessage> get queuedMessages => _queue.snapshot;
-
-  // Todo list state (from TodoWrite tool calls)
-  List<TodoItem> _todos = [];
-  List<TodoItem> get todos => _todos;
+  // Message display, streaming, todos, queue and pagination all live in the
+  // owned [PaneMessageStore]; these getters forward to it.
+  List<DisplayMessage> get messages => _msg.messages;
+  bool get loadingMore => _msg.loadingMore;
+  bool get hasMoreMessages => _msg.hasMoreMessages;
+  int get totalMessageCount => _msg.totalMessageCount;
+  List<QueuedMessage> get queuedMessages => _msg.queuedMessages;
+  List<TodoItem> get todos => _msg.todos;
 
   // Right panel state — which panel is open (null = closed).
   // Recognised keys: "todo", "project", "statistics".
@@ -592,16 +579,6 @@ class PaneState extends ChangeNotifier {
   }
 
   // Agent group tracking (Claude Code / Codex / OpenCode collapsible blocks)
-  // True between agent_group_start and agent_group_end.
-  bool _inAgentMode = false;
-  // The tool name for the current agent group (e.g. 'claude_code', 'codex', 'opencode').
-  String _agentToolName = 'claude_code';
-  // Human-readable display name for the current agent group.
-  String? _agentDisplayName;
-  // Index in _messages of the current tool sub-group being built.
-  // Null when no tool group is open (e.g. between text and next tool batch).
-  int? _agentToolGroupIndex;
-
   /// Monotonically increasing revision counter, bumped on every notify.
   /// Used by OutputDisplay to detect changes that aren't visible from
   /// top-level message count or last-message content alone (e.g. tool
@@ -615,18 +592,12 @@ class PaneState extends ChangeNotifier {
     super.notifyListeners();
   }
 
-  // Dynamic streaming
-  Timer? _streamingTimer;
-  String? _activeToolName;
-  static const _tickMs = 16;
-  static const _pageSize = 50;
-
   // Terminal statuses for sessions
   static const _terminalStatuses = {'completed', 'failed', 'cancelled'};
 
   /// Whether the current session is driven by an agent that supports plugin slash commands.
   bool get isClaudeCodeSession =>
-      _agentToolName == 'claude_code' || _agentToolName == 'opencode';
+      _msg.agentToolName == 'claude_code' || _msg.agentToolName == 'opencode';
 
   /// Whether the input area should allow sending messages.
   /// Sending while paused is allowed — the server auto-resumes the session.
@@ -756,9 +727,8 @@ class PaneState extends ChangeNotifier {
       _readyForNewChat = true;
     }
 
-    finalizeStream();
-    _closeAgentToolGroup();
-    _inAgentMode = false;
+    _msg.finalizeStream();
+    _msg.exitAgentMode();
     // Prepend #ToolName to the prompt so the backend sees a normal tool mention.
     final toolMention = _selectedToolMention;
     final effectiveText = toolMention != null ? '#$toolMention $text' : text;
@@ -772,8 +742,7 @@ class PaneState extends ChangeNotifier {
               .replaceAllMapped(RegExp(r'(^|\s)#\S+'), (m) => m.group(1) ?? '')
               .trim();
 
-    _pendingLocalUserMessages++;
-    _messages.add(
+    _msg.addLocalUserMessage(
       DisplayMessage(
         type: DisplayMessageType.user,
         content: displayContent,
@@ -843,15 +812,8 @@ class PaneState extends ChangeNotifier {
     final oldSessionId = _sessionId;
     final oldWorkerId = _workerId;
 
-    finalizeStream();
-    _inAgentMode = false;
-    _agentToolGroupIndex = null;
-    _messages.clear();
-    _todos = [];
+    _msg.resetForSwitch();
     _activeRightPanel = null;
-    _resetPagination();
-    _pendingLocalUserMessages = 0;
-    _queue.clear();
     _sessionEnded = false;
     _sessionPaused = false;
     _pausedReason = null;
@@ -877,7 +839,7 @@ class PaneState extends ChangeNotifier {
 
     if (isTerminal) {
       _sessionEnded = true;
-      _loadSessionMessages(sessionId);
+      _msg.loadSessionMessages(sessionId);
     } else {
       if (session != null && session.status == 'paused') {
         _sessionPaused = true;
@@ -932,14 +894,7 @@ class PaneState extends ChangeNotifier {
   void resubscribeSession() {
     if (_sessionId == null) return;
 
-    finalizeStream();
-    _inAgentMode = false;
-    _agentToolGroupIndex = null;
-    _messages.clear();
-    _todos = [];
-    _resetPagination();
-    _pendingLocalUserMessages = 0;
-    _queue.clear();
+    _msg.resetForSwitch();
     _runningSubprocess = null;
     _activeMonitors.clear();
 
@@ -966,9 +921,7 @@ class PaneState extends ChangeNotifier {
     final oldSessionId = _sessionId;
     final oldWorkerId = _workerId;
 
-    finalizeStream();
-    _inAgentMode = false;
-    _agentToolGroupIndex = null;
+    _msg.resetForSwitch();
     _sessionId = null;
     _readyForNewChat = false;
     _sessionEnded = false;
@@ -976,17 +929,12 @@ class PaneState extends ChangeNotifier {
     _pausedReason = null;
     _runningSubprocess = null;
     _activeMonitors.clear();
-    _pendingLocalUserMessages = 0;
-    _queue.clear();
-    _messages.clear();
-    _todos = [];
     _activeRightPanel = null;
     _selectedProjectName = null;
     _selectedProjectPath = null;
     _projectNameError = null;
     _selectedToolMention = null;
     _view.pendingWorktreePath = null;
-    _resetPagination();
 
     if (oldSessionId != null && oldWorkerId != null) {
       _host.requestUnsubscribe(oldSessionId, oldWorkerId);
@@ -1008,9 +956,7 @@ class PaneState extends ChangeNotifier {
     final oldSessionId = _sessionId;
     final oldWorkerId = _workerId;
 
-    finalizeStream();
-    _inAgentMode = false;
-    _agentToolGroupIndex = null;
+    _msg.resetForSwitch();
     _sessionId = null;
     _readyForNewChat = true;
     _sessionEnded = false;
@@ -1018,13 +964,12 @@ class PaneState extends ChangeNotifier {
     _pausedReason = null;
     _runningSubprocess = null;
     _activeMonitors.clear();
-    _pendingLocalUserMessages = 0;
-    _queue.clear();
     _pendingInputText = null;
     _selectedToolMention = null;
     _selectedProjectName = null;
     _selectedProjectPath = null;
     _projectNameError = null;
+    _activeRightPanel = null;
     _view.pendingWorktreePath = null;
     _view.pendingTaskId = null;
     // Apply per-worker cached defaults (project + agent) for the new chat.
@@ -1034,10 +979,6 @@ class PaneState extends ChangeNotifier {
       _selectedToolMention = _host.defaultAgentForWorker(targetWorker);
       _applyWorkerDefaults(targetWorker);
     }
-    _messages.clear();
-    _todos = [];
-    _activeRightPanel = null;
-    _resetPagination();
 
     if (oldSessionId != null && oldWorkerId != null) {
       _host.requestUnsubscribe(oldSessionId, oldWorkerId);
@@ -1056,15 +997,7 @@ class PaneState extends ChangeNotifier {
 
   /// Clear the displayed message list for this pane (client-side only).
   /// Does not affect the server-side session or database history.
-  void clearMessages() {
-    finalizeStream();
-    _messages.clear();
-    _todos = [];
-    if (_activeRightPanel == 'todo') _activeRightPanel = null;
-    _pendingLocalUserMessages = 0;
-    _queue.clear();
-    notifyListeners();
-  }
+  void clearMessages() => _msg.clearMessages();
 
   // --- Ack handling ---
 
@@ -1081,10 +1014,10 @@ class PaneState extends ChangeNotifier {
     if (queued && queuedId != null) {
       // Take the newest pending-local-echo user message as the submission
       // being acknowledged; its content is what we show in the pinned queue.
-      for (int i = _messages.length - 1; i >= 0; i--) {
-        final m = _messages[i];
+      for (int i = messages.length - 1; i >= 0; i--) {
+        final m = messages[i];
         if (m.type == DisplayMessageType.user && m.pendingLocalEcho) {
-          promoteLocalEchoToQueued(queuedId: queuedId, content: m.content);
+          _msg.promoteLocalEchoToQueued(queuedId: queuedId, content: m.content);
           break;
         }
       }
@@ -1094,10 +1027,10 @@ class PaneState extends ChangeNotifier {
       notifyListeners();
       return;
     }
-    finalizeStream();
+    _msg.finalizeStream();
     pendingAck = false;
     if (sessionId != _sessionId) {
-      _addSystemMessage('[ACK] Session: $sessionId');
+      _msg.addSystemMessage('[ACK] Session: $sessionId');
     }
     // Record whether this ack created a brand-new session (vs. re-acking an
     // existing one) so we can clear the new-session draft below.
@@ -1139,11 +1072,11 @@ class PaneState extends ChangeNotifier {
       final oldWorkerId = _workerId;
       await _ws?.cancelSession(sessionId);
       if (_sessionId == sessionId) {
-        finalizeStream();
+        _msg.finalizeStream();
         _sessionId = null;
         _readyForNewChat = true;
         _sessionEnded = false;
-        _messages.clear();
+        _msg.messages.clear();
 
         if (oldWorkerId != null) {
           _host.requestUnsubscribe(sessionId, oldWorkerId);
@@ -1155,21 +1088,21 @@ class PaneState extends ChangeNotifier {
       );
       _host.refreshSessions();
     } catch (e) {
-      _addSystemMessage('Failed to cancel session: $e', isError: true);
+      _msg.addSystemMessage('Failed to cancel session: $e', isError: true);
     }
   }
 
   Future<void> endSession(String sessionId) async {
     try {
       await _ws?.endSession(sessionId);
-      finalizeStream();
+      _msg.finalizeStream();
       if (_sessionId == sessionId) {
         _sessionEnded = true;
       }
       _host.refreshSessions();
       notifyListeners();
     } catch (e) {
-      _addSystemMessage('Failed to end session: $e', isError: true);
+      _msg.addSystemMessage('Failed to end session: $e', isError: true);
     }
   }
 
@@ -1178,7 +1111,7 @@ class PaneState extends ChangeNotifier {
       await _ws?.pauseSession(sessionId);
       _host.refreshSessions();
     } catch (e) {
-      _addSystemMessage('Failed to pause session: $e', isError: true);
+      _msg.addSystemMessage('Failed to pause session: $e', isError: true);
     }
   }
 
@@ -1187,7 +1120,7 @@ class PaneState extends ChangeNotifier {
       await _ws?.resumeSession(sessionId);
       _host.refreshSessions();
     } catch (e) {
-      _addSystemMessage('Failed to resume session: $e', isError: true);
+      _msg.addSystemMessage('Failed to resume session: $e', isError: true);
     }
   }
 
@@ -1197,13 +1130,13 @@ class PaneState extends ChangeNotifier {
     try {
       _ws?.interruptSubprocess(sid);
     } catch (e) {
-      _addSystemMessage('Failed to interrupt subprocess: $e', isError: true);
+      _msg.addSystemMessage('Failed to interrupt subprocess: $e', isError: true);
     }
   }
 
   void handleSessionPaused(String? sessionId, {String? reason}) {
     if (_sessionId == sessionId) {
-      finalizeStream();
+      _msg.finalizeStream();
       _sessionPaused = true;
       _pausedReason = reason;
     }
@@ -1233,7 +1166,7 @@ class PaneState extends ChangeNotifier {
       _host.refreshSessions();
       notifyListeners();
     } catch (e) {
-      _addSystemMessage('Failed to restore session: $e', isError: true);
+      _msg.addSystemMessage('Failed to restore session: $e', isError: true);
     }
   }
 
@@ -1251,7 +1184,7 @@ class PaneState extends ChangeNotifier {
       await _ws?.renameSession(sessionId, title);
       _host.refreshSessions();
     } catch (e) {
-      _addSystemMessage('Failed to rename session: $e', isError: true);
+      _msg.addSystemMessage('Failed to rename session: $e', isError: true);
     }
   }
 
@@ -1299,87 +1232,17 @@ class PaneState extends ChangeNotifier {
 
   void handleSessionNotFound(String sessionId) {
     if (_sessionId != sessionId) return;
-    _loadSessionMessages(sessionId);
+    _msg.loadSessionMessages(sessionId);
     _host.refreshSessions();
   }
 
   void handleSessionEnded(String? sessionId) {
     if (_sessionId == sessionId) {
-      finalizeStream();
+      _msg.finalizeStream();
       _sessionEnded = true;
-      _finishPendingQuestions();
+      _msg.finishPendingQuestions();
     }
     _host.refreshSessions();
-    notifyListeners();
-  }
-
-  /// Mark any unanswered question blocks as finished (e.g. on session end).
-  void _finishPendingQuestions() {
-    for (final m in _messages) {
-      if (m.isQuestion && !m.finished) m.finished = true;
-      if (m.type == DisplayMessageType.agentGroup) {
-        for (final child in m.children ?? <DisplayMessage>[]) {
-          if (child.isQuestion && !child.finished) child.finished = true;
-        }
-      }
-    }
-  }
-
-  // --- Agent group helpers ---
-
-  /// The list that streaming content should be appended to: either the active
-  /// tool sub-group's children, or the top-level message list.
-  List<DisplayMessage> get _streamTargetList {
-    if (_agentToolGroupIndex != null &&
-        _agentToolGroupIndex! < _messages.length &&
-        _messages[_agentToolGroupIndex!].type ==
-            DisplayMessageType.agentGroup) {
-      return _messages[_agentToolGroupIndex!].children!;
-    }
-    return _messages;
-  }
-
-  /// The message that text is currently being written into.
-  /// Returns null when the list is empty or the last message is already finished.
-  DisplayMessage? get _streamTarget {
-    final list = _streamTargetList;
-    if (list.isEmpty) return null;
-    final last = list.last;
-    return last.finished ? null : last;
-  }
-
-  /// The last message in the current stream target list (public, for handlers).
-  DisplayMessage? get lastStreamMessage => _streamTarget;
-
-  /// Enter agent mode — subsequent tool calls will be auto-grouped.
-  void startAgentGroup(
-    String name,
-    Map<String, dynamic>? input, {
-    String? displayName,
-  }) {
-    finalizeStream();
-    _inAgentMode = true;
-    _agentToolName = name;
-    _agentDisplayName = displayName;
-    _messages.add(
-      DisplayMessage(
-        type: DisplayMessageType.agentGroup,
-        sessionId: _sessionId,
-        toolName: name,
-        displayName: displayName,
-        children: [],
-        expanded: true,
-      ),
-    );
-    _agentToolGroupIndex = _messages.length - 1;
-    notifyListeners();
-  }
-
-  /// Exit agent mode — close any open tool sub-group.
-  void endAgentGroup() {
-    finalizeStream();
-    _closeAgentToolGroup();
-    _inAgentMode = false;
     notifyListeners();
   }
 
@@ -1398,20 +1261,11 @@ class PaneState extends ChangeNotifier {
 
   // -- Todo list management --
 
-  void updateTodos(List<TodoItem> todos) {
-    _todos = todos;
-    if (todos.isNotEmpty && _activeRightPanel == null) {
-      _activeRightPanel = 'todo';
-    }
-    notifyListeners();
-  }
+  /// Replace the todo list (forwards to the message store).
+  void updateTodos(List<TodoItem> todos) => _msg.updateTodos(todos);
 
-  void clearTodos() {
-    if (_todos.isEmpty) return;
-    _todos = [];
-    if (_activeRightPanel == 'todo') _activeRightPanel = null;
-    notifyListeners();
-  }
+  /// Clear the todo list (forwards to the message store).
+  void clearTodos() => _msg.clearTodos();
 
   void toggleTodoPanel() => toggleRightPanel('todo');
 
@@ -1477,556 +1331,103 @@ class PaneState extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Reconstruct todo state from a history message's metadata.
-  void _reconstructTodosFromHistory(Map<String, dynamic> msg) {
-    final metadata = msg['metadata'] as Map<String, dynamic>? ?? {};
-    final rawTodos = metadata['todos'] as List<dynamic>? ?? [];
-    if (rawTodos.isNotEmpty) {
-      _todos = rawTodos
-          .whereType<Map<String, dynamic>>()
-          .map((t) => TodoItem.fromJson(t))
-          .toList();
-    }
-  }
+  // ---------------------------------------------------------------------------
+  // Message / streaming surface — forwarded to the owned [PaneMessageStore].
+  // The streaming output handlers and chat widgets call these on the pane.
+  // ---------------------------------------------------------------------------
 
-  /// Ensure a tool sub-group exists (create one if needed).
-  void _ensureAgentToolGroup() {
-    if (_agentToolGroupIndex != null) return;
-    _messages.add(
-      DisplayMessage(
-        type: DisplayMessageType.agentGroup,
-        sessionId: _sessionId,
-        toolName: _agentToolName,
-        displayName: _agentDisplayName,
-        children: [],
-        expanded: true,
-      ),
-    );
-    _agentToolGroupIndex = _messages.length - 1;
-  }
+  /// The message currently being streamed into (assistant text or tool block).
+  DisplayMessage? get lastStreamMessage => _msg.lastStreamMessage;
 
-  /// Close the current tool sub-group (mark finished, collapse).
-  void _closeAgentToolGroup() {
-    if (_agentToolGroupIndex == null) return;
-    if (_agentToolGroupIndex! < _messages.length &&
-        _messages[_agentToolGroupIndex!].type ==
-            DisplayMessageType.agentGroup) {
-      final group = _messages[_agentToolGroupIndex!];
-      group.finished = true;
-      group.expanded = false;
-      for (final child in group.children ?? <DisplayMessage>[]) {
-        if (child.type == DisplayMessageType.toolBlock &&
-            !child.finished &&
-            !child.isQuestion) {
-          child.finished = true;
-        }
-      }
-    }
-    _agentToolGroupIndex = null;
-  }
+  /// Enter agent mode — subsequent tool calls are auto-grouped.
+  void startAgentGroup(
+    String name,
+    Map<String, dynamic>? input, {
+    String? displayName,
+  }) => _msg.startAgentGroup(name, input, displayName: displayName);
 
-  // --- Streaming helpers ---
+  /// Exit agent mode — close any open tool sub-group.
+  void endAgentGroup() => _msg.endAgentGroup();
 
-  void appendAssistantChunk(String text) {
-    // Assistant text breaks a tool group — close it and add text at top level.
-    if (_inAgentMode && _agentToolGroupIndex != null) {
-      finalizeStream();
-      _closeAgentToolGroup();
-    }
-    if (_messages.isEmpty ||
-        _messages.last.type != DisplayMessageType.assistant ||
-        _messages.last.finished) {
-      finalizeStream();
-      _messages.add(
-        DisplayMessage(
-          type: DisplayMessageType.assistant,
-          sessionId: _sessionId,
-        ),
-      );
-      _scheduleNotify();
-    }
-    _enqueueText(text);
-  }
+  /// Append streamed assistant text.
+  void appendAssistantChunk(String text) => _msg.appendAssistantChunk(text);
 
+  /// Open a new streaming tool block.
   void startToolBlock(
     String name,
     Map<String, dynamic>? input, {
     String? displayName,
-  }) {
-    finalizeStream();
-    _activeToolName = name;
-    if (_inAgentMode) {
-      _ensureAgentToolGroup();
-    }
-    _streamTargetList.add(
-      DisplayMessage(
-        type: DisplayMessageType.toolBlock,
-        sessionId: _sessionId,
-        toolName: name,
-        displayName: displayName,
-        toolInput: input,
-      ),
-    );
-    _scheduleNotify();
-  }
+  }) => _msg.startToolBlock(name, input, displayName: displayName);
 
-  void appendToolOutput(String text, {bool isError = false}) {
-    final target = _streamTargetList;
-    if (target.isEmpty || target.last.type != DisplayMessageType.toolBlock) {
-      target.add(
-        DisplayMessage(
-          type: DisplayMessageType.toolBlock,
-          sessionId: _sessionId,
-          toolName: 'output',
-        ),
-      );
-      _scheduleNotify();
-    }
-    if (isError && target.isNotEmpty) {
-      target.last.isError = true;
-      target.last.expanded = true;
-    }
-    _enqueueText(text);
-  }
+  /// Append output text to the current tool block.
+  void appendToolOutput(String text, {bool isError = false}) =>
+      _msg.appendToolOutput(text, isError: isError);
 
-  void applyDiffToLastToolBlock(String diff) {
-    final list = _streamTargetList;
-    for (int i = list.length - 1; i >= 0; i--) {
-      if (list[i].type == DisplayMessageType.toolBlock) {
-        list[i].fileDiff = diff;
-        // Auto-expand Edit/Write blocks so the diff is visible immediately.
-        final tn = list[i].toolName?.toLowerCase();
-        if (tn == 'edit' || tn == 'write') {
-          list[i].expanded = true;
-        }
-        _scheduleNotify();
-        return;
-      }
-    }
-  }
+  /// Attach a unified diff to the most recent tool block.
+  void applyDiffToLastToolBlock(String diff) =>
+      _msg.applyDiffToLastToolBlock(diff);
 
-  void _enqueueText(String text) {
-    final target = _streamTarget;
-    if (target == null) return;
-    target.content += text;
-    _scheduleNotify();
-  }
+  /// Finish the current streaming message.
+  void finalizeStream() => _msg.finalizeStream();
 
-  /// Coalesce streaming-path mutations into a single rebuild per [_tickMs]
-  /// window. Use for any state change driven by the inbound WS stream
-  /// (append text, open tool block, attach diff, add streamed message). Use
-  /// `notifyListeners()` directly only for terminal transitions where the
-  /// 16 ms latency would feel wrong (finalize, session switch, errors).
-  void _scheduleNotify() {
-    _streamingTimer ??= Timer(
-      const Duration(milliseconds: _tickMs),
-      _renderChars,
-    );
-  }
+  /// True when a local user echo matches [echoContent] (skip the server echo).
+  bool consumeLocalUserMessage(String echoContent) =>
+      _msg.consumeLocalUserMessage(echoContent);
 
-  void _renderChars() {
-    _streamingTimer = null;
-    notifyListeners();
-  }
-
-  void finalizeStream() {
-    _streamingTimer?.cancel();
-    _streamingTimer = null;
-
-    final target = _streamTarget;
-    if (target != null) {
-      if (_activeToolName != null &&
-          target.type == DisplayMessageType.toolBlock &&
-          !target.isQuestion) {
-        target.finished = true;
-      } else if (target.type == DisplayMessageType.assistant) {
-        target.finished = true;
-      }
-    }
-
-    _activeToolName = null;
-    notifyListeners();
-  }
-
-  /// Returns true if a locally-added user message matches [echoContent] —
-  /// meaning the server echo should be skipped.
-  ///
-  /// Uses content-based matching against pending local messages, with the
-  /// counter as a fallback. This is robust against timing issues where the
-  /// counter might be reset (e.g. by an intervening [switchSession]).
-  bool consumeLocalUserMessage(String echoContent) {
-    // Primary: content-based match against pending local messages.
-    for (int i = _messages.length - 1; i >= 0; i--) {
-      final m = _messages[i];
-      if (m.type == DisplayMessageType.user &&
-          m.pendingLocalEcho &&
-          m.content == echoContent) {
-        m.pendingLocalEcho = false;
-        if (_pendingLocalUserMessages > 0) _pendingLocalUserMessages--;
-        return true;
-      }
-    }
-    // Fallback: counter only (e.g. if content was mutated).
-    if (_pendingLocalUserMessages > 0) {
-      _pendingLocalUserMessages--;
-      return true;
-    }
-    return false;
-  }
-
-  // ---------------------------------------------------------------------------
-  // Queued-message reconciliation — called by output handlers and ack handlers.
-  // See ``Queued User Messages`` in ``docs/design/sessions.md`` for the full protocol.
-
-  /// Promote an optimistic pending-echo DisplayMessage into a real
-  /// [QueuedMessage] after the server ack confirms the message was queued.
+  /// Promote an optimistic local echo into a pinned queued message.
   void promoteLocalEchoToQueued({
     required String queuedId,
     required String content,
-  }) {
-    for (int i = _messages.length - 1; i >= 0; i--) {
-      final m = _messages[i];
-      if (m.type == DisplayMessageType.user &&
-          m.pendingLocalEcho &&
-          m.content == content) {
-        _messages.removeAt(i);
-        if (_pendingLocalUserMessages > 0) _pendingLocalUserMessages--;
-        break;
-      }
-    }
-    final now = DateTime.now();
-    _queue.upsert(
-      QueuedMessage(
-        queuedId: queuedId,
-        position: _queue.length,
-        content: content,
-        displayContent: content,
-        submittedAt: now,
-        updatedAt: now,
-        pendingLocalEcho: true,
-      ),
-    );
-    notifyListeners();
-  }
+  }) => _msg.promoteLocalEchoToQueued(queuedId: queuedId, content: content);
 
-  void applyMessageQueued(Map<String, dynamic> msg) {
-    final queuedId = msg['queued_id'] as String?;
-    if (queuedId == null) return;
-    _queue.upsert(
-      QueuedMessage(
-        queuedId: queuedId,
-        position: (msg['position'] as num?)?.toInt() ?? _queue.length,
-        content: msg['content'] as String? ?? '',
-        displayContent:
-            msg['display_content'] as String? ??
-            msg['content'] as String? ??
-            '',
-        submittedAt:
-            DateTime.tryParse(msg['submitted_at'] as String? ?? '') ??
-            DateTime.now(),
-        updatedAt:
-            DateTime.tryParse(msg['submitted_at'] as String? ?? '') ??
-            DateTime.now(),
-      ),
-    );
-    notifyListeners();
-  }
+  /// Apply a ``message_queued`` event.
+  void applyMessageQueued(Map<String, dynamic> msg) =>
+      _msg.applyMessageQueued(msg);
 
-  void applyMessageDequeued(String queuedId) {
-    if (!_queue.dequeue(queuedId)) return;
-    notifyListeners();
-  }
+  /// Apply a ``message_dequeued`` event.
+  void applyMessageDequeued(String queuedId) =>
+      _msg.applyMessageDequeued(queuedId);
 
-  void applyMessageQueuedUpdated(Map<String, dynamic> msg) {
-    final queuedId = msg['queued_id'] as String?;
-    if (queuedId == null) return;
-    final found = _queue.update(
-      queuedId,
-      content: msg['content'] as String?,
-      displayContent: msg['display_content'] as String?,
-      updatedAt: DateTime.tryParse(msg['updated_at'] as String? ?? ''),
-    );
-    if (found) notifyListeners();
-  }
+  /// Apply a ``message_queued_updated`` event.
+  void applyMessageQueuedUpdated(Map<String, dynamic> msg) =>
+      _msg.applyMessageQueuedUpdated(msg);
 
   /// Replace the local queue with the authoritative server snapshot.
-  void applyQueueSnapshot(List<Map<String, dynamic>> snapshot) {
-    _queue.replaceSnapshot([
-      for (final raw in snapshot) QueuedMessage.fromSnapshot(raw),
-    ]);
-    notifyListeners();
-  }
+  void applyQueueSnapshot(List<Map<String, dynamic>> snapshot) =>
+      _msg.applyQueueSnapshot(snapshot);
 
-  void applyCancelAck(Map<String, dynamic> msg) {
-    // Cancel success already removed the entry via message_dequeued; nothing to
-    // do here.  Cancel failure means the message was already delivered — the
-    // subsequent text_chunk will insert it into history, so also nothing to do.
-    // Kept for hook symmetry so ack messages are not logged as "unknown type".
-    final ok = msg['ok'] as bool? ?? false;
-    if (ok) return;
-    // Swallow — the dequeue stream handles the visible state transition.
-  }
+  /// Handle a ``cancel_ack`` (visible state driven by the dequeue stream).
+  void applyCancelAck(Map<String, dynamic> msg) => _msg.applyCancelAck(msg);
 
-  void applyEditAck(Map<String, dynamic> msg) {
-    final ok = msg['ok'] as bool? ?? false;
-    if (ok) {
-      // message_queued_updated already carried the new text to the UI.
-      return;
-    }
-    // Edit failed (message already delivered or empty).  The UI rolls back via
-    // the caller-side optimistic tracking layer in the edit widget.
-  }
+  /// Handle an ``edit_ack`` (visible update arrives via queued_updated).
+  void applyEditAck(Map<String, dynamic> msg) => _msg.applyEditAck(msg);
 
-  /// Request cancellation of a queued message.  Optimistically removes it
-  /// from the local queue; on ``cancel_ack{ok: false, already_delivered}``
-  /// the subsequent ``text_chunk`` reinserts it into chat history.
-  void cancelQueuedMessage(String queuedId) {
-    final sid = _sessionId;
-    if (sid == null) return;
-    applyMessageDequeued(queuedId);
-    _ws?.cancelQueued(sid, queuedId);
-  }
+  /// Request cancellation of a queued message.
+  void cancelQueuedMessage(String queuedId) =>
+      _msg.cancelQueuedMessage(queuedId);
 
-  /// Update the text of a queued message.  Optimistically mutates the local
-  /// queue entry; the server confirms via ``edit_ack`` and mirror-broadcasts
-  /// ``message_queued_updated``.
-  void editQueuedMessage(String queuedId, String content) {
-    final sid = _sessionId;
-    if (sid == null) return;
-    if (!_queue.editText(queuedId, content, DateTime.now())) return;
-    notifyListeners();
-    _ws?.editQueued(sid, queuedId, content);
-  }
+  /// Update the text of a queued message.
+  void editQueuedMessage(String queuedId, String content) =>
+      _msg.editQueuedMessage(queuedId, content);
 
-  void addDisplayMessage(DisplayMessage msg) {
-    _messages.add(msg);
-    notifyListeners();
-  }
+  /// Append a finished display message at the top level.
+  void addDisplayMessage(DisplayMessage msg) => _msg.addDisplayMessage(msg);
 
   /// Add a display message respecting agent group nesting.
-  void addDisplayMessageInStream(DisplayMessage msg) {
-    if (_inAgentMode) {
-      _ensureAgentToolGroup();
-    }
-    _streamTargetList.add(msg);
-    _scheduleNotify();
-  }
+  void addDisplayMessageInStream(DisplayMessage msg) =>
+      _msg.addDisplayMessageInStream(msg);
 
-  void addSystemMessage(String text, {bool isError = false}) {
-    _addSystemMessage(text, isError: isError);
-  }
+  /// Append a system/error notice to the message list.
+  void addSystemMessage(String text, {bool isError = false}) =>
+      _msg.addSystemMessage(text, isError: isError);
 
-  void _addSystemMessage(String text, {bool isError = false}) {
-    _messages.add(
-      DisplayMessage(
-        type: isError ? DisplayMessageType.error : DisplayMessageType.system,
-        content: text,
-        isError: isError,
-      ),
-    );
-    notifyListeners();
-  }
-
-  // --- Pagination ---
-
-  Future<void> _loadSessionMessages(String sessionId) async {
-    _addSystemMessage('Loading session history...');
-    try {
-      final ws = _ws;
-      if (ws == null) {
-        _addSystemMessage('Not connected to worker', isError: true);
-        return;
-      }
-      final response = await ws.fetchSessionMessages(
-        sessionId,
-        limit: _pageSize,
-      );
-      if (_sessionId != sessionId) return;
-
-      if (_messages.isNotEmpty &&
-          _messages.last.type == DisplayMessageType.system) {
-        _messages.removeLast();
-      }
-
-      final rawMessages = (response['messages'] as List<dynamic>? ?? [])
-          .cast<Map<String, dynamic>>();
-      final pagination = response['pagination'] as Map<String, dynamic>? ?? {};
-      _totalMessageCount = pagination['total_count'] as int? ?? 0;
-      final hasMore = pagination['has_more'] as bool? ?? false;
-      _nextCursor = hasMore ? pagination['next_cursor'] as int? : null;
-
-      if (rawMessages.isEmpty) {
-        _addSystemMessage('No message history available');
-      } else {
-        _buildDisplayFromHistoryInto(rawMessages, sessionId, _messages);
-      }
-    } catch (e) {
-      _addSystemMessage('Failed to load session history: $e', isError: true);
-    }
-  }
-
-  Future<void> loadOlderMessages() async {
-    if (_loadingMore || _nextCursor == null || _sessionId == null) return;
-    final sessionId = _sessionId!;
-    final ws = _ws;
-    if (ws == null) return;
-
-    _loadingMore = true;
-    notifyListeners();
-
-    try {
-      final response = await ws.fetchSessionMessages(
-        sessionId,
-        before: _nextCursor,
-        limit: _pageSize,
-      );
-      if (_sessionId != sessionId) return;
-
-      final rawMessages = (response['messages'] as List<dynamic>? ?? [])
-          .cast<Map<String, dynamic>>();
-      final pagination = response['pagination'] as Map<String, dynamic>? ?? {};
-      final hasMore = pagination['has_more'] as bool? ?? false;
-      _nextCursor = hasMore ? pagination['next_cursor'] as int? : null;
-
-      if (rawMessages.isNotEmpty) {
-        final olderMessages = <DisplayMessage>[];
-        _buildDisplayFromHistoryInto(rawMessages, sessionId, olderMessages);
-        _messages.insertAll(0, olderMessages);
-      }
-    } catch (e) {
-      _addSystemMessage('Failed to load older messages: $e', isError: true);
-    } finally {
-      _loadingMore = false;
-      notifyListeners();
-    }
-  }
-
-  void _buildDisplayFromHistoryInto(
-    List<Map<String, dynamic>> rawMessages,
-    String sessionId,
-    List<DisplayMessage> target,
-  ) {
-    bool inAgent = false;
-    int? toolGroupIdx;
-    String? agentDisplayName;
-    String agentToolName = 'claude_code';
-
-    void closeToolGroup() {
-      if (toolGroupIdx != null && toolGroupIdx! < target.length) {
-        final group = target[toolGroupIdx!];
-        group.finished = true;
-        group.expanded = false;
-        for (final child in group.children ?? <DisplayMessage>[]) {
-          if (child.type == DisplayMessageType.toolBlock && !child.finished) {
-            child.finished = true;
-          }
-        }
-      }
-      toolGroupIdx = null;
-    }
-
-    void ensureToolGroup() {
-      if (toolGroupIdx != null) return;
-      target.add(
-        DisplayMessage(
-          type: DisplayMessageType.agentGroup,
-          sessionId: sessionId,
-          toolName: agentToolName,
-          displayName: agentDisplayName,
-          children: [],
-          finished: false,
-        ),
-      );
-      toolGroupIdx = target.length - 1;
-    }
-
-    for (final msg in rawMessages) {
-      final type = msg['type'] as String? ?? '';
-
-      if (type == 'agent_group_start') {
-        inAgent = true;
-        final meta = msg['metadata'] as Map<String, dynamic>?;
-        agentDisplayName = meta?['display_name'] as String?;
-        agentToolName = meta?['tool_name'] as String? ?? 'claude_code';
-        continue;
-      }
-
-      if (type == 'agent_group_end') {
-        closeToolGroup();
-        inAgent = false;
-        continue;
-      }
-
-      if (inAgent) {
-        if (type == 'todo_update') {
-          // Todo updates go into the agent group but also update pane state
-          ensureToolGroup();
-          final builder = historyBuilderRegistry[type];
-          if (builder != null) {
-            builder(msg, sessionId, target[toolGroupIdx!].children!);
-          }
-          _reconstructTodosFromHistory(msg);
-        } else if (type == 'tool_start' || type == 'tool_output') {
-          ensureToolGroup();
-          final builder = historyBuilderRegistry[type];
-          if (builder != null) {
-            builder(msg, sessionId, target[toolGroupIdx!].children!);
-          }
-        } else if (type == 'text_chunk') {
-          final metadata = msg['metadata'] as Map<String, dynamic>? ?? {};
-          if (metadata['role'] == 'user') {
-            final builder = historyBuilderRegistry[type];
-            if (builder != null) builder(msg, sessionId, target);
-          } else {
-            // Assistant text closes the current tool group
-            closeToolGroup();
-            final builder = historyBuilderRegistry[type];
-            if (builder != null) builder(msg, sessionId, target);
-          }
-        } else {
-          // Other types (error, summary, etc.) go to top level
-          closeToolGroup();
-          final builder = historyBuilderRegistry[type];
-          if (builder != null) builder(msg, sessionId, target);
-        }
-      } else {
-        final builder = historyBuilderRegistry[type];
-        if (builder != null) builder(msg, sessionId, target);
-        if (type == 'todo_update') {
-          _reconstructTodosFromHistory(msg);
-        }
-      }
-    }
-
-    // Finalize any remaining open groups
-    closeToolGroup();
-
-    for (final m in target) {
-      if (m.type == DisplayMessageType.toolBlock && !m.finished) {
-        m.finished = true;
-      }
-      if (m.type == DisplayMessageType.agentGroup) {
-        for (final child in m.children ?? <DisplayMessage>[]) {
-          if (child.type == DisplayMessageType.toolBlock && !child.finished) {
-            child.finished = true;
-          }
-        }
-      }
-    }
-
-    notifyListeners();
-  }
-
-  void _resetPagination() {
-    _nextCursor = null;
-    _totalMessageCount = 0;
-    _loadingMore = false;
-  }
+  /// Load the next older page of history and prepend it to the message list.
+  Future<void> loadOlderMessages() => _msg.loadOlderMessages();
 
   @override
   void dispose() {
     _disposed = true;
-    _streamingTimer?.cancel();
+    _msg.disposeTimers();
     super.dispose();
   }
 }

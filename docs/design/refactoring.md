@@ -106,8 +106,8 @@ is already factored into `models/split_tree.dart`; what remains on `AppState`
 the `PaneHost` coordinator itself, which can't move to a store without a
 high-risk Provider-tree change for little gain.
 
-**PaneState (2073 → 2032):** two cohesive clusters carved into composed holders
-(PaneState keeps notify + WebSocket-send, delegates storage):
+**PaneState (2073 → 1433):** three cohesive clusters carved into composed holders
+(PaneState keeps notify + WebSocket-send + session lifecycle, delegates storage):
 
 - `PaneViewTarget` (`lib/state/pane_view_target.dart`) — the "what non-chat
   content is this pane showing" fields (pendingWorktreePath/pendingTaskId/
@@ -115,19 +115,27 @@ high-risk Provider-tree change for little gain.
 - `PaneQueueState` (`lib/state/pane_queue_state.dart`) — the queued-message
   mirror (ordered list + upsert/dequeue+renumber/update/replaceSnapshot/
   editText), with its own unit test.
+- `PaneMessageStore` (`lib/state/pane_message_store.dart`, 763 lines) — the
+  chat-content core: the display-message list, the live-streaming assembler
+  (assistant text / tool blocks / agent-group nesting, the `_tickMs`-coalesced
+  notify, `finalizeStream`), todo state, the queued-message reconciliation
+  surface, and history pagination. A `part of 'pane_state.dart'` library so it
+  keeps a back-reference to its owning `PaneState` (for the current session id,
+  WebSocket, `notifyListeners`, and the shared right-panel selection) without
+  widening either class's public API. The streaming output handlers and chat
+  widgets still call the same names on the pane; PaneState forwards each to the
+  store. Lifecycle resets (`switchSession`/`goHome`/`startNewChat`/
+  `resubscribeSession`) collapse to a single `resetForSwitch()`.
 
-**Message/stream cluster — assessed, intentionally not extracted.** The
-`_messages`/`_nextCursor`/`_activeMonitors` bulk is *behaviour*, not data:
-streaming insertion with agent-group nesting, `finalizeStream`, pagination, and
-monitor-block lifecycle, all bound to `notifyListeners` and the pane. A holder
-would only relocate the list (a ~40-ref rename) while the logic stays on
-PaneState — churn without real decomposition — and a true behavioural split is
-high-risk for low gain. Left as-is.
+**Message/stream cluster — extracted (was previously deferred).** The earlier
+pass judged this behaviour-bound and left it in place; the carve was completed
+in a later pass via the back-reference `part` store above, which separates the
+~600 lines of chat-content behaviour from PaneState's session/transport role
+without changing any external call site. Full client suite (503) stays green.
 
 **Net step 3:** every cleanly-separable cluster on `AppState` (5 stores +
-clipboard + toast) and `PaneState` (view-target + queue) is extracted; the
-pane-host (already factored via `split_tree.dart`) and PaneState's
-behaviour-bound message/stream core are intentionally left in place.
+clipboard + toast) and `PaneState` (view-target + queue + message store) is
+extracted; the pane-host is already factored via `split_tree.dart`.
 
 ## Phase 6 — Flutter Tests + Final Lint
 
