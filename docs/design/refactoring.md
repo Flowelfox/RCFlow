@@ -100,6 +100,6 @@ carve — same owned-store-with-delegation pattern.
 
 | Slice | Status | Notes |
 |-------|--------|-------|
-| Tests for the new transport / dispatcher / REST / sub-state seams | ⏳ deferred | Gated on Phase 5 |
+| Tests for the new transport / dispatcher / REST / sub-state seams | ⏳ partial | `test/state/stores_test.dart` unit-tests the new `LinearIssueStore` / `TaskStore` / `ArtifactStore` (sort order, byWorker bucketing, per-worker replace isolation, get/upsert/remove, forTask/forSession queries; client suite 479 → 485). `RestClient` is covered indirectly via the existing `FakeWebSocketService` worker-connection tests; dedicated `WebSocketTransport` socket-level tests still to come |
 | Ruff `D` (docstrings) | ⏳ deferred | Thousands of violations on existing code; needs a docstring sweep PR or per-module incremental enablement |
 | Ruff `COM` (trailing commas) | ❌ not enabled | The `ruff format` step already handles trailing commas and the ruff docs flag `COM812` / `COM819` as conflicting with the formatter — enabling both produces oscillating fixes. Comment in `pyproject.toml` records the decision so future contributors don't reintroduce the conflict |
