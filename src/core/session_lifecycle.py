@@ -691,10 +691,11 @@ class SessionLifecycleMixin:
 
         # Idempotent: multiple concurrent sends to a paused session each
         # fire a resume task — the second arrives after the first already
-        # flipped status back to ACTIVE.  Skip cleanly instead of raising.
+        # flipped status back to ACTIVE.  Skip cleanly without re-firing
+        # the drain (the first call is already draining, and a second
+        # ``schedule_pending_drain`` would race ``_drain_one`` against
+        # itself and risk double-delivering the head message).
         if session.status != SessionStatus.PAUSED:
-            if session.pending_user_messages:
-                self.schedule_pending_drain(session)  # ty:ignore[unresolved-attribute]
             return session
 
         session.resume()

@@ -898,8 +898,29 @@ class PromptRouter(
 
         session.touch()
 
-        # Auto-resume paused sessions when a new prompt arrives
+        # Paused-session handling: the input WS path already enqueues
+        # before calling us, so most arrivals while paused are *internal*
+        # callers — wake fires, e2e tests, direct invocations.  Route
+        # them through the same queue + resume flow so the
+        # forwarding-vs-draining race we'd otherwise hit (drain task
+        # spawned by resume vs this handle_prompt's own forward) cannot
+        # happen.  Enqueue, kick off resume (which drains), return.
         if session.status == SessionStatus.PAUSED:
+            qid = await self.enqueue_user_prompt(
+                session,
+                text=text,
+                display_text=display_text,
+                attachments=attachments,
+                project_name=project_name,
+                selected_worktree_path=selected_worktree_path,
+                task_id=task_id,
+            )
+            if qid is not None:
+                await self.resume_session(resolved_id)
+                return session.id
+            # Pending store unavailable (test harness) — fall back to the
+            # legacy "just resume and proceed" path so we don't drop the
+            # prompt entirely.
             await self.resume_session(resolved_id)
 
         # Check session token limits before processing
