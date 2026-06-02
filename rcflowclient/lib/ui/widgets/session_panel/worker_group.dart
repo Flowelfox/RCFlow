@@ -447,8 +447,9 @@ class _WorkerGroupState extends State<WorkerGroup> {
           extraIndent: extraIndent,
         );
       },
-      onReorder: (oldIndex, newIndex) {
-        if (oldIndex < newIndex) newIndex -= 1;
+      onReorderItem: (oldIndex, newIndex) {
+        // Flutter 3.44+: ``onReorderItem`` already adjusts newIndex for
+        // the removed item, so no manual ``newIndex -= 1`` correction.
         if (oldIndex == newIndex) return;
         final movedSession = sortedSessions[oldIndex];
         String? afterSessionId;
