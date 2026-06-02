@@ -14,7 +14,7 @@ class SummaryBubble extends StatelessWidget {
       padding: EdgeInsets.symmetric(vertical: 6),
       child: Container(
         width: double.infinity,
-        padding: EdgeInsets.all(12),
+        padding: EdgeInsets.all(kSpace3),
         decoration: BoxDecoration(
           color: context.appColors.summaryBg,
           borderRadius: BorderRadius.circular(kRadiusMedium),

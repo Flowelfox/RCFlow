@@ -143,7 +143,7 @@ class _MonitorBlockState extends State<MonitorBlock> {
         : _formatElapsed(elapsed);
 
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.symmetric(vertical: kSpace1),
       child: Container(
         decoration: BoxDecoration(
           color: colors.toolBg,
@@ -169,7 +169,7 @@ class _MonitorBlockState extends State<MonitorBlock> {
               child: Container(
                 color: Colors.transparent,
                 padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    const EdgeInsets.symmetric(horizontal: kSpace3, vertical: 10),
                 child: Row(
                   children: [
                     if (events.isNotEmpty) ...[
@@ -376,7 +376,7 @@ class _StopButton extends StatelessWidget {
       child: GestureDetector(
         onTap: stopping ? null : onTap,
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+          padding: const EdgeInsets.symmetric(horizontal: kSpace2, vertical: 3),
           decoration: BoxDecoration(
             color: stopping ? colors.bgElevated : colors.errorBg,
             borderRadius: BorderRadius.circular(5),

@@ -187,7 +187,7 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
               child: filtered.isEmpty && _hasActiveFilters
                   ? _buildNoResults(context)
                   : ListView(
-                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      padding: const EdgeInsets.symmetric(vertical: kSpace1),
                       children: sections,
                     ),
             ),
@@ -292,7 +292,7 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
               filled: true,
               fillColor: context.appColors.bgElevated,
               contentPadding: const EdgeInsets.symmetric(
-                horizontal: 12,
+                horizontal: kSpace3,
                 vertical: 10,
               ),
               border: OutlineInputBorder(
@@ -332,7 +332,7 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
           if (_setupError != null) ...[
             const SizedBox(height: 10),
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: kSpace3, vertical: kSpace2),
               decoration: BoxDecoration(
                 color: Colors.red.withAlpha(25),
                 borderRadius: BorderRadius.circular(8),
@@ -404,7 +404,7 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
             ),
             const SizedBox(height: 6),
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
+              padding: const EdgeInsets.symmetric(horizontal: kSpace3),
               decoration: BoxDecoration(
                 color: context.appColors.bgElevated,
                 borderRadius: BorderRadius.circular(8),
@@ -578,7 +578,7 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
   Widget _buildEmptyState(BuildContext context, AppState state) {
     return Center(
       child: Padding(
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.all(kSpace5),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -626,7 +626,7 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
                   borderRadius: BorderRadius.circular(kRadiusMedium),
                 ),
                 padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
+                  horizontal: kSpace4,
                   vertical: 10,
                 ),
               ),
@@ -696,7 +696,7 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
                       filled: true,
                       fillColor: context.appColors.bgElevated,
                       contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 8,
+                        horizontal: kSpace2,
                         vertical: 0,
                       ),
                       border: OutlineInputBorder(
@@ -806,7 +806,7 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        padding: const EdgeInsets.symmetric(horizontal: kSpace2, vertical: 3),
         decoration: BoxDecoration(
           color: selected ? color.withAlpha(40) : context.appColors.bgElevated,
           borderRadius: BorderRadius.circular(12),
@@ -849,7 +849,7 @@ class _LinearIssueListPanelState extends State<LinearIssueListPanel> {
             }
           }),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+            padding: const EdgeInsets.symmetric(horizontal: kSpace4, vertical: 6),
             child: Row(
               children: [
                 Container(

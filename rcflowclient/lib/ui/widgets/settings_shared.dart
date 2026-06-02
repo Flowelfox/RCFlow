@@ -20,7 +20,7 @@ class _SegmentedSelector extends StatelessWidget {
         color: context.appColors.bgElevated,
         borderRadius: BorderRadius.circular(12),
       ),
-      padding: const EdgeInsets.all(4),
+      padding: const EdgeInsets.all(kSpace1),
       child: Row(
         children: [
           for (var i = 0; i < options.length; i++)

@@ -88,7 +88,7 @@ class _LinearIssuePaneHeader extends StatelessWidget {
             : context.appColors.bgSurface,
         border: Border(bottom: BorderSide(color: context.appColors.divider)),
       ),
-      padding: const EdgeInsets.symmetric(horizontal: 8),
+      padding: const EdgeInsets.symmetric(horizontal: kSpace2),
       child: Row(
         children: [
           if (appState.panes[paneId]?.canGoBack ?? false)
@@ -301,7 +301,7 @@ class _LinearIssueContentState extends State<_LinearIssueContent> {
                   .map(
                     (label) => Container(
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
+                        horizontal: kSpace2,
                         vertical: 3,
                       ),
                       decoration: BoxDecoration(
@@ -397,8 +397,8 @@ class _LinearIssueContentState extends State<_LinearIssueContent> {
                     borderRadius: BorderRadius.circular(8),
                   ),
                   padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 8,
+                    horizontal: kSpace3,
+                    vertical: kSpace2,
                   ),
                 ),
               ),
@@ -437,8 +437,8 @@ class _LinearIssueContentState extends State<_LinearIssueContent> {
                       borderRadius: BorderRadius.circular(8),
                     ),
                     padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 8,
+                      horizontal: kSpace3,
+                      vertical: kSpace2,
                     ),
                   ),
                 )
@@ -465,8 +465,8 @@ class _LinearIssueContentState extends State<_LinearIssueContent> {
                         borderRadius: BorderRadius.circular(8),
                       ),
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 8,
+                        horizontal: kSpace3,
+                        vertical: kSpace2,
                       ),
                     ),
                   ),
@@ -550,7 +550,7 @@ class _MetadataChip extends StatelessWidget {
   @override
   Widget build(BuildContext ctx) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: kSpace2, vertical: kSpace1),
       decoration: BoxDecoration(
         color: color.withAlpha(20),
         borderRadius: BorderRadius.circular(8),

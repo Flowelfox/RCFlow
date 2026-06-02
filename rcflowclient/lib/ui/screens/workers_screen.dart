@@ -64,8 +64,8 @@ class _WorkersPage extends StatelessWidget {
                       backgroundColor: context.appColors.accent,
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 8,
+                        horizontal: kSpace4,
+                        vertical: kSpace2,
                       ),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(kRadiusMedium),
@@ -78,7 +78,7 @@ class _WorkersPage extends StatelessWidget {
           ),
           const Expanded(
             child: Padding(
-              padding: EdgeInsets.all(24),
+              padding: EdgeInsets.all(kSpace5),
               child: _WorkersContent(),
             ),
           ),
@@ -203,7 +203,7 @@ class _WorkersContentState extends State<_WorkersContent> {
             children: [
               Container(
                 width: double.infinity,
-                padding: EdgeInsets.all(24),
+                padding: EdgeInsets.all(kSpace5),
                 decoration: BoxDecoration(
                   color: context.appColors.bgElevated,
                   borderRadius: BorderRadius.circular(kRadiusLarge),
@@ -351,7 +351,7 @@ class _WorkersContentState extends State<_WorkersContent> {
               filled: true,
               fillColor: context.appColors.bgElevated,
               contentPadding: const EdgeInsets.symmetric(
-                horizontal: 12,
+                horizontal: kSpace3,
                 vertical: 0,
               ),
               border: OutlineInputBorder(
@@ -520,7 +520,7 @@ class _WorkerStatusFilterChip extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: kSpace1),
         decoration: BoxDecoration(
           color: selected ? color.withAlpha(40) : Colors.transparent,
           borderRadius: BorderRadius.circular(8),
@@ -586,7 +586,7 @@ class _WorkerCard extends StatelessWidget {
     };
 
     return Container(
-      padding: EdgeInsets.all(16),
+      padding: EdgeInsets.all(kSpace4),
       decoration: BoxDecoration(
         color: context.appColors.bgElevated,
         borderRadius: BorderRadius.circular(kRadiusLarge),

@@ -27,7 +27,7 @@ class _TaskPaneHeader extends StatelessWidget {
             : context.appColors.bgSurface,
         border: Border(bottom: BorderSide(color: context.appColors.divider)),
       ),
-      padding: const EdgeInsets.symmetric(horizontal: 8),
+      padding: const EdgeInsets.symmetric(horizontal: kSpace2),
       child: Row(
         children: [
           if (appState.panes[paneId]?.canGoBack ?? false)

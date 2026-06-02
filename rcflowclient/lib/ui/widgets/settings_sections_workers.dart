@@ -22,7 +22,7 @@ class _WorkersSection extends StatelessWidget {
             _SectionHeader(title: 'Workers', icon: Icons.dns_outlined),
             Container(
               width: double.infinity,
-              padding: EdgeInsets.all(16),
+              padding: EdgeInsets.all(kSpace4),
               decoration: BoxDecoration(
                 color: context.appColors.bgElevated,
                 borderRadius: BorderRadius.circular(kRadiusLarge),

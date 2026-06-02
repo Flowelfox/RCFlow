@@ -53,7 +53,7 @@ class _GuidanceBar extends StatelessWidget {
     final appColors = context.appColors;
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: kSpace4, vertical: 6),
       color: appColors.bgElevated,
       child: Text(
         message,
@@ -83,7 +83,7 @@ class _NewChatBar extends StatelessWidget {
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: kSpace4, vertical: 6),
       color: appColors.bgElevated,
       child: Row(
         children: [
@@ -153,7 +153,7 @@ class _SessionBar extends StatelessWidget {
       onTap: () => _showSessionActions(context),
       child: Container(
         width: double.infinity,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: kSpace4, vertical: 6),
         decoration: BoxDecoration(
           color: appColors.bgElevated,
           border: Border(
@@ -215,7 +215,7 @@ class _SessionBar extends StatelessWidget {
             children: [
               // Handle
               Padding(
-                padding: const EdgeInsets.symmetric(vertical: 12),
+                padding: const EdgeInsets.symmetric(vertical: kSpace3),
                 child: Container(
                   width: 40,
                   height: 4,
@@ -228,7 +228,7 @@ class _SessionBar extends StatelessWidget {
               // Session title header
               Padding(
                 padding:
-                    const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+                    const EdgeInsets.symmetric(horizontal: 20, vertical: kSpace1),
                 child: Row(
                   children: [
                     BadgeBar(

@@ -8,6 +8,7 @@ library;
 import 'package:flutter/material.dart';
 
 import '../../theme.dart';
+import '../../theme/spacing.dart';
 
 class CollapsibleGroupHeader extends StatelessWidget {
   const CollapsibleGroupHeader({
@@ -18,7 +19,7 @@ class CollapsibleGroupHeader extends StatelessWidget {
     required this.onToggle,
     this.icon,
     this.trailing,
-    this.padding = const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+    this.padding = const EdgeInsets.symmetric(horizontal: kSpace4, vertical: 6),
   });
 
   /// Display label for the group (e.g. `'In Progress'`, `'worker-1'`).

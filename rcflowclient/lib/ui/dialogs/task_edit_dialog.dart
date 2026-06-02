@@ -119,7 +119,7 @@ class _TaskEditDialogState extends State<_TaskEditDialog> {
 
                 // Title
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 24),
+                  padding: const EdgeInsets.symmetric(horizontal: kSpace5),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -159,7 +159,7 @@ class _TaskEditDialogState extends State<_TaskEditDialog> {
 
                 // Description
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 24),
+                  padding: const EdgeInsets.symmetric(horizontal: kSpace5),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [

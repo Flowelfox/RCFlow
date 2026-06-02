@@ -389,7 +389,7 @@ class _ArtifactListPanelState extends State<ArtifactListPanel> {
     }
 
     return ListView(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.symmetric(vertical: kSpace1),
       children: children,
     );
   }
@@ -740,7 +740,7 @@ class _ArtifactListPanelState extends State<ArtifactListPanel> {
     final count = _selectedArtifactIds.length;
     return Container(
       color: context.appColors.accent.withAlpha(18),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 5),
+      padding: const EdgeInsets.symmetric(horizontal: kSpace4, vertical: 5),
       child: Row(
         children: [
           Icon(
@@ -835,7 +835,7 @@ class _ArtifactListPanelState extends State<ArtifactListPanel> {
                   filled: true,
                   fillColor: context.appColors.bgElevated,
                   contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 8,
+                    horizontal: kSpace2,
                     vertical: 0,
                   ),
                   border: OutlineInputBorder(
@@ -1025,7 +1025,7 @@ class _WorkerHeader extends StatelessWidget {
     return InkWell(
       onTap: onToggle,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: kSpace4, vertical: 6),
         child: Row(
           children: [
             Icon(

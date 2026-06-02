@@ -335,7 +335,7 @@ class _TaskListPanelState extends State<TaskListPanel> {
     final count = _selectedTaskIds.length;
     return Container(
       color: context.appColors.accent.withAlpha(18),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 5),
+      padding: const EdgeInsets.symmetric(horizontal: kSpace4, vertical: 5),
       child: Row(
         children: [
           Icon(
@@ -715,7 +715,7 @@ class _TaskListPanelState extends State<TaskListPanel> {
                 _buildSelectionBar(context, state),
               Expanded(
                 child: ListView(
-                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  padding: const EdgeInsets.symmetric(vertical: kSpace1),
                   children: listItems,
                 ),
               ),
@@ -762,7 +762,7 @@ class _TaskListPanelState extends State<TaskListPanel> {
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(kRadiusMedium),
               ),
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              padding: const EdgeInsets.symmetric(horizontal: kSpace4, vertical: 10),
             ),
           ),
         ],
@@ -1139,7 +1139,7 @@ class _StatusFilterChip extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        padding: const EdgeInsets.symmetric(horizontal: kSpace2, vertical: 3),
         decoration: BoxDecoration(
           color: selected ? color.withAlpha(40) : Colors.transparent,
           borderRadius: BorderRadius.circular(kRadiusSmall),

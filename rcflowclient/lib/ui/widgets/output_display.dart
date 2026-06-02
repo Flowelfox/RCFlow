@@ -12,6 +12,7 @@ import '../../tips.dart';
 import '../dialogs/worker_edit_dialog.dart';
 import 'message_bubble.dart';
 import 'session_panel.dart';
+import '../../theme/spacing.dart';
 
 class OutputDisplay extends StatefulWidget {
   const OutputDisplay({super.key});
@@ -117,7 +118,7 @@ class _OutputDisplayState extends State<OutputDisplay> {
     required int remaining,
   }) {
     return Padding(
-      padding: EdgeInsets.symmetric(vertical: 8),
+      padding: EdgeInsets.symmetric(vertical: kSpace2),
       child: Center(
         child: loading
             ? SizedBox(
@@ -213,8 +214,8 @@ class _OutputDisplayState extends State<OutputDisplay> {
                           backgroundColor: context.appColors.accent,
                           foregroundColor: Colors.white,
                           padding: const EdgeInsets.symmetric(
-                            horizontal: 24,
-                            vertical: 12,
+                            horizontal: kSpace5,
+                            vertical: kSpace3,
                           ),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),
@@ -230,8 +231,8 @@ class _OutputDisplayState extends State<OutputDisplay> {
                           foregroundColor: context.appColors.textSecondary,
                           side: BorderSide(color: context.appColors.divider),
                           padding: EdgeInsets.symmetric(
-                            horizontal: 24,
-                            vertical: 12,
+                            horizontal: kSpace5,
+                            vertical: kSpace3,
                           ),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),
@@ -326,7 +327,7 @@ class _OutputDisplayState extends State<OutputDisplay> {
                       );
                     }
                     return Padding(
-                      padding: EdgeInsets.symmetric(vertical: 12),
+                      padding: EdgeInsets.symmetric(vertical: kSpace3),
                       child: Center(
                         child: Text(
                           'Beginning of session',
@@ -367,7 +368,7 @@ class _OutputDisplayState extends State<OutputDisplay> {
                   duration: Duration(milliseconds: 250),
                   child: Container(
                     width: double.infinity,
-                    padding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                    padding: EdgeInsets.symmetric(horizontal: kSpace4, vertical: 10),
                     decoration: BoxDecoration(
                       color: context.appColors.bgElevated,
                       border: Border(
@@ -532,7 +533,7 @@ class _LlmNotConfiguredBanner extends StatelessWidget {
     final colors = context.appColors;
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: kSpace3, vertical: kSpace2),
       decoration: BoxDecoration(
         color: const Color(0xFFFFF7CC),
         border: Border(
@@ -568,7 +569,7 @@ class _LlmNotConfiguredBanner extends StatelessWidget {
             ),
             style: TextButton.styleFrom(
               foregroundColor: const Color(0xFF8A6D1A),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              padding: const EdgeInsets.symmetric(horizontal: kSpace3, vertical: kSpace1),
               minimumSize: Size.zero,
               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
@@ -603,7 +604,7 @@ class _AgentNotConfiguredBanner extends StatelessWidget {
     final colors = context.appColors;
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: kSpace3, vertical: kSpace2),
       decoration: BoxDecoration(
         color: const Color(0xFFFFF7CC),
         border: Border(
@@ -639,7 +640,7 @@ class _AgentNotConfiguredBanner extends StatelessWidget {
             ),
             style: TextButton.styleFrom(
               foregroundColor: const Color(0xFF8A6D1A),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              padding: const EdgeInsets.symmetric(horizontal: kSpace3, vertical: kSpace1),
               minimumSize: Size.zero,
               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),

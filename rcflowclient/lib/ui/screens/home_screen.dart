@@ -22,6 +22,7 @@ import '../widgets/session_panel.dart';
 import '../widgets/settings_menu.dart';
 import '../widgets/split_view.dart';
 import '../widgets/worker_picker_dialog.dart';
+import '../../theme/spacing.dart';
 
 bool get _isDesktop =>
     Platform.isWindows || Platform.isLinux || Platform.isMacOS;
@@ -527,7 +528,7 @@ class _WelcomePane extends StatelessWidget {
           FilledButton.icon(
             style: FilledButton.styleFrom(
               backgroundColor: context.appColors.accent,
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: kSpace5, vertical: kSpace3),
             ),
             icon: const Icon(Icons.add_rounded, color: Colors.white),
             label: const Text(

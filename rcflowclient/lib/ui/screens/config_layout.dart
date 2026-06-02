@@ -64,7 +64,7 @@ class _ConfigSidebarItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      padding: const EdgeInsets.symmetric(horizontal: kSpace2, vertical: 2),
       child: Material(
         color: selected ? context.appColors.bgElevated : Colors.transparent,
         borderRadius: BorderRadius.circular(kRadiusMedium),
@@ -72,7 +72,7 @@ class _ConfigSidebarItem extends StatelessWidget {
           borderRadius: BorderRadius.circular(kRadiusMedium),
           onTap: onTap,
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            padding: const EdgeInsets.symmetric(horizontal: kSpace3, vertical: 10),
             child: Row(
               children: [
                 Icon(
@@ -148,7 +148,7 @@ class _ConfigSidebarSubItem extends StatelessWidget {
           borderRadius: BorderRadius.circular(8),
           onTap: onTap,
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: kSpace3, vertical: kSpace2),
             child: Row(
               children: [
                 Container(

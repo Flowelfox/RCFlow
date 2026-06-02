@@ -1,7 +1,7 @@
 /// Centralised spacing tokens for layouts and components.
 ///
-/// The widget tree previously sprinkled raw `EdgeInsets.all(8)`,
-/// `SizedBox(width: 12)`, `padding: EdgeInsets.symmetric(horizontal: 16)`
+/// The widget tree previously sprinkled raw `EdgeInsets.all(kSpace2)`,
+/// `SizedBox(width: 12)`, `padding: EdgeInsets.symmetric(horizontal: kSpace4)`
 /// across ~60 files with no shared source of truth. The constants below
 /// give every padding, gap, and inset a name so we can adjust spacing
 /// globally and audit consistency.

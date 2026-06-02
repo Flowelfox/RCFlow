@@ -16,7 +16,7 @@ class ThinkingBlock extends StatelessWidget {
     final content = message.content;
 
     return Padding(
-      padding: EdgeInsets.symmetric(vertical: 4),
+      padding: EdgeInsets.symmetric(vertical: kSpace1),
       child: Container(
         decoration: BoxDecoration(
           color: context.appColors.toolBg,
@@ -34,7 +34,7 @@ class ThinkingBlock extends StatelessWidget {
               },
               child: Container(
                 color: Colors.transparent,
-                padding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                padding: EdgeInsets.symmetric(horizontal: kSpace3, vertical: 10),
                 child: Row(
                   children: [
                     Icon(

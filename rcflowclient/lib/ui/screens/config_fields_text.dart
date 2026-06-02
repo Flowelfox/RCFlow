@@ -30,7 +30,7 @@ class _TextField extends StatelessWidget {
             borderRadius: BorderRadius.circular(kRadiusMedium),
           ),
           contentPadding: const EdgeInsets.symmetric(
-            horizontal: 12,
+            horizontal: kSpace3,
             vertical: 10,
           ),
         ),
@@ -72,7 +72,7 @@ class _TextAreaField extends StatelessWidget {
             borderRadius: BorderRadius.circular(kRadiusMedium),
           ),
           contentPadding: const EdgeInsets.symmetric(
-            horizontal: 12,
+            horizontal: kSpace3,
             vertical: 10,
           ),
         ),
@@ -124,7 +124,7 @@ class _SecretFieldState extends State<_SecretField> {
                   borderRadius: BorderRadius.circular(kRadiusMedium),
                 ),
                 contentPadding: EdgeInsets.symmetric(
-                  horizontal: 12,
+                  horizontal: kSpace3,
                   vertical: 10,
                 ),
                 suffixIcon: IconButton(
@@ -143,7 +143,7 @@ class _SecretFieldState extends State<_SecretField> {
               children: [
                 Expanded(
                   child: Container(
-                    padding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    padding: EdgeInsets.symmetric(horizontal: kSpace3, vertical: 10),
                     decoration: BoxDecoration(
                       color: context.appColors.bgElevated,
                       borderRadius: BorderRadius.circular(kRadiusMedium),
@@ -198,7 +198,7 @@ class _SelectField extends StatelessWidget {
       option: option,
       isModified: isModified,
       child: Container(
-        padding: EdgeInsets.symmetric(horizontal: 12),
+        padding: EdgeInsets.symmetric(horizontal: kSpace3),
         decoration: BoxDecoration(
           color: context.appColors.bgElevated,
           borderRadius: BorderRadius.circular(kRadiusMedium),

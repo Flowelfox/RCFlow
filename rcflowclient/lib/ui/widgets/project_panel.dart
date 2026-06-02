@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../state/app_state.dart';
 import '../../state/pane_state.dart';
 import '../../theme.dart';
+import '../../theme/spacing.dart';
 
 /// Right-side dockable panel showing project information for the active session.
 ///
@@ -485,7 +486,7 @@ class _ProjectPanelState extends State<ProjectPanel> {
   ) {
     return Container(
       height: 36,
-      padding: const EdgeInsets.symmetric(horizontal: 12),
+      padding: const EdgeInsets.symmetric(horizontal: kSpace3),
       decoration: BoxDecoration(
         border: Border(bottom: BorderSide(color: context.appColors.divider)),
       ),
@@ -526,7 +527,7 @@ class _ProjectPanelState extends State<ProjectPanel> {
     String selectedWorktreePath,
   ) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+      padding: const EdgeInsets.symmetric(horizontal: kSpace3, vertical: 5),
       decoration: BoxDecoration(
         color: context.appColors.accent.withAlpha(10),
         border: Border(bottom: BorderSide(color: context.appColors.divider)),
@@ -572,7 +573,7 @@ class _ProjectPanelState extends State<ProjectPanel> {
       return Align(
         alignment: Alignment.topCenter,
         child: Padding(
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.all(kSpace3),
           child: LinearProgressIndicator(
             backgroundColor: context.appColors.bgElevated,
           ),
@@ -581,7 +582,7 @@ class _ProjectPanelState extends State<ProjectPanel> {
     }
     if (_worktreesError != null) {
       return Padding(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(kSpace3),
         child: Text(
           _worktreesError!,
           style: TextStyle(color: context.appColors.errorText, fontSize: 11),
@@ -697,7 +698,7 @@ class _ProjectPanelState extends State<ProjectPanel> {
           // Header
           Container(
             height: 36,
-            padding: const EdgeInsets.symmetric(horizontal: 12),
+            padding: const EdgeInsets.symmetric(horizontal: kSpace3),
             decoration: BoxDecoration(
               border: Border(
                 bottom: BorderSide(color: context.appColors.divider),
@@ -927,7 +928,7 @@ class _SmallIconBtn extends StatelessWidget {
         borderRadius: BorderRadius.circular(4),
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.all(4),
+          padding: const EdgeInsets.all(kSpace1),
           child: Icon(
             icon,
             size: iconSize,

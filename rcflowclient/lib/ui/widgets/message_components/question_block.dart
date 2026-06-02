@@ -155,7 +155,7 @@ class _QuestionBlockState extends State<QuestionBlock> {
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(kRadiusMedium),
                   ),
-                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  padding: const EdgeInsets.symmetric(vertical: kSpace3),
                 ),
                 child: const Text(
                   'Submit',
@@ -180,7 +180,7 @@ class _QuestionBlockState extends State<QuestionBlock> {
       children: [
         if (header != null) ...[
           Container(
-            padding: EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            padding: EdgeInsets.symmetric(horizontal: kSpace2, vertical: 3),
             decoration: BoxDecoration(
               color: context.appColors.accent.withAlpha(40),
               borderRadius: BorderRadius.circular(kRadiusSmall),
@@ -257,7 +257,7 @@ class _QuestionBlockState extends State<QuestionBlock> {
         child: AnimatedContainer(
           duration: Duration(milliseconds: 150),
           width: double.infinity,
-          padding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          padding: EdgeInsets.symmetric(horizontal: kSpace3, vertical: 10),
           decoration: BoxDecoration(
             color: selected
                 ? context.appColors.accent.withAlpha(30)
@@ -338,7 +338,7 @@ class _QuestionBlockState extends State<QuestionBlock> {
         child: AnimatedContainer(
           duration: Duration(milliseconds: 150),
           width: double.infinity,
-          padding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          padding: EdgeInsets.symmetric(horizontal: kSpace3, vertical: 10),
           decoration: BoxDecoration(
             color: isOther
                 ? context.appColors.accent.withAlpha(30)
@@ -390,7 +390,7 @@ class _QuestionBlockState extends State<QuestionBlock> {
                     hintText: 'Type your answer...',
                     isDense: true,
                     contentPadding: EdgeInsets.symmetric(
-                      horizontal: 12,
+                      horizontal: kSpace3,
                       vertical: 10,
                     ),
                     fillColor: context.appColors.bgOverlay,
@@ -413,14 +413,14 @@ class _QuestionBlockState extends State<QuestionBlock> {
     final answers = widget.message.selectedAnswers ?? {};
 
     return Padding(
-      padding: EdgeInsets.symmetric(vertical: 4),
+      padding: EdgeInsets.symmetric(vertical: kSpace1),
       child: Container(
         decoration: BoxDecoration(
           color: context.appColors.toolBg,
           borderRadius: BorderRadius.circular(kRadiusMedium),
           border: Border.all(color: context.appColors.divider),
         ),
-        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        padding: EdgeInsets.symmetric(horizontal: kSpace3, vertical: 10),
         child: Row(
           children: [
             Icon(

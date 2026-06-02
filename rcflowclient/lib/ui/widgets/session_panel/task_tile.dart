@@ -232,7 +232,7 @@ class TaskTile extends StatelessWidget {
       feedback: Material(
         color: Colors.transparent,
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          padding: const EdgeInsets.symmetric(horizontal: kSpace3, vertical: 6),
           decoration: BoxDecoration(
             color: context.appColors.bgElevated,
             borderRadius: BorderRadius.circular(16),

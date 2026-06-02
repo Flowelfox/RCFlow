@@ -111,7 +111,7 @@ class _WorkerSettingsPaneHeader extends StatelessWidget {
             : context.appColors.bgSurface,
         border: Border(bottom: BorderSide(color: context.appColors.divider)),
       ),
-      padding: const EdgeInsets.symmetric(horizontal: 8),
+      padding: const EdgeInsets.symmetric(horizontal: kSpace2),
       child: Row(
         children: [
           if (appState.panes[paneId]?.canGoBack ?? false)
@@ -372,7 +372,7 @@ class _PluginsSectionState extends State<_PluginsSection> {
       );
     }
     return ListView.separated(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.symmetric(vertical: kSpace2),
       itemCount: plugins.length,
       separatorBuilder: (_, _) =>
           Divider(height: 1, color: context.appColors.divider),
@@ -431,7 +431,7 @@ class _InstallBar extends StatelessWidget {
                     isDense: true,
                     contentPadding: const EdgeInsets.symmetric(
                       horizontal: 10,
-                      vertical: 8,
+                      vertical: kSpace2,
                     ),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(kRadiusSmall),
@@ -461,7 +461,7 @@ class _InstallBar extends StatelessWidget {
                           style: TextStyle(fontSize: 12),
                         ),
                         style: ElevatedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          padding: const EdgeInsets.symmetric(horizontal: kSpace3),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(kRadiusSmall),
                           ),
@@ -513,7 +513,7 @@ class _PluginTile extends StatelessWidget {
     final enabled = plugin['enabled'] as bool? ?? true;
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: kSpace3, vertical: 6),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

@@ -233,7 +233,7 @@ class _LinkedIssueTile extends StatelessWidget {
           title: Row(
             children: [
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                padding: const EdgeInsets.symmetric(horizontal: kSpace1, vertical: 1),
                 decoration: BoxDecoration(
                   color: context.appColors.bgBase,
                   borderRadius: BorderRadius.circular(4),

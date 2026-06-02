@@ -13,6 +13,7 @@ library;
 import 'package:flutter/material.dart';
 
 import '../../theme.dart';
+import '../../theme/spacing.dart';
 
 class PanelSearchBar extends StatelessWidget {
   const PanelSearchBar({
@@ -95,7 +96,7 @@ class PanelSearchBar extends StatelessWidget {
                 filled: true,
                 fillColor: context.appColors.bgElevated,
                 contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 8,
+                  horizontal: kSpace2,
                   vertical: 0,
                 ),
                 border: OutlineInputBorder(

@@ -18,7 +18,7 @@ class _MentionItem extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        padding: EdgeInsets.symmetric(horizontal: kSpace3, vertical: kSpace2),
         color: selected ? context.appColors.bgOverlay : Colors.transparent,
         child: Row(
           children: [
@@ -110,7 +110,7 @@ class _ToolMentionItem extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        padding: EdgeInsets.symmetric(horizontal: kSpace3, vertical: kSpace2),
         color: selected ? context.appColors.bgOverlay : Colors.transparent,
         child: Row(
           children: [
@@ -222,7 +222,7 @@ class _FileMentionItem extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        padding: EdgeInsets.symmetric(horizontal: kSpace3, vertical: kSpace2),
         color: selected ? context.appColors.bgOverlay : Colors.transparent,
         child: Row(
           children: [

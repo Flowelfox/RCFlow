@@ -109,7 +109,7 @@ class _DesktopSettingsDialogState extends State<_DesktopSettingsDialog> {
             // Content
             Expanded(
               child: Padding(
-                padding: const EdgeInsets.all(24),
+                padding: const EdgeInsets.all(kSpace5),
                 child: SingleChildScrollView(child: _buildSection(_selected)),
               ),
             ),
@@ -154,7 +154,7 @@ class _SidebarItem extends StatelessWidget {
     };
 
     return Padding(
-      padding: EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      padding: EdgeInsets.symmetric(horizontal: kSpace2, vertical: 2),
       child: Material(
         color: selected ? context.appColors.bgElevated : Colors.transparent,
         borderRadius: BorderRadius.circular(kRadiusMedium),
@@ -162,7 +162,7 @@ class _SidebarItem extends StatelessWidget {
           borderRadius: BorderRadius.circular(kRadiusMedium),
           onTap: onTap,
           child: Padding(
-            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            padding: EdgeInsets.symmetric(horizontal: kSpace3, vertical: 10),
             child: Row(
               children: [
                 Icon(

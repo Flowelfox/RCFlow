@@ -875,7 +875,7 @@ class _InputAreaState extends State<InputArea> {
             _MentionType.project || null => 'No projects found',
           };
           content = Padding(
-            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            padding: EdgeInsets.symmetric(horizontal: kSpace4, vertical: kSpace3),
             child: Text(
               label,
               style: TextStyle(
@@ -1173,7 +1173,7 @@ class _InputAreaState extends State<InputArea> {
         prefixIconConstraints: const BoxConstraints(minWidth: 40, minHeight: 0),
         contentPadding: const EdgeInsets.symmetric(
           horizontal: 20,
-          vertical: 12,
+          vertical: kSpace3,
         ),
       ),
       maxLines: _isDesktop ? 8 : 4,

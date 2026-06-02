@@ -344,7 +344,7 @@ class _OnboardingOverlayState extends State<_OnboardingOverlay>
                         borderRadius: BorderRadius.circular(kRadiusMedium),
                       ),
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
+                        horizontal: kSpace4,
                         vertical: 10,
                       ),
                     ),

@@ -21,6 +21,7 @@ import 'terminal_pane.dart';
 import 'todo_panel.dart';
 import 'project_panel.dart';
 import 'worker_settings_pane.dart';
+import '../../theme/spacing.dart';
 
 /// Data carried during a session drag from the sidebar.
 class SessionDragData {
@@ -383,7 +384,7 @@ class _BookmarkTab extends StatelessWidget {
         borderRadius: const BorderRadius.horizontal(left: Radius.circular(6)),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 150),
-          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
+          padding: const EdgeInsets.symmetric(horizontal: kSpace1, vertical: 10),
           decoration: BoxDecoration(
             color: isActive
                 ? context.appColors.bgSurface
@@ -510,7 +511,7 @@ class _TerminalPaneHeader extends StatelessWidget {
           bottom: BorderSide(color: context.appColors.divider, width: 1),
         ),
       ),
-      padding: const EdgeInsets.symmetric(horizontal: 8),
+      padding: const EdgeInsets.symmetric(horizontal: kSpace2),
       child: Row(
         children: [
           Icon(

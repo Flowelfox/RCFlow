@@ -308,8 +308,8 @@ class _NoSessionView extends StatelessWidget {
                 style: FilledButton.styleFrom(
                   backgroundColor: appColors.accent,
                   padding: const EdgeInsets.symmetric(
-                    horizontal: 24,
-                    vertical: 12,
+                    horizontal: kSpace5,
+                    vertical: kSpace3,
                   ),
                 ),
                 icon: const Icon(Icons.history_rounded, color: Colors.white),

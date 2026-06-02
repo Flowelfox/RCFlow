@@ -14,6 +14,7 @@ import 'helpers.dart';
 import 'session_leading_icon.dart';
 import 'session_list_panel.dart' show compareBySortOrder;
 import 'terminal_session_tile.dart';
+import '../../../theme/spacing.dart';
 
 class WorkerGroup extends StatefulWidget {
   final WorkerConfig config;
@@ -153,7 +154,7 @@ class _WorkerGroupState extends State<WorkerGroup> {
           child: InkWell(
             onTap: onToggleExpand,
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+              padding: const EdgeInsets.symmetric(horizontal: kSpace4, vertical: 6),
               child: Row(
                 children: [
                   Icon(
@@ -954,7 +955,7 @@ class _WorkerGroupState extends State<WorkerGroup> {
     return Material(
       color: Colors.transparent,
       child: Container(
-        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        padding: EdgeInsets.symmetric(horizontal: kSpace3, vertical: 6),
         decoration: BoxDecoration(
           color: context.appColors.bgElevated,
           borderRadius: BorderRadius.circular(16),
@@ -1039,7 +1040,7 @@ class _WorkerGroupState extends State<WorkerGroup> {
             ),
           ),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4),
+            padding: const EdgeInsets.symmetric(horizontal: kSpace1),
             child: Text('\u00B7', style: mutedStyle),
           ),
         ],

@@ -22,7 +22,7 @@ class AgentGroupBlock extends StatelessWidget {
         message.displayName ?? message.toolName ?? 'Agent';
 
     return Padding(
-      padding: EdgeInsets.symmetric(vertical: 4),
+      padding: EdgeInsets.symmetric(vertical: kSpace1),
       child: Container(
         decoration: BoxDecoration(
           color: context.appColors.toolBg,
@@ -43,7 +43,7 @@ class AgentGroupBlock extends StatelessWidget {
               child: Container(
                 color: Colors.transparent,
                 padding:
-                    EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    EdgeInsets.symmetric(horizontal: kSpace3, vertical: 10),
                 child: Row(
                   children: [
                     if (hasChildren)

@@ -105,7 +105,7 @@ class _SetupWizardState extends State<_SetupWizard> {
     return Dialog(
       backgroundColor: context.appColors.bgSurface,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      insetPadding: const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 40, vertical: kSpace5),
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 600, maxHeight: 620),
         child: Column(
@@ -261,7 +261,7 @@ class _SetupWizardState extends State<_SetupWizard> {
       backgroundColor: context.appColors.accent,
       disabledBackgroundColor: context.appColors.accentDim,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+      padding: const EdgeInsets.symmetric(horizontal: kSpace5, vertical: 14),
     );
   }
 
@@ -657,7 +657,7 @@ class _SetupWizardState extends State<_SetupWizard> {
             )
           else if (_vm.toolsError != null)
             Padding(
-              padding: const EdgeInsets.symmetric(vertical: 16),
+              padding: const EdgeInsets.symmetric(vertical: kSpace4),
               child: Text(
                 'Could not load tool status: ${_vm.toolsError}',
                 style: TextStyle(
@@ -672,7 +672,7 @@ class _SetupWizardState extends State<_SetupWizard> {
             ),
           if (_vm.tools == null && !_vm.toolsLoading && _vm.toolsError == null)
             Padding(
-              padding: const EdgeInsets.symmetric(vertical: 16),
+              padding: const EdgeInsets.symmetric(vertical: kSpace4),
               child: Text(
                 'No tool information available.',
                 style: TextStyle(
@@ -725,7 +725,7 @@ class _SetupWizardState extends State<_SetupWizard> {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Container(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(kSpace3),
         decoration: BoxDecoration(
           color: context.appColors.bgElevated,
           borderRadius: BorderRadius.circular(12),
@@ -823,7 +823,7 @@ class _SetupWizardState extends State<_SetupWizard> {
           const SizedBox(height: 24),
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(kSpace4),
             decoration: BoxDecoration(
               color: context.appColors.bgElevated,
               borderRadius: BorderRadius.circular(kRadiusLarge),

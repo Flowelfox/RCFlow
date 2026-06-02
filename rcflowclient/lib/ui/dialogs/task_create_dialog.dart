@@ -140,7 +140,7 @@ class _TaskCreateDialogState extends State<_TaskCreateDialog> {
 
                 // Title
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 24),
+                  padding: const EdgeInsets.symmetric(horizontal: kSpace5),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -185,7 +185,7 @@ class _TaskCreateDialogState extends State<_TaskCreateDialog> {
 
                 // Description
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 24),
+                  padding: const EdgeInsets.symmetric(horizontal: kSpace5),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -221,7 +221,7 @@ class _TaskCreateDialogState extends State<_TaskCreateDialog> {
                 if (multiWorker) ...[
                   const SizedBox(height: 16),
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 24),
+                    padding: const EdgeInsets.symmetric(horizontal: kSpace5),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [

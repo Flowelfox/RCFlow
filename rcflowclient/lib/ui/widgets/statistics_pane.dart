@@ -12,6 +12,7 @@ import '../../state/pane_state.dart';
 import '../../state/statistics_pane_state.dart';
 import '../../theme.dart';
 import 'statistics_panel/telemetry_chart.dart';
+import '../../theme/spacing.dart';
 
 class StatisticsPane extends StatefulWidget {
   const StatisticsPane({super.key});
@@ -116,7 +117,7 @@ class _FilterBar extends StatelessWidget {
         color: context.appColors.bgSurface,
         border: Border(bottom: BorderSide(color: context.appColors.divider)),
       ),
-      padding: const EdgeInsets.symmetric(horizontal: 8),
+      padding: const EdgeInsets.symmetric(horizontal: kSpace2),
       child: Row(
         children: [
           Expanded(
@@ -229,7 +230,7 @@ class _ChartsBody extends StatelessWidget {
     }
 
     return ListView(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(kSpace3),
       children: [
         if (state.series.isNotEmpty) ...[
           _ChartSection(
@@ -494,7 +495,7 @@ class _ErrorView extends StatelessWidget {
   Widget build(BuildContext context) {
     return Center(
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(kSpace4),
         child: Text(
           error,
           style: TextStyle(color: context.appColors.textMuted, fontSize: 11),

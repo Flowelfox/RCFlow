@@ -140,7 +140,7 @@ class _TaskDetailContentState extends State<_TaskDetailContent> {
         _statusColors[task.status] ?? context.appColors.textMuted;
 
     return ListView(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(kSpace4),
       children: [
         // Title — inline editable on double-click
         _editingTitle
@@ -210,7 +210,7 @@ class _TaskDetailContentState extends State<_TaskDetailContent> {
                   const SizedBox(height: 6),
                   Container(
                     width: double.infinity,
-                    padding: const EdgeInsets.all(12),
+                    padding: const EdgeInsets.all(kSpace3),
                     decoration: BoxDecoration(
                       color: context.appColors.bgElevated,
                       borderRadius: BorderRadius.circular(8),
@@ -259,7 +259,7 @@ class _TaskDetailContentState extends State<_TaskDetailContent> {
                               color: context.appColors.toolBg,
                               borderRadius: BorderRadius.circular(8),
                             ),
-                            codeblockPadding: EdgeInsets.all(12),
+                            codeblockPadding: EdgeInsets.all(kSpace3),
                             a: TextStyle(color: context.appColors.accentLight),
                             listBullet: TextStyle(
                               color: context.appColors.textPrimary,
@@ -338,7 +338,7 @@ class _TaskDetailContentState extends State<_TaskDetailContent> {
                       waitDuration: const Duration(milliseconds: 600),
                       child: Container(
                         width: double.infinity,
-                        padding: const EdgeInsets.all(12),
+                        padding: const EdgeInsets.all(kSpace3),
                         decoration: BoxDecoration(
                           color: context.appColors.bgElevated,
                           borderRadius: BorderRadius.circular(8),
@@ -390,8 +390,8 @@ class _TaskDetailContentState extends State<_TaskDetailContent> {
                 style: FilledButton.styleFrom(
                   backgroundColor: context.appColors.accent,
                   padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 8,
+                    horizontal: kSpace4,
+                    vertical: kSpace2,
                   ),
                 ),
                 onPressed: _saveChanges,
@@ -520,7 +520,7 @@ class _TaskDetailContentState extends State<_TaskDetailContent> {
         const SizedBox(height: 8),
         if (task.sessions.isEmpty)
           Container(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(kSpace3),
             decoration: BoxDecoration(
               color: context.appColors.bgElevated,
               borderRadius: BorderRadius.circular(8),
@@ -581,7 +581,7 @@ class _TaskDetailContentState extends State<_TaskDetailContent> {
           isDense: true,
           counterText: '',
           contentPadding: const EdgeInsets.symmetric(
-            horizontal: 8,
+            horizontal: kSpace2,
             vertical: 6,
           ),
           fillColor: context.appColors.bgElevated,
@@ -638,7 +638,7 @@ class _TaskDetailContentState extends State<_TaskDetailContent> {
             decoration: InputDecoration(
               hintText: 'Add description...',
               hintStyle: TextStyle(color: context.appColors.textMuted),
-              contentPadding: const EdgeInsets.all(12),
+              contentPadding: const EdgeInsets.all(kSpace3),
               fillColor: context.appColors.bgElevated,
               filled: true,
               border: OutlineInputBorder(
@@ -774,7 +774,7 @@ class _TaskDetailContentState extends State<_TaskDetailContent> {
         const SizedBox(height: 8),
         if (linkedIssues.isEmpty)
           Container(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(kSpace3),
             decoration: BoxDecoration(
               color: context.appColors.bgElevated,
               borderRadius: BorderRadius.circular(8),
@@ -830,7 +830,7 @@ class _StatusChip extends StatelessWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(12),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: kSpace1),
         decoration: BoxDecoration(
           color: current ? color.withAlpha(30) : Colors.transparent,
           borderRadius: BorderRadius.circular(12),

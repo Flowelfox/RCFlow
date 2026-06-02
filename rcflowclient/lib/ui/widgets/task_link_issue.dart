@@ -104,8 +104,8 @@ class _LinkIssueDialogState extends State<_LinkIssueDialog> {
                       filled: true,
                       fillColor: context.appColors.bgElevated,
                       contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 8,
+                        horizontal: kSpace3,
+                        vertical: kSpace2,
                       ),
                       border: OutlineInputBorder(
                         borderSide: BorderSide.none,
@@ -130,7 +130,7 @@ class _LinkIssueDialogState extends State<_LinkIssueDialog> {
             const Divider(height: 1),
             if (unlinked.isEmpty)
               Padding(
-                padding: const EdgeInsets.all(24),
+                padding: const EdgeInsets.all(kSpace5),
                 child: Center(
                   child: Text(
                     'No unlinked issues available.\nSync from Linear first.',
@@ -144,7 +144,7 @@ class _LinkIssueDialogState extends State<_LinkIssueDialog> {
               )
             else if (filtered.isEmpty)
               Padding(
-                padding: const EdgeInsets.all(24),
+                padding: const EdgeInsets.all(kSpace5),
                 child: Center(
                   child: Text(
                     'No issues match your search.',
@@ -159,7 +159,7 @@ class _LinkIssueDialogState extends State<_LinkIssueDialog> {
               Flexible(
                 child: ListView.separated(
                   shrinkWrap: true,
-                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  padding: const EdgeInsets.symmetric(vertical: kSpace2),
                   itemCount: filtered.length,
                   separatorBuilder: (ctx, i) => const SizedBox(height: 0),
                   itemBuilder: (context, index) {
@@ -214,7 +214,7 @@ class _LinkIssueDialogState extends State<_LinkIssueDialog> {
               ),
             const Divider(height: 1),
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              padding: const EdgeInsets.symmetric(horizontal: kSpace4, vertical: 10),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [

@@ -15,7 +15,7 @@ class _AboutSection extends StatelessWidget {
         _SectionHeader(title: 'About', icon: Icons.info_outline),
         Container(
           width: double.infinity,
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(kSpace4),
           decoration: BoxDecoration(
             color: context.appColors.bgElevated,
             borderRadius: BorderRadius.circular(kRadiusLarge),
@@ -105,7 +105,7 @@ class _AboutSection extends StatelessWidget {
                             style: TextButton.styleFrom(
                               foregroundColor: context.appColors.textMuted,
                               padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
+                                horizontal: kSpace2,
                               ),
                               minimumSize: Size.zero,
                               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -151,7 +151,7 @@ class _AboutSection extends StatelessWidget {
                               style: TextButton.styleFrom(
                                 foregroundColor: context.appColors.accent,
                                 padding: const EdgeInsets.symmetric(
-                                  horizontal: 8,
+                                  horizontal: kSpace2,
                                 ),
                                 minimumSize: Size.zero,
                                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -192,7 +192,7 @@ class _AboutSection extends StatelessWidget {
                           onPressed: svc.checkForUpdates,
                           style: TextButton.styleFrom(
                             foregroundColor: context.appColors.textMuted,
-                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                            padding: const EdgeInsets.symmetric(horizontal: kSpace2),
                             minimumSize: Size.zero,
                             tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                           ),

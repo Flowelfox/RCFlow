@@ -6,6 +6,7 @@ import '../../../theme.dart';
 import '../../utils/link_utils.dart';
 import '../../utils/markdown_copy_menu.dart';
 import '../../utils/selectable_code_block_builder.dart';
+import '../../../theme/spacing.dart';
 
 class AssistantBubble extends StatefulWidget {
   final DisplayMessage message;
@@ -94,7 +95,7 @@ class _AssistantBubbleState extends State<AssistantBubble> {
           color: context.appColors.toolBg,
           borderRadius: BorderRadius.circular(8),
         ),
-        codeblockPadding: const EdgeInsets.all(12),
+        codeblockPadding: const EdgeInsets.all(kSpace3),
         a: TextStyle(color: context.appColors.accentLight),
         listBullet: TextStyle(
           color: context.appColors.assistantText,

@@ -169,8 +169,8 @@ class _HotkeyRow extends StatelessWidget {
                   onTap: onStartRecording,
                   child: Container(
                     padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 4,
+                      horizontal: kSpace2,
+                      vertical: kSpace1,
                     ),
                     decoration: BoxDecoration(
                       color: context.appColors.bgElevated,
@@ -318,7 +318,7 @@ class _HotkeyRecorderState extends State<_HotkeyRecorder> {
       focusNode: _focusNode,
       onKeyEvent: _onKeyEvent,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: kSpace2, vertical: kSpace1),
         decoration: BoxDecoration(
           color: context.appColors.bgElevated,
           borderRadius: BorderRadius.circular(kRadiusSmall),

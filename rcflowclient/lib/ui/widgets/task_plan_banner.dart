@@ -16,7 +16,7 @@ class _PlanBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: kSpace3, vertical: 10),
       decoration: BoxDecoration(
         color: _green.withAlpha(18),
         borderRadius: BorderRadius.circular(kRadiusMedium),

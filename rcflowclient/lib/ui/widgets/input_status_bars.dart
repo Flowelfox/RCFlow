@@ -83,7 +83,7 @@ class _SubprocessStatusBarState extends State<_SubprocessStatusBar> {
             child: GestureDetector(
               onTap: _killing ? null : _onKill,
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                padding: const EdgeInsets.symmetric(horizontal: kSpace2, vertical: 3),
                 decoration: BoxDecoration(
                   color: _killing
                       ? context.appColors.bgElevated

@@ -13,6 +13,7 @@ import 'package:provider/provider.dart';
 
 import '../../models/ws_messages.dart';
 import '../../state/pane_state.dart';
+import '../../theme/spacing.dart';
 
 class QueuedMessagesBar extends StatelessWidget {
   const QueuedMessagesBar({super.key});
@@ -26,8 +27,8 @@ class QueuedMessagesBar extends StatelessWidget {
     }
     final theme = Theme.of(context);
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      margin: const EdgeInsets.symmetric(horizontal: kSpace2, vertical: kSpace1),
+      padding: const EdgeInsets.symmetric(horizontal: kSpace2, vertical: 6),
       decoration: BoxDecoration(
         color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.6),
         borderRadius: BorderRadius.circular(8),

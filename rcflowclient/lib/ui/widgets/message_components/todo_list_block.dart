@@ -33,7 +33,7 @@ class TodoListBlock extends StatelessWidget {
     final progress = total > 0 ? completed / total : 0.0;
 
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.symmetric(vertical: kSpace1),
       child: Container(
         decoration: BoxDecoration(
           color: context.appColors.toolBg,
@@ -43,7 +43,7 @@ class TodoListBlock extends StatelessWidget {
         clipBehavior: Clip.antiAlias,
         child: Container(
           color: Colors.transparent,
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          padding: const EdgeInsets.symmetric(horizontal: kSpace3, vertical: 10),
           child: Row(
             children: [
               Icon(

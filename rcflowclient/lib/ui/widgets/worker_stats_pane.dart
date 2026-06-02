@@ -14,6 +14,7 @@ import '../../services/worker_connection.dart';
 import '../../state/statistics_pane_state.dart';
 import '../../theme.dart';
 import 'statistics_panel/telemetry_chart.dart';
+import '../../theme/spacing.dart';
 
 /// Full-screen dialog body showing worker-level telemetry.
 ///
@@ -119,7 +120,7 @@ class _WorkerFilterBar extends StatelessWidget {
         color: context.appColors.bgSurface,
         border: Border(bottom: BorderSide(color: context.appColors.divider)),
       ),
-      padding: const EdgeInsets.symmetric(horizontal: 8),
+      padding: const EdgeInsets.symmetric(horizontal: kSpace2),
       child: Row(
         children: [
           Expanded(
@@ -232,7 +233,7 @@ class _WorkerChartsBody extends StatelessWidget {
     }
 
     return ListView(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(kSpace3),
       children: [
         if (workerSummary != null) ...[
           _WorkerSummaryCard(summary: workerSummary!),
@@ -482,7 +483,7 @@ class _ErrorView extends StatelessWidget {
   Widget build(BuildContext context) {
     return Center(
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(kSpace4),
         child: Text(
           error,
           style: TextStyle(color: context.appColors.textMuted, fontSize: 11),
@@ -507,7 +508,7 @@ Future<void> showWorkerStatsDialog(
     context: context,
     builder: (ctx) => Dialog(
       backgroundColor: ctx.appColors.bgBase,
-      insetPadding: const EdgeInsets.all(24),
+      insetPadding: const EdgeInsets.all(kSpace5),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: SizedBox(
         width: 640,
@@ -517,7 +518,7 @@ Future<void> showWorkerStatsDialog(
             // Dialog header
             Container(
               height: 48,
-              padding: const EdgeInsets.symmetric(horizontal: 16),
+              padding: const EdgeInsets.symmetric(horizontal: kSpace4),
               decoration: BoxDecoration(
                 color: ctx.appColors.bgSurface,
                 borderRadius: const BorderRadius.vertical(

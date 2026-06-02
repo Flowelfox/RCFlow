@@ -62,7 +62,7 @@ class _PermissionRequestCardState extends State<PermissionRequestCard> {
     final riskLevel = metadata['risk_level'] as String? ?? 'medium';
 
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.symmetric(vertical: kSpace2),
       child: Container(
         width: double.infinity,
         padding: const EdgeInsets.all(14),
@@ -115,7 +115,7 @@ class _PermissionRequestCardState extends State<PermissionRequestCard> {
             ),
             // Risk badge
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              padding: const EdgeInsets.symmetric(horizontal: kSpace2, vertical: 2),
               decoration: BoxDecoration(
                 color: _riskBgColor(context, riskLevel).withAlpha(120),
                 borderRadius: BorderRadius.circular(kRadiusSmall),
@@ -220,7 +220,7 @@ class _PermissionRequestCardState extends State<PermissionRequestCard> {
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(kRadiusMedium),
                   ),
-                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  padding: const EdgeInsets.symmetric(vertical: kSpace3),
                 ),
                 child: const Text(
                   'Deny',
@@ -237,7 +237,7 @@ class _PermissionRequestCardState extends State<PermissionRequestCard> {
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(kRadiusMedium),
                   ),
-                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  padding: const EdgeInsets.symmetric(vertical: kSpace3),
                 ),
                 child: const Text(
                   'Allow',

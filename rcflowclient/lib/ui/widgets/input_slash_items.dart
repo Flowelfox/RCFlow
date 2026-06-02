@@ -45,7 +45,7 @@ class _SlashCommandItem extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: kSpace3, vertical: kSpace2),
         color: selected ? context.appColors.bgOverlay : Colors.transparent,
         child: Row(
           children: [

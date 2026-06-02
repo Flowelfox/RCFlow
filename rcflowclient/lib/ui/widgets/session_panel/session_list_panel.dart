@@ -246,7 +246,7 @@ class _SessionListPanelState extends State<SessionListPanel>
                   tabAlignment: TabAlignment.start,
                   isScrollable: true,
                   padding: const EdgeInsets.only(left: 12),
-                  labelPadding: const EdgeInsets.symmetric(horizontal: 8),
+                  labelPadding: const EdgeInsets.symmetric(horizontal: kSpace2),
                   tabs: const [
                     Tab(text: 'Workers'),
                     Tab(text: 'Tasks'),
@@ -291,8 +291,8 @@ class _SessionListPanelState extends State<SessionListPanel>
                 // Bottom bar: Settings
                 Padding(
                   padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 8,
+                    horizontal: kSpace3,
+                    vertical: kSpace2,
                   ),
                   child: InkWell(
                     key: onboarding.settingsButtonKey,
@@ -300,7 +300,7 @@ class _SessionListPanelState extends State<SessionListPanel>
                     onTap: () => showSettingsMenu(context),
                     child: Padding(
                       padding: EdgeInsets.symmetric(
-                        horizontal: 8,
+                        horizontal: kSpace2,
                         vertical: 10,
                       ),
                       child: Row(
@@ -460,7 +460,7 @@ class _SessionListPanelState extends State<SessionListPanel>
     final count = _selectedSessionIds.length;
     return Container(
       color: context.appColors.accent.withAlpha(18),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 5),
+      padding: const EdgeInsets.symmetric(horizontal: kSpace4, vertical: 5),
       child: Row(
         children: [
           Icon(
@@ -957,7 +957,7 @@ class _SessionListPanelState extends State<SessionListPanel>
                                 filled: true,
                                 fillColor: context.appColors.bgElevated,
                                 contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 8,
+                                  horizontal: kSpace2,
                                   vertical: 0,
                                 ),
                                 border: OutlineInputBorder(
@@ -1168,7 +1168,7 @@ class _SidebarNotifications extends StatelessWidget {
           children: [
             const Divider(height: 1),
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              padding: const EdgeInsets.symmetric(horizontal: kSpace2, vertical: 6),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -1222,8 +1222,8 @@ class _UpdateBanner extends StatelessWidget {
               onTap: () => showSettingsMenu(context),
               child: Padding(
                 padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 8,
+                  horizontal: kSpace3,
+                  vertical: kSpace2,
                 ),
                 child: Row(
                   children: [
@@ -1280,7 +1280,7 @@ class _SessionStatusFilterChip extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        padding: const EdgeInsets.symmetric(horizontal: kSpace2, vertical: 3),
         decoration: BoxDecoration(
           color: selected ? color.withAlpha(40) : Colors.transparent,
           borderRadius: BorderRadius.circular(kRadiusSmall),

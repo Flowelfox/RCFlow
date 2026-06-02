@@ -348,7 +348,7 @@ class _SoundOption extends StatelessWidget {
         InkWell(
           onTap: onTap,
           child: Padding(
-            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            padding: EdgeInsets.symmetric(horizontal: kSpace3, vertical: 10),
             child: Row(
               children: [
                 Icon(

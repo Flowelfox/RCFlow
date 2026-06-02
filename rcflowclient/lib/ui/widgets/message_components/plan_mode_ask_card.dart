@@ -13,7 +13,7 @@ class PlanModeAskCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: EdgeInsets.symmetric(vertical: 8),
+      padding: EdgeInsets.symmetric(vertical: kSpace2),
       child: Container(
         width: double.infinity,
         padding: EdgeInsets.all(14),
@@ -71,7 +71,7 @@ class PlanModeAskCard extends StatelessWidget {
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(kRadiusMedium),
                   ),
-                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  padding: const EdgeInsets.symmetric(vertical: kSpace3),
                 ),
                 child: const Text(
                   'Deny',
@@ -93,7 +93,7 @@ class PlanModeAskCard extends StatelessWidget {
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(kRadiusMedium),
                   ),
-                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  padding: const EdgeInsets.symmetric(vertical: kSpace3),
                 ),
                 child: const Text(
                   'Allow',

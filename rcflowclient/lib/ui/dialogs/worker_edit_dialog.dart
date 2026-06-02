@@ -707,7 +707,7 @@ class _WorkerEditDialogState extends State<_WorkerEditDialog>
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(kRadiusMedium),
               ),
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: kSpace3),
             ),
           ),
         ],

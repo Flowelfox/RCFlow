@@ -31,7 +31,7 @@ class _PlanReviewAskCardState extends State<PlanReviewAskCard> {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: EdgeInsets.symmetric(vertical: 8),
+      padding: EdgeInsets.symmetric(vertical: kSpace2),
       child: Container(
         width: double.infinity,
         padding: EdgeInsets.all(14),
@@ -113,7 +113,7 @@ class _PlanReviewAskCardState extends State<PlanReviewAskCard> {
                     color: context.appColors.toolBg,
                     borderRadius: BorderRadius.circular(kRadiusSmall),
                   ),
-                  codeblockPadding: EdgeInsets.all(8),
+                  codeblockPadding: EdgeInsets.all(kSpace2),
                 ),
               ),
             ),
@@ -134,7 +134,7 @@ class _PlanReviewAskCardState extends State<PlanReviewAskCard> {
               hintText: 'Describe what to change...',
               isDense: true,
               contentPadding: EdgeInsets.symmetric(
-                horizontal: 12,
+                horizontal: kSpace3,
                 vertical: 10,
               ),
               fillColor: context.appColors.bgOverlay,
@@ -157,7 +157,7 @@ class _PlanReviewAskCardState extends State<PlanReviewAskCard> {
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(kRadiusMedium),
                     ),
-                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    padding: const EdgeInsets.symmetric(vertical: kSpace3),
                   ),
                   child: const Text(
                     'Cancel',
@@ -183,7 +183,7 @@ class _PlanReviewAskCardState extends State<PlanReviewAskCard> {
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(kRadiusMedium),
                     ),
-                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    padding: const EdgeInsets.symmetric(vertical: kSpace3),
                   ),
                   child: const Text(
                     'Send Feedback',
@@ -205,7 +205,7 @@ class _PlanReviewAskCardState extends State<PlanReviewAskCard> {
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(kRadiusMedium),
                     ),
-                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    padding: const EdgeInsets.symmetric(vertical: kSpace3),
                   ),
                   child: const Text(
                     'Edit',
@@ -227,7 +227,7 @@ class _PlanReviewAskCardState extends State<PlanReviewAskCard> {
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(kRadiusMedium),
                     ),
-                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    padding: const EdgeInsets.symmetric(vertical: kSpace3),
                   ),
                   child: const Text(
                     'Approve',

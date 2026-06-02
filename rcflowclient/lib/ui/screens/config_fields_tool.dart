@@ -63,7 +63,7 @@ class _ToolSecretFieldState extends State<_ToolSecretField> {
                   }),
                   style: TextButton.styleFrom(
                     foregroundColor: context.appColors.accent,
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: kSpace2),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(kRadiusSmall),
                     ),
@@ -97,7 +97,7 @@ class _ToolSecretFieldState extends State<_ToolSecretField> {
                 borderSide: BorderSide.none,
                 borderRadius: BorderRadius.circular(8),
               ),
-              contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: kSpace2),
               suffixIcon: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -173,7 +173,7 @@ class _ToolActionButton extends StatelessWidget {
           foregroundColor: accent
               ? Colors.white
               : context.appColors.textSecondary,
-          padding: EdgeInsets.symmetric(horizontal: 12),
+          padding: EdgeInsets.symmetric(horizontal: kSpace3),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         ),
         child: loading

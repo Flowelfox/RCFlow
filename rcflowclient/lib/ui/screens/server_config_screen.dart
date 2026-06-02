@@ -939,7 +939,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
     if (widget.sectionFilter != null) {
       return SingleChildScrollView(
         controller: widget.scrollController,
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(kSpace4),
         child: _buildSectionContent(widget.sectionFilter!),
       );
     }
@@ -957,7 +957,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
             ),
           ),
           child: ListView(
-            padding: const EdgeInsets.symmetric(vertical: 8),
+            padding: const EdgeInsets.symmetric(vertical: kSpace2),
             children: [
               for (final s in _sectionNames)
                 if (s == 'Tools') ...[
@@ -1006,7 +1006,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
         // Content
         Expanded(
           child: Padding(
-            padding: const EdgeInsets.all(24),
+            padding: const EdgeInsets.all(kSpace5),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -1034,8 +1034,8 @@ class ServerConfigContentState extends State<ServerConfigContent> {
                             backgroundColor: context.appColors.accent,
                             foregroundColor: Colors.white,
                             padding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 8,
+                              horizontal: kSpace4,
+                              vertical: kSpace2,
                             ),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(kRadiusMedium),
@@ -1935,7 +1935,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
                                   fontSize: 12,
                                 ),
                                 contentPadding: EdgeInsets.symmetric(
-                                  horizontal: 8,
+                                  horizontal: kSpace2,
                                   vertical: 6,
                                 ),
                                 border: OutlineInputBorder(
@@ -2030,7 +2030,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
       children: [
         if (loading && fields == null)
           Padding(
-            padding: EdgeInsets.symmetric(vertical: 8),
+            padding: EdgeInsets.symmetric(vertical: kSpace2),
             child: Center(
               child: SizedBox(
                 width: 16,
@@ -2044,7 +2044,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
           )
         else if (error != null && fields == null)
           Padding(
-            padding: EdgeInsets.symmetric(vertical: 4),
+            padding: EdgeInsets.symmetric(vertical: kSpace1),
             child: Text(
               error,
               style: TextStyle(
@@ -2267,7 +2267,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
               borderSide: BorderSide.none,
               borderRadius: BorderRadius.circular(8),
             ),
-            contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: kSpace2),
           ),
         );
       case 'model_select':
@@ -2323,7 +2323,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
               borderSide: BorderSide.none,
               borderRadius: BorderRadius.circular(8),
             ),
-            contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: kSpace2),
           ),
         );
     }

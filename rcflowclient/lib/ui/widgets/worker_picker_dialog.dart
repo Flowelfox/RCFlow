@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import '../../state/app_state.dart';
 import '../../theme.dart';
+import '../../theme/spacing.dart';
 
 /// Shows a centered popup listing workers.
 /// Returns the selected worker ID, or null if dismissed.
@@ -153,7 +154,7 @@ class _WorkerPickerDialogState extends State<_WorkerPickerDialog> {
               // Worker list
               if (!hasConnected)
                 Padding(
-                  padding: const EdgeInsets.all(24),
+                  padding: const EdgeInsets.all(kSpace5),
                   child: Column(
                     children: [
                       Icon(
@@ -185,7 +186,7 @@ class _WorkerPickerDialogState extends State<_WorkerPickerDialog> {
                   constraints: const BoxConstraints(maxHeight: 300),
                   child: ListView.builder(
                     shrinkWrap: true,
-                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    padding: const EdgeInsets.symmetric(vertical: kSpace2),
                     itemCount: _options.length,
                     itemBuilder: (ctx, index) {
                       final option = _options[index];
@@ -253,7 +254,7 @@ class _WorkerPickerDialogState extends State<_WorkerPickerDialog> {
               Padding(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 20,
-                  vertical: 12,
+                  vertical: kSpace3,
                 ),
                 child: Row(
                   children: [
