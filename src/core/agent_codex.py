@@ -209,7 +209,7 @@ class CodexAgentMixin:
                 "display_name": session.subprocess_display_name,
                 "working_directory": session.subprocess_working_directory,
                 "current_tool": None,
-                "started_at": session.subprocess_started_at.isoformat(),
+                "started_at": session.subprocess_started_at_iso,
             },
         )
 
@@ -283,7 +283,7 @@ class CodexAgentMixin:
                                 "display_name": session.subprocess_display_name,
                                 "working_directory": session.subprocess_working_directory,
                                 "current_tool": "command_execution",
-                                "started_at": session.subprocess_started_at.isoformat(),
+                                "started_at": session.subprocess_started_at_iso,
                             },
                         )
                     # Live worktree-badge tracking — same machinery the
@@ -317,7 +317,7 @@ class CodexAgentMixin:
                                 "display_name": session.subprocess_display_name,
                                 "working_directory": session.subprocess_working_directory,
                                 "current_tool": "file_change",
-                                "started_at": session.subprocess_started_at.isoformat(),
+                                "started_at": session.subprocess_started_at_iso,
                             },
                         )
                 elif item_type == "mcp_tool_call":
@@ -341,7 +341,7 @@ class CodexAgentMixin:
                                 "display_name": session.subprocess_display_name,
                                 "working_directory": session.subprocess_working_directory,
                                 "current_tool": mcp_tool_name,
-                                "started_at": session.subprocess_started_at.isoformat(),
+                                "started_at": session.subprocess_started_at_iso,
                             },
                         )
 
@@ -414,7 +414,7 @@ class CodexAgentMixin:
                                 "display_name": session.subprocess_display_name,
                                 "working_directory": session.subprocess_working_directory,
                                 "current_tool": None,
-                                "started_at": session.subprocess_started_at.isoformat(),
+                                "started_at": session.subprocess_started_at_iso,
                             },
                         )
                 elif item_type == "file_change":
@@ -442,7 +442,7 @@ class CodexAgentMixin:
                                 "display_name": session.subprocess_display_name,
                                 "working_directory": session.subprocess_working_directory,
                                 "current_tool": None,
-                                "started_at": session.subprocess_started_at.isoformat(),
+                                "started_at": session.subprocess_started_at_iso,
                             },
                         )
                 elif item_type == "mcp_tool_call":
@@ -472,7 +472,7 @@ class CodexAgentMixin:
                                 "display_name": session.subprocess_display_name,
                                 "working_directory": session.subprocess_working_directory,
                                 "current_tool": None,
-                                "started_at": session.subprocess_started_at.isoformat(),
+                                "started_at": session.subprocess_started_at_iso,
                             },
                         )
 
@@ -614,7 +614,7 @@ class CodexAgentMixin:
                 "display_name": session.subprocess_display_name,
                 "working_directory": session.subprocess_working_directory,
                 "current_tool": None,
-                "started_at": session.subprocess_started_at.isoformat(),
+                "started_at": session.subprocess_started_at_iso,
             },
         )
 

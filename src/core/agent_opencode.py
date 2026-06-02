@@ -154,7 +154,7 @@ class OpenCodeAgentMixin:
                 "display_name": session.subprocess_display_name,
                 "working_directory": session.subprocess_working_directory,
                 "current_tool": None,
-                "started_at": session.subprocess_started_at.isoformat(),
+                "started_at": session.subprocess_started_at_iso,
             },
         )
 
@@ -249,7 +249,7 @@ class OpenCodeAgentMixin:
                             "display_name": session.subprocess_display_name,
                             "working_directory": session.subprocess_working_directory,
                             "current_tool": tool_name,
-                            "started_at": session.subprocess_started_at.isoformat(),
+                            "started_at": session.subprocess_started_at_iso,
                         },
                     )
                 # Live worktree-badge tracking for OpenCode's bash tool.
@@ -290,7 +290,7 @@ class OpenCodeAgentMixin:
                                 "display_name": session.subprocess_display_name,
                                 "working_directory": session.subprocess_working_directory,
                                 "current_tool": None,
-                                "started_at": session.subprocess_started_at.isoformat(),
+                                "started_at": session.subprocess_started_at_iso,
                             },
                         )
 
@@ -445,7 +445,7 @@ class OpenCodeAgentMixin:
                 "display_name": session.subprocess_display_name,
                 "working_directory": session.subprocess_working_directory,
                 "current_tool": None,
-                "started_at": session.subprocess_started_at.isoformat(),
+                "started_at": session.subprocess_started_at_iso,
             },
         )
 

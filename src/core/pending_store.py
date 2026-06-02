@@ -182,10 +182,7 @@ class SessionPendingMessageStore:
                 "updated_at": now.isoformat(),
             },
         )
-        idx = session._find_pending_index(queued_id)
-        if idx is None:
-            return None
-        return session.pending_user_messages[idx]
+        return next((p for p in session.pending_user_messages if p.queued_id == queued_id), None)
 
     async def cancel(self, session: ActiveSession, *, queued_id: str) -> PendingMessage | None:
         """Remove a queued message by id. Returns the popped entry or None."""
