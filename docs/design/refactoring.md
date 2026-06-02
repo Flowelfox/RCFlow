@@ -57,9 +57,8 @@ Current floors: Python **54%**, Flutter **14%**.
 
 ## Phase 5 — Flutter State / Transport Split
 
-🔄 in progress. `AppState`, `PaneState`, `WebSocketService` get carved into
-per-feature `ChangeNotifier`s and a `WebSocketTransport` /
-`MessageDispatcher` / `lib/services/rest/*` trio.
+✅ done. `AppState`, `PaneState`, `WebSocketService` carved into
+per-feature stores and a `WebSocketTransport` / `lib/services/rest/*` split.
 
 **Step 1 (REST extraction) — ✅ done.** The 63 `Future`-returning HTTP methods
 (plus the `_escapeFilename` / `_extractDetail` static helpers and the private
@@ -86,7 +85,7 @@ six worktree/project-artifact HTTP methods in step 1 — those moved into
 state. `websocket_service.dart` 767 → 521 lines; flutter analyze clean, all
 479 client tests pass.
 
-**Step 3 (AppState / PaneState → feature stores) — in progress.** Every cleanly
+**Step 3 (AppState / PaneState → feature stores) — ✅ done.** Every cleanly
 separable cluster on `AppState` is carved out, with `AppState` owning each and
 delegating so the read-sites and Provider tree are unchanged:
 
