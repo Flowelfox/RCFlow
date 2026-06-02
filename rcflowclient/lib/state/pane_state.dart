@@ -11,6 +11,7 @@ import 'package:flutter/foundation.dart';
 
 import '../models/app_notification.dart';
 import '../models/scheduled_wake.dart';
+import 'pane_queue_state.dart';
 import 'pane_view_target.dart';
 import '../models/session_info.dart';
 import '../models/split_tree.dart';
@@ -488,8 +489,8 @@ class PaneState extends ChangeNotifier {
   // ``message_dequeued`` / ``message_queued_updated`` events and the
   // ``queued_messages`` snapshot on ``session_update``.  See
   // ``Queued User Messages`` in ``docs/design/sessions.md``.
-  final List<QueuedMessage> _queuedMessages = [];
-  List<QueuedMessage> get queuedMessages => List.unmodifiable(_queuedMessages);
+  final PaneQueueState _queue = PaneQueueState();
+  List<QueuedMessage> get queuedMessages => _queue.snapshot;
 
   // Todo list state (from TodoWrite tool calls)
   List<TodoItem> _todos = [];
@@ -850,7 +851,7 @@ class PaneState extends ChangeNotifier {
     _activeRightPanel = null;
     _resetPagination();
     _pendingLocalUserMessages = 0;
-    _queuedMessages.clear();
+    _queue.clear();
     _sessionEnded = false;
     _sessionPaused = false;
     _pausedReason = null;
@@ -938,7 +939,7 @@ class PaneState extends ChangeNotifier {
     _todos = [];
     _resetPagination();
     _pendingLocalUserMessages = 0;
-    _queuedMessages.clear();
+    _queue.clear();
     _runningSubprocess = null;
     _activeMonitors.clear();
 
@@ -976,7 +977,7 @@ class PaneState extends ChangeNotifier {
     _runningSubprocess = null;
     _activeMonitors.clear();
     _pendingLocalUserMessages = 0;
-    _queuedMessages.clear();
+    _queue.clear();
     _messages.clear();
     _todos = [];
     _activeRightPanel = null;
@@ -1018,7 +1019,7 @@ class PaneState extends ChangeNotifier {
     _runningSubprocess = null;
     _activeMonitors.clear();
     _pendingLocalUserMessages = 0;
-    _queuedMessages.clear();
+    _queue.clear();
     _pendingInputText = null;
     _selectedToolMention = null;
     _selectedProjectName = null;
@@ -1061,7 +1062,7 @@ class PaneState extends ChangeNotifier {
     _todos = [];
     if (_activeRightPanel == 'todo') _activeRightPanel = null;
     _pendingLocalUserMessages = 0;
-    _queuedMessages.clear();
+    _queue.clear();
     notifyListeners();
   }
 
@@ -1694,10 +1695,10 @@ class PaneState extends ChangeNotifier {
       }
     }
     final now = DateTime.now();
-    _upsertQueued(
+    _queue.upsert(
       QueuedMessage(
         queuedId: queuedId,
-        position: _queuedMessages.length,
+        position: _queue.length,
         content: content,
         displayContent: content,
         submittedAt: now,
@@ -1708,75 +1709,51 @@ class PaneState extends ChangeNotifier {
     notifyListeners();
   }
 
-  void _upsertQueued(QueuedMessage entry) {
-    final idx = _queuedMessages.indexWhere((q) => q.queuedId == entry.queuedId);
-    if (idx >= 0) {
-      _queuedMessages[idx].position = entry.position;
-      _queuedMessages[idx].content = entry.content;
-      _queuedMessages[idx].displayContent = entry.displayContent;
-      _queuedMessages[idx].submittedAt = entry.submittedAt;
-      _queuedMessages[idx].updatedAt = entry.updatedAt;
-      _queuedMessages[idx].pendingLocalEcho = false;
-    } else {
-      _queuedMessages.add(entry);
-    }
-    _queuedMessages.sort((a, b) => a.position.compareTo(b.position));
-  }
-
   void applyMessageQueued(Map<String, dynamic> msg) {
     final queuedId = msg['queued_id'] as String?;
     if (queuedId == null) return;
-    final entry = QueuedMessage(
-      queuedId: queuedId,
-      position: (msg['position'] as num?)?.toInt() ?? _queuedMessages.length,
-      content: msg['content'] as String? ?? '',
-      displayContent:
-          msg['display_content'] as String? ?? msg['content'] as String? ?? '',
-      submittedAt:
-          DateTime.tryParse(msg['submitted_at'] as String? ?? '') ??
-          DateTime.now(),
-      updatedAt:
-          DateTime.tryParse(msg['submitted_at'] as String? ?? '') ??
-          DateTime.now(),
+    _queue.upsert(
+      QueuedMessage(
+        queuedId: queuedId,
+        position: (msg['position'] as num?)?.toInt() ?? _queue.length,
+        content: msg['content'] as String? ?? '',
+        displayContent:
+            msg['display_content'] as String? ??
+            msg['content'] as String? ??
+            '',
+        submittedAt:
+            DateTime.tryParse(msg['submitted_at'] as String? ?? '') ??
+            DateTime.now(),
+        updatedAt:
+            DateTime.tryParse(msg['submitted_at'] as String? ?? '') ??
+            DateTime.now(),
+      ),
     );
-    _upsertQueued(entry);
     notifyListeners();
   }
 
   void applyMessageDequeued(String queuedId) {
-    final idx = _queuedMessages.indexWhere((q) => q.queuedId == queuedId);
-    if (idx < 0) return;
-    _queuedMessages.removeAt(idx);
-    for (var i = 0; i < _queuedMessages.length; i++) {
-      _queuedMessages[i].position = i;
-    }
+    if (!_queue.dequeue(queuedId)) return;
     notifyListeners();
   }
 
   void applyMessageQueuedUpdated(Map<String, dynamic> msg) {
     final queuedId = msg['queued_id'] as String?;
     if (queuedId == null) return;
-    final idx = _queuedMessages.indexWhere((q) => q.queuedId == queuedId);
-    if (idx < 0) return;
-    final entry = _queuedMessages[idx];
-    entry.content = msg['content'] as String? ?? entry.content;
-    entry.displayContent =
-        msg['display_content'] as String? ?? entry.displayContent;
-    entry.updatedAt =
-        DateTime.tryParse(msg['updated_at'] as String? ?? '') ??
-        entry.updatedAt;
-    notifyListeners();
+    final found = _queue.update(
+      queuedId,
+      content: msg['content'] as String?,
+      displayContent: msg['display_content'] as String?,
+      updatedAt: DateTime.tryParse(msg['updated_at'] as String? ?? ''),
+    );
+    if (found) notifyListeners();
   }
 
   /// Replace the local queue with the authoritative server snapshot.
   void applyQueueSnapshot(List<Map<String, dynamic>> snapshot) {
-    final incoming = [
+    _queue.replaceSnapshot([
       for (final raw in snapshot) QueuedMessage.fromSnapshot(raw),
-    ];
-    incoming.sort((a, b) => a.position.compareTo(b.position));
-    _queuedMessages
-      ..clear()
-      ..addAll(incoming);
+    ]);
     notifyListeners();
   }
 
@@ -1816,11 +1793,7 @@ class PaneState extends ChangeNotifier {
   void editQueuedMessage(String queuedId, String content) {
     final sid = _sessionId;
     if (sid == null) return;
-    final idx = _queuedMessages.indexWhere((q) => q.queuedId == queuedId);
-    if (idx < 0) return;
-    _queuedMessages[idx].content = content;
-    _queuedMessages[idx].displayContent = content;
-    _queuedMessages[idx].updatedAt = DateTime.now();
+    if (!_queue.editText(queuedId, content, DateTime.now())) return;
     notifyListeners();
     _ws?.editQueued(sid, queuedId, content);
   }
