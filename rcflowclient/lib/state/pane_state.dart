@@ -11,6 +11,7 @@ import 'package:flutter/foundation.dart';
 
 import '../models/app_notification.dart';
 import '../models/scheduled_wake.dart';
+import 'pane_view_target.dart';
 import '../models/session_info.dart';
 import '../models/split_tree.dart';
 import '../models/subprocess_info.dart';
@@ -157,96 +158,80 @@ class PaneState extends ChangeNotifier {
   String? _selectedToolMention;
   String? get selectedToolMention => _selectedToolMention;
 
-  // Absolute path of the worktree the user pre-selected before the first message
-  // is sent.  Passed as selected_worktree_path in the first sendPrompt call and
-  // then cleared (the session's worktree selection lives on the backend afterward).
-  // Also cleared when the user starts a new chat or switches sessions.
-  String? _pendingWorktreePath;
-  String? get pendingWorktreePath => _pendingWorktreePath;
+  // What non-chat content this pane shows + pending first-prompt selections.
+  // Storage lives on the composed [PaneViewTarget]; PaneState keeps the notify
+  // responsibility and re-exposes the historical accessors.
+  final PaneViewTarget _view = PaneViewTarget();
+
+  String? get pendingWorktreePath => _view.pendingWorktreePath;
 
   void setPendingWorktreePath(String? path) {
-    _pendingWorktreePath = path;
+    _view.pendingWorktreePath = path;
     notifyListeners();
   }
 
-  // Task ID to associate with the first prompt of a new session. Sent as
-  // task_id in the first sendPrompt call so the backend stores it in
-  // session.metadata["primary_task_id"] and injects the plan context.
-  // Cleared after the first send so subsequent messages in the same session
-  // do not re-send it.
-  String? _pendingTaskId;
-  String? get pendingTaskId => _pendingTaskId;
+  String? get pendingTaskId => _view.pendingTaskId;
 
   void setPendingTaskId(String? taskId) {
-    _pendingTaskId = taskId;
+    _view.pendingTaskId = taskId;
     notifyListeners();
   }
 
   void _clearPendingTaskId() {
-    _pendingTaskId = null;
+    _view.pendingTaskId = null;
   }
 
-  // Task pane state (when pane shows a task detail view)
-  String? _taskId;
-  String? get taskId => _taskId;
+  String? get taskId => _view.taskId;
 
   void setTaskId(String? taskId) {
-    _taskId = taskId;
+    _view.taskId = taskId;
     notifyListeners();
   }
 
   void clearTaskId() {
-    _taskId = null;
+    _view.taskId = null;
     notifyListeners();
   }
 
-  // Artifact pane state (when pane shows an artifact detail view)
-  String? _artifactId;
-  String? get artifactId => _artifactId;
+  String? get artifactId => _view.artifactId;
 
   void setArtifactId(String? artifactId) {
-    _artifactId = artifactId;
+    _view.artifactId = artifactId;
     notifyListeners();
   }
 
   void clearArtifactId() {
-    _artifactId = null;
+    _view.artifactId = null;
     notifyListeners();
   }
 
-  // Linear issue pane state (when pane shows a Linear issue detail view)
-  String? _linearIssueId;
-  String? get linearIssueId => _linearIssueId;
+  String? get linearIssueId => _view.linearIssueId;
 
   void setLinearIssueId(String? linearIssueId) {
-    _linearIssueId = linearIssueId;
+    _view.linearIssueId = linearIssueId;
     notifyListeners();
   }
 
   void clearLinearIssueId() {
-    _linearIssueId = null;
+    _view.linearIssueId = null;
     notifyListeners();
   }
 
-  // Worker settings pane state (when pane shows managed tool plugin settings)
-  String? _workerSettingsTool;
-  String? _workerSettingsSection;
-
   /// The managed tool whose settings are displayed (``"claude_code"``, ``"codex"``, or ``"opencode"``).
-  String? get workerSettingsTool => _workerSettingsTool;
+  String? get workerSettingsTool => _view.workerSettingsTool;
 
   /// The settings sub-section currently shown (e.g. ``"plugins"``).
-  String? get workerSettingsSection => _workerSettingsSection;
+  String? get workerSettingsSection => _view.workerSettingsSection;
 
   void setWorkerSettings(String toolName, {String section = 'plugins'}) {
-    _workerSettingsTool = toolName;
-    _workerSettingsSection = section;
+    _view.workerSettingsTool = toolName;
+    _view.workerSettingsSection = section;
     notifyListeners();
   }
 
   void clearWorkerSettings() {
-    _workerSettingsTool = null;
-    _workerSettingsSection = null;
+    _view.workerSettingsTool = null;
+    _view.workerSettingsSection = null;
     notifyListeners();
   }
 
@@ -283,9 +268,8 @@ class PaneState extends ChangeNotifier {
   Map<String, DisplayMessage> get activeMonitors => _activeMonitors;
 
   /// All currently-live monitor blocks for this pane, in start order.
-  List<DisplayMessage> get liveMonitors => _activeMonitors.values
-      .where((m) => !m.finished)
-      .toList(growable: false);
+  List<DisplayMessage> get liveMonitors =>
+      _activeMonitors.values.where((m) => !m.finished).toList(growable: false);
 
   /// Hard cap on monitor events retained per block.  Older entries are
   /// dropped while ``monitorTotalEvents`` keeps the true count.
@@ -368,7 +352,8 @@ class PaneState extends ChangeNotifier {
     final plucks = <String, dynamic>{
       if (_selectedToolMention != null) 'agent': _selectedToolMention,
       if (_selectedProjectName != null) 'project': _selectedProjectName,
-      if (_pendingWorktreePath != null) 'worktree': _pendingWorktreePath,
+      if (_view.pendingWorktreePath != null)
+        'worktree': _view.pendingWorktreePath,
     };
     if (plucks.isNotEmpty) {
       _host.saveDraftPlucks(key, plucks);
@@ -401,8 +386,7 @@ class PaneState extends ChangeNotifier {
     // the backend returns agentType=null), fall back to the agent saved in the
     // session's draft pluck.  This keeps the chip populated after navigation.
     if (_selectedToolMention == null) {
-      final savedAgent =
-          _host.getDraftPlucks(sessionId)?['agent'] as String?;
+      final savedAgent = _host.getDraftPlucks(sessionId)?['agent'] as String?;
       if (savedAgent != null) {
         _selectedToolMention = kAgentMentionNames[savedAgent] ?? savedAgent;
         notifyListeners();
@@ -416,9 +400,9 @@ class PaneState extends ChangeNotifier {
       // Backend wins if it has content and its timestamp is newer than the
       // local cache (or the local cache has no timestamp, meaning it predates
       // this feature or was never written by this client).
-      final useRemote = remote.content.isNotEmpty &&
-          (local.cachedAt == null ||
-              remote.updatedAt.isAfter(local.cachedAt!));
+      final useRemote =
+          remote.content.isNotEmpty &&
+          (local.cachedAt == null || remote.updatedAt.isAfter(local.cachedAt!));
       if (useRemote && remote.content != local.content) {
         _lastLoadedDraft = remote.content;
         _host.saveDraft(sessionId, remote.content);
@@ -461,7 +445,7 @@ class PaneState extends ChangeNotifier {
       }
       final worktree = plucks['worktree'] as String?;
       if (worktree != null) {
-        _pendingWorktreePath = worktree;
+        _view.pendingWorktreePath = worktree;
         changed = true;
       }
       if (changed) notifyListeners();
@@ -518,9 +502,11 @@ class PaneState extends ChangeNotifier {
   double _rightPanelWidth = 260;
   double get rightPanelWidth => _rightPanelWidth;
   static const double rightPanelMinWidth = 180;
+
   /// Absolute fallback cap. The actual max is typically constrained to a
   /// fraction of the available row width by the caller (see session_pane).
   static const double rightPanelMaxWidth = 2000;
+
   /// Maximum fraction of the available row width the right panel may occupy.
   static const double rightPanelMaxFraction = 0.75;
 
@@ -751,7 +737,7 @@ class PaneState extends ChangeNotifier {
     _selectedProjectPath = null;
     _projectNameError = null;
     _selectedToolMention = null;
-    _pendingWorktreePath = null;
+    _view.pendingWorktreePath = null;
     if (workerId != null) {
       // Apply sync fallback immediately so the chip isn't blank during the
       // async validation phase.
@@ -782,11 +768,8 @@ class PaneState extends ChangeNotifier {
     final displayContent = toolMention != null
         ? text
         : text
-            .replaceAllMapped(
-              RegExp(r'(^|\s)#\S+'),
-              (m) => m.group(1) ?? '',
-            )
-            .trim();
+              .replaceAllMapped(RegExp(r'(^|\s)#\S+'), (m) => m.group(1) ?? '')
+              .trim();
 
     _pendingLocalUserMessages++;
     _messages.add(
@@ -803,10 +786,12 @@ class PaneState extends ChangeNotifier {
 
     // Pass the pre-selected worktree path only for new sessions (no session yet).
     // After the session exists the user adjusts the worktree via the Project panel.
-    final worktreeToSend = _sessionId == null ? _pendingWorktreePath : null;
+    final worktreeToSend = _sessionId == null
+        ? _view.pendingWorktreePath
+        : null;
     // Pass the pending task ID only for new sessions so the backend can inject
     // plan context. Cleared immediately after sending.
-    final taskIdToSend = _sessionId == null ? _pendingTaskId : null;
+    final taskIdToSend = _sessionId == null ? _view.pendingTaskId : null;
     _ws?.sendPrompt(
       effectiveText,
       _sessionId,
@@ -999,7 +984,7 @@ class PaneState extends ChangeNotifier {
     _selectedProjectPath = null;
     _projectNameError = null;
     _selectedToolMention = null;
-    _pendingWorktreePath = null;
+    _view.pendingWorktreePath = null;
     _resetPagination();
 
     if (oldSessionId != null && oldWorkerId != null) {
@@ -1039,8 +1024,8 @@ class PaneState extends ChangeNotifier {
     _selectedProjectName = null;
     _selectedProjectPath = null;
     _projectNameError = null;
-    _pendingWorktreePath = null;
-    _pendingTaskId = null;
+    _view.pendingWorktreePath = null;
+    _view.pendingTaskId = null;
     // Apply per-worker cached defaults (project + agent) for the new chat.
     // The sync fallback ensures the tool chip isn't blank during async work.
     final targetWorker = _workerId ?? _host.defaultWorkerId;
@@ -1749,10 +1734,10 @@ class PaneState extends ChangeNotifier {
           msg['display_content'] as String? ?? msg['content'] as String? ?? '',
       submittedAt:
           DateTime.tryParse(msg['submitted_at'] as String? ?? '') ??
-              DateTime.now(),
+          DateTime.now(),
       updatedAt:
           DateTime.tryParse(msg['submitted_at'] as String? ?? '') ??
-              DateTime.now(),
+          DateTime.now(),
     );
     _upsertQueued(entry);
     notifyListeners();
@@ -1778,7 +1763,8 @@ class PaneState extends ChangeNotifier {
     entry.displayContent =
         msg['display_content'] as String? ?? entry.displayContent;
     entry.updatedAt =
-        DateTime.tryParse(msg['updated_at'] as String? ?? '') ?? entry.updatedAt;
+        DateTime.tryParse(msg['updated_at'] as String? ?? '') ??
+        entry.updatedAt;
     notifyListeners();
   }
 
