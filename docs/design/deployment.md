@@ -1,5 +1,5 @@
 ---
-updated: 2026-04-28
+updated: 2026-06-02
 ---
 
 # Platform Support, Deployment & Bundling
@@ -284,11 +284,11 @@ curl -fsSL https://rcflow.app/get-client.sh | sh
 
 Pin a version with `RCFLOW_VERSION=0.35.0` and pass options with `sh -s -- --port 8080 --unattended`. The scripts are hosted at `scripts/get-worker.sh` and `scripts/get-client.sh` in the repository.
 
-**`get-worker.sh`** — Downloads the `.tar.gz` (Linux) or `.dmg` (macOS) worker artifact. On Linux it delegates to the bundled `install.sh` inside the tarball. On macOS it mounts the DMG, extracts the `.app` contents, and performs a headless install (copies to `~/.local/lib/rcflow`, creates a LaunchAgent, symlinks to `~/.local/bin/rcflow`). Passes `--unattended` automatically when stdin is not a terminal.
+**`get-worker.sh`** — Downloads the `.tar.gz` (Linux) or `.dmg` (macOS) worker artifact. On Linux it delegates to the bundled `install.sh` inside the tarball. On macOS it mounts the DMG and installs the **whole `.app` bundle intact** to `~/Applications` (the frozen binary must run from inside `Contents/MacOS/` so its runtime libraries resolve from `Contents/Frameworks/` — copying the loose executable out breaks `libpython` loading). It then registers a LaunchAgent that runs the in-bundle binary (`…/Contents/MacOS/rcflow run`), runs migrations in place, and symlinks `~/.local/bin/rcflow` to the in-bundle binary. Config and data live under `~/Library/Application Support/rcflow/` (see [path resolution](#path-resolution)), not the install directory. Passes `--unattended` automatically when stdin is not a terminal.
 
 **`get-client.sh`** — Downloads the `.deb` (Linux) or `.dmg` (macOS) client artifact. On Linux it installs via `dpkg -i`. On macOS it copies the `.app` to `/Applications`.
 
-Environment variables: `RCFLOW_VERSION` (pin version), `RCFLOW_REPO` (override GitHub owner/repo), `INSTALL_DIR` (override install prefix, worker only).
+Environment variables: `RCFLOW_VERSION` (pin version), `RCFLOW_REPO` (override GitHub owner/repo), `INSTALL_DIR` (override the directory the worker `.app` is installed into — macOS — or the install prefix on Linux).
 
 #### Manual installation
 
