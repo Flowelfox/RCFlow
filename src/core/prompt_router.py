@@ -1,11 +1,13 @@
 """Routes user prompts through the LLM pipeline with tool execution.
 
-The ``PromptRouter`` class is composed from five mixin modules:
+The ``PromptRouter`` class is composed from four mixin modules plus a
+:class:`~src.core.context.ContextBuilder` collaborator:
 
 - :class:`~src.core.session_lifecycle.SessionLifecycleMixin` — session
   create/cancel/end/pause/resume/restore, permissions, inactivity reaper
-- :class:`~src.core.context.ContextMixin` — #tool, $file mention
-  extraction, project context building, direct tool mode
+- :class:`~src.core.context.ContextBuilder` — #tool, $file mention
+  extraction, project context building, direct tool mode (composed as
+  ``self._context``, not inherited)
 - :class:`~src.core.agent_claude_code.ClaudeCodeAgentMixin` — Claude Code
   subprocess lifecycle
 - :class:`~src.core.agent_codex.CodexAgentMixin` — Codex CLI subprocess
@@ -35,7 +37,7 @@ from src.core.agents import MAX_TOOL_OUTPUT_CHARS, truncate_tool_output
 from src.core.attachment_store import ResolvedAttachment
 from src.core.background_tasks import BackgroundTasksMixin
 from src.core.buffer import MessageType
-from src.core.context import ContextMixin
+from src.core.context import ContextBuilder
 from src.core.llm import LLMClient, StreamDone, TextChunk, ToolCallRequest, llm_configuration_issue
 from src.core.pending_store import SessionPendingMessageStore
 from src.core.session import ActiveSession, ActivityState, SessionManager, SessionStatus, SessionType
@@ -115,13 +117,18 @@ def _build_planning_prompt(title: str, description: str, plan_path: Path) -> str
 
 class PromptRouter(
     SessionLifecycleMixin,
-    ContextMixin,
     ClaudeCodeAgentMixin,
     CodexAgentMixin,
     OpenCodeAgentMixin,
     BackgroundTasksMixin,
 ):
-    """Routes user prompts through the LLM pipeline with tool execution."""
+    """Routes user prompts through the LLM pipeline with tool execution.
+
+    Context building and direct-tool-mode parsing are provided by a composed
+    :class:`~src.core.context.ContextBuilder` collaborator (``self._context``)
+    rather than a mixin; the remaining concerns are still mixins pending their
+    own conversion.
+    """
 
     def __init__(
         self,
@@ -173,6 +180,8 @@ class PromptRouter(
         self._pending_task_creation_tasks: set[asyncio.Task[None]] = set()
         self._pending_task_update_tasks: set[asyncio.Task[None]] = set()
         self._pending_plan_finalization_tasks: set[asyncio.Task[None]] = set()
+        # Context building / direct-tool-mode parsing collaborator (composition).
+        self._context = ContextBuilder(self)
 
     # ------------------------------------------------------------------
     # Executor / config helpers
@@ -512,7 +521,7 @@ class PromptRouter(
         On failure: pushes an error buffer entry and sets ``session.project_name_error``
         so the client chip shows a red error state via the next session_update.
         """
-        resolved = self._resolve_project_path(project_name)
+        resolved = self._context._resolve_project_path(project_name)
         if resolved is None:
             self._push_project_error(
                 session,
@@ -692,7 +701,7 @@ class PromptRouter(
             return None
         if not session.is_busy_for_queue():
             return None
-        display = display_text if display_text is not None else self._TOOL_MENTION_RE.sub("", text).strip()
+        display = display_text if display_text is not None else self._context._TOOL_MENTION_RE.sub("", text).strip()
         entry = await self._pending_store.enqueue(
             session,
             content=text,
@@ -936,7 +945,7 @@ class PromptRouter(
         # directly instead of selecting it via the chip), derive display text
         # by stripping all #tool_mention markers so they never appear in chat.
         # The empty-string case (chip + empty input) must be preserved as-is.
-        _display = display_text if display_text is not None else self._TOOL_MENTION_RE.sub("", text).strip()
+        _display = display_text if display_text is not None else self._context._TOOL_MENTION_RE.sub("", text).strip()
 
         def _make_user_buffer_data() -> dict[str, Any]:
             """Build the TEXT_CHUNK(role=user) payload, optionally tagged with queued_id."""
@@ -971,16 +980,16 @@ class PromptRouter(
         if self.is_direct_tool_mode:
             session.set_active()
             session.buffer.push_text(MessageType.TEXT_CHUNK, _make_user_buffer_data())
-            await self._handle_direct_prompt(session, text)
+            await self._context._handle_direct_prompt(session, text)
             return session.id
 
         # Bare agent mention: when the user sends only "#ClaudeCode" or "#Codex"
         # (with no task description), bypass the LLM and start the agent subprocess
         # directly so it is ready for follow-up instructions.
-        if self._is_bare_agent_mention(text):
+        if self._context._is_bare_agent_mention(text):
             session.set_active()
             session.buffer.push_text(MessageType.TEXT_CHUNK, _make_user_buffer_data())
-            await self._handle_direct_prompt(session, text)
+            await self._context._handle_direct_prompt(session, text)
             return session.id
 
         # Preflight LLM credentials. When the worker has a provider selected
@@ -1012,24 +1021,26 @@ class PromptRouter(
             # Injected every turn so the LLM always has the project in context,
             # not only on the first turn where the picker selection was made.
             project_context = (
-                self._build_project_context_from_path(session.main_project_path) if session.main_project_path else None
+                self._context._build_project_context_from_path(session.main_project_path)
+                if session.main_project_path
+                else None
             )
 
-            tool_mentions = self._extract_tool_mentions(text)
-            tool_context = self._build_tool_context(tool_mentions) if tool_mentions else None
+            tool_mentions = self._context._extract_tool_mentions(text)
+            tool_context = self._context._build_tool_context(tool_mentions) if tool_mentions else None
 
-            file_refs = self._extract_file_references(text)
-            file_context = await self._build_file_context(file_refs) if file_refs else None
+            file_refs = self._context._extract_file_references(text)
+            file_context = await self._context._build_file_context(file_refs) if file_refs else None
 
             # Active worktree context: injected when a worktree is explicitly
             # selected for this session so the LLM knows which working directory
             # to pass when it calls an agent tool (claude_code / codex).
-            worktree_context = self._build_active_worktree_context(session)
+            worktree_context = self._context._build_active_worktree_context(session)
 
             # Plan context: injected on the first turn of implementation sessions
             # that have a task with a completed plan artifact. Skipped for planning
             # sessions themselves.
-            plan_context = await self._build_plan_context(session)
+            plan_context = await self._context._build_plan_context(session)
 
             context_blocks: list[dict[str, Any]] = []
             if project_context:

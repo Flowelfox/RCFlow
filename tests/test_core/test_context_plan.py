@@ -1,4 +1,4 @@
-"""Tests for ContextMixin._build_plan_context.
+"""Tests for ContextBuilder._build_plan_context.
 
 Covers:
 - Returns None for plan sessions (session_purpose == "plan")
@@ -20,7 +20,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.core.context import ContextMixin
+from src.core.context import ContextBuilder
 from src.core.session import SessionManager, SessionType
 
 if TYPE_CHECKING:
@@ -34,14 +34,13 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 
-class _ContextHost(ContextMixin):
+class _ContextHost(ContextBuilder):
     def __init__(self, db_session_factory=None) -> None:
-        self._tool_registry = MagicMock()
-        self._settings = None
-        self._db_session_factory = db_session_factory
-
-    async def _execute_tool(self, session, tool_call):
-        pass
+        router = MagicMock()
+        router._tool_registry = MagicMock()
+        router._settings = None
+        router._db_session_factory = db_session_factory
+        super().__init__(router)
 
 
 # ---------------------------------------------------------------------------

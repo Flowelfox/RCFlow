@@ -531,7 +531,7 @@ async def test_end_paused_session(session_manager: SessionManager) -> None:
 def test_build_tool_context_agent_only(session_manager: SessionManager) -> None:
     """A single agent mention produces a MUST directive."""
     router = _make_router_with_real_registry(session_manager)
-    ctx = router._build_tool_context(["ClaudeCode"])
+    ctx = router._context._build_tool_context(["ClaudeCode"])
     assert ctx is not None
     assert "MUST" in ctx
     assert "claude_code" in ctx
@@ -541,7 +541,7 @@ def test_build_tool_context_agent_only(session_manager: SessionManager) -> None:
 def test_build_tool_context_worktree_only(session_manager: SessionManager) -> None:
     """A worktree-only mention produces a preference block (no orchestration)."""
     router = _make_router_with_real_registry(session_manager)
-    ctx = router._build_tool_context(["Worktree"])
+    ctx = router._context._build_tool_context(["Worktree"])
     assert ctx is not None
     assert "Tool preference" in ctx
     assert "Step 1" not in ctx
@@ -550,7 +550,7 @@ def test_build_tool_context_worktree_only(session_manager: SessionManager) -> No
 def test_build_tool_context_worktree_and_agent_orchestration(session_manager: SessionManager) -> None:
     """Worktree + agent mention produces the two-step orchestration directive."""
     router = _make_router_with_real_registry(session_manager)
-    ctx = router._build_tool_context(["Worktree", "ClaudeCode"])
+    ctx = router._context._build_tool_context(["Worktree", "ClaudeCode"])
     assert ctx is not None
     assert "Step 1" in ctx
     assert "Step 2" in ctx
@@ -564,7 +564,7 @@ def test_build_tool_context_worktree_and_agent_orchestration(session_manager: Se
 def test_build_tool_context_worktree_and_agent_case_insensitive(session_manager: SessionManager) -> None:
     """Case-insensitive mention matching still triggers orchestration."""
     router = _make_router_with_real_registry(session_manager)
-    ctx = router._build_tool_context(["worktree", "claude_code"])
+    ctx = router._context._build_tool_context(["worktree", "claude_code"])
     assert ctx is not None
     assert "Step 1" in ctx
     assert "Step 2" in ctx
@@ -573,7 +573,7 @@ def test_build_tool_context_worktree_and_agent_case_insensitive(session_manager:
 def test_build_tool_context_unknown_mention_ignored(session_manager: SessionManager) -> None:
     """Unknown tool mentions are silently ignored; valid ones still produce output."""
     router = _make_router_with_real_registry(session_manager)
-    ctx = router._build_tool_context(["NonExistentTool", "ClaudeCode"])
+    ctx = router._context._build_tool_context(["NonExistentTool", "ClaudeCode"])
     assert ctx is not None
     assert "MUST" in ctx
 
@@ -581,7 +581,7 @@ def test_build_tool_context_unknown_mention_ignored(session_manager: SessionMana
 def test_build_tool_context_all_unknown_returns_none(session_manager: SessionManager) -> None:
     """All-unknown mentions return None."""
     router = _make_router_with_real_registry(session_manager)
-    ctx = router._build_tool_context(["Foo", "Bar"])
+    ctx = router._context._build_tool_context(["Foo", "Bar"])
     assert ctx is None
 
 
@@ -594,7 +594,7 @@ def test_build_active_worktree_context_no_worktree(session_manager: SessionManag
     """Returns None when no worktree is selected for the session."""
     router = _make_router(session_manager)
     session = session_manager.create_session(SessionType.ONE_SHOT)
-    assert router._build_active_worktree_context(session) is None
+    assert router._context._build_active_worktree_context(session) is None
 
 
 def test_build_active_worktree_context_with_worktree(session_manager: SessionManager) -> None:
@@ -609,7 +609,7 @@ def test_build_active_worktree_context_with_worktree(session_manager: SessionMan
         "base": "main",
     }
 
-    ctx = router._build_active_worktree_context(session)
+    ctx = router._context._build_active_worktree_context(session)
 
     assert ctx is not None
     assert "/repos/myproject/.worktrees/feat-xyz" in ctx
@@ -623,7 +623,7 @@ def test_build_active_worktree_context_path_only(session_manager: SessionManager
     session = session_manager.create_session(SessionType.ONE_SHOT)
     session.metadata["selected_worktree_path"] = "/repos/myproject/.worktrees/feat-xyz"
 
-    ctx = router._build_active_worktree_context(session)
+    ctx = router._context._build_active_worktree_context(session)
 
     assert ctx is not None
     assert "/repos/myproject/.worktrees/feat-xyz" in ctx
@@ -649,7 +649,7 @@ def test_build_active_worktree_context_merge_direction_disambiguation(
         "base": "main",
     }
 
-    ctx = router._build_active_worktree_context(session)
+    ctx = router._context._build_active_worktree_context(session)
 
     assert ctx is not None
     # Disambiguation block must be present
