@@ -20,7 +20,7 @@ import pytest
 from src.core.agent_claude_code import (
     _MAX_DIFF_LINES,
     _MAX_SNAPSHOT_BYTES,
-    ClaudeCodeAgentMixin,
+    ClaudeCodeAgent,
     _classify_log_level,
     _compute_diff,
     _read_file_snapshot,
@@ -154,10 +154,11 @@ def _make_executor_chunks(events: list[dict]):
 
 
 def _make_mixin():
-    mixin = ClaudeCodeAgentMixin.__new__(ClaudeCodeAgentMixin)
-    mixin._tool_settings = None
-    mixin._fire_text_artifact_scan = MagicMock()
-    return mixin
+    agent = ClaudeCodeAgent.__new__(ClaudeCodeAgent)
+    agent._r = MagicMock()
+    agent._r._tool_settings = None
+    agent._r._fire_text_artifact_scan = MagicMock()
+    return agent
 
 
 class TestDiffIntegration:

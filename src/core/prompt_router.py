@@ -1,21 +1,21 @@
 """Routes user prompts through the LLM pipeline with tool execution.
 
-The ``PromptRouter`` class is composed from four mixin modules plus a
-:class:`~src.core.context.ContextBuilder` collaborator:
+The ``PromptRouter`` is built from one mixin plus composed collaborators it
+delegates to:
 
 - :class:`~src.core.session_lifecycle.SessionLifecycleMixin` — session
   create/cancel/end/pause/resume/restore, permissions, inactivity reaper
-- :class:`~src.core.context.ContextBuilder` — #tool, $file mention
-  extraction, project context building, direct tool mode (composed as
-  ``self._context``, not inherited)
-- :class:`~src.core.agent_claude_code.ClaudeCodeAgentMixin` — Claude Code
+  (still inherited, pending its own conversion)
+- :class:`~src.core.context.ContextBuilder` (``self._context``) — #tool, $file
+  mention extraction, project context building, direct tool mode
+- :class:`~src.core.background_tasks.BackgroundTasks` (``self._background``) —
+  fire-and-forget logging, archiving, summaries, titles, tasks, artifacts
+- :class:`~src.core.agent_claude_code.ClaudeCodeAgent` (``self._claude``) —
+  Claude Code subprocess lifecycle
+- :class:`~src.core.agent_codex.CodexAgent` (``self._codex``) — Codex CLI
   subprocess lifecycle
-- :class:`~src.core.agent_codex.CodexAgentMixin` — Codex CLI subprocess
-  lifecycle
-- :class:`~src.core.agent_opencode.OpenCodeAgentMixin` — OpenCode CLI subprocess
-  lifecycle
-- :class:`~src.core.background_tasks.BackgroundTasksMixin` — fire-and-forget
-  background tasks (logging, archiving, summaries, titles, tasks, artifacts)
+- :class:`~src.core.agent_opencode.OpenCodeAgent` (``self._opencode``) —
+  OpenCode CLI subprocess lifecycle
 """
 
 import asyncio
@@ -23,15 +23,16 @@ import json
 import logging
 import os
 import uuid
+from collections.abc import AsyncGenerator
 from pathlib import Path
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from src.config import Settings
-from src.core.agent_claude_code import ClaudeCodeAgentMixin
-from src.core.agent_codex import CodexAgentMixin
-from src.core.agent_opencode import OpenCodeAgentMixin
+from src.core.agent_claude_code import ClaudeCodeAgent
+from src.core.agent_codex import CodexAgent
+from src.core.agent_opencode import OpenCodeAgent
 from src.core.agent_prompt import extract_code_blocks, format_agent_prompt
 from src.core.agents import MAX_TOOL_OUTPUT_CHARS, truncate_tool_output
 from src.core.attachment_store import ResolvedAttachment
@@ -40,6 +41,7 @@ from src.core.buffer import MessageType
 from src.core.context import ContextBuilder
 from src.core.llm import LLMClient, StreamDone, TextChunk, ToolCallRequest, TurnUsage, llm_configuration_issue
 from src.core.pending_store import SessionPendingMessageStore
+from src.core.permissions import PermissionDecision
 from src.core.session import ActiveSession, ActivityState, SessionManager, SessionStatus, SessionType
 from src.core.session_lifecycle import SessionLifecycleMixin
 from src.core.wakeup_scheduler import WakeupScheduler
@@ -117,15 +119,13 @@ def _build_planning_prompt(title: str, description: str, plan_path: Path) -> str
 
 class PromptRouter(
     SessionLifecycleMixin,
-    ClaudeCodeAgentMixin,
-    CodexAgentMixin,
-    OpenCodeAgentMixin,
 ):
     """Routes user prompts through the LLM pipeline with tool execution.
 
-    Context building and fire-and-forget background tasks are provided by
-    composed collaborators (``self._context`` / ``self._background``) and
-    delegated to; the remaining concerns are still mixins pending their own
+    Most concerns are composed collaborators that PromptRouter delegates to —
+    ``self._context`` (context building), ``self._background`` (fire-and-forget
+    tasks), and ``self._claude`` / ``self._codex`` / ``self._opencode`` (agent
+    subprocess lifecycles).  Session lifecycle is still a mixin pending its own
     conversion.
     """
 
@@ -183,6 +183,9 @@ class PromptRouter(
         # their public entry points so existing call sites stay unchanged.
         self._background = BackgroundTasks(self)
         self._context = ContextBuilder(self)
+        self._claude = ClaudeCodeAgent(self)
+        self._codex = CodexAgent(self)
+        self._opencode = OpenCodeAgent(self)
 
     # ------------------------------------------------------------------
     # Background-task delegation
@@ -247,6 +250,78 @@ class PromptRouter(
     @staticmethod
     def _resolve_artifact_project(file_path: str, projects_dirs: list[Path]) -> str | None:
         return BackgroundTasks._resolve_artifact_project(file_path, projects_dirs)
+
+    # ------------------------------------------------------------------
+    # Agent-subprocess delegation
+    #
+    # The Claude Code / Codex / OpenCode subprocess lifecycles live on composed
+    # collaborators; these wrappers preserve the historical ``router._start_*``
+    # / ``_forward_*`` / ``_end_*_session`` / ``_build_*_extra_env`` surface for
+    # the still-mixin session-lifecycle code, the agentic loop, WS/route
+    # handlers, and tests.
+    # ------------------------------------------------------------------
+
+    # --- Claude Code ---
+    def _build_claude_code_extra_env(self) -> dict[str, str]:
+        return self._claude._build_claude_code_extra_env()
+
+    async def _start_claude_code(
+        self, session: ActiveSession, tool_def: ToolDefinition, tool_call: ToolCallRequest
+    ) -> str:
+        return await self._claude._start_claude_code(session, tool_def, tool_call)
+
+    async def _handle_permission_check(
+        self, session: ActiveSession, tool_name: str, tool_input: dict[str, Any]
+    ) -> PermissionDecision:
+        return await self._claude._handle_permission_check(session, tool_name, tool_input)
+
+    async def _relay_claude_code_stream(
+        self, session: ActiveSession, stream: AsyncGenerator[ExecutionChunk, None]
+    ) -> None:
+        await self._claude._relay_claude_code_stream(session, stream)
+
+    async def _terminate_active_monitors(self, session: ActiveSession, reason: str) -> None:
+        await self._claude._terminate_active_monitors(session, reason)
+
+    async def cancel_monitor(self, session_id: str, monitor_id: str) -> None:
+        await self._claude.cancel_monitor(session_id, monitor_id)
+
+    def _schedule_drain_after_stream_task(self, session: ActiveSession) -> None:
+        self._claude._schedule_drain_after_stream_task(session)
+
+    async def _end_claude_code_session(self, session: ActiveSession) -> None:
+        await self._claude._end_claude_code_session(session)
+
+    async def _forward_to_claude_code(self, session: ActiveSession, text: str) -> None:
+        await self._claude._forward_to_claude_code(session, text)
+
+    # --- Codex ---
+    def _build_codex_extra_env(self) -> dict[str, str]:
+        return self._codex._build_codex_extra_env()
+
+    async def _start_codex(self, session: ActiveSession, tool_def: ToolDefinition, tool_call: ToolCallRequest) -> str:
+        return await self._codex._start_codex(session, tool_def, tool_call)
+
+    async def _end_codex_session(self, session: ActiveSession) -> None:
+        await self._codex._end_codex_session(session)
+
+    async def _forward_to_codex(self, session: ActiveSession, text: str) -> None:
+        await self._codex._forward_to_codex(session, text)
+
+    # --- OpenCode ---
+    def _build_opencode_extra_env(self) -> dict[str, str]:
+        return self._opencode._build_opencode_extra_env()
+
+    async def _start_opencode(
+        self, session: ActiveSession, tool_def: ToolDefinition, tool_call: ToolCallRequest
+    ) -> str:
+        return await self._opencode._start_opencode(session, tool_def, tool_call)
+
+    async def _end_opencode_session(self, session: ActiveSession) -> None:
+        await self._opencode._end_opencode_session(session)
+
+    async def _forward_to_opencode(self, session: ActiveSession, text: str) -> None:
+        await self._opencode._forward_to_opencode(session, text)
 
     # ------------------------------------------------------------------
     # Executor / config helpers

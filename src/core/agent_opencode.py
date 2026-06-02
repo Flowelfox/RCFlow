@@ -4,8 +4,9 @@ Extracted from prompt_router.py to reduce file size. These methods handle
 starting, streaming, forwarding, restarting, and ending OpenCode CLI
 subprocess sessions.
 
-Used as a mixin class — ``PromptRouter`` inherits from
-``OpenCodeAgentMixin`` to gain these methods.
+Composition collaborator — ``PromptRouter`` owns an :class:`OpenCodeAgent`
+instance (``self._opencode``) and delegates its public entry points to it.
+Shared router state / sibling behaviour is reached through ``self._r``.
 """
 
 from __future__ import annotations
@@ -32,6 +33,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
     from src.core.llm import ToolCallRequest
+    from src.core.prompt_router import PromptRouter
     from src.core.session import ActiveSession
     from src.executors.base import ExecutionChunk
     from src.tools.loader import ToolDefinition
@@ -41,16 +43,19 @@ logger = logging.getLogger(__name__)
 _truncate_tool_output = truncate_tool_output
 
 
-class OpenCodeAgentMixin:
-    """Mixin providing OpenCode CLI agent lifecycle methods for PromptRouter."""
+class OpenCodeAgent:
+    """OpenCode CLI subprocess lifecycle collaborator for PromptRouter."""
+
+    def __init__(self, router: PromptRouter) -> None:
+        self._r = router
 
     def _build_opencode_extra_env(self) -> dict[str, str]:
         """Build extra environment variables for OpenCode CLI subprocesses."""
         extra_env: dict[str, str] = {}
 
         tool_settings: dict[str, Any] = {}
-        if self._tool_settings:  # ty:ignore[unresolved-attribute]
-            tool_settings = self._tool_settings.get_settings("opencode")  # ty:ignore[unresolved-attribute]
+        if self._r._tool_settings:
+            tool_settings = self._r._tool_settings.get_settings("opencode")
 
         tool_provider = tool_settings.get("provider", "")
 
@@ -59,8 +64,8 @@ class OpenCodeAgentMixin:
             if isinstance(tool_env, dict):
                 extra_env.update(tool_env)
 
-        if self._tool_settings:  # ty:ignore[unresolved-attribute]
-            config_dir = self._tool_settings.get_config_dir("opencode")  # ty:ignore[unresolved-attribute]
+        if self._r._tool_settings:
+            config_dir = self._r._tool_settings.get_config_dir("opencode")
             config_dir.mkdir(parents=True, exist_ok=True)
             extra_env["OPENCODE_HOME"] = str(config_dir)
 
@@ -75,9 +80,9 @@ class OpenCodeAgentMixin:
         """Start an OpenCode CLI session: spawn subprocess, begin background streaming."""
         auth_issue = agent_configuration_issue(
             "opencode",
-            self._settings,  # ty:ignore[unresolved-attribute]
-            self._tool_settings,  # ty:ignore[unresolved-attribute]
-            self._tool_manager,  # ty:ignore[unresolved-attribute]
+            self._r._settings,
+            self._r._tool_settings,
+            self._r._tool_manager,
         )
         if auth_issue is not None:
             session.buffer.push_text(
@@ -96,7 +101,7 @@ class OpenCodeAgentMixin:
         selected_wt = session.metadata.get("selected_worktree_path")
         if selected_wt:
             working_dir = selected_wt
-        working_path = self._resolve_working_directory(working_dir)  # ty:ignore[unresolved-attribute]
+        working_path = self._r._resolve_working_directory(working_dir)
         try:
             is_dir = working_path.is_dir()
         except OSError as e:
@@ -124,7 +129,7 @@ class OpenCodeAgentMixin:
 
         tool_call.tool_input["working_directory"] = str(working_path)
 
-        executor = self._get_executor(tool_def.executor, tool_def)  # ty:ignore[unresolved-attribute]
+        executor = self._r._get_executor(tool_def.executor, tool_def)
         assert isinstance(executor, OpenCodeExecutor)  # noqa: S101
 
         session.opencode_executor = executor
@@ -220,7 +225,7 @@ class OpenCodeAgentMixin:
                             "finished": False,
                         },
                     )
-                    self._fire_text_artifact_scan(session, [text])  # ty:ignore[unresolved-attribute]
+                    self._r._fire_text_artifact_scan(session, [text])
 
             elif event_type == "tool_use":
                 # Single event carries both tool invocation and result
@@ -261,8 +266,8 @@ class OpenCodeAgentMixin:
                         command,
                         session.metadata.get("agent_cwd") or session.subprocess_working_directory,
                     )
-                    if new_cwd and apply_agent_cwd(session, new_cwd) and self._session_manager is not None:  # ty:ignore[unresolved-attribute]
-                        self._session_manager.broadcast_session_update(session)  # ty:ignore[unresolved-attribute]
+                    if new_cwd and apply_agent_cwd(session, new_cwd) and self._r._session_manager is not None:
+                        self._r._session_manager.broadcast_session_update(session)
 
                 if tool_status == "completed":
                     output = state.get("output") or ""
@@ -279,7 +284,7 @@ class OpenCodeAgentMixin:
                                 "stream": "stdout",
                             },
                         )
-                        self._fire_text_artifact_scan(session, [output])  # ty:ignore[unresolved-attribute]
+                        self._r._fire_text_artifact_scan(session, [output])
                     session.subprocess_current_tool = None
                     if session.subprocess_started_at is not None:
                         session.buffer.push_ephemeral(
@@ -311,8 +316,8 @@ class OpenCodeAgentMixin:
                     _completed_successfully = True
                     session.set_activity(ActivityState.IDLE)
                     summary_text = "".join(post_tool_text_chunks).strip() or "OpenCode task completed"
-                    self._fire_summary_task(session, summary_text)  # ty:ignore[unresolved-attribute]
-                    self._fire_task_update_task(session, summary_text)  # ty:ignore[unresolved-attribute]
+                    self._r._fire_summary_task(session, summary_text)
+                    self._r._fire_task_update_task(session, summary_text)
 
             elif event_type in ("error", "session.error"):
                 error = event.get("error") or {}
@@ -386,7 +391,7 @@ class OpenCodeAgentMixin:
             "OpenCode initial streaming finished (session=%s)",
             session.id,
         )
-        self.schedule_pending_drain(session)  # ty:ignore[unresolved-attribute]
+        self._r.schedule_pending_drain(session)
 
     async def _end_opencode_session(self, session: ActiveSession) -> None:
         """Clean up OpenCode state when the session ends."""
@@ -409,7 +414,7 @@ class OpenCodeAgentMixin:
             },
         )
         session.complete()
-        self._fire_archive_task(session.id)  # ty:ignore[unresolved-attribute]
+        self._r._fire_archive_task(session.id)
 
     async def _forward_to_opencode(self, session: ActiveSession, text: str) -> None:
         """Forward a follow-up message to the active OpenCode session.
@@ -429,7 +434,7 @@ class OpenCodeAgentMixin:
         if session.subprocess_started_at is None:
             session.subprocess_started_at = datetime.now(UTC)
             session.subprocess_type = "opencode"
-            opencode_def_for_name = self._tool_registry.get("opencode")  # ty:ignore[unresolved-attribute]
+            opencode_def_for_name = self._r._tool_registry.get("opencode")
             session.subprocess_display_name = (
                 opencode_def_for_name.display_name
                 if opencode_def_for_name and opencode_def_for_name.display_name
@@ -449,7 +454,7 @@ class OpenCodeAgentMixin:
             },
         )
 
-        opencode_def = self._tool_registry.get("opencode")  # ty:ignore[unresolved-attribute]
+        opencode_def = self._r._tool_registry.get("opencode")
         session.buffer.push_text(
             MessageType.AGENT_GROUP_START,
             {
@@ -501,4 +506,4 @@ class OpenCodeAgentMixin:
             return
 
         await executor.stop_process()
-        self.schedule_pending_drain(session)  # ty:ignore[unresolved-attribute]
+        self._r.schedule_pending_drain(session)

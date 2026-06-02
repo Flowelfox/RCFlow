@@ -4,8 +4,9 @@ Extracted from prompt_router.py to reduce file size. These methods handle
 starting, streaming, forwarding, restarting, and ending Claude Code
 subprocess sessions.
 
-Used as a mixin class — ``PromptRouter`` inherits from
-``ClaudeCodeAgentMixin`` to gain these methods.
+Composition collaborator — ``PromptRouter`` owns a :class:`ClaudeCodeAgent`
+instance (``self._claude``) and delegates its public entry points to it.
+Shared router state / sibling behaviour is reached through ``self._r``.
 """
 
 from __future__ import annotations
@@ -47,6 +48,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
     from src.core.llm import ToolCallRequest
+    from src.core.prompt_router import PromptRouter
     from src.core.session import ActiveSession
     from src.executors.base import ExecutionChunk
     from src.tools.loader import ToolDefinition
@@ -203,8 +205,11 @@ def _split_into_chunks(content: str, chunk_size: int) -> list[str]:
 _truncate_tool_output = truncate_tool_output
 
 
-class ClaudeCodeAgentMixin:
-    """Mixin providing Claude Code agent lifecycle methods for PromptRouter."""
+class ClaudeCodeAgent:
+    """Claude Code subprocess lifecycle collaborator for PromptRouter."""
+
+    def __init__(self, router: PromptRouter) -> None:
+        self._r = router
 
     def _build_claude_code_extra_env(self) -> dict[str, str]:
         """Build extra environment variables for Claude Code subprocesses."""
@@ -215,8 +220,8 @@ class ClaudeCodeAgentMixin:
         # section takes precedence.
         tool_provider = ""
         tool_cfg: dict[str, Any] = {}
-        if self._tool_settings:  # ty:ignore[unresolved-attribute]
-            tool_cfg = self._tool_settings.get_settings("claude_code")  # ty:ignore[unresolved-attribute]
+        if self._r._tool_settings:
+            tool_cfg = self._r._tool_settings.get_settings("claude_code")
             tool_provider = tool_cfg.get("provider", "")
 
         if tool_provider == "anthropic_login":
@@ -225,8 +230,8 @@ class ClaudeCodeAgentMixin:
             # which would override OAuth and cause "Invalid API key" errors.
             extra_env["ANTHROPIC_API_KEY"] = ""
 
-        if self._tool_settings:  # ty:ignore[unresolved-attribute]
-            config_dir = self._tool_settings.get_config_dir("claude_code")  # ty:ignore[unresolved-attribute]
+        if self._r._tool_settings:
+            config_dir = self._r._tool_settings.get_config_dir("claude_code")
             config_dir.mkdir(parents=True, exist_ok=True)
             extra_env["CLAUDE_CONFIG_DIR"] = str(config_dir)
 
@@ -258,9 +263,9 @@ class ClaudeCodeAgentMixin:
         # and never emit a JSON event the user can see.
         auth_issue = agent_configuration_issue(
             "claude_code",
-            self._settings,  # ty:ignore[unresolved-attribute]
-            self._tool_settings,  # ty:ignore[unresolved-attribute]
-            self._tool_manager,  # ty:ignore[unresolved-attribute]
+            self._r._settings,
+            self._r._tool_settings,
+            self._r._tool_manager,
         )
         if auth_issue is not None:
             session.buffer.push_text(
@@ -284,7 +289,7 @@ class ClaudeCodeAgentMixin:
             working_dir = selected_wt
         elif session.main_project_path:
             working_dir = session.main_project_path
-        working_path = self._resolve_working_directory(working_dir)  # ty:ignore[unresolved-attribute]
+        working_path = self._r._resolve_working_directory(working_dir)
         try:
             is_dir = working_path.is_dir()
         except OSError as e:
@@ -313,7 +318,7 @@ class ClaudeCodeAgentMixin:
         # Replace the working_directory in tool_input with the resolved absolute path
         tool_call.tool_input["working_directory"] = str(working_path)
 
-        executor = self._get_executor(tool_def.executor, tool_def)  # ty:ignore[unresolved-attribute]
+        executor = self._r._get_executor(tool_def.executor, tool_def)
         assert isinstance(executor, ClaudeCodeExecutor)  # noqa: S101
 
         session.claude_code_executor = executor
@@ -322,14 +327,14 @@ class ClaudeCodeAgentMixin:
 
         # Enable interactive permissions if configured
         effective_config = {**tool_def.executor_config.get("claude_code", {})}
-        for k, v in self._get_managed_config_overrides("claude_code").items():  # ty:ignore[unresolved-attribute]
+        for k, v in self._r._get_managed_config_overrides("claude_code").items():
             if v not in (None, ""):
                 effective_config[k] = v
         if effective_config.get("default_permission_mode") == "interactive":
             session.permission_manager = PermissionManager()
 
         # Stamp caveman mode so the badge system reflects the tool's current state.
-        if self._tool_settings and self._tool_settings.is_caveman_active("claude_code"):  # ty:ignore[unresolved-attribute]
+        if self._r._tool_settings and self._r._tool_settings.is_caveman_active("claude_code"):
             session.metadata["caveman_mode"] = True
 
         # Store CC metadata for potential session restore
@@ -758,16 +763,16 @@ class ClaudeCodeAgentMixin:
                                 if (
                                     inferred
                                     and apply_agent_cwd(session, inferred)
-                                    and self._session_manager is not None  # ty:ignore[unresolved-attribute]
+                                    and self._r._session_manager is not None
                                 ):
-                                    self._session_manager.broadcast_session_update(session)  # ty:ignore[unresolved-attribute]
+                                    self._r._session_manager.broadcast_session_update(session)
                         # Collect tool input values for scanning
                         for v in tool_input.values():
                             if isinstance(v, str):
                                 scan_texts.append(v)
                 # Fire artifact scan for this assistant message
                 if scan_texts:
-                    self._fire_text_artifact_scan(session, scan_texts)  # ty:ignore[unresolved-attribute]
+                    self._r._fire_text_artifact_scan(session, scan_texts)
 
             elif event_type == "user":
                 # Claude Code emits tool_result events wrapped inside a "user"
@@ -836,11 +841,11 @@ class ClaudeCodeAgentMixin:
                             "claude_code_interrupted": False,
                         },
                     )
-                    self._fire_summary_task(session, summary_text)  # ty:ignore[unresolved-attribute]
-                    self._fire_task_update_task(session, summary_text)  # ty:ignore[unresolved-attribute]
+                    self._r._fire_summary_task(session, summary_text)
+                    self._r._fire_task_update_task(session, summary_text)
                 elif result_text:
-                    self._fire_summary_task(session, result_text)  # ty:ignore[unresolved-attribute]
-                    self._fire_task_update_task(session, result_text)  # ty:ignore[unresolved-attribute]
+                    self._r._fire_summary_task(session, result_text)
+                    self._r._fire_task_update_task(session, result_text)
 
             elif event_type == "system":
                 # Claude Code may emit system events with usage data
@@ -872,8 +877,8 @@ class ClaudeCodeAgentMixin:
         activity strip update is fired by the store as part of
         WAKEUP_SCHEDULED.
         """
-        store = self._wakeup_store  # ty:ignore[unresolved-attribute]
-        scheduler = self._wakeup_scheduler  # ty:ignore[unresolved-attribute]
+        store = self._r._wakeup_store
+        scheduler = self._r._wakeup_scheduler
         if store is None or scheduler is None:
             # No persistence layer configured (test harness, etc.) — fall
             # through to the generic TOOL_START so the call is still
@@ -954,8 +959,8 @@ class ClaudeCodeAgentMixin:
             fire_at.isoformat(),
             len(session.scheduled_wakes),
         )
-        if self._session_manager is not None:  # ty:ignore[unresolved-attribute]
-            self._session_manager.broadcast_session_update(session)  # ty:ignore[unresolved-attribute]
+        if self._r._session_manager is not None:
+            self._r._session_manager.broadcast_session_update(session)
         # Acknowledge so the assistant message lists a tool_result.
         # We rely on the generic TOOL_OUTPUT path; ScheduleWakeup
         # doesn't produce its own result event from CC.
@@ -1036,7 +1041,7 @@ class ClaudeCodeAgentMixin:
                         chunk_data,
                     )
             if content:
-                self._fire_text_artifact_scan(session, [content])  # ty:ignore[unresolved-attribute]
+                self._r._fire_text_artifact_scan(session, [content])
 
         session.subprocess_current_tool = None
         if session.subprocess_started_at is not None:
@@ -1061,8 +1066,8 @@ class ClaudeCodeAgentMixin:
         # session's project; unrelated paths in the output are ignored,
         # so this is conservative and command-agnostic.
         inferred = infer_cwd_from_output(content, session.main_project_path)
-        if inferred and apply_agent_cwd(session, inferred) and self._session_manager is not None:  # ty:ignore[unresolved-attribute]
-            self._session_manager.broadcast_session_update(session)  # ty:ignore[unresolved-attribute]
+        if inferred and apply_agent_cwd(session, inferred) and self._r._session_manager is not None:
+            self._r._session_manager.broadcast_session_update(session)
 
     async def _process_monitor_event(
         self,
@@ -1165,7 +1170,7 @@ class ClaudeCodeAgentMixin:
             ValueError: If the session does not exist or no live monitor
                 with the given id is tracked.
         """
-        sm = self._session_manager  # ty:ignore[unresolved-attribute]
+        sm = self._r._session_manager
         session = sm.get_session(session_id)
         if session is None:
             raise ValueError(f"Session not found: {session_id}")
@@ -1329,9 +1334,9 @@ class ClaudeCodeAgentMixin:
         """
         task = session._claude_code_stream_task
         if task is None or task.done():
-            self.schedule_pending_drain(session)  # ty:ignore[unresolved-attribute]
+            self._r.schedule_pending_drain(session)
             return
-        task.add_done_callback(lambda _t: self.schedule_pending_drain(session))  # ty:ignore[unresolved-attribute]
+        task.add_done_callback(lambda _t: self._r.schedule_pending_drain(session))
 
     async def _drain_monitor_events(
         self,
@@ -1410,7 +1415,7 @@ class ClaudeCodeAgentMixin:
             },
         )
         session.complete()
-        self._fire_archive_task(session.id)  # ty:ignore[unresolved-attribute]
+        self._r._fire_archive_task(session.id)
 
     async def _forward_to_claude_code(self, session: ActiveSession, text: str) -> None:
         """Forward a follow-up message to the active Claude Code subprocess.
@@ -1440,7 +1445,7 @@ class ClaudeCodeAgentMixin:
         if session.subprocess_started_at is None:
             session.subprocess_started_at = datetime.now(UTC)
             session.subprocess_type = "claude_code"
-            cc_def_for_name = self._tool_registry.get("claude_code")  # ty:ignore[unresolved-attribute]
+            cc_def_for_name = self._r._tool_registry.get("claude_code")
             session.subprocess_display_name = (
                 cc_def_for_name.display_name if cc_def_for_name and cc_def_for_name.display_name else "Claude Code"
             )
@@ -1459,7 +1464,7 @@ class ClaudeCodeAgentMixin:
         )
 
         # Open a new agent group for this follow-up turn
-        cc_def = self._tool_registry.get("claude_code")  # ty:ignore[unresolved-attribute]
+        cc_def = self._r._tool_registry.get("claude_code")
         session.buffer.push_text(
             MessageType.AGENT_GROUP_START,
             {

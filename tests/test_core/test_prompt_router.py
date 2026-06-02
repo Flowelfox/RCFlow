@@ -974,7 +974,7 @@ async def test_relay_enter_plan_mode_denied_ends_session(
 ) -> None:
     """Denying plan mode ends the session with PLAN_MODE_DENIED error."""
     router = _make_router(session_manager)
-    router._end_claude_code_session = AsyncMock()  # type: ignore[method-assign]
+    router._claude._end_claude_code_session = AsyncMock()  # type: ignore[method-assign]
 
     session = session_manager.create_session(SessionType.LONG_RUNNING)
     session.set_active()
@@ -1021,7 +1021,7 @@ async def test_relay_enter_plan_mode_denied_ends_session(
     assert any(m.data.get("code") == "PLAN_MODE_DENIED" for m in error_msgs)
 
     # _end_claude_code_session should have been called
-    router._end_claude_code_session.assert_awaited_once_with(session)  # type: ignore[attr-defined]
+    router._claude._end_claude_code_session.assert_awaited_once_with(session)  # type: ignore[attr-defined]
 
 
 @pytest.mark.asyncio
