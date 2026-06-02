@@ -98,11 +98,24 @@ delegating so the read-sites and Provider tree are unchanged:
 - `lib/state/toast_notifier.dart` — settings-gated toast wrapper (public
   `ToastCategory`).
 
-`AppState` 2292 → 2090 lines; all 485 client tests pass. **Remaining for step 3
-(needs a design-first pass, not a store extraction):** the session-direct
-command methods, the pane-host split-tree (`splitRoot`/`panes`/`activePaneId` +
-`open*InPane`/split/close/nav-history) and `PaneState` (2073 lines) — all bound
-to the pane system + subscriptions, the central interwoven UI state.
+`AppState` 2292 → 2090 lines; all 485 client tests pass.
+
+**Pane-host:** assessed — needs no store extraction. The split-tree algorithm
+is already factored into `models/split_tree.dart`; what remains on `AppState`
+(`splitRoot`/`panes`/`activePaneId` + `open*InPane`/split/close/nav-history) is
+the `PaneHost` coordinator itself, which can't move to a store without a
+high-risk Provider-tree change for little gain.
+
+**PaneState (2073 → 2059):** the "what non-chat content is this pane showing"
+cluster is carved into a composed `PaneViewTarget`
+(`lib/state/pane_view_target.dart`: pendingWorktreePath/pendingTaskId/taskId/
+artifactId/linearIssueId/workerSettings*), PaneState delegating. **Remaining
+PaneState carves (test-protected by `pane_state_queue_test` /
+`pane_state_message_test` / `output_handlers_test`, but large internal
+rewrites — own focused commits):** the queued-messages cluster (~29 refs:
+`_queuedMessages` + apply/upsert/dequeue/reconcile) and the message/stream
+cluster (~70 refs: `_messages`/`_nextCursor`/`_activeMonitors` + the streaming
++ pagination logic — the biggest and most intricate).
 
 ## Phase 6 — Flutter Tests + Final Lint
 
