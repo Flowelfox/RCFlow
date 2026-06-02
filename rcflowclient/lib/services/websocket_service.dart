@@ -1,62 +1,19 @@
-import 'dart:async';
-import 'dart:convert';
-import 'dart:io' as io;
-
-import 'package:web_socket_channel/io.dart';
-import 'package:web_socket_channel/web_socket_channel.dart';
-
 import 'server_url.dart';
 import 'rest/rest_client.dart';
+import 'web_socket_transport.dart';
 
+/// Worker connection facade: composes the raw [WebSocketTransport] and the
+/// HTTP [RestClient], exposing the higher-level command + REST surface the
+/// rest of the app (and the test mocks) use.
 class WebSocketService {
-  static const _pingInterval = Duration(seconds: 5);
-
-  ServerUrl? _serverUrl;
   final RestClient _rest = RestClient();
-  bool _allowSelfSigned = true;
-  WebSocketChannel? _inputChannel;
-  WebSocketChannel? _outputChannel;
+  final WebSocketTransport _transport = WebSocketTransport();
 
-  final _inputController = StreamController<Map<String, dynamic>>.broadcast();
-  final _outputController = StreamController<Map<String, dynamic>>.broadcast();
-  final _connectionController = StreamController<bool>.broadcast();
+  Stream<Map<String, dynamic>> get inputMessages => _transport.inputMessages;
+  Stream<Map<String, dynamic>> get outputMessages => _transport.outputMessages;
+  Stream<bool> get connectionStatus => _transport.connectionStatus;
 
-  Stream<Map<String, dynamic>> get inputMessages => _inputController.stream;
-  Stream<Map<String, dynamic>> get outputMessages => _outputController.stream;
-  Stream<bool> get connectionStatus => _connectionController.stream;
-
-  bool get isConnected => _inputChannel != null && _outputChannel != null;
-
-  StreamSubscription<dynamic>? _inputSub;
-  StreamSubscription<dynamic>? _outputSub;
-
-  /// Create an [io.HttpClient] that optionally trusts self-signed certificates.
-  io.HttpClient _createHttpClient({required bool allowSelfSigned}) {
-    final client = io.HttpClient();
-    if (allowSelfSigned) {
-      client.badCertificateCallback = (cert, host, port) => true;
-    }
-    return client;
-  }
-
-  /// Open a single [io.WebSocket] with ping keepalive and wrap it in an
-  /// [IOWebSocketChannel].
-  Future<IOWebSocketChannel> _connectSocket(
-    Uri url, {
-    required bool secure,
-    required bool allowSelfSigned,
-  }) async {
-    io.HttpClient? client;
-    if (secure) {
-      client = _createHttpClient(allowSelfSigned: allowSelfSigned);
-    }
-    final socket = await io.WebSocket.connect(
-      url.toString(),
-      customClient: client,
-    ).timeout(const Duration(seconds: 10));
-    socket.pingInterval = _pingInterval;
-    return IOWebSocketChannel(socket);
-  }
+  bool get isConnected => _transport.isConnected;
 
   /// Connect both input and output WebSocket channels.
   /// [host] is a raw host string (e.g. "192.168.1.100:8765" or "example.com").
@@ -68,72 +25,13 @@ class WebSocketService {
     bool secure = false,
     bool allowSelfSigned = true,
   }) async {
-    disconnect();
-
     final url = ServerUrl(rawHost: host, apiKey: apiKey, secure: secure);
-    _serverUrl = url;
-    _allowSelfSigned = allowSelfSigned;
     _rest.configure(url, allowSelfSigned: allowSelfSigned);
-
-    // Connect input channel
-    try {
-      _inputChannel = await _connectSocket(
-        url.wsInputText(),
-        secure: secure,
-        allowSelfSigned: allowSelfSigned,
-      );
-    } catch (e) {
-      _inputChannel = null;
-      _connectionController.add(false);
-      rethrow;
-    }
-
-    _inputSub = _inputChannel!.stream.listen(
-      (data) {
-        try {
-          final msg = jsonDecode(data as String) as Map<String, dynamic>;
-          _inputController.add(msg);
-        } catch (_) {}
-      },
-      onError: (error) {
-        _connectionController.add(false);
-      },
-      onDone: () {
-        _connectionController.add(false);
-      },
+    await _transport.connect(
+      url,
+      secure: secure,
+      allowSelfSigned: allowSelfSigned,
     );
-
-    // Connect output channel after input succeeds
-    try {
-      _outputChannel = await _connectSocket(
-        url.wsOutputText(),
-        secure: secure,
-        allowSelfSigned: allowSelfSigned,
-      );
-    } catch (e) {
-      _inputChannel?.sink.close();
-      _inputChannel = null;
-      _outputChannel = null;
-      _connectionController.add(false);
-      rethrow;
-    }
-
-    _outputSub = _outputChannel!.stream.listen(
-      (data) {
-        try {
-          final msg = jsonDecode(data as String) as Map<String, dynamic>;
-          _outputController.add(msg);
-        } catch (_) {}
-      },
-      onError: (error) {
-        _connectionController.add(false);
-      },
-      onDone: () {
-        _connectionController.add(false);
-      },
-    );
-
-    _connectionController.add(true);
   }
 
   void sendPrompt(
@@ -145,7 +43,6 @@ class WebSocketService {
     String? taskId,
     String? displayText,
   }) {
-    if (_inputChannel == null) return;
     final msg = <String, dynamic>{
       'type': 'prompt',
       'text': text,
@@ -157,7 +54,7 @@ class WebSocketService {
       'task_id': ?taskId,
       'display_text': ?displayText,
     };
-    _inputChannel!.sink.add(jsonEncode(msg));
+    _transport.sendInput(msg);
   }
 
   /// Send a start_plan_session message over the input WebSocket.
@@ -168,14 +65,13 @@ class WebSocketService {
     String? projectName,
     String? selectedWorktreePath,
   }) {
-    if (_inputChannel == null) return;
     final msg = <String, dynamic>{
       'type': 'start_plan_session',
       'task_id': taskId,
       'project_name': ?projectName,
       'selected_worktree_path': ?selectedWorktreePath,
     };
-    _inputChannel!.sink.add(jsonEncode(msg));
+    _transport.sendInput(msg);
   }
 
   Future<Map<String, dynamic>> uploadAttachment({
@@ -189,25 +85,22 @@ class WebSocketService {
   );
 
   void subscribe(String sessionId) {
-    if (_outputChannel == null) return;
     final msg = {'type': 'subscribe', 'session_id': sessionId};
-    _outputChannel!.sink.add(jsonEncode(msg));
+    _transport.sendOutput(msg);
   }
 
   void unsubscribe(String sessionId) {
-    if (_outputChannel == null) return;
     final msg = {'type': 'unsubscribe', 'session_id': sessionId};
-    _outputChannel!.sink.add(jsonEncode(msg));
+    _transport.sendOutput(msg);
   }
 
   void answerQuestion(String? sessionId, Map<String, String> answers) {
-    if (_inputChannel == null) return;
     final msg = {
       'type': 'question_answer',
       'session_id': sessionId,
       'answers': answers,
     };
-    _inputChannel!.sink.add(jsonEncode(msg));
+    _transport.sendInput(msg);
   }
 
   void sendPermissionResponse({
@@ -217,7 +110,6 @@ class WebSocketService {
     required String scope,
     String? pathPrefix,
   }) {
-    if (_inputChannel == null) return;
     final msg = <String, dynamic>{
       'type': 'permission_response',
       'session_id': sessionId,
@@ -226,7 +118,7 @@ class WebSocketService {
       'scope': scope,
       'path_prefix': ?pathPrefix,
     };
-    _inputChannel!.sink.add(jsonEncode(msg));
+    _transport.sendInput(msg);
   }
 
   void sendInteractiveResponse(
@@ -234,36 +126,33 @@ class WebSocketService {
     String text, {
     bool accepted = true,
   }) {
-    if (_inputChannel == null) return;
     final msg = {
       'type': 'interactive_response',
       'session_id': sessionId,
       'text': text,
       'accepted': accepted,
     };
-    _inputChannel!.sink.add(jsonEncode(msg));
+    _transport.sendInput(msg);
   }
 
   /// Send an interrupt_subprocess message over the input WebSocket.
   /// Kills any running Claude Code / Codex subprocess without pausing the
   /// session. The session remains ACTIVE and ready for new prompts.
   void interruptSubprocess(String sessionId) {
-    if (_inputChannel == null) return;
     final msg = {'type': 'interrupt_subprocess', 'session_id': sessionId};
-    _inputChannel!.sink.add(jsonEncode(msg));
+    _transport.sendInput(msg);
   }
 
   /// Stop a live Claude Code Monitor watch identified by its tool_use id.
   /// The server responds with an ``ack`` and emits ``monitor_end`` with
   /// ``reason="cancelled"`` for the matching block.
   void cancelMonitor(String sessionId, String monitorId) {
-    if (_inputChannel == null) return;
     final msg = {
       'type': 'cancel_monitor',
       'session_id': sessionId,
       'monitor_id': monitorId,
     };
-    _inputChannel!.sink.add(jsonEncode(msg));
+    _transport.sendInput(msg);
   }
 
   /// Request cancellation of a queued user message that has not yet been
@@ -271,13 +160,12 @@ class WebSocketService {
   /// carrying ``ok: false`` when the message was already dequeued; the UI
   /// handles that gracefully.
   void cancelQueued(String sessionId, String queuedId) {
-    if (_inputChannel == null) return;
     final msg = {
       'type': 'cancel_queued',
       'session_id': sessionId,
       'queued_id': queuedId,
     };
-    _inputChannel!.sink.add(jsonEncode(msg));
+    _transport.sendInput(msg);
   }
 
   /// Edit the text of a queued user message in place (text only; attachments
@@ -288,7 +176,6 @@ class WebSocketService {
     String content, {
     String? displayContent,
   }) {
-    if (_inputChannel == null) return;
     final msg = <String, dynamic>{
       'type': 'edit_queued',
       'session_id': sessionId,
@@ -298,19 +185,19 @@ class WebSocketService {
     if (displayContent != null) {
       msg['display_content'] = displayContent;
     }
-    _inputChannel!.sink.add(jsonEncode(msg));
+    _transport.sendInput(msg);
   }
 
   void listSessions({int offset = 0, int limit = 30}) {
-    if (_outputChannel == null) return;
-    _outputChannel!.sink.add(
-      jsonEncode({'type': 'list_sessions', 'offset': offset, 'limit': limit}),
-    );
+    _transport.sendOutput({
+      'type': 'list_sessions',
+      'offset': offset,
+      'limit': limit,
+    });
   }
 
   void listTasks() {
-    if (_outputChannel == null) return;
-    _outputChannel!.sink.add(jsonEncode({'type': 'list_tasks'}));
+    _transport.sendOutput({'type': 'list_tasks'});
   }
 
   Future<Map<String, dynamic>> fetchSessionMessages(
@@ -521,8 +408,7 @@ class WebSocketService {
   Future<Map<String, dynamic>> fetchLinearTeams() => _rest.fetchLinearTeams();
 
   void listLinearIssues() {
-    if (_outputChannel == null) return;
-    _outputChannel!.sink.add(jsonEncode({'type': 'list_linear_issues'}));
+    _transport.sendOutput({'type': 'list_linear_issues'});
   }
 
   Future<Map<String, dynamic>> syncLinearIssues() => _rest.syncLinearIssues();
@@ -596,172 +482,40 @@ class WebSocketService {
 
   /// Send a WebSocket message to request artifacts list
   void requestArtifacts() {
-    _outputChannel!.sink.add(jsonEncode({'type': 'list_artifacts'}));
+    _transport.sendOutput({'type': 'list_artifacts'});
   }
 
   // ---------------------------------------------------------------------------
   // Worktree API
   // ---------------------------------------------------------------------------
 
-  /// List all active worktrees for [repoPath].
-  Future<Map<String, dynamic>> listWorktrees(String repoPath) async {
-    if (_serverUrl == null) throw StateError('Not connected');
-    final url = _serverUrl!.http('/api/worktrees', {'repo_path': repoPath});
-    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
-    try {
-      final request = await client.getUrl(url);
-      request.headers.set('X-API-Key', _serverUrl!.apiKey);
-      final response = await request.close();
-      final body = await response.transform(utf8.decoder).join();
-      if (response.statusCode != 200) {
-        throw Exception('Server returned ${response.statusCode}: $body');
-      }
-      return jsonDecode(body) as Map<String, dynamic>;
-    } finally {
-      client.close();
-    }
-  }
+  Future<Map<String, dynamic>> listWorktrees(String repoPath) =>
+      _rest.listWorktrees(repoPath);
 
-  /// Create a new worktree with [branch] branched from [base] (default "main").
   Future<Map<String, dynamic>> createWorktree({
     required String branch,
     required String repoPath,
     String base = 'main',
-  }) async {
-    if (_serverUrl == null) throw StateError('Not connected');
-    final url = _serverUrl!.http('/api/worktrees');
-    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
-    try {
-      final request = await client.postUrl(url);
-      request.headers.set('X-API-Key', _serverUrl!.apiKey);
-      request.headers.contentType = io.ContentType.json;
-      request.write(
-        jsonEncode({'branch': branch, 'base': base, 'repo_path': repoPath}),
-      );
-      final response = await request.close();
-      final body = await response.transform(utf8.decoder).join();
-      if (response.statusCode != 201) {
-        throw Exception('Server returned ${response.statusCode}: $body');
-      }
-      return jsonDecode(body) as Map<String, dynamic>;
-    } finally {
-      client.close();
-    }
-  }
+  }) => _rest.createWorktree(branch: branch, repoPath: repoPath, base: base);
 
-  /// Squash-merge [name] into its base branch with [message] and clean up.
   Future<Map<String, dynamic>> mergeWorktree({
     required String name,
     required String message,
     required String repoPath,
-  }) async {
-    if (_serverUrl == null) throw StateError('Not connected');
-    final url = _serverUrl!.http('/api/worktrees/$name/merge');
-    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
-    try {
-      final request = await client.postUrl(url);
-      request.headers.set('X-API-Key', _serverUrl!.apiKey);
-      request.headers.contentType = io.ContentType.json;
-      request.write(jsonEncode({'message': message, 'repo_path': repoPath}));
-      final response = await request.close();
-      final body = await response.transform(utf8.decoder).join();
-      if (response.statusCode != 200) {
-        throw Exception('Server returned ${response.statusCode}: $body');
-      }
-      return jsonDecode(body) as Map<String, dynamic>;
-    } finally {
-      client.close();
-    }
-  }
+  }) => _rest.mergeWorktree(name: name, message: message, repoPath: repoPath);
 
-  /// Remove a worktree and its branch without merging.
   Future<Map<String, dynamic>> removeWorktree({
     required String name,
     required String repoPath,
-  }) async {
-    if (_serverUrl == null) throw StateError('Not connected');
-    final url = _serverUrl!.http('/api/worktrees/$name', {
-      'repo_path': repoPath,
-    });
-    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
-    try {
-      final request = await client.deleteUrl(url);
-      request.headers.set('X-API-Key', _serverUrl!.apiKey);
-      final response = await request.close();
-      final body = await response.transform(utf8.decoder).join();
-      if (response.statusCode != 200) {
-        throw Exception('Server returned ${response.statusCode}: $body');
-      }
-      return jsonDecode(body) as Map<String, dynamic>;
-    } finally {
-      client.close();
-    }
-  }
+  }) => _rest.removeWorktree(name: name, repoPath: repoPath);
 
-  /// List artifacts that belong to a project directory.
-  ///
-  /// [projectName] is the directory name as it appears under PROJECTS_DIR.
-  Future<Map<String, dynamic>> listProjectArtifacts(String projectName) async {
-    if (_serverUrl == null) throw StateError('Not connected');
-    final url = _serverUrl!.http('/api/projects/$projectName/artifacts');
-    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
-    try {
-      final request = await client.getUrl(url);
-      request.headers.set('X-API-Key', _serverUrl!.apiKey);
-      final response = await request.close();
-      final body = await response.transform(utf8.decoder).join();
-      if (response.statusCode != 200) {
-        throw Exception('Server returned ${response.statusCode}: $body');
-      }
-      return jsonDecode(body) as Map<String, dynamic>;
-    } finally {
-      client.close();
-    }
-  }
+  Future<Map<String, dynamic>> listProjectArtifacts(String projectName) =>
+      _rest.listProjectArtifacts(projectName);
 
-  /// Set or clear the selected worktree path for a session.
-  ///
-  /// [path] is the absolute path of the worktree to select, or null to clear.
-  /// When set, Claude Code and Codex agents will use this directory.
-  Future<void> setSessionWorktree(String sessionId, String? path) async {
-    if (_serverUrl == null) throw StateError('Not connected');
-    final url = _serverUrl!.http('/api/sessions/$sessionId/worktree');
-    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
-    try {
-      final request = await client.openUrl('PATCH', url);
-      request.headers.set('X-API-Key', _serverUrl!.apiKey);
-      request.headers.contentType = io.ContentType.json;
-      request.add(utf8.encode(jsonEncode({'path': path})));
-      final response = await request.close();
-      final body = await response.transform(utf8.decoder).join();
-      if (response.statusCode != 200) {
-        throw Exception(
-          response.statusCode == 404
-              ? 'Session not found'
-              : 'Server returned ${response.statusCode}: $body',
-        );
-      }
-    } finally {
-      client.close();
-    }
-  }
+  Future<void> setSessionWorktree(String sessionId, String? path) =>
+      _rest.setSessionWorktree(sessionId, path);
 
-  void disconnect() {
-    _inputSub?.cancel();
-    _outputSub?.cancel();
-    _inputSub = null;
-    _outputSub = null;
-    _inputChannel?.sink.close();
-    _outputChannel?.sink.close();
-    _inputChannel = null;
-    _outputChannel = null;
-    _connectionController.add(false);
-  }
+  void disconnect() => _transport.disconnect();
 
-  void dispose() {
-    disconnect();
-    _inputController.close();
-    _outputController.close();
-    _connectionController.close();
-  }
+  void dispose() => _transport.dispose();
 }

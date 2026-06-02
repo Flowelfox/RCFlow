@@ -73,9 +73,22 @@ keep working (an `extension` was rejected because its methods are not virtual).
 `websocket_service.dart` 2239 → 640 lines; flutter analyze clean, all 479
 client tests pass.
 
-Steps 2–4 (WebSocketTransport / MessageDispatcher extraction; AppState /
-PaneState carved into feature ChangeNotifiers one feature at a time with
-AppState delegating until each of the 29 read-sites is migrated) follow.
+**Step 2 (transport extraction) — ✅ done.** `WebSocketTransport`
+(`lib/services/web_socket_transport.dart`, 162 lines) now owns the two raw
+channels, the broadcast controllers + subscriptions, ping keepalive,
+connect/disconnect/dispose, the inbound frame→stream decode (the
+message-dispatch leg), and `sendInput`/`sendOutput`. `WebSocketService`
+composes it (`self._transport`), delegates `connect`/`disconnect`/`dispose` /
+the three streams / `isConnected`, and its `void` command methods build their
+JSON map and call `_transport.sendInput`/`sendOutput`. `connect` also missed
+six worktree/project-artifact HTTP methods in step 1 — those moved into
+`RestClient` here too, so `WebSocketService` no longer holds any connection
+state. `websocket_service.dart` 767 → 521 lines; flutter analyze clean, all
+479 client tests pass.
+
+**Step 3 (AppState / PaneState → feature ChangeNotifiers)** follows — carve one
+feature at a time with AppState delegating until each of the 29 read-sites is
+migrated.
 
 ## Phase 6 — Flutter Tests + Final Lint
 
