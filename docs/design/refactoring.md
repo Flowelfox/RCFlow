@@ -49,11 +49,11 @@ Current floors: Python **54%**, Flutter **14%**.
 | Slice | Status | Notes |
 |-------|--------|-------|
 | `lib/theme/spacing.dart` shared tokens | ✅ done | `kSpace1..6`, `kPadCompact/Default/Comfortable`, `kGapInline/Tight/Relaxed`, `kRadiusSmall/Medium/Large`. Replaces ad-hoc literals; widget rewrites consume these in follow-ups |
-| `server_config_screen.dart` (3959) split | ⏳ deferred | 28 embedded classes; extract `lib/ui/widgets/config_fields/` + `lib/ui/widgets/config_layout/` |
-| `input_area.dart` (2605) split | ⏳ deferred | Extract autocomplete, worktree picker, attachment strip, key shortcuts |
-| `settings_menu.dart` (1778) split | ⏳ deferred | Promote each section to its own file under `lib/ui/widgets/settings/` |
-| `task_pane.dart` (1821) split | ⏳ deferred | Header / list / detail / actions |
-| Codemod replacing hardcoded EdgeInsets with spacing tokens | ⏳ deferred | One mechanical PR after the file splits land |
+| `server_config_screen.dart` (3959) split | ✅ done | Field/layout widgets extracted into `part` files: `config_layout`, `config_fields_text`, `config_fields_model`, `config_fields_misc`, `config_fields_tool`, `config_field_wrapper`. Main keeps `showServerConfigScreen` + `ServerConfigContent(State)` (the large stateful controller, → 2451 lines). `part`/`part of` keeps private widgets private with no external import changes |
+| `input_area.dart` (2649) split | ✅ done | Chips, mention items, status bars (subprocess + monitor/wake strip), and slash items extracted into `input_chips`/`input_mention_items`/`input_status_bars`/`input_slash_items` parts; main keeps `InputArea`/`_InputAreaState` (→ 1487 lines) |
+| `settings_menu.dart` (1778) split | ✅ done | Each settings section extracted into a `settings_sections_*` part (workers/appearance/notifications/hotkeys/about) plus `settings_shared`; main keeps `showSettingsMenu`, `AndroidSettingsBody`, and the dialog/sheet/page shells (→ 385 lines) |
+| `task_pane.dart` (1821) split | ✅ done | Header, detail content, tiles, link-issue dialog, and plan banner extracted into parts; main keeps `TaskPane`/`_TaskPaneState` (→ 99 lines) |
+| Codemod replacing hardcoded EdgeInsets with spacing tokens | ⏳ deferred | Still a separate mechanical sweep — only literals that exactly match a `spacing.dart` token value should be rewritten, so it is done as its own focused pass rather than bundled with the structural splits |
 
 ## Phase 5 — Flutter State / Transport Split
 
