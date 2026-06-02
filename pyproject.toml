@@ -77,7 +77,7 @@ omit = ["src/__main__.py"]
 [tool.coverage.report]
 show_missing = true
 skip_empty = true
-fail_under = 52
+fail_under = 54
 
 [tool.ty.src]
 exclude = ["scripts/", "src/gui/macos.py"]

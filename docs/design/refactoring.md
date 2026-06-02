@@ -16,7 +16,7 @@ above their previous values. PRs that add ≥10 lines under `src/` or
 `rcflowclient/lib/` must additionally raise the relevant gate by the
 new code's measured coverage.
 
-Current floors: Python **52%**, Flutter **14%**.
+Current floors: Python **54%**, Flutter **14%**.
 
 ## Phase 1 — Tooling & Dead Code
 
@@ -40,9 +40,9 @@ Current floors: Python **52%**, Flutter **14%**.
 | Slice | Status | Notes |
 |-------|--------|-------|
 | Route tests for dashboard.py + projects.py | ✅ done | Coverage 52.99 → 53.12% |
-| Direct agent unit tests | ⏳ deferred | Best landed alongside Phase 2d so the targets are isolated classes rather than mixins |
+| Direct agent unit tests | ⏳ partial | The agent collaborators are now isolated classes (`ClaudeCodeAgent`/`CodexAgent`/`OpenCodeAgent`); `test_agent_monitor.py` and `test_agent_diff.py` cover the Claude relay/monitor/diff paths against a bare `ClaudeCodeAgent`. Broader Codex/OpenCode unit coverage can follow incrementally |
 | Real implementations for `*_plan.py` files | n/a | Audit was misled by filename — those files are real tests for plan-mode infrastructure, not "to-do" stubs |
-| Tests for `auth`, `config`, `models`, `slash_commands`, `tools`, `uploads`, `telemetry`, `rcflow_plugins` routes | ⏳ partial | Existing `test_claude_code_login.py`, `test_config_reload.py`, `test_models_route.py`, `test_slash_commands.py`, `test_rcflow_plugins.py`, `test_uploads.py` already cover the most-used paths; `telemetry` and `tools` need DB / ToolManager fixtures and ship in dedicated PRs |
+| Tests for `auth`, `config`, `models`, `slash_commands`, `tools`, `uploads`, `telemetry`, `rcflow_plugins` routes | ✅ done | `test_routes_tools.py` (read endpoints + not-installed / unknown-tool error paths; tools.py 62%) and `test_routes_telemetry.py` (all four read endpoints against an empty in-memory DB + UUID/param guards; telemetry.py 51%) landed. Python coverage floor raised 52 → 54% |
 
 ## Phase 4 — Flutter File Splits
 
