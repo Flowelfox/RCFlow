@@ -7,6 +7,7 @@ import 'dart:math';
 import '../models/artifact_info.dart';
 import '../models/linear_issue_info.dart';
 import 'clipboard_paste_controller.dart';
+import 'toast_notifier.dart';
 import 'stores/artifact_store.dart';
 import 'stores/linear_issue_store.dart';
 import 'stores/task_store.dart';
@@ -334,21 +335,21 @@ class AppState extends ChangeNotifier implements PaneHost {
 
     // N3: Task created (new task ID)
     if (existing == null) {
-      _showToast(
+      _toasts.show(
         level: NotificationLevel.info,
         title: 'Task Created',
         body: updated.title,
-        category: _ToastCategory.task,
+        category: ToastCategory.task,
         onAction: () => openTaskInPane(taskId),
       );
     }
     // N2: Task status changed
     else if (existing.status != updated.status) {
-      _showToast(
+      _toasts.show(
         level: NotificationLevel.warning,
         title: 'Task Status Changed',
         body: '${updated.title}: ${existing.status} \u2192 ${updated.status}',
-        category: _ToastCategory.task,
+        category: ToastCategory.task,
         onAction: () => openTaskInPane(taskId),
       );
     }
@@ -802,6 +803,7 @@ class AppState extends ChangeNotifier implements PaneHost {
       _activePaneId = 'pane_0' {
     _soundService = NotificationSoundService(settings: _settings);
     _notificationService = NotificationService();
+    _toasts = ToastNotifier(_settings, _notificationService);
     _hotkeyService = HotkeyService(settings: _settings);
     _updateService = UpdateService(settings: _settings);
     _panes['pane_0'] = PaneState(paneId: 'pane_0', host: this)
@@ -877,33 +879,8 @@ class AppState extends ChangeNotifier implements PaneHost {
     await _registry.wakeAll();
   }
 
-  // --- Toast notification helpers ---
-
-  void _showToast({
-    required NotificationLevel level,
-    required String title,
-    String? body,
-    required _ToastCategory category,
-    String? actionLabel,
-    VoidCallback? onAction,
-  }) {
-    if (!_settings.toastEnabled) return;
-    switch (category) {
-      case _ToastCategory.connection:
-        if (!_settings.toastConnections) return;
-      case _ToastCategory.task:
-        if (!_settings.toastTasks) return;
-      case _ToastCategory.session:
-        if (!_settings.toastBackgroundSessions) return;
-    }
-    _notificationService.show(
-      level: level,
-      title: title,
-      body: body,
-      actionLabel: actionLabel,
-      onAction: onAction,
-    );
-  }
+  // --- Toast notifications (settings-gated; see [ToastNotifier]) ---
+  late final ToastNotifier _toasts;
 
   String _sessionLabel(String sessionId) {
     for (final w in _registry.all) {
@@ -952,11 +929,11 @@ class AppState extends ChangeNotifier implements PaneHost {
               activePane.addSystemMessage('Connected to ${config.name}');
             }
           } catch (e) {
-            _showToast(
+            _toasts.show(
               level: NotificationLevel.error,
               title: 'Connection Failed',
               body: 'Failed to connect to ${config.name}: $e',
-              category: _ToastCategory.connection,
+              category: ToastCategory.connection,
             );
           }
         }
@@ -1778,11 +1755,11 @@ class AppState extends ChangeNotifier implements PaneHost {
         // N4: Session awaiting input (not visible in any pane)
         if (wsType != null && _awaitingInputTypes.contains(wsType)) {
           final label = _sessionLabel(sessionId);
-          _showToast(
+          _toasts.show(
             level: NotificationLevel.warning,
             title: 'Waiting for Input',
             body: label,
-            category: _ToastCategory.session,
+            category: ToastCategory.session,
             onAction: () => _navigateToSession(sessionId),
           );
         }
@@ -1791,11 +1768,11 @@ class AppState extends ChangeNotifier implements PaneHost {
         if (wsType == WsOutputType.error) {
           final label = _sessionLabel(sessionId);
           final content = msg['content'] as String? ?? 'Unknown error';
-          _showToast(
+          _toasts.show(
             level: NotificationLevel.error,
             title: 'Session Error',
             body: '$label: $content',
-            category: _ToastCategory.session,
+            category: ToastCategory.session,
             onAction: () => _navigateToSession(sessionId),
           );
         }
@@ -1803,11 +1780,11 @@ class AppState extends ChangeNotifier implements PaneHost {
         // N12: Session completed (background)
         if (wsType == WsOutputType.sessionEnd) {
           final label = _sessionLabel(sessionId);
-          _showToast(
+          _toasts.show(
             level: NotificationLevel.info,
             title: 'Session Completed',
             body: label,
-            category: _ToastCategory.session,
+            category: ToastCategory.session,
             onAction: () => _navigateToSession(sessionId),
           );
         }
@@ -1818,11 +1795,11 @@ class AppState extends ChangeNotifier implements PaneHost {
         final code = msg['code'] as String?;
         if (code == 'TOKEN_LIMIT_REACHED') {
           final label = _sessionLabel(sessionId);
-          _showToast(
+          _toasts.show(
             level: NotificationLevel.warning,
             title: 'Token Limit Reached',
             body: label,
-            category: _ToastCategory.session,
+            category: ToastCategory.session,
             onAction: () => _navigateToSession(sessionId),
           );
         }
@@ -1836,21 +1813,21 @@ class AppState extends ChangeNotifier implements PaneHost {
         final status = msg['status'] as String?;
         if (status == 'failed') {
           final label = _sessionLabel(sessionId);
-          _showToast(
+          _toasts.show(
             level: NotificationLevel.error,
             title: 'Session Failed',
             body: label,
-            category: _ToastCategory.session,
+            category: ToastCategory.session,
             onAction: () => _navigateToSession(sessionId),
           );
         } else if (status == 'cancelled') {
           if (!_userEndedSessionIds.remove(sessionId)) {
             final label = _sessionLabel(sessionId);
-            _showToast(
+            _toasts.show(
               level: NotificationLevel.error,
               title: 'Session Cancelled',
               body: label,
-              category: _ToastCategory.session,
+              category: ToastCategory.session,
               onAction: () => _navigateToSession(sessionId),
             );
           }
@@ -2115,8 +2092,6 @@ SplitNode treeSplitPaneAtPosition(
   axis,
   insertFirst: insertFirst,
 );
-
-enum _ToastCategory { connection, task, session }
 
 /// Snapshot of a closed pane's essential state for the reopen stack.
 class _ClosedPaneRecord {
