@@ -418,7 +418,7 @@ class MockAnthropicServer:
         self.base_url: str = ""
 
     def set_responses(self, responses: list[str]) -> None:
-        """Simple text mode: cycle through these responses."""
+        """Set simple text mode: cycle through these responses."""
         self._state.set_responses(responses)
 
     def set_turns(self, turns: list[dict[str, Any]]) -> None:

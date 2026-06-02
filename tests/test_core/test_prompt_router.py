@@ -193,7 +193,7 @@ async def test_fire_title_task(session_manager: SessionManager) -> None:
 
 
 async def _async_stream_chunks(chunks: list[ExecutionChunk]):
-    """Helper to create an async generator from a list of ExecutionChunks."""
+    """Create an async generator from a list of ExecutionChunks."""
     for chunk in chunks:
         yield chunk
 

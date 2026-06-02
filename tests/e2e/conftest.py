@@ -175,7 +175,7 @@ def _build_e2e_app(
 
 @pytest.fixture
 def make_e2e_client(e2e_settings: Settings, e2e_tool_registry: ToolRegistry):
-    """Factory fixture — call with a list of scripted LLM turns.
+    """Build an e2e client; call with a list of scripted LLM turns.
 
     Example::
 
