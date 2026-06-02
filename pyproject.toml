@@ -128,9 +128,6 @@ ignore = [
     "ASYNC240", # pathlib in async — synchronous fs calls are OK in our context
     "D105",     # undocumented magic method — __eq__/__repr__ etc. are self-evident
     "D107",     # undocumented __init__ — documented at the class level instead
-    "D205",     # blank line between summary and description — stylistic
-    "D401",     # imperative mood — stylistic, opinionated about existing prose
-    "D417",     # per-argument descriptions — covered by type hints + summaries
 ]
 
 # Complexity ratchet: the current ceiling is set high so that landing the rule
@@ -148,7 +145,7 @@ max-complexity = 70
 # Tests use assert and rotate through local temp files / fake subprocesses.
 # Test functions/classes are self-documenting by name, so the docstring-content
 # rules (D1xx) don't apply.
-"tests/*" = ["S101", "S105", "S106", "D100", "D101", "D102", "D103", "D104", "D106"]
+"tests/*" = ["S101", "S105", "S106", "D100", "D101", "D102", "D103", "D104", "D106", "D205"]
 # Database migrations are mechanically generated; complexity + docstring gates
 # don't fit generated code.
 "src/database/migrations/*" = ["C901", "D100", "D101", "D103"]

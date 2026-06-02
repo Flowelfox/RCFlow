@@ -153,7 +153,7 @@ class PtyLineReader:
     # Internal event-loop callback
 
     def _on_readable(self) -> None:
-        """Invoked by the event loop when *master_fd* has data available."""
+        """Read available PTY output when *master_fd* becomes readable."""
         try:
             data = os.read(self._fd, 65536)
         except OSError as exc:

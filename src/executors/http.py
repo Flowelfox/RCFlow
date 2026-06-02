@@ -201,7 +201,7 @@ class HttpExecutor(BaseExecutor):
 
 
 def _extract_json_path(data: Any, path: str) -> Any:
-    """Simple JSON path extraction supporting dot notation (e.g., '$.data.summary')."""
+    """Extract a value by JSON path with dot notation (e.g. '$.data.summary')."""
     parts = path.lstrip("$").lstrip(".").split(".")
     current = data
     for part in parts:

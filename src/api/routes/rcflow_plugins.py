@@ -389,7 +389,7 @@ _DEPRECATION_NOTICE = "This endpoint is deprecated. Use /api/tools/claude_code/p
     dependencies=[Depends(verify_http_api_key)],
 )
 async def list_rcflow_plugins_deprecated(response: Response) -> dict[str, Any]:
-    """Deprecated — use GET /api/tools/claude_code/plugins."""
+    """Use ``GET /api/tools/claude_code/plugins`` instead (deprecated)."""
     response.headers["X-RCFlow-Deprecated"] = _DEPRECATION_NOTICE
     plugins_dir = get_managed_cc_plugins_dir()
     state = PluginStateManager(plugins_dir)
@@ -419,7 +419,7 @@ async def install_rcflow_plugin_deprecated(
     body: _LegacyInstallRequest,
     response: Response,
 ) -> dict[str, Any]:
-    """Deprecated — use POST /api/tools/claude_code/plugins."""
+    """Use ``POST /api/tools/claude_code/plugins`` instead (deprecated)."""
     response.headers["X-RCFlow-Deprecated"] = _DEPRECATION_NOTICE
     return await install_tool_plugin(
         "claude_code",
@@ -437,6 +437,6 @@ async def install_rcflow_plugin_deprecated(
     dependencies=[Depends(verify_http_api_key)],
 )
 async def uninstall_rcflow_plugin_deprecated(name: str, response: Response) -> dict[str, str]:
-    """Deprecated — use DELETE /api/tools/claude_code/plugins/{name}."""
+    """Use ``DELETE /api/tools/claude_code/plugins/{name}`` instead (deprecated)."""
     response.headers["X-RCFlow-Deprecated"] = _DEPRECATION_NOTICE
     return await uninstall_tool_plugin("claude_code", name)

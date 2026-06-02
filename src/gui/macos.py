@@ -646,7 +646,7 @@ class RCFlowMacOSGUI:
     # ── Update event handlers ────────────────────────────────────────────
 
     def _on_updater_change(self) -> None:
-        """Listener invoked from the updater worker thread.
+        """Handle an update event from the updater worker thread.
 
         Sets a flag consumed on the next ``_update_ui`` tick — the only safe
         place to mutate Tk widgets and AppKit objects on macOS.

@@ -517,9 +517,11 @@ class ToolManager:
                 yield {"step": "error", "message": f"Unknown tool: {name}"}
 
     def _cleanup_parked_binaries(self, name: str) -> None:
-        """Best-effort delete of ``<binary>.<pid>.old`` files left over from prior in-place
-        Windows updates.  Files still memory-mapped by a running process stay on disk and
-        are retried at the next call.  No-op on POSIX where ``replace`` already overwrites.
+        """Sweep stale ``<binary>.<pid>.old`` files from prior in-place updates.
+
+        Left over from prior in-place Windows updates.  Files still
+        memory-mapped by a running process stay on disk and are retried at the
+        next call.  No-op on POSIX where ``replace`` already overwrites.
         """
         if sys.platform != "win32":
             return

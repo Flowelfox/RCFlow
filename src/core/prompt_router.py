@@ -1020,7 +1020,7 @@ class PromptRouter:
             self.schedule_pending_drain(session)
 
     async def _fire_pending_wakeup(self, session_id: str, wake) -> None:  # type: ignore[no-untyped-def]
-        """Callback handed to the :class:`WakeupScheduler`.
+        """Handle a pending wake fired by the :class:`WakeupScheduler`.
 
         Marks the wake fired in the store, then routes the prompt
         through :meth:`handle_prompt` so it reuses all the normal

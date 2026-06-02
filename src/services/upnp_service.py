@@ -237,7 +237,7 @@ def _is_conflict_error(exc: BaseException) -> bool:
 
 
 def _is_conflict_error_str(msg: str) -> bool:
-    """String variant of :func:`_is_conflict_error` — used when only the message survives."""
+    """Return whether *message* signals a conflict (string variant of :func:`_is_conflict_error`)."""
     low = msg.lower()
     return any(marker in low for marker in _CONFLICT_ERROR_MARKERS)
 

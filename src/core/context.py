@@ -471,7 +471,7 @@ class ContextBuilder:
 
     @staticmethod
     def _is_fresh_direct_mode_session(session: ActiveSession) -> bool:
-        """True when *session* has no successful prior turn.
+        """Return True when *session* has no successful prior turn.
 
         A direct-mode session is considered fresh when no agent has been
         attached, no tokens have been recorded, no title has been assigned,
