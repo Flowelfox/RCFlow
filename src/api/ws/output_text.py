@@ -1,3 +1,5 @@
+"""WebSocket endpoint for the outbound (server to client) streaming channel."""
+
 import asyncio
 import json
 import logging

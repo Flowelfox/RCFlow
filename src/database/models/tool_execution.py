@@ -1,3 +1,5 @@
+"""SQLAlchemy model for tool-execution records."""
+
 from __future__ import annotations
 
 import uuid
@@ -14,6 +16,8 @@ if TYPE_CHECKING:
 
 
 class ToolExecution(Base):
+    """Tool Execution."""
+
     __tablename__ = "tool_executions"
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)

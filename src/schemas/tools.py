@@ -19,6 +19,8 @@ CURRENT_OS = _PLATFORM_TO_OS.get(sys.platform, sys.platform)
 
 
 class ShellExecutorConfig(BaseModel):
+    """Shell Executor Config."""
+
     command_template: str
     shell: str = _DEFAULT_SHELL
     capture_stderr: bool = True
@@ -28,6 +30,8 @@ class ShellExecutorConfig(BaseModel):
 
 
 class HttpExecutorConfig(BaseModel):
+    """Http Executor Config."""
+
     method: str = "GET"
     url_template: str
     headers: dict[str, str] = Field(default_factory=dict)
@@ -37,6 +41,8 @@ class HttpExecutorConfig(BaseModel):
 
 
 class ClaudeCodeExecutorConfig(BaseModel):
+    """Claude Code Executor Config."""
+
     binary_path: str = "claude"
     default_permission_mode: str = "bypassPermissions"
     max_turns: int = 200
@@ -44,6 +50,8 @@ class ClaudeCodeExecutorConfig(BaseModel):
 
 
 class CodexExecutorConfig(BaseModel):
+    """Codex Executor Config."""
+
     binary_path: str = "codex"
     approval_mode: str = "full-auto"
     model: str = ""
@@ -51,17 +59,23 @@ class CodexExecutorConfig(BaseModel):
 
 
 class OpenCodeExecutorConfig(BaseModel):
+    """Open Code Executor Config."""
+
     binary_path: str = "opencode"
     model: str = ""
     timeout: int = 600
 
 
 class WorktreeExecutorConfig(BaseModel):
+    """Worktree Executor Config."""
+
     default_base_branch: str = "main"
     validate_branch_type: bool = True
 
 
 class ToolDefinition(BaseModel):
+    """Tool Definition."""
+
     name: str
     display_name: str = ""
     description: str
@@ -85,19 +99,25 @@ class ToolDefinition(BaseModel):
         return self.name
 
     def get_shell_config(self) -> ShellExecutorConfig:
+        """Get shell config."""
         return ShellExecutorConfig(**self.executor_config["shell"])
 
     def get_http_config(self) -> HttpExecutorConfig:
+        """Get http config."""
         return HttpExecutorConfig(**self.executor_config["http"])
 
     def get_claude_code_config(self) -> ClaudeCodeExecutorConfig:
+        """Get claude code config."""
         return ClaudeCodeExecutorConfig(**self.executor_config["claude_code"])
 
     def get_codex_config(self) -> CodexExecutorConfig:
+        """Get codex config."""
         return CodexExecutorConfig(**self.executor_config["codex"])
 
     def get_opencode_config(self) -> OpenCodeExecutorConfig:
+        """Get opencode config."""
         return OpenCodeExecutorConfig(**self.executor_config["opencode"])
 
     def get_worktree_config(self) -> WorktreeExecutorConfig:
+        """Get worktree config."""
         return WorktreeExecutorConfig(**self.executor_config.get("worktree", {}))

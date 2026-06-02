@@ -27,11 +27,15 @@ logger = logging.getLogger(__name__)
 
 
 class PermissionDecision(StrEnum):
+    """Permission Decision."""
+
     ALLOW = "allow"
     DENY = "deny"
 
 
 class PermissionScope(StrEnum):
+    """Permission Scope."""
+
     ONCE = "once"  # Single request only
     TOOL_SESSION = "tool_session"  # All uses of this tool in this session
     TOOL_PATH = "tool_path"  # This tool + files under a path prefix

@@ -1,3 +1,5 @@
+"""SQLAlchemy ORM models package."""
+
 from src.database.models.artifact import Artifact
 from src.database.models.base import Base
 from src.database.models.draft import Draft

@@ -228,4 +228,5 @@ button:disabled { opacity: .5; cursor: not-allowed; }
     response_class=HTMLResponse,
 )
 async def dashboard() -> HTMLResponse:
+    """Serve the worker dashboard HTML page."""
     return HTMLResponse(_DASHBOARD_HTML)

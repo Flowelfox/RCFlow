@@ -1,3 +1,5 @@
+"""SQLAlchemy telemetry models (turns and tool calls)."""
+
 import uuid
 from datetime import datetime
 

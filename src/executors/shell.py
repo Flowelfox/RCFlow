@@ -1,3 +1,5 @@
+"""Executor that runs shell-command tools."""
+
 import asyncio
 import logging
 import shlex
@@ -52,6 +54,8 @@ def _quote_params_for_shell(
 
 
 class ShellExecutor(BaseExecutor):
+    """Shell Executor."""
+
     def __init__(self) -> None:
         self._process: asyncio.subprocess.Process | None = None
 
@@ -105,6 +109,7 @@ class ShellExecutor(BaseExecutor):
         tool: ToolDefinition,
         parameters: dict[str, Any],
     ) -> ExecutionResult:
+        """Execute the tool."""
         config = tool.get_shell_config()
         is_ps = self._is_powershell(config.shell)
         quoted = _quote_params_for_shell(parameters, config.command_template, is_powershell=is_ps)
@@ -157,6 +162,7 @@ class ShellExecutor(BaseExecutor):
         tool: ToolDefinition,
         parameters: dict[str, Any],
     ) -> AsyncGenerator[ExecutionChunk, None]:
+        """Execute the tool, streaming output chunks."""
         config = tool.get_shell_config()
         is_ps = self._is_powershell(config.shell)
         quoted = _quote_params_for_shell(parameters, config.command_template, is_powershell=is_ps)
@@ -194,6 +200,7 @@ class ShellExecutor(BaseExecutor):
             self._process = None
 
     async def send_input(self, data: str) -> None:
+        """Send input."""
         if self._process and self._process.stdin:
             self._process.stdin.write(data.encode("utf-8"))
             await self._process.stdin.drain()
@@ -201,6 +208,7 @@ class ShellExecutor(BaseExecutor):
             raise RuntimeError("No running interactive process or stdin not available")
 
     async def cancel(self) -> None:
+        """Cancel."""
         if self._process:
             self._process.kill()
             await self._process.wait()

@@ -1,3 +1,5 @@
+"""Active-session model, session manager, and session enums."""
+
 import asyncio
 import contextlib
 import logging
@@ -56,6 +58,8 @@ def session_sort_key(item: dict[str, Any]) -> tuple[int, float]:
 
 
 class SessionStatus(StrEnum):
+    """Lifecycle state of a session."""
+
     CREATED = "created"
     ACTIVE = "active"
     EXECUTING = "executing"
@@ -67,6 +71,8 @@ class SessionStatus(StrEnum):
 
 
 class ActivityState(StrEnum):
+    """What a session is currently doing (drives the status badge)."""
+
     IDLE = "idle"
     PROCESSING_LLM = "processing_llm"
     EXECUTING_TOOL = "executing_tool"
@@ -75,6 +81,8 @@ class ActivityState(StrEnum):
 
 
 class SessionType(StrEnum):
+    """How a session is driven: one-shot, conversational, or long-running."""
+
     ONE_SHOT = "one-shot"
     CONVERSATIONAL = "conversational"
     LONG_RUNNING = "long-running"
@@ -191,66 +199,82 @@ class ActiveSession:
 
     @property
     def input_tokens(self) -> int:
+        """Running LLM input-token total."""
         return self._tokens.input_tokens
 
     @input_tokens.setter
     def input_tokens(self, value: int) -> None:
+        """Set the LLM input-token total."""
         self._tokens.input_tokens = value
 
     @property
     def output_tokens(self) -> int:
+        """Running LLM output-token total."""
         return self._tokens.output_tokens
 
     @output_tokens.setter
     def output_tokens(self, value: int) -> None:
+        """Set the LLM output-token total."""
         self._tokens.output_tokens = value
 
     @property
     def cache_creation_input_tokens(self) -> int:
+        """Running prompt-cache creation token total."""
         return self._tokens.cache_creation_input_tokens
 
     @cache_creation_input_tokens.setter
     def cache_creation_input_tokens(self, value: int) -> None:
+        """Set the prompt-cache creation token total."""
         self._tokens.cache_creation_input_tokens = value
 
     @property
     def cache_read_input_tokens(self) -> int:
+        """Running prompt-cache read token total."""
         return self._tokens.cache_read_input_tokens
 
     @cache_read_input_tokens.setter
     def cache_read_input_tokens(self, value: int) -> None:
+        """Set the prompt-cache read token total."""
         self._tokens.cache_read_input_tokens = value
 
     @property
     def tool_input_tokens(self) -> int:
+        """Running tool-agent input-token total."""
         return self._tokens.tool_input_tokens
 
     @tool_input_tokens.setter
     def tool_input_tokens(self, value: int) -> None:
+        """Set the tool-agent input-token total."""
         self._tokens.tool_input_tokens = value
 
     @property
     def tool_output_tokens(self) -> int:
+        """Running tool-agent output-token total."""
         return self._tokens.tool_output_tokens
 
     @tool_output_tokens.setter
     def tool_output_tokens(self, value: int) -> None:
+        """Set the tool-agent output-token total."""
         self._tokens.tool_output_tokens = value
 
     @property
     def tool_cost_usd(self) -> float:
+        """Running tool-agent cost in USD."""
         return self._tokens.tool_cost_usd
 
     @tool_cost_usd.setter
     def tool_cost_usd(self, value: float) -> None:
+        """Set the tool-agent cost in USD."""
         self._tokens.tool_cost_usd = value
 
     @property
     def subprocess_started_at(self) -> datetime | None:
+        """When the running subprocess started, or None."""
         return self._subprocess.started_at
 
     @subprocess_started_at.setter
     def subprocess_started_at(self, value: datetime | None) -> None:
+        """Set the running-subprocess start time."""
         self._subprocess.started_at = value
 
     @property
@@ -266,50 +290,62 @@ class ActiveSession:
 
     @property
     def subprocess_current_tool(self) -> str | None:
+        """Tool the running subprocess is currently executing, or None."""
         return self._subprocess.current_tool
 
     @subprocess_current_tool.setter
     def subprocess_current_tool(self, value: str | None) -> None:
+        """Set the running-subprocess current tool."""
         self._subprocess.current_tool = value
 
     @property
     def subprocess_type(self) -> str | None:
+        """Type of the running subprocess (claude_code / codex / opencode), or None."""
         return self._subprocess.type
 
     @subprocess_type.setter
     def subprocess_type(self, value: str | None) -> None:
+        """Set the running-subprocess type."""
         self._subprocess.type = value
 
     @property
     def subprocess_display_name(self) -> str | None:
+        """Display name of the running subprocess, or None."""
         return self._subprocess.display_name
 
     @subprocess_display_name.setter
     def subprocess_display_name(self, value: str | None) -> None:
+        """Set the running-subprocess display name."""
         self._subprocess.display_name = value
 
     @property
     def subprocess_working_directory(self) -> str | None:
+        """Working directory of the running subprocess, or None."""
         return self._subprocess.working_directory
 
     @subprocess_working_directory.setter
     def subprocess_working_directory(self, value: str | None) -> None:
+        """Set the running-subprocess working directory."""
         self._subprocess.working_directory = value
 
     @property
     def pending_user_messages(self) -> list[PendingMessage]:
+        """In-memory mirror of this session's queued user messages."""
         return self._pending.messages
 
     @pending_user_messages.setter
     def pending_user_messages(self, value: list[PendingMessage]) -> None:
+        """Replace the queued-user-message mirror."""
         self._pending.messages = value
 
     @property
     def scheduled_wakes(self) -> list[ScheduledWake]:
+        """In-memory mirror of this session's pending ScheduleWakeup calls."""
         return self._wakes.wakes
 
     @scheduled_wakes.setter
     def scheduled_wakes(self, value: list[ScheduledWake]) -> None:
+        """Replace the scheduled-wake mirror."""
         self._wakes.wakes = value
 
     @property
@@ -331,9 +367,11 @@ class ActiveSession:
 
     @property
     def todos(self) -> list[dict[str, str]]:
+        """Current in-memory todo list (from the latest TodoWrite)."""
         return list(self._todos)
 
     def update_todos(self, todos: list[dict[str, str]]) -> None:
+        """Replace the in-memory todo list."""
         self._todos = todos
 
     def touch(self) -> None:
@@ -342,6 +380,7 @@ class ActiveSession:
 
     @property
     def activity_state(self) -> ActivityState:
+        """Current activity state of the session."""
         return self._activity_state
 
     def set_activity(self, state: ActivityState) -> None:
@@ -451,6 +490,7 @@ class ActiveSession:
 
     @property
     def title(self) -> str | None:
+        """Human-readable session title, or None if not yet set."""
         return self._title
 
     @title.setter
@@ -465,6 +505,7 @@ class ActiveSession:
         self._dirty = True
 
     def set_active(self) -> None:
+        """Transition the session to the ACTIVE state."""
         if self.status in (
             SessionStatus.PAUSED,
             SessionStatus.COMPLETED,
@@ -480,6 +521,7 @@ class ActiveSession:
                 self._on_update()
 
     def set_executing(self) -> None:
+        """Transition the session to the EXECUTING state."""
         if self.status in (
             SessionStatus.PAUSED,
             SessionStatus.COMPLETED,
@@ -495,6 +537,7 @@ class ActiveSession:
                 self._on_update()
 
     def complete(self) -> None:
+        """Mark the session COMPLETED."""
         if self.status == SessionStatus.PAUSED:
             self.metadata["completed_while_paused"] = True
             return
@@ -507,6 +550,7 @@ class ActiveSession:
             self._on_update()
 
     def fail(self, error: str | None = None) -> None:
+        """Mark the session FAILED, optionally recording an error message."""
         self.status = SessionStatus.FAILED
         self._activity_state = ActivityState.IDLE
         self.ended_at = datetime.now(UTC)
@@ -519,6 +563,7 @@ class ActiveSession:
             self._on_update()
 
     def cancel(self) -> None:
+        """Mark the session CANCELLED."""
         self.status = SessionStatus.CANCELLED
         self._activity_state = ActivityState.IDLE
         self.ended_at = datetime.now(UTC)
@@ -610,6 +655,7 @@ class SessionManager:
         self._update_subscribers: dict[str, asyncio.Queue[dict[str, Any] | None]] = {}
 
     def create_session(self, session_type: SessionType = SessionType.ONE_SHOT) -> ActiveSession:
+        """Create, register, and return a new active session."""
         session_id = str(uuid.uuid4())
         session = ActiveSession(session_id, session_type)
         # Assign sort_order so new sessions appear at the top of the list.
@@ -727,13 +773,16 @@ class SessionManager:
             queue.put_nowait(msg)
 
     def get_session(self, session_id: str) -> ActiveSession | None:
+        """Return the active session with *session_id*, or None."""
         return self._sessions.get(session_id)
 
     def list_active_sessions(self) -> list[ActiveSession]:
+        """Return all non-terminal in-memory sessions."""
         terminal = (SessionStatus.COMPLETED, SessionStatus.FAILED, SessionStatus.CANCELLED)
         return [s for s in self._sessions.values() if s.status not in terminal]
 
     def list_all_sessions(self) -> list[ActiveSession]:
+        """Return every in-memory session (active and terminal)."""
         return list(self._sessions.values())
 
     def compute_session_badges(self, session: ActiveSession) -> list[dict[str, Any]]:

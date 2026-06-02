@@ -1,3 +1,5 @@
+"""Executor that runs the Claude Code CLI subprocess."""
+
 import asyncio
 import contextlib
 import json
@@ -96,10 +98,12 @@ class ClaudeCodeExecutor(BaseExecutor):
 
     @property
     def is_running(self) -> bool:
+        """Whether the process is currently running."""
         return self._process is not None and self._process.returncode is None
 
     @property
     def session_id(self) -> str:
+        """Return the session id."""
         return self._session_id
 
     @property

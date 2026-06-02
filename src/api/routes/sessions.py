@@ -1,3 +1,5 @@
+"""HTTP routes for session listing, lifecycle, drafts, and worktrees."""
+
 from __future__ import annotations
 
 import logging
@@ -38,6 +40,7 @@ router = APIRouter(tags=["Sessions"])
 async def list_sessions(
     request: Request,
 ) -> dict[str, Any]:
+    """List sessions."""
     session_manager = request.app.state.session_manager
     db_session_factory = request.app.state.db_session_factory
     if db_session_factory is not None:
@@ -105,6 +108,7 @@ async def get_session_messages(
     before: int | None = Query(None, description="Cursor: return messages with sequence < this value"),
     limit: int | None = Query(None, ge=1, le=200, description="Max messages to return (enables pagination)"),
 ) -> dict[str, Any]:
+    """Get session messages."""
     session_manager = request.app.state.session_manager
     db_session_factory = request.app.state.db_session_factory
 
@@ -231,6 +235,7 @@ async def get_session_messages(
     dependencies=[Depends(verify_http_api_key)],
 )
 async def cancel_session(session_id: str, request: Request) -> dict[str, Any]:
+    """Cancel session."""
     prompt_router: PromptRouter = request.app.state.prompt_router
     try:
         session = await prompt_router.cancel_session(session_id)
@@ -306,6 +311,7 @@ async def cancel_session(session_id: str, request: Request) -> dict[str, Any]:
     dependencies=[Depends(verify_http_api_key)],
 )
 async def end_session(session_id: str, request: Request) -> dict[str, Any]:
+    """End the session."""
     prompt_router: PromptRouter = request.app.state.prompt_router
     try:
         session = await prompt_router.end_session(session_id)
@@ -331,6 +337,7 @@ async def end_session(session_id: str, request: Request) -> dict[str, Any]:
     dependencies=[Depends(verify_http_api_key)],
 )
 async def pause_session(session_id: str, request: Request) -> dict[str, Any]:
+    """Pause session."""
     prompt_router: PromptRouter = request.app.state.prompt_router
     try:
         session = await prompt_router.pause_session(session_id)
@@ -358,6 +365,7 @@ async def pause_session(session_id: str, request: Request) -> dict[str, Any]:
     dependencies=[Depends(verify_http_api_key)],
 )
 async def interrupt_subprocess(session_id: str, request: Request) -> dict[str, Any]:
+    """Interrupt subprocess."""
     prompt_router: PromptRouter = request.app.state.prompt_router
     try:
         session = await prompt_router.interrupt_subprocess(session_id)
@@ -382,6 +390,7 @@ async def interrupt_subprocess(session_id: str, request: Request) -> dict[str, A
     dependencies=[Depends(verify_http_api_key)],
 )
 async def resume_session(session_id: str, request: Request) -> dict[str, Any]:
+    """Resume session."""
     prompt_router: PromptRouter = request.app.state.prompt_router
     try:
         session = await prompt_router.resume_session(session_id)
@@ -407,6 +416,7 @@ async def resume_session(session_id: str, request: Request) -> dict[str, Any]:
     dependencies=[Depends(verify_http_api_key)],
 )
 async def restore_session(session_id: str, request: Request) -> dict[str, Any]:
+    """Restore session."""
     prompt_router: PromptRouter = request.app.state.prompt_router
     try:
         session = await prompt_router.restore_session(session_id)
@@ -448,6 +458,7 @@ async def reorder_session(
     body: ReorderSessionRequest,
     request: Request,
 ) -> dict[str, Any]:
+    """Reorder session."""
     session_manager: SessionManager = request.app.state.session_manager
     db_session_factory = request.app.state.db_session_factory
 
@@ -564,6 +575,7 @@ async def rename_session(
     body: RenameSessionRequest,
     request: Request,
 ) -> dict[str, Any]:
+    """Rename session."""
     session_manager: SessionManager = request.app.state.session_manager
     db_session_factory = request.app.state.db_session_factory
 
@@ -624,6 +636,7 @@ async def rename_session(
     dependencies=[Depends(verify_http_api_key)],
 )
 async def get_session_todos(session_id: str, request: Request) -> dict[str, Any]:
+    """Get session todos."""
     session_manager: SessionManager = request.app.state.session_manager
     session = session_manager.get_session(session_id)
     if session is None:
@@ -653,6 +666,7 @@ async def set_session_worktree(
     body: SetSessionWorktreeRequest,
     request: Request,
 ) -> dict[str, Any]:
+    """Set session worktree."""
     session_manager: SessionManager = request.app.state.session_manager
     session = session_manager.get_session(session_id)
     if session is None:
@@ -805,6 +819,7 @@ async def cancel_session_wake(
     wake_id: str,
     request: Request,
 ) -> dict[str, Any]:
+    """Cancel session wake."""
     prompt_router: PromptRouter = request.app.state.prompt_router
     session_manager: SessionManager = request.app.state.session_manager
     session = session_manager.get_session(session_id)
@@ -833,6 +848,7 @@ async def cancel_session_wakes(
     session_id: str,
     request: Request,
 ) -> dict[str, Any]:
+    """Cancel session wakes."""
     prompt_router: PromptRouter = request.app.state.prompt_router
     session_manager: SessionManager = request.app.state.session_manager
     session = session_manager.get_session(session_id)

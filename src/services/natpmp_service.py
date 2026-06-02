@@ -63,6 +63,8 @@ _PROTONVPN_DEFAULT_GATEWAY = "10.2.0.1"
 
 
 class NatPmpStatus(StrEnum):
+    """Nat Pmp Status."""
+
     DISABLED = "disabled"
     DISCOVERING = "discovering"
     MAPPED = "mapped"
@@ -72,6 +74,8 @@ class NatPmpStatus(StrEnum):
 
 @dataclass
 class NatPmpState:
+    """Nat Pmp State."""
+
     status: NatPmpStatus = NatPmpStatus.DISABLED
     gateway: str | None = None
     public_ip: str | None = None

@@ -1,3 +1,5 @@
+"""WebSocket endpoint for the inbound (client to server) prompt channel."""
+
 import asyncio
 import json
 import logging

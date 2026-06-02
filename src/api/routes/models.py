@@ -117,6 +117,7 @@ async def list_models(
         Query(description="Bypass cache and force a re-fetch"),
     ] = False,
 ) -> dict[str, Any]:
+    """List models."""
     if provider not in _VALID_PROVIDERS:
         raise HTTPException(
             status_code=422,

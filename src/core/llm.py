@@ -1,3 +1,5 @@
+"""LLM client abstraction and streaming response/usage types."""
+
 import json
 import logging
 import platform
@@ -127,6 +129,8 @@ class ConversationTurn:
 
 
 class LLMClient:
+    """L L M Client."""
+
     def __init__(self, settings: Settings, tool_registry: ToolRegistry) -> None:
         self._provider = settings.LLM_PROVIDER.lower()
         self._tool_registry = tool_registry
@@ -803,6 +807,7 @@ class LLMClient:
             return {"status": current_status, "description": task_description or ""}
 
     async def close(self) -> None:
+        """Close."""
         if self._anthropic_client is not None:
             await self._anthropic_client.close()
         if self._openai_client is not None:

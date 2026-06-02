@@ -6,6 +6,8 @@ from pydantic import BaseModel
 
 
 class InstallPluginRequest(BaseModel):
+    """Install Plugin Request."""
+
     source: str
     """Git URL or local filesystem path to clone/copy from."""
     name: str | None = None
@@ -13,6 +15,8 @@ class InstallPluginRequest(BaseModel):
 
 
 class SetPluginEnabledRequest(BaseModel):
+    """Set Plugin Enabled Request."""
+
     enabled: bool
     """Whether the plugin should be enabled (True) or disabled (False)."""
 

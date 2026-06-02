@@ -186,7 +186,9 @@ def resolve_current_version() -> str:
 class UpdateFetcher(Protocol):
     """Pluggable interface so tests can inject a fake without network I/O."""
 
-    def fetch_latest(self) -> UpdateInfo | None: ...
+    def fetch_latest(self) -> UpdateInfo | None:
+        """Return the latest release info, or None when unavailable."""
+        ...
 
 
 class HttpUpdateFetcher:
@@ -198,6 +200,7 @@ class HttpUpdateFetcher:
         self._arch = arch or detect_arch()
 
     def fetch_latest(self) -> UpdateInfo | None:
+        """Fetch latest."""
         req = urllib.request.Request(
             self._url,
             headers={
@@ -289,47 +292,57 @@ class UpdateService:
 
     @property
     def current_version(self) -> str:
+        """Return the current version."""
         return self._current_version
 
     @property
     def latest(self) -> UpdateInfo | None:
+        """Return the latest."""
         return self._latest
 
     @property
     def is_checking(self) -> bool:
+        """Whether an update check is currently in progress."""
         return self._is_checking
 
     @property
     def is_downloading(self) -> bool:
+        """Whether an update download is in progress."""
         return self._is_downloading
 
     @property
     def last_error(self) -> str | None:
+        """Return the last error."""
         return self._last_error
 
     @property
     def update_available(self) -> bool:
+        """Update available."""
         if not self._current_version or self._latest is None:
             return False
         return is_newer(self._latest.version, self._current_version)
 
     @property
     def is_dismissed(self) -> bool:
+        """Whether the available update was dismissed."""
         if self._latest is None:
             return False
         return _read_setting(KEY_DISMISSED_VERSION) == self._latest.version
 
     @property
     def show_banner(self) -> bool:
+        """Show banner."""
         return self.update_available and not self.is_dismissed
 
     # ── Listener registration ──────────────────────────────────────────
 
     def add_listener(self, fn: Callable[[], None]) -> None:
+        """Add listener."""
         with self._lock:
             self._listeners.append(fn)
 
     def remove_listener(self, fn: Callable[[], None]) -> None:
+        """Remove listener."""
         with self._lock, contextlib.suppress(ValueError):
             self._listeners.remove(fn)
 
@@ -429,6 +442,7 @@ class UpdateService:
         self._notify()
 
     def open_release_page(self) -> None:
+        """Open release page."""
         if self._latest is None or not self._latest.release_url:
             return
         with contextlib.suppress(Exception):

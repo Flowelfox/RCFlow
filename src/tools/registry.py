@@ -1,3 +1,5 @@
+"""In-memory registry of loaded tool definitions."""
+
 import logging
 from pathlib import Path
 from typing import Any
@@ -8,10 +10,13 @@ logger = logging.getLogger(__name__)
 
 
 class ToolRegistry:
+    """Tool Registry."""
+
     def __init__(self) -> None:
         self._tools: dict[str, ToolDefinition] = {}
 
     def load_from_directory(self, tools_dir: Path) -> None:
+        """Load from directory."""
         tools = load_tools_from_directory(tools_dir)
         for tool in tools:
             if tool.name in self._tools:
@@ -30,6 +35,7 @@ class ToolRegistry:
         return None
 
     def list_tools(self) -> list[ToolDefinition]:
+        """List tools."""
         return list(self._tools.values())
 
     def to_anthropic_tools(self) -> list[dict[str, Any]]:

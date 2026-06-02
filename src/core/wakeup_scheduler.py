@@ -75,6 +75,7 @@ class WakeupScheduler:
         _ = session_id
 
     def pending_count(self) -> int:
+        """Return the pending count."""
         return len(self._tasks)
 
     # ------------------------------------------------------------------

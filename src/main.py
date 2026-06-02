@@ -1,3 +1,5 @@
+"""Application entry point: builds the FastAPI app and wires services."""
+
 import asyncio
 import logging
 from collections.abc import AsyncGenerator

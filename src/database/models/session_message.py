@@ -1,3 +1,5 @@
+"""SQLAlchemy model for archived session messages."""
+
 from __future__ import annotations
 
 import uuid
@@ -14,6 +16,8 @@ if TYPE_CHECKING:
 
 
 class SessionMessage(Base):
+    """Session Message."""
+
     __tablename__ = "session_messages"
     __table_args__ = (UniqueConstraint("session_id", "sequence"),)
 

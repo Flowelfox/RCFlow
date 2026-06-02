@@ -1,3 +1,5 @@
+"""HTTP routes for task CRUD and session linking."""
+
 from __future__ import annotations
 
 import asyncio

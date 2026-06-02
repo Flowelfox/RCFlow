@@ -1,3 +1,5 @@
+"""HTTP routes for coding-agent CLI authentication (Claude Code / Codex login)."""
+
 from __future__ import annotations
 
 import asyncio

@@ -1,3 +1,5 @@
+"""SQLAlchemy model for cached Linear issues."""
+
 from __future__ import annotations
 
 import uuid

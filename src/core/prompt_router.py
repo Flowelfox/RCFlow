@@ -282,6 +282,7 @@ class PromptRouter:
         await self._claude._terminate_active_monitors(session, reason)
 
     async def cancel_monitor(self, session_id: str, monitor_id: str) -> None:
+        """Cancel monitor."""
         await self._claude.cancel_monitor(session_id, monitor_id)
 
     def _schedule_drain_after_stream_task(self, session: ActiveSession) -> None:
@@ -333,18 +334,23 @@ class PromptRouter:
 
     @property
     def is_direct_tool_mode(self) -> bool:
+        """Whether the router is in direct-tool (no-LLM) mode."""
         return self._lifecycle.is_direct_tool_mode
 
     async def cancel_pending_tasks(self) -> None:
+        """Cancel pending tasks."""
         await self._lifecycle.cancel_pending_tasks()
 
     def ensure_session(self, session_id: str | None = None) -> str:
+        """Ensure session."""
         return self._lifecycle.ensure_session(session_id)
 
     async def cancel_session(self, session_id: str) -> ActiveSession:
+        """Cancel session."""
         return await self._lifecycle.cancel_session(session_id)
 
     async def end_session(self, session_id: str) -> ActiveSession:
+        """End the session."""
         return await self._lifecycle.end_session(session_id)
 
     def resolve_permission(
@@ -355,24 +361,31 @@ class PromptRouter:
         scope: str,
         path_prefix: str | None = None,
     ) -> None:
+        """Resolve permission."""
         self._lifecycle.resolve_permission(session_id, request_id, decision, scope, path_prefix)
 
     async def send_interactive_response(self, session_id: str, text: str, *, accepted: bool = True) -> None:
+        """Send interactive response."""
         await self._lifecycle.send_interactive_response(session_id, text, accepted=accepted)
 
     async def pause_session(self, session_id: str) -> ActiveSession:
+        """Pause session."""
         return await self._lifecycle.pause_session(session_id)
 
     async def interrupt_subprocess(self, session_id: str) -> ActiveSession:
+        """Interrupt subprocess."""
         return await self._lifecycle.interrupt_subprocess(session_id)
 
     async def resume_session(self, session_id: str) -> ActiveSession:
+        """Resume session."""
         return await self._lifecycle.resume_session(session_id)
 
     async def restore_session(self, session_id: str) -> ActiveSession:
+        """Restore session."""
         return await self._lifecycle.restore_session(session_id)
 
     async def run_inactivity_reaper(self) -> None:
+        """Run inactivity reaper."""
         await self._lifecycle.run_inactivity_reaper()
 
     def _check_token_limit_exceeded(self, session: ActiveSession) -> bool:

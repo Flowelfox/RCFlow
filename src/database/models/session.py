@@ -1,3 +1,5 @@
+"""SQLAlchemy model for the sessions table."""
+
 from __future__ import annotations
 
 import uuid  # noqa: TC003
@@ -18,6 +20,8 @@ if TYPE_CHECKING:
 
 
 class Session(Base):
+    """Session."""
+
     __tablename__ = "sessions"
     __table_args__ = (Index("ix_sessions_backend_id", "backend_id"),)
 

@@ -1,3 +1,5 @@
+"""HTTP routes for browsing and managing session artifacts."""
+
 from __future__ import annotations
 
 import logging
@@ -118,6 +120,8 @@ async def get_artifact_settings(request: Request) -> dict[str, Any]:
 
 
 class UpdateArtifactSettingsRequest(BaseModel):
+    """Update Artifact Settings Request."""
+
     include_pattern: str | None = None
     exclude_pattern: str | None = None
     auto_scan: bool | None = None

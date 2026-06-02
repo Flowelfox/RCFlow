@@ -1,3 +1,5 @@
+"""SQLAlchemy model for per-turn telemetry rows."""
+
 from __future__ import annotations
 
 import uuid

@@ -1,3 +1,5 @@
+"""Per-session message buffer and the buffered message-type enum."""
+
 import asyncio
 import logging
 from collections import deque
@@ -13,6 +15,8 @@ _MAX_BUFFER_MESSAGES = 2000
 
 
 class MessageType(StrEnum):
+    """Message Type."""
+
     TEXT_CHUNK = "text_chunk"
     TOOL_START = "tool_start"
     TOOL_OUTPUT = "tool_output"
@@ -79,6 +83,7 @@ class SessionBuffer:
 
     @property
     def text_history(self) -> list[BufferedMessage]:
+        """Return the text history."""
         return list(self._text_messages)
 
     def push_text(self, message_type: MessageType, data: dict[str, Any]) -> BufferedMessage:
@@ -125,6 +130,7 @@ class SessionBuffer:
         return queue
 
     def unsubscribe_text(self, subscriber_id: str) -> None:
+        """Unsubscribe text."""
         queue = self._text_subscribers.pop(subscriber_id, None)
         if queue:
             queue.put_nowait(None)  # Signal end

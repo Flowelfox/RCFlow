@@ -1,3 +1,5 @@
+"""Shared FastAPI dependencies (HTTP API-key authentication)."""
+
 import asyncio
 import hmac
 import json

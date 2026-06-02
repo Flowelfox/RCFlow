@@ -1,3 +1,5 @@
+"""Base executor interface and execution-chunk types."""
+
 from abc import ABC, abstractmethod
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
@@ -25,6 +27,8 @@ class ExecutionResult:
 
 
 class BaseExecutor(ABC):
+    """Base Executor."""
+
     @abstractmethod
     async def execute(
         self,

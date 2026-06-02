@@ -401,6 +401,7 @@ class LinearService:
         return _parse_issue(result["issue"])
 
     async def aclose(self) -> None:
+        """Close the underlying async client."""
         await self._client.aclose()
 
     async def __aenter__(self) -> LinearService:

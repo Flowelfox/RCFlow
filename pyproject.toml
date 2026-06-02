@@ -126,20 +126,11 @@ ignore = [
     "S607",     # start-process with partial path — `claude`, `codex`, `opencode`
     "S606",     # start-process without shell — intentional
     "ASYNC240", # pathlib in async — synchronous fs calls are OK in our context
-    # pydocstyle: the docstring-FORMAT rules (D2xx/D3xx/D4xx) are enforced; the
-    # content rules below are deferred to an incremental per-module docs pass —
-    # they require writing/expanding prose, not mechanical fixes.
-    "D100",     # undocumented public module
-    "D101",     # undocumented public class
-    "D102",     # undocumented public method
-    "D103",     # undocumented public function
-    "D104",     # undocumented public package
-    "D105",     # undocumented magic method
-    "D106",     # undocumented public nested class
-    "D107",     # undocumented __init__
-    "D205",     # 1 blank line required between summary and description
-    "D401",     # first line should be in imperative mood
-    "D417",     # missing argument descriptions in the docstring
+    "D105",     # undocumented magic method — __eq__/__repr__ etc. are self-evident
+    "D107",     # undocumented __init__ — documented at the class level instead
+    "D205",     # blank line between summary and description — stylistic
+    "D401",     # imperative mood — stylistic, opinionated about existing prose
+    "D417",     # per-argument descriptions — covered by type hints + summaries
 ]
 
 # Complexity ratchet: the current ceiling is set high so that landing the rule
@@ -155,9 +146,12 @@ max-complexity = 70
 
 [tool.ruff.lint.per-file-ignores]
 # Tests use assert and rotate through local temp files / fake subprocesses.
-"tests/*" = ["S101", "S105", "S106"]
-# Database migrations are mechanically generated; complexity gates don't fit.
-"src/database/migrations/*" = ["C901"]
+# Test functions/classes are self-documenting by name, so the docstring-content
+# rules (D1xx) don't apply.
+"tests/*" = ["S101", "S105", "S106", "D100", "D101", "D102", "D103", "D104", "D106"]
+# Database migrations are mechanically generated; complexity + docstring gates
+# don't fit generated code.
+"src/database/migrations/*" = ["C901", "D100", "D101", "D103"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["src"]
