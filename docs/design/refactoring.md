@@ -92,9 +92,14 @@ entity collections are carved into owned stores under `lib/state/stores/`:
 read-only query projections + list/upsert/remove mutations). `AppState` owns
 one of each and delegates its getters/handlers, keeping the notify, toast, and
 pane-management responsibilities, so the read-sites and Provider tree are
-unchanged. All 479 client tests pass. Remaining for step 3: the pane/session/
-clipboard/notification clusters on `AppState` and the `PaneState` (2073-line)
-carve — same owned-store-with-delegation pattern.
+unchanged. Two more self-contained clusters are also extracted:
+`ClipboardPasteController` (`lib/state/clipboard_paste_controller.dart` — the
+dictation-tool paste-detection dance) and `ToastNotifier`
+(`lib/state/toast_notifier.dart` — settings-gated toast wrapper, with a public
+`ToastCategory`). `AppState` is down 2292 → 2115 lines; all 485 client tests
+pass. Remaining for step 3: the pane-host cluster (`splitRoot`/`panes`/
+`activePaneId` + the `open*InPane` methods) and the `PaneState` (2073-line)
+carve — the central, interwoven UI state, best done as its own focused pass.
 
 ## Phase 6 — Flutter Tests + Final Lint
 
