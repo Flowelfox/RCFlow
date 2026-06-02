@@ -57,11 +57,32 @@ Current floors: Python **54%**, Flutter **14%**.
 
 ## Phase 5 — Flutter State / Transport Split
 
-⏳ deferred. `AppState`, `PaneState`, `WebSocketService` get carved into
+🔄 in progress. `AppState`, `PaneState`, `WebSocketService` get carved into
 per-feature `ChangeNotifier`s and a `WebSocketTransport` /
-`MessageDispatcher` / `lib/services/rest/*` trio. Lands only after
-Phase 4 file splits are stable — the smaller files surface seams
-that aren't visible inside the current god-files.
+`MessageDispatcher` / `lib/services/rest/*` trio.
+
+**Step 1 (REST extraction) — constraints discovered, execution pending.**
+`WebSocketService` is a single class whose ~64 `Future`-returning HTTP methods
+should move to an injectable `RestClient` under `lib/services/rest/`. Two traps
+to honour when doing it:
+
+1. **Do not use a Dart `extension` in a `part` file.** Extension methods are
+   statically dispatched, so they silently break the test mocks —
+   `FakeWebSocketService extends WebSocketService` (in
+   `test/services/worker_connection_test.dart`) `@override`s several REST
+   methods (`fetchServerInfo`, `fetchConfig`, `reorderSession`, …). The
+   override only works if the method stays a **virtual instance method on the
+   class**. So `WebSocketService` must keep thin *delegator* methods
+   (`fetchProjects(...) => _rest.fetchProjects(...)`) and own a `RestClient`
+   field configured with the live `ServerUrl`/`allowSelfSigned` on connect.
+2. **Derive method line ranges fresh by brace-matching at extraction time** —
+   the file's line numbers drift, so any hard-coded offsets will cut method
+   bodies incorrectly. Move the `_escapeFilename` / `_extractDetail` static
+   helpers into `RestClient` too (they are used only by the REST methods).
+
+Steps 2–4 (WebSocketTransport / MessageDispatcher extraction; AppState /
+PaneState carved into feature ChangeNotifiers one feature at a time with
+AppState delegating until each of the 29 read-sites is migrated) follow.
 
 ## Phase 6 — Flutter Tests + Final Lint
 
