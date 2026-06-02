@@ -10,6 +10,7 @@ import 'clipboard_paste_controller.dart';
 import 'toast_notifier.dart';
 import 'stores/artifact_store.dart';
 import 'stores/linear_issue_store.dart';
+import 'stores/project_data_cache.dart';
 import 'stores/task_store.dart';
 import 'stores/terminal_session_store.dart';
 import '../models/session_info.dart';
@@ -420,36 +421,21 @@ class AppState extends ChangeNotifier implements PaneHost {
   /// Cached worktree/artifact lists per `'workerId:projectPath'` key.
   /// Populated by [ProjectPanel] after each successful fetch so that reopening
   /// the panel shows the last-known data immediately while a fresh fetch runs.
-  final Map<
-    String,
-    ({
-      List<Map<String, dynamic>>? worktrees,
-      List<Map<String, dynamic>>? artifacts,
-      bool noGitRepo,
-    })
-  >
-  _projectDataCache = {};
+  final ProjectDataCache _projectData = ProjectDataCache();
 
-  ({
-    List<Map<String, dynamic>>? worktrees,
-    List<Map<String, dynamic>>? artifacts,
-    bool noGitRepo,
-  })?
-  getProjectDataCache(String key) => _projectDataCache[key];
+  ProjectData? getProjectDataCache(String key) => _projectData.get(key);
 
   void setProjectDataCache(
     String key, {
     List<Map<String, dynamic>>? worktrees,
     List<Map<String, dynamic>>? artifacts,
     bool? noGitRepo,
-  }) {
-    final existing = _projectDataCache[key];
-    _projectDataCache[key] = (
-      worktrees: worktrees ?? existing?.worktrees,
-      artifacts: artifacts ?? existing?.artifacts,
-      noGitRepo: noGitRepo ?? existing?.noGitRepo ?? false,
-    );
-  }
+  }) => _projectData.set(
+    key,
+    worktrees: worktrees,
+    artifacts: artifacts,
+    noGitRepo: noGitRepo,
+  );
 
   /// Show an artifact in the active pane (converting it in-place).
   void openArtifactInPane(String artifactId) {
