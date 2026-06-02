@@ -35,10 +35,10 @@ from src.core.agent_opencode import OpenCodeAgentMixin
 from src.core.agent_prompt import extract_code_blocks, format_agent_prompt
 from src.core.agents import MAX_TOOL_OUTPUT_CHARS, truncate_tool_output
 from src.core.attachment_store import ResolvedAttachment
-from src.core.background_tasks import BackgroundTasksMixin
+from src.core.background_tasks import BackgroundTasks
 from src.core.buffer import MessageType
 from src.core.context import ContextBuilder
-from src.core.llm import LLMClient, StreamDone, TextChunk, ToolCallRequest, llm_configuration_issue
+from src.core.llm import LLMClient, StreamDone, TextChunk, ToolCallRequest, TurnUsage, llm_configuration_issue
 from src.core.pending_store import SessionPendingMessageStore
 from src.core.session import ActiveSession, ActivityState, SessionManager, SessionStatus, SessionType
 from src.core.session_lifecycle import SessionLifecycleMixin
@@ -120,14 +120,13 @@ class PromptRouter(
     ClaudeCodeAgentMixin,
     CodexAgentMixin,
     OpenCodeAgentMixin,
-    BackgroundTasksMixin,
 ):
     """Routes user prompts through the LLM pipeline with tool execution.
 
-    Context building and direct-tool-mode parsing are provided by a composed
-    :class:`~src.core.context.ContextBuilder` collaborator (``self._context``)
-    rather than a mixin; the remaining concerns are still mixins pending their
-    own conversion.
+    Context building and fire-and-forget background tasks are provided by
+    composed collaborators (``self._context`` / ``self._background``) and
+    delegated to; the remaining concerns are still mixins pending their own
+    conversion.
     """
 
     def __init__(
@@ -180,8 +179,74 @@ class PromptRouter(
         self._pending_task_creation_tasks: set[asyncio.Task[None]] = set()
         self._pending_task_update_tasks: set[asyncio.Task[None]] = set()
         self._pending_plan_finalization_tasks: set[asyncio.Task[None]] = set()
-        # Context building / direct-tool-mode parsing collaborator (composition).
+        # Composed collaborators (see their modules). PromptRouter delegates
+        # their public entry points so existing call sites stay unchanged.
+        self._background = BackgroundTasks(self)
         self._context = ContextBuilder(self)
+
+    # ------------------------------------------------------------------
+    # Background-task delegation
+    #
+    # The fire-and-forget background work lives on the composed
+    # ``self._background`` collaborator; these thin wrappers preserve the
+    # historical ``router._fire_*`` / ``router._ensure_session_row_in_db``
+    # surface for the still-mixin agent/lifecycle code, the context
+    # collaborator, WebSocket / route handlers, and tests.
+    # ------------------------------------------------------------------
+
+    def _fire_log_task(
+        self,
+        *,
+        session_id: str,
+        usage: TurnUsage,
+        has_tool_calls: bool,
+        request_messages: list[dict[str, Any]],
+        response_text: str | None,
+    ) -> None:
+        self._background._fire_log_task(
+            session_id=session_id,
+            usage=usage,
+            has_tool_calls=has_tool_calls,
+            request_messages=request_messages,
+            response_text=response_text,
+        )
+
+    async def _ensure_session_row_in_db(self, session: ActiveSession) -> None:
+        await self._background._ensure_session_row_in_db(session)
+
+    def _fire_archive_task(self, session_id: str) -> None:
+        self._background._fire_archive_task(session_id)
+
+    def _fire_summary_task(self, session: ActiveSession, text: str) -> None:
+        self._background._fire_summary_task(session, text)
+
+    def _fire_title_task(self, session: ActiveSession, user_text: str, assistant_text: str) -> None:
+        self._background._fire_title_task(session, user_text, assistant_text)
+
+    def _fire_persist_session_metadata(self, session: ActiveSession) -> None:
+        self._background._fire_persist_session_metadata(session)
+
+    def _fire_task_creation_task(self, session: ActiveSession, user_text: str, assistant_text: str) -> None:
+        self._background._fire_task_creation_task(session, user_text, assistant_text)
+
+    def _fire_task_update_task(self, session: ActiveSession, session_result_text: str) -> None:
+        self._background._fire_task_update_task(session, session_result_text)
+
+    def _fire_task_update_on_session_end(self, session: ActiveSession) -> None:
+        self._background._fire_task_update_on_session_end(session)
+
+    def _fire_realtime_artifact_scan(self, session: ActiveSession) -> None:
+        self._background._fire_realtime_artifact_scan(session)
+
+    def _fire_text_artifact_scan(self, session: ActiveSession, texts: list[str]) -> None:
+        self._background._fire_text_artifact_scan(session, texts)
+
+    def _fire_plan_finalization_task(self, session: ActiveSession) -> None:
+        self._background._fire_plan_finalization_task(session)
+
+    @staticmethod
+    def _resolve_artifact_project(file_path: str, projects_dirs: list[Path]) -> str | None:
+        return BackgroundTasks._resolve_artifact_project(file_path, projects_dirs)
 
     # ------------------------------------------------------------------
     # Executor / config helpers

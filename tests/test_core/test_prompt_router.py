@@ -112,7 +112,7 @@ async def test_summarize_and_push_pushes_summary_message(session_manager: Sessio
     session = session_manager.create_session(SessionType.LONG_RUNNING)
     session.set_active()
 
-    await router._summarize_and_push(session, "Long result text.")
+    await router._background._summarize_and_push(session, "Long result text.")
 
     summary_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.SUMMARY]
     assert len(summary_msgs) == 1
@@ -130,7 +130,7 @@ async def test_summarize_and_push_failure_does_not_raise(session_manager: Sessio
     session.set_active()
 
     # Must not raise
-    await router._summarize_and_push(session, "Some text.")
+    await router._background._summarize_and_push(session, "Some text.")
 
     summary_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.SUMMARY]
     assert len(summary_msgs) == 0
@@ -149,7 +149,7 @@ async def test_generate_and_set_title(session_manager: SessionManager) -> None:
     session.set_active()
     assert session.title is None
 
-    await router._generate_and_set_title(session, "list files", "Here are the files...")
+    await router._background._generate_and_set_title(session, "list files", "Here are the files...")
 
     router._llm.generate_title.assert_awaited_once_with("list files", "Here are the files...")  # type: ignore[attr-defined]
     assert session.title == "List project files"
@@ -165,7 +165,7 @@ async def test_generate_and_set_title_failure_does_not_raise(session_manager: Se
     session.set_active()
 
     # Should not raise
-    await router._generate_and_set_title(session, "hello", "world")
+    await router._background._generate_and_set_title(session, "hello", "world")
 
     # On LLM failure the finally-block sets a fallback title derived from user_text
     assert session.title == "hello"
