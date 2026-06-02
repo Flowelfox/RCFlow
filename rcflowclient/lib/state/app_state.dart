@@ -6,6 +6,7 @@ import 'dart:math';
 
 import '../models/artifact_info.dart';
 import '../models/linear_issue_info.dart';
+import 'clipboard_paste_controller.dart';
 import 'stores/artifact_store.dart';
 import 'stores/linear_issue_store.dart';
 import 'stores/task_store.dart';
@@ -16,7 +17,6 @@ import '../models/worker_config.dart';
 import '../models/app_notification.dart';
 import '../services/foreground_service.dart';
 import '../services/hotkey_service.dart';
-import '../services/keyboard_state_reconciler.dart';
 import '../services/notification_service.dart';
 import '../services/notification_sound_service.dart';
 import '../services/settings_service.dart';
@@ -63,104 +63,28 @@ class AppState extends ChangeNotifier implements PaneHost {
   }
 
   // External paste with explicit text payload — used by the Windows clipboard
-  // sniffer in the runner. Wispr Flow's TSF text-injection path doesn't reach
-  // Flutter's TextField, but Wispr also writes the recognized text to the
-  // clipboard before injecting. The runner forwards that captured text here
-  // so the InputArea can insert it directly.
-  final ValueNotifier<int> externalPasteRequest = ValueNotifier(0);
-  String? externalPasteText;
+  // sniffer in the runner. The detection/dance logic lives on a composed
+  // [ClipboardPasteController]; AppState re-exposes its surface.
+  final ClipboardPasteController _clipboard = ClipboardPasteController();
 
-  // Delay-and-detect for the Wispr Flow paste pattern (and similar
-  // dictation tools that follow the same dance):
-  //
-  //   1. Save current clipboard X
-  //   2. Write recognized text Y      → poller emits {text=Y, prev=X}
-  //   3. SendInput Ctrl+V
-  //   4. Wait ~500ms
-  //   5. Restore X                    → poller emits {text=X, prev=Y}
-  //
-  // The C++ poller delivers `previousText` with each event so the restore
-  // detector matches directly against the prior clipboard contents — no
-  // dart-side baseline tracking, no timer races. Two restore detection
-  // paths:
-  //   - In-window: pending Y exists, incoming text equals what was on the
-  //     clipboard right before Y was written (i.e. Y's previousText).
-  //     Equivalently: incoming `previousText` equals pending Y.
-  //   - Late: timer already fired and committed Y. If a later event arrives
-  //     whose `previousText` equals the just-committed text within
-  //     [_lateRestoreWindow], it's Wispr's restore — drop it.
-  static const Duration _pasteHoldoff = Duration(milliseconds: 150);
-  static const Duration _lateRestoreWindow = Duration(seconds: 2);
+  ValueNotifier<int> get externalPasteRequest =>
+      _clipboard.externalPasteRequest;
+  String? get externalPasteText => _clipboard.externalPasteText;
 
-  String? _pendingPasteText;
-  Timer? _pasteHoldoffTimer;
-  String? _lastCommittedText;
-  DateTime _lastCommitAt = DateTime.fromMillisecondsSinceEpoch(0);
-
-  /// Single entry point for all clipboard change notifications from the
-  /// Win32 runner's polling thread. The runner pre-fills `previousText`
-  /// with what was on the clipboard immediately before this change, which
-  /// is what restore detection keys off of.
+  /// Single entry point for clipboard change notifications from the runner.
   void handleClipboardEvent({
     required String text,
     required String? previousText,
     required bool isOwn,
     required bool isForeground,
     required bool seqJumped,
-  }) {
-    // Wispr's hotkey holds Ctrl/Alt/Win via global hook; the release can
-    // miss RCFlow entirely. Reconcile modifier state with the OS on every
-    // clipboard event so stuck modifiers clear once dictation finishes.
-    KeyboardStateReconciler.reconcile();
-
-    if (text.isEmpty) return;
-    // Skip our own copies — Flutter's TextField copy menu, RCFlow copy
-    // buttons, etc.
-    if (isOwn) return;
-
-    // In-window restore: incoming event's previousText is the pending Y,
-    // which means the clipboard just transitioned Y → text. That's Wispr
-    // restoring its saved clipboard right after writing Y. Commit Y, drop
-    // this restore event.
-    if (_pendingPasteText != null && previousText == _pendingPasteText) {
-      _commitPendingPaste();
-      return;
-    }
-
-    // Late restore: timer already fired and committed Y. A later event
-    // reports a transition from Y → text within the late-restore window —
-    // drop it.
-    if (previousText != null &&
-        previousText == _lastCommittedText &&
-        DateTime.now().difference(_lastCommitAt) < _lateRestoreWindow) {
-      return;
-    }
-
-    // External write — buffer for restore detection. Final input-field-focus
-    // gate runs at insertion time in InputArea, so background-app writes
-    // while RCFlow happens to be foreground but no input is focused don't
-    // hijack the field. We deliberately don't gate on isForeground here:
-    // Wispr's hotkey timing can leave RCFlow non-foreground at the moment
-    // the clipboard is written.
-    if (_pendingPasteText != null) {
-      _commitPendingPaste();
-    }
-    _pendingPasteText = text;
-    _pasteHoldoffTimer?.cancel();
-    _pasteHoldoffTimer = Timer(_pasteHoldoff, _commitPendingPaste);
-  }
-
-  void _commitPendingPaste() {
-    _pasteHoldoffTimer?.cancel();
-    _pasteHoldoffTimer = null;
-    final text = _pendingPasteText;
-    if (text == null) return;
-    _pendingPasteText = null;
-    _lastCommittedText = text;
-    _lastCommitAt = DateTime.now();
-    externalPasteText = text;
-    externalPasteRequest.value++;
-  }
+  }) => _clipboard.handleClipboardEvent(
+    text: text,
+    previousText: previousText,
+    isOwn: isOwn,
+    isForeground: isForeground,
+    seqJumped: seqJumped,
+  );
 
   // --- Workers (delegated to WorkerRegistry) ---
   late final WorkerRegistry _registry;
@@ -2159,8 +2083,7 @@ class AppState extends ChangeNotifier implements PaneHost {
     _notificationService.dispose();
     inputFocusRequest.dispose();
     pasteToInputRequest.dispose();
-    externalPasteRequest.dispose();
-    _pasteHoldoffTimer?.cancel();
+    _clipboard.dispose();
     ForegroundServiceHelper.stop();
     super.dispose();
   }
