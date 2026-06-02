@@ -1365,7 +1365,6 @@ class RCFlowMacOSGUI:
     @staticmethod
     def _tray_template_dir() -> Path:
         """Directory holding the monochrome menu-bar template PNGs."""
-
         if is_frozen():
             return Path(sys.executable).resolve().parent.parent / "Resources"
         return Path(__file__).resolve().parent / "assets"
@@ -1607,7 +1606,6 @@ class RCFlowMacOSGUI:
         When *minimized* is True (login autostart), the dashboard is kept
         hidden and the process stays in accessory policy — tray icon only.
         """
-
         _trace_path = Path.home() / "Library" / "Logs" / "rcflow-worker-trace.log"
 
         def _t(msg: str) -> None:
@@ -1824,7 +1822,6 @@ def run_gui_macos(*, minimized: bool = False) -> None:
     autostart LaunchAgent passes this flag so rebooting does not pop the
     window; user-initiated launches leave it False and the dashboard shows.
     """
-
     _trace_path = Path.home() / "Library" / "Logs" / "rcflow-worker-trace.log"
 
     def _trace(msg: str) -> None:

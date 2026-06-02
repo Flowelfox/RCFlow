@@ -1,4 +1,4 @@
-"""add session_scheduled_wakes
+"""add session_scheduled_wakes.
 
 Revision ID: 6788441ce2c4
 Revises: 1076c343cb5f

@@ -447,7 +447,7 @@ def infer_cwd_from_output(output: str, repo_path: str | None) -> str | None:
 
 
 def looks_like_git_worktree_mutation(command: str) -> bool:
-    """Heuristic: did this Bash command create or destroy a worktree?
+    """Heuristic for whether a Bash command created or destroyed a worktree.
 
     Used by the agent stream handlers to invalidate the worktree
     cache so a subsequent ``resolve_worktree_for_cwd`` picks up the

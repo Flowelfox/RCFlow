@@ -47,7 +47,8 @@ class TestCancelSession:
     def test_cancel_completed_session(self, client: TestClient, session_manager: SessionManager) -> None:
         """Cancelling a session that already reached a terminal state in memory
         returns 200 with the existing terminal status.  Rapid double-clicks
-        on End used to surface this as a misleading 409 error in the UI."""
+        on End used to surface this as a misleading 409 error in the UI.
+        """
         session = session_manager.create_session(SessionType.ONE_SHOT)
         session.complete()
 
@@ -83,7 +84,8 @@ class TestCancelSession:
     ) -> None:
         """A session that's already cancelled in the DB and no longer in memory
         still returns 200 — the second cancel of an archived session must not
-        404."""
+        404.
+        """
         db_file = tmp_path / "cancel.db"
         sync_engine = _sync_create_engine(f"sqlite:///{db_file}")
         Base.metadata.create_all(sync_engine)

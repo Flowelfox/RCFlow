@@ -301,7 +301,8 @@ class TestCCBuiltinDescriptionsFromClaude:
 
     def test_in_process_cache_prevents_second_fetch(self, client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
         """After the first request the in-process cache is populated; no further
-        subprocess calls are made on subsequent requests."""
+        subprocess calls are made on subsequent requests.
+        """
         call_count = []
 
         async def counting_fetch(binary: str) -> list[dict[str, str]]:

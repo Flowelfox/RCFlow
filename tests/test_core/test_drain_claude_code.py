@@ -197,7 +197,8 @@ async def test_schedule_drain_after_stream_task_waits_for_done(_db_factory, tmp_
     """The ``add_done_callback`` wiring must defer the drain until the
     stream task has actually finished. Without that guarantee the drain
     races ``_drain_monitor_events`` and ``is_busy_for_queue()`` can be
-    True at drain time."""
+    True at drain time.
+    """
     session_manager = SessionManager("test-backend")
     store = SessionPendingMessageStore(_db_factory, tmp_path / "attachments")
     session = await _make_session(_db_factory, session_manager)

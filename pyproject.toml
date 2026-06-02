@@ -108,6 +108,7 @@ select = [
     "S",      # flake8-bandit (security)
     "RET",    # flake8-return
     "LOG",    # flake8-logging
+    "D",      # pydocstyle (docstring quality; see ignore list + convention)
     # COM (trailing-comma) intentionally excluded — ruff's docs warn that
     # COM812 / COM819 conflict with `ruff format` (which already handles
     # trailing commas), so enabling both produces oscillating fixes.
@@ -125,6 +126,20 @@ ignore = [
     "S607",     # start-process with partial path — `claude`, `codex`, `opencode`
     "S606",     # start-process without shell — intentional
     "ASYNC240", # pathlib in async — synchronous fs calls are OK in our context
+    # pydocstyle: the docstring-FORMAT rules (D2xx/D3xx/D4xx) are enforced; the
+    # content rules below are deferred to an incremental per-module docs pass —
+    # they require writing/expanding prose, not mechanical fixes.
+    "D100",     # undocumented public module
+    "D101",     # undocumented public class
+    "D102",     # undocumented public method
+    "D103",     # undocumented public function
+    "D104",     # undocumented public package
+    "D105",     # undocumented magic method
+    "D106",     # undocumented public nested class
+    "D107",     # undocumented __init__
+    "D205",     # 1 blank line required between summary and description
+    "D401",     # first line should be in imperative mood
+    "D417",     # missing argument descriptions in the docstring
 ]
 
 # Complexity ratchet: the current ceiling is set high so that landing the rule
@@ -132,6 +147,9 @@ ignore = [
 # organically by splitting the highest-complexity functions
 # (handle_prompt=43, ws_input_text=63, _relay_claude_code_stream=49, etc.).
 # Lower the ceiling step by step as those splits land.
+[tool.ruff.lint.pydocstyle]
+convention = "pep257"
+
 [tool.ruff.lint.mccabe]
 max-complexity = 70
 

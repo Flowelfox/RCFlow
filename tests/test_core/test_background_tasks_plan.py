@@ -248,7 +248,8 @@ class TestFinalizePlanSessionRaceCondition:
     @pytest.mark.asyncio
     async def test_integrity_error_on_insert_refetches_artifact(self, tmp_path: Path) -> None:
         """If flush raises IntegrityError (ArtifactScanner race), fall back to
-        a second SELECT to find the existing artifact."""
+        a second SELECT to find the existing artifact.
+        """
         plan_path = tmp_path / "plan.md"
         plan_path.write_text("# Plan")
 
@@ -284,7 +285,8 @@ class TestFinalizePlanSessionRaceCondition:
     @pytest.mark.asyncio
     async def test_existing_artifact_is_updated_not_inserted(self, tmp_path: Path) -> None:
         """When artifact already exists in DB (first SELECT finds it), update
-        its metadata in place rather than inserting a new row."""
+        its metadata in place rather than inserting a new row.
+        """
         plan_path = tmp_path / "plan.md"
         plan_path.write_text("# Plan")
 

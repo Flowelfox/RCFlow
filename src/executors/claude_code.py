@@ -25,7 +25,7 @@ if _HAS_PTY:
 
 
 class ClaudeCodeExecutor(BaseExecutor):
-    """Executor that manages a persistent Claude Code subprocess with bidirectional stream-json I/O.
+    r"""Executor that manages a persistent Claude Code subprocess with bidirectional stream-json I/O.
 
     On Unix (Linux/macOS), the subprocess is backed by a **PTY** by default so
     that Claude Code detects a real terminal on both stdin and stdout.  This
@@ -330,7 +330,7 @@ class ClaudeCodeExecutor(BaseExecutor):
         resume: bool = False,
         prompt: str | None = None,
     ) -> asyncio.subprocess.Process:
-        """Spawn using a PTY so Claude Code detects a real terminal on stdin/stdout.
+        r"""Spawn using a PTY so Claude Code detects a real terminal on stdin/stdout.
 
         Architecture
         ------------

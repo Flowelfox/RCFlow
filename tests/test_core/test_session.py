@@ -45,7 +45,8 @@ def _make_session_row(
 
 def _make_db_mock(stale_rows: list, msg_rows: list | None = None) -> AsyncMock:
     """Build an AsyncMock DB session that returns *stale_rows* for the first
-    execute call and *msg_rows* (default []) for each subsequent one."""
+    execute call and *msg_rows* (default []) for each subsequent one.
+    """
     if msg_rows is None:
         msg_rows = []
     db = AsyncMock()
@@ -555,7 +556,8 @@ class TestPauseReason:
 class TestWorktreeContextInSessionList:
     """Regression tests for the bug where list_all_with_archived omitted
     worktree metadata, causing the client worktree tab to lose context on
-    session pane reopen."""
+    session pane reopen.
+    """
 
     def test_list_all_with_archived_includes_worktree_for_active_session(self):
         """In-memory sessions with worktree metadata must appear in the list."""
@@ -580,7 +582,8 @@ class TestWorktreeContextInSessionList:
 
     def test_broadcast_session_update_includes_worktree(self):
         """broadcast_session_update must include the worktree key so live
-        session_update WebSocket messages carry worktree context."""
+        session_update WebSocket messages carry worktree context.
+        """
         manager = SessionManager("test-backend")
         queue = manager.subscribe_updates("test-sub")
         session = manager.create_session(SessionType.CONVERSATIONAL)
@@ -602,7 +605,8 @@ class TestWorktreeContextInSessionList:
 
     def test_broadcast_session_update_worktree_is_none_when_not_set(self):
         """Sessions without worktree metadata should broadcast worktree: null,
-        so the client correctly clears any stale worktreeInfo."""
+        so the client correctly clears any stale worktreeInfo.
+        """
         manager = SessionManager("test-backend")
         queue = manager.subscribe_updates("test-sub")
         session = manager.create_session(SessionType.CONVERSATIONAL)
@@ -616,7 +620,8 @@ class TestWorktreeContextInSessionList:
 
     def test_list_all_with_archived_includes_worktree_in_dict(self):
         """list_all_with_archived must include 'worktree' key in each in-memory
-        session dict so the list_sessions WS handler can forward it to clients."""
+        session dict so the list_sessions WS handler can forward it to clients.
+        """
         manager = SessionManager("test-backend")
         session = manager.create_session(SessionType.CONVERSATIONAL)
         session.set_active()
@@ -708,7 +713,8 @@ class TestMainProjectPath:
 
     def test_broadcast_includes_main_project_path(self):
         """broadcast_session_update must include main_project_path so live
-        session_update WS messages carry it to the client."""
+        session_update WS messages carry it to the client.
+        """
         manager = SessionManager("test-backend")
         q = manager.subscribe_updates("test-sub")
         session = manager.create_session(SessionType.CONVERSATIONAL)
@@ -725,7 +731,8 @@ class TestMainProjectPath:
 
     def test_broadcast_main_project_path_none_when_not_set(self):
         """Sessions without a project must broadcast main_project_path: null
-        so the client never shows stale project data."""
+        so the client never shows stale project data.
+        """
         manager = SessionManager("test-backend")
         q = manager.subscribe_updates("test-sub")
         session = manager.create_session(SessionType.CONVERSATIONAL)
@@ -739,7 +746,8 @@ class TestMainProjectPath:
 
     def test_broadcast_includes_main_project_path_after_pause(self):
         """After pausing, broadcasts must still carry the project path so the
-        client project panel remains visible for paused sessions."""
+        client project panel remains visible for paused sessions.
+        """
         manager = SessionManager("test-backend")
         q = manager.subscribe_updates("test-sub")
         session = manager.create_session(SessionType.CONVERSATIONAL)
@@ -759,7 +767,8 @@ class TestMainProjectPath:
 
     def test_list_all_with_archived_includes_main_project_path(self):
         """list_all_with_archived in-memory dict must include main_project_path
-        so the WS session_list message carries it to the client."""
+        so the WS session_list message carries it to the client.
+        """
         manager = SessionManager("test-backend")
         session = manager.create_session(SessionType.CONVERSATIONAL)
         session.set_active()
@@ -1132,7 +1141,8 @@ class TestReloadStaleSessionsSQLiteIntegration:
     async def test_empty_stub_session_skipped_and_deleted(self):
         """A stub row with no title, no conversation_history, and no messages
         (backend crash before first LLM response) must NOT be loaded into
-        memory and the stub row must be removed from the database."""
+        memory and the stub row must be removed from the database.
+        """
         manager = SessionManager("test-backend")
         session_uuid = uuid.uuid4()
 
@@ -1165,7 +1175,8 @@ class TestReloadStaleSessionsSQLiteIntegration:
     @pytest.mark.asyncio
     async def test_session_with_title_is_reloaded(self):
         """A session that has a title (even with no buffered messages) is real
-        and must be restored — it is not an empty stub."""
+        and must be restored — it is not an empty stub.
+        """
         manager = SessionManager("test-backend")
         session_uuid = uuid.uuid4()
 
@@ -1194,7 +1205,8 @@ class TestReloadStaleSessionsSQLiteIntegration:
     @pytest.mark.asyncio
     async def test_session_with_conversation_history_but_no_title_is_reloaded(self):
         """A session that has conversation_history but no title (title not yet
-        extracted by the LLM) must still be restored."""
+        extracted by the LLM) must still be restored.
+        """
         manager = SessionManager("test-backend")
         session_uuid = uuid.uuid4()
         history = [{"role": "user", "content": "hello"}]
@@ -1253,7 +1265,8 @@ class TestReloadStaleSessionsSQLiteIntegration:
     @pytest.mark.asyncio
     async def test_save_all_sessions_preserves_sort_order(self):
         """save_all_sessions must persist sort_order so it survives a
-        graceful shutdown/restart cycle."""
+        graceful shutdown/restart cycle.
+        """
         manager = SessionManager("test-backend")
         session = manager.create_session(SessionType.ONE_SHOT)
         session.title = "Pinned session"
@@ -1330,7 +1343,8 @@ class TestPersistSessionMetadataSQLiteIntegration:
     @pytest.mark.asyncio
     async def test_persist_is_noop_when_row_missing(self):
         """If the stub row hasn't been created yet (or was already archived
-        and deleted), persist_session_metadata is a silent no-op."""
+        and deleted), persist_session_metadata is a silent no-op.
+        """
         manager = SessionManager("test-backend")
         session = manager.create_session(SessionType.CONVERSATIONAL)
         session.title = "Will not be saved"
@@ -1347,7 +1361,8 @@ class TestPersistSessionMetadataSQLiteIntegration:
     async def test_persisted_title_survives_simulated_restart(self):
         """Auto-generated title written via persist_session_metadata should
         be reloaded on the next start.  Regression test for the title-loss
-        bug behind the inactivity-reaper auto-close report."""
+        bug behind the inactivity-reaper auto-close report.
+        """
         manager = SessionManager("test-backend")
         session = manager.create_session(SessionType.CONVERSATIONAL)
         session.set_active()

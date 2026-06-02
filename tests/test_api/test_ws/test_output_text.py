@@ -63,7 +63,8 @@ def _ws_url() -> str:
 class TestOutputWsListLinearIssues:
     def test_returns_empty_list_when_no_db(self, client: TestClient) -> None:
         """With db_session_factory=None the handler must return an empty list,
-        not an 'Unknown message type' error."""
+        not an 'Unknown message type' error.
+        """
         with client.websocket_connect(_ws_url()) as ws:
             ws.send_json({"type": "list_linear_issues"})
             data = ws.receive_json()
@@ -196,7 +197,8 @@ class TestListArtifacts:
 class TestSubscribe:
     def test_subscribe_nonexistent_session_returns_error(self, client: TestClient) -> None:
         """When subscribing to a session that doesn't exist, the server must
-        send a SESSION_NOT_FOUND error instead of silently doing nothing."""
+        send a SESSION_NOT_FOUND error instead of silently doing nothing.
+        """
         with client.websocket_connect(_ws_url()) as ws:
             ws.send_json({"type": "subscribe", "session_id": "does-not-exist"})
             data = ws.receive_json()

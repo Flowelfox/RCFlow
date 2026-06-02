@@ -1,4 +1,4 @@
-"""Add sort_order to sessions
+"""Add sort_order to sessions.
 
 Revision ID: e4f5a6b7c8d9
 Revises: 0001

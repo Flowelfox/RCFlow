@@ -425,7 +425,6 @@ async def test_cgnat_detected_and_reported(monkeypatch: pytest.MonkeyPatch) -> N
     service must recognise this via a public-IP probe and fail with a
     CGNAT-specific error message instead of blaming router UPnP.
     """
-
     # Router reports no external IP + rejects AddPortMapping.
     upnp_mock = _make_upnp_mock(
         external_ip=None,
@@ -511,7 +510,6 @@ async def test_cgnat_inferred_when_public_echo_fails(monkeypatch: pytest.MonkeyP
 @pytest.mark.asyncio
 async def test_double_nat_detected_and_reported(monkeypatch: pytest.MonkeyPatch) -> None:
     """Public probe returns an RFC 1918 address → double-NAT upstream."""
-
     upnp_mock = _make_upnp_mock(
         external_ip=None,
         addportmapping_side_effect=RuntimeError("Action Failed"),

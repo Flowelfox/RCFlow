@@ -74,7 +74,7 @@ _MONITOR_TERMINAL_PREFIXES = (
 
 
 def _is_monitor_terminal(content: str, is_error: bool) -> bool:
-    """Heuristic: does this Monitor tool_result block end the watch?
+    """Heuristic for whether a Monitor tool_result block ends the watch.
 
     Treat ``is_error=True`` as terminal so we never leak a live block on
     error.  Otherwise look for the ``"Monitor …"`` summary lines Claude
