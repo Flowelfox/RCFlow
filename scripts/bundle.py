@@ -336,8 +336,10 @@ def run_pyinstaller(target_platform: str, *, windowed: bool = False) -> Path:
         str(dist_dir),
         "--workpath",
         str(build_dir),
+        # Write the auto-generated rcflow.spec under build/ (gitignored) instead
+        # of the repo root, so a build doesn't dirty the working tree.
         "--specpath",
-        str(PROJECT_ROOT),
+        str(build_dir),
         "--noconfirm",
         "--clean",
     ]
