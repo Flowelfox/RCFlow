@@ -221,10 +221,42 @@ def _install_parent_death_watchdog() -> None:
     threading.Thread(target=_watch, name="parent-death-watchdog", daemon=True).start()
 
 
+def _run_migrations(revision: str = "head", *, quiet: bool = False) -> None:
+    """Upgrade the database schema to *revision* (idempotent ``alembic upgrade``)."""
+    from alembic import command  # noqa: PLC0415
+    from alembic.config import Config  # noqa: PLC0415
+
+    from src.paths import get_alembic_ini, get_migrations_dir  # noqa: PLC0415
+
+    ini_path = get_alembic_ini()
+    if not ini_path.exists():
+        print(f"ERROR: alembic.ini not found at {ini_path}", file=sys.stderr)
+        sys.exit(1)
+
+    alembic_cfg = Config(str(ini_path))
+    alembic_cfg.set_main_option("script_location", str(get_migrations_dir()))
+    alembic_cfg.set_main_option("prepend_sys_path", str(get_install_dir()))
+    if not quiet:
+        print(f"Running migrations to: {revision}")
+    command.upgrade(alembic_cfg, revision)
+    if not quiet:
+        print("Migrations complete.")
+
+
 def _cmd_run(args: argparse.Namespace) -> None:
     """Start the RCFlow server (default command)."""
     _check_not_root()
     _install_parent_death_watchdog()
+
+    # Ensure the schema is up to date before serving.  The server is started in
+    # many ways — a launchd/systemd service, the GUI, a bare `rcflow run` — and
+    # only some of them migrate first; running it here (idempotent) means the
+    # service no longer crash-loops on a fresh/empty database ("no such table").
+    try:
+        _run_migrations(quiet=True)
+    except Exception as exc:
+        print(f"ERROR: database migration failed: {exc}", file=sys.stderr)
+        sys.exit(1)
 
     # Apply --upnp / --no-upnp override before Settings is built so the lifespan
     # sees the effective value.  Per-invocation only — not persisted to
@@ -272,24 +304,7 @@ def _cmd_run(args: argparse.Namespace) -> None:
 
 def _cmd_migrate(args: argparse.Namespace) -> None:
     """Run database migrations to the latest version."""
-    from alembic import command  # noqa: PLC0415
-    from alembic.config import Config  # noqa: PLC0415
-
-    from src.paths import get_alembic_ini, get_migrations_dir  # noqa: PLC0415
-
-    ini_path = get_alembic_ini()
-    if not ini_path.exists():
-        print(f"ERROR: alembic.ini not found at {ini_path}", file=sys.stderr)
-        sys.exit(1)
-
-    alembic_cfg = Config(str(ini_path))
-    alembic_cfg.set_main_option("script_location", str(get_migrations_dir()))
-    alembic_cfg.set_main_option("prepend_sys_path", str(get_install_dir()))
-
-    revision = getattr(args, "revision", "head")
-    print(f"Running migrations to: {revision}")
-    command.upgrade(alembic_cfg, revision)
-    print("Migrations complete.")
+    _run_migrations(getattr(args, "revision", "head"))
 
 
 def _resolve_running_worker_api_key(*, default: str) -> str:

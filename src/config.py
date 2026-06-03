@@ -10,7 +10,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from src.paths import get_default_tools_dir
@@ -274,6 +274,33 @@ class Settings(BaseSettings):
     RCFLOW_UPDATE_CACHED_DOWNLOAD_URL: str = ""
     RCFLOW_UPDATE_CACHED_ASSET_NAME: str = ""
     RCFLOW_UPDATE_DISMISSED_VERSION: str = ""
+
+    @field_validator("DATABASE_URL")
+    @classmethod
+    def _anchor_relative_sqlite(cls, value: str) -> str:
+        """Anchor a *relative* sqlite path to the data dir (cwd-independent).
+
+        The default ``sqlite+aiosqlite:///./data/rcflow.db`` is relative to the
+        current working directory, so the worker used a *different* database
+        depending on where it was launched from — e.g. a launchd service whose
+        working directory is inside the read-only ``.app`` bundle got an empty
+        ``…/Contents/MacOS/data/rcflow.db`` and crash-looped with
+        "no such table: sessions".  Resolve relative sqlite paths against
+        :func:`~src.paths.get_data_dir` (where ``settings.json`` and logs already
+        live), so every launch context shares one database.  Absolute sqlite
+        paths and non-sqlite URLs (e.g. an explicit Postgres override) are left
+        untouched.
+        """
+        if not value.startswith("sqlite"):
+            return value
+        scheme, sep, path = value.partition(":///")
+        if not sep or path.startswith("/"):
+            return value  # not a 3-slash relative sqlite URL, or already absolute
+        from src.paths import get_data_dir  # noqa: PLC0415
+
+        rel = path[2:] if path.startswith("./") else path
+        abs_path = (get_data_dir() / rel).resolve()
+        return f"{scheme}:///{abs_path}"
 
     @property
     def projects_dirs(self) -> list[Path]:
