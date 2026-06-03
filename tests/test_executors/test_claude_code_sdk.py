@@ -18,7 +18,7 @@ from claude_agent_sdk import (
     UserMessage,
 )
 
-from src.executors.claude_code_sdk import sdk_message_to_events
+from src.executors.claude_code_sdk import ClaudeCodeSdkExecutor, sdk_message_to_events
 
 
 def _task_notification(**kw):
@@ -168,3 +168,25 @@ class TestTaskNotificationMapping:
 
     def test_without_tool_use_id_dropped(self):
         assert sdk_message_to_events(_task_notification(tool_use_id=None)) == []
+
+
+class TestSdkEnv:
+    """The ``timeout`` tool setting must reach Claude Code as CLAUDE_CODE_TIMEOUT."""
+
+    def test_timeout_override_sets_env(self):
+        ex = ClaudeCodeSdkExecutor(config_overrides={"timeout": 900})
+        assert ex._sdk_env()["CLAUDE_CODE_TIMEOUT"] == "900"
+
+    def test_no_timeout_leaves_env_unset(self):
+        ex = ClaudeCodeSdkExecutor(config_overrides={})
+        assert "CLAUDE_CODE_TIMEOUT" not in ex._sdk_env()
+
+    def test_model_pinning_vars_blanked(self):
+        ex = ClaudeCodeSdkExecutor()
+        env = ex._sdk_env()
+        assert env["ANTHROPIC_MODEL"] == ""
+        assert env["CLAUDE_AVAILABLE_MODELS"] == ""
+
+    def test_extra_env_passed_through(self):
+        ex = ClaudeCodeSdkExecutor(extra_env={"CLAUDE_CONFIG_DIR": "/cfg"})
+        assert ex._sdk_env()["CLAUDE_CONFIG_DIR"] == "/cfg"

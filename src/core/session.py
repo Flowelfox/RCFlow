@@ -453,6 +453,22 @@ class ActiveSession:
             return True
         return self._activity_state != ActivityState.IDLE
 
+    @property
+    def claude_code_relay_active(self) -> bool:
+        """Whether a Claude Code relay task is live and draining the SDK stream.
+
+        Mid-turn, the relay consumes the executor's message queue, so injecting
+        a follow-up via ``send_input`` reaches the model and streams back through
+        that relay.  When no relay is active (process gone, or connected-but-idle
+        between turns), a ``send_input`` would instead land in the queue and be
+        mis-consumed by the next turn — callers must route through a fresh prompt.
+        """
+        return (
+            self.claude_code_executor is not None
+            and self._claude_code_stream_task is not None
+            and not self._claude_code_stream_task.done()
+        )
+
     def pending_snapshot(self) -> list[dict[str, Any]]:
         """Return the current queue as a list of snapshot dicts (for ``session_update``)."""
         return self._pending.snapshot()

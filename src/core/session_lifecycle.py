@@ -482,12 +482,17 @@ class SessionLifecycle:
             return
 
         executor = session.claude_code_executor
-        if executor is not None and executor.is_running:
-            # Mid-turn: just send to stdin; the original relay task handles the rest
+        if executor is not None and executor.is_running and session.claude_code_relay_active:
+            # Mid-turn: a relay task is actively draining the stream, so the
+            # injected text reaches the model and its response streams back
+            # through that relay.
             await executor.send_input(text)
             return
 
-        # Fallback: process is gone — treat as a regular follow-up prompt
+        # No active relay (process gone, or connected-but-idle between turns):
+        # deliver as a fresh turn so a relay is spawned to stream the
+        # continuation.  A bare send_input here would land in the SDK message
+        # queue and be mis-consumed by the next turn.
         await self._r.handle_prompt(text, session_id)
 
     async def pause_session(self, session_id: str) -> ActiveSession:

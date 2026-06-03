@@ -296,6 +296,13 @@ class ClaudeCodeSdkExecutor(BaseExecutor):
         selects OAuth).
         """
         env: dict[str, str] = {"CLAUDE_AVAILABLE_MODELS": "", "ANTHROPIC_MODEL": ""}
+        # Parity with the legacy CLI executor: surface the configured turn timeout
+        # to Claude Code via ``CLAUDE_CODE_TIMEOUT`` so the ``timeout`` tool setting
+        # is honored (``max_turns`` bounds the number of turns; this bounds
+        # per-invocation wall-clock).
+        timeout = self._config_overrides.get("timeout")
+        if timeout:
+            env["CLAUDE_CODE_TIMEOUT"] = str(timeout)
         env.update(self._extra_env)
         return env
 

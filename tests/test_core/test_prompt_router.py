@@ -1063,6 +1063,57 @@ async def test_send_interactive_response_question_parses_flat_text(
 
 
 @pytest.mark.asyncio
+async def test_free_text_response_mid_turn_uses_send_input(
+    session_manager: SessionManager,
+) -> None:
+    """A free-text interactive response injects via send_input only while a relay is live."""
+    router = _make_router(session_manager)
+    session = session_manager.create_session(SessionType.LONG_RUNNING)
+    session.set_active()
+
+    executor = MagicMock()
+    executor.is_running = True
+    executor.send_input = AsyncMock()
+    session.claude_code_executor = executor
+    # A live (not-done) relay task means the stream is being drained.
+    task = MagicMock()
+    task.done.return_value = False
+    session._claude_code_stream_task = task  # type: ignore[assignment]
+    router.handle_prompt = AsyncMock()  # type: ignore[method-assign]
+
+    await router.send_interactive_response(session.id, "hello")
+
+    executor.send_input.assert_awaited_once_with("hello")
+    router.handle_prompt.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_free_text_response_idle_routes_to_handle_prompt(
+    session_manager: SessionManager,
+) -> None:
+    """Connected-but-idle (no live relay): route as a fresh prompt, not send_input.
+
+    A bare send_input here would land in the SDK queue and be mis-consumed by the
+    next turn; handle_prompt spawns a relay to stream the continuation instead.
+    """
+    router = _make_router(session_manager)
+    session = session_manager.create_session(SessionType.LONG_RUNNING)
+    session.set_active()
+
+    executor = MagicMock()
+    executor.is_running = True  # connected between turns
+    executor.send_input = AsyncMock()
+    session.claude_code_executor = executor
+    session._claude_code_stream_task = None  # no relay draining
+    router.handle_prompt = AsyncMock()  # type: ignore[method-assign]
+
+    await router.send_interactive_response(session.id, "hello")
+
+    executor.send_input.assert_not_awaited()
+    router.handle_prompt.assert_awaited_once_with("hello", session.id)
+
+
+@pytest.mark.asyncio
 async def test_cancel_session_resolves_pending_question_event(
     session_manager: SessionManager,
 ) -> None:
