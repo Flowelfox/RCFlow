@@ -239,11 +239,9 @@ def run_pyinstaller(target_platform: str, *, windowed: bool = False) -> Path:
         "src.database",
         "src.database.engine",
         "src.executors",
-        "src.executors.claude_code",
         "src.executors.claude_code_sdk",
         "src.executors.codex",
         "src.logs",
-        "src.models",
         "src.database.models",
         "src.prompts",
         "src.prompts.builder",
@@ -265,7 +263,6 @@ def run_pyinstaller(target_platform: str, *, windowed: bool = False) -> Path:
     if target_platform == "windows":
         hidden_imports.extend(
             [
-                "src.tray",
                 "src.gui",
                 "src.gui.windows",
                 "src.gui.core",
