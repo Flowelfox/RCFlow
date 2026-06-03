@@ -141,20 +141,40 @@ class TestMacOSCommandMapping:
         assert written["RunAtLoad"] is True
         assert "enable" in svc._launchctl.verbs()  # type: ignore[attr-defined]
 
-    def test_uninstall_removes_plist(self, macos):
+    def test_uninstall_unloads_and_removes_plist_without_disabling(self, macos):
         svc, rec, plist = macos
         plist.write_bytes(b"x")
         svc.uninstall()
         assert not plist.exists()
         assert "bootout" in rec.verbs()
-        assert "disable" in rec.verbs()
+        # Must NOT `launchctl disable` — that persists and would make a later
+        # install/start fail to bootstrap (rc=5).
+        assert "disable" not in rec.verbs()
 
-    def test_disable_does_not_bootout(self, macos):
+    def test_disable_only_flips_runatload_no_launchctl_disable(self, macos, monkeypatch):
         svc, rec, plist = macos
-        plist.write_bytes(b"x")
+        # Seed an enabled plist; disable() should rewrite it RunAtLoad=false and
+        # issue no launchctl mutation (so a manual start still works).
+        import plistlib  # noqa: PLC0415
+
+        with plist.open("wb") as fh:
+            plistlib.dump({"Label": "com.rcflow.server", "RunAtLoad": True}, fh)
+        monkeypatch.setattr(svc, "_write_plist", lambda *, run_at_load: plist.write_bytes(b"x"))
         svc.disable()
-        assert "disable" in rec.verbs()
-        assert "bootout" not in rec.verbs()  # never stops a running worker
+        assert "disable" not in rec.verbs()
+        assert "bootout" not in rec.verbs()
+
+    def test_start_enables_before_bootstrap(self, macos, monkeypatch):
+        svc, _rec, plist = macos
+        plist.write_bytes(b"")  # installed
+        rec = _Recorder(print_rc=1)  # not loaded → bootstrap path
+        monkeypatch.setattr(svc, "_launchctl", rec)
+        monkeypatch.setattr(svc, "_migrate_legacy_plist", lambda: None)
+        svc.start()
+        verbs = rec.verbs()
+        # `enable` must precede `bootstrap` so a previously-disabled label loads.
+        assert "enable" in verbs and "bootstrap" in verbs
+        assert verbs.index("enable") < verbs.index("bootstrap")
 
     def test_legacy_keepalive_true_is_migrated(self, macos, monkeypatch):
         svc, _rec, plist = macos

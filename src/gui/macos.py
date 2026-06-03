@@ -1866,16 +1866,16 @@ class RCFlowMacOSGUI:
 
         # Reconcile with the worker service first: adopt a running one (started
         # by the CLI, by launchd at login, or by a previous GUI) so the user
-        # controls the same instance.  An installed-but-stopped service is left
-        # stopped — don't auto-start a service the user (or `rcflow stop`)
-        # deliberately stopped.  Only with no service installed do we fall back
-        # to the pidfile-orphan adoption / dev child spawn.
+        # controls the same instance.  If a service is installed but stopped,
+        # opening the app means "I want the worker" — so start it (this also
+        # covers re-opening after a "Stop Worker & Quit").  Only with no service
+        # installed do we fall back to the pidfile-orphan adoption / dev child.
         detected = self._service.detect()
         if detected.running:
             self._service_adopted = True
             self._root.after(0, self._on_adopted_server)
         elif self._service.status().installed:
-            self._root.after(0, lambda: self._set_status("Stopped"))
+            self._root.after(0, self._start_server)
         else:
             adopted_pid = self._server.adopt_if_running()
             if adopted_pid is None:

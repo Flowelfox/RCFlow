@@ -102,7 +102,15 @@ class MacOSWorkerService:
     # ── lifecycle ───────────────────────────────────────────────────────
 
     def install(self, *, enable: bool, port: int | None = None) -> None:
-        """Write the canonical plist and bootstrap (and optionally enable) it."""
+        """Write the canonical plist and bootstrap it.
+
+        ``enable`` is the *autostart-at-login* axis (``RunAtLoad``), separate from
+        launchd's enable/disable override (whether the label may load at all).  We
+        always clear that override (``launchctl enable``) so a label left
+        ``disabled`` by a previous ``uninstall`` can be bootstrapped again — a
+        ``disabled`` label makes ``bootstrap`` fail with the opaque
+        "5: Input/output error".
+        """
         if port is not None:
             from src.config import update_settings_file  # noqa: PLC0415
 
@@ -111,24 +119,31 @@ class MacOSWorkerService:
         for log_path in worker_log_paths():
             log_path.parent.mkdir(parents=True, exist_ok=True)
         self._write_plist(run_at_load=enable)
+        self._launchctl("enable", self._target)
         # Bootstrap (load) the job; tolerate "already bootstrapped".
         if not self._is_loaded():
             self._launchctl("bootstrap", self._domain, str(self._plist))
-        if enable:
-            self._launchctl("enable", self._target)
 
     def uninstall(self) -> None:
-        """Stop, disable, and delete the plist."""
+        """Stop and delete the plist (does not leave the label disabled).
+
+        Deliberately does **not** ``launchctl disable`` the label: that override
+        persists in launchd's user database and would make a later
+        install/start fail to bootstrap (rc=5).  Unload + remove the plist is
+        enough — with no plist nothing can load.
+        """
         self._launchctl("bootout", self._target)
-        self._launchctl("disable", self._target)
         with contextlib.suppress(OSError):
             self._plist.unlink()
 
     def start(self) -> None:
-        """Bootstrap (if needed) and kickstart the worker."""
+        """Enable (clear any stale disable), bootstrap if needed, and kickstart."""
         if not self._plist.exists():
             raise RuntimeError(f"{_LABEL} is not installed; run `rcflow install` first")
         self._migrate_legacy_plist()
+        # Clear any persistent launchd "disabled" override (e.g. from an old
+        # uninstall) so bootstrap doesn't fail with "5: Input/output error".
+        self._launchctl("enable", self._target)
         if not self._is_loaded():
             self._launchctl("bootstrap", self._domain, str(self._plist), check=True)
         self._launchctl("kickstart", self._target, check=True)
@@ -182,21 +197,22 @@ class MacOSWorkerService:
             self._launchctl("bootstrap", self._domain, str(self._plist))
 
     def disable(self) -> None:
-        """Disable autostart without stopping a running worker."""
-        # Disable autostart without stopping a currently-running worker.
-        self._launchctl("disable", self._target)
+        """Disable autostart-at-login without stopping or blocking the worker.
+
+        Only flips ``RunAtLoad`` off.  Deliberately does NOT ``launchctl
+        disable`` — that override would persist and prevent any later manual
+        start/bootstrap (rc=5).  A running worker keeps running; it just won't
+        auto-start at the next login.
+        """
         if self._plist.exists():
             self._write_plist(run_at_load=False)
 
     # ── introspection ───────────────────────────────────────────────────
 
     def _is_enabled(self) -> bool:
+        # "Enabled" is the autostart-at-login axis = the plist's RunAtLoad.
         plist = self._read_plist()
-        if plist is None or not bool(plist.get("RunAtLoad", False)):
-            return False
-        # A label present in the domain's disabled set overrides RunAtLoad.
-        disabled = self._launchctl("print-disabled", self._domain)
-        return all(not (_LABEL in line and "true" in line) for line in disabled.stdout.splitlines())
+        return bool(plist and plist.get("RunAtLoad", False))
 
     def status(self) -> ServiceStatus:
         """Full state from ``launchctl print`` corroborated by a port probe."""
