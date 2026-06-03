@@ -1545,6 +1545,11 @@ def build_macos_dmg(app_path: Path, version: str, arch: str) -> Path | None:
     )
 
     # ── Mount the DMG ────────────────────────────────────────────────
+    # Detach any stale "RCFlow Worker" volume first: otherwise this one mounts as
+    # "RCFlow Worker 1" and the AppleScript (which targets the volume by name)
+    # styles the wrong/old volume — the DMG ships with no window layout.
+    for stale in Path("/Volumes").glob("RCFlow Worker*"):
+        subprocess.run(["hdiutil", "detach", str(stale), "-force", "-quiet"], check=False, capture_output=True)
     result = subprocess.run(
         ["hdiutil", "attach", str(tmp_dmg), "-noautoopen", "-nobrowse"],
         capture_output=True,
@@ -1592,9 +1597,12 @@ def build_macos_dmg(app_path: Path, version: str, arch: str) -> Path | None:
             if has_background
             else "-- no custom background"
         )
+        # Target the *actual* mounted volume name (may be "RCFlow Worker 1" if a
+        # stale one lingered despite the detach above), not a hardcoded name.
+        vol_name = vol_path.name
         applescript = f"""
 tell application "Finder"
-    tell disk "RCFlow Worker"
+    tell disk "{vol_name}"
         open
         set current view of container window to icon view
         set toolbar visible of container window to false

@@ -178,6 +178,10 @@ def build_styled_dmg(app_path: Path, out_dmg: Path, volname: str) -> Path:
         ["hdiutil", "create", "-size", f"{dmg_mb}m", "-fs", "HFS+", "-volname", volname, "-o", str(tmp_dmg)]
     )
 
+    # Detach any stale volume of this name first, else the new one mounts as
+    # "<name> 1" and the AppleScript styles the wrong volume (plain DMG ships).
+    for stale in Path("/Volumes").glob(f"{volname}*"):
+        subprocess.run(["hdiutil", "detach", str(stale), "-force", "-quiet"], check=False, capture_output=True)
     result = subprocess.run(
         ["hdiutil", "attach", str(tmp_dmg), "-noautoopen", "-nobrowse"],
         capture_output=True,
@@ -208,9 +212,11 @@ def build_styled_dmg(app_path: Path, out_dmg: Path, volname: str) -> Path:
             if has_background
             else "-- no custom background"
         )
+        # Use the actual mounted volume name (may be "<name> 1" on a dedup).
+        vol_name = vol.name
         applescript = f"""
 tell application "Finder"
-    tell disk "{volname}"
+    tell disk "{vol_name}"
         open
         set current view of container window to icon view
         set toolbar visible of container window to false
