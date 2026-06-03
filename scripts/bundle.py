@@ -64,6 +64,35 @@ def get_version() -> str:
     return "0.0.0"
 
 
+def _git_short_hash() -> str | None:
+    """Return the short git commit hash, or ``None`` outside a git checkout."""
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "--short=7", "HEAD"],
+            cwd=str(PROJECT_ROOT),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return None
+    h = out.stdout.strip()
+    return h or None
+
+
+def dev_version(base: str) -> str:
+    """Append a ``-dev`` suffix (plus the git short hash) to mark a local build.
+
+    Release builds (``--release`` / ``RCFLOW_RELEASE=1``) use the bare pyproject
+    version; everything else — notably ``just bundle-*`` on a developer machine —
+    gets a clearly distinguishable version like ``0.43.0-dev.g1a2b3c`` so a local
+    build is never mistaken for a published release (in the filename, the app's
+    ``rcflow version`` output, and the macOS ``About`` panel).
+    """
+    h = _git_short_hash()
+    return f"{base}-dev.g{h}" if h else f"{base}-dev"
+
+
 def get_arch() -> str:
     """Get current machine architecture as a normalized string."""
     machine = platform.machine().lower()
@@ -1931,6 +1960,11 @@ def main() -> None:
         action="store_true",
         help="Sign artifacts after building (requires platform-specific env vars)",
     )
+    parser.add_argument(
+        "--release",
+        action="store_true",
+        help="Build with the exact pyproject version (no '-dev' suffix). Also enabled by RCFLOW_RELEASE=1.",
+    )
     args = parser.parse_args()
 
     # --install implies --installer
@@ -1938,7 +1972,8 @@ def main() -> None:
         args.installer = True
 
     target_platform = args.platform or detect_platform()
-    version = get_version()
+    is_release = args.release or os.environ.get("RCFLOW_RELEASE", "") not in ("", "0", "false", "False")
+    version = get_version() if is_release else dev_version(get_version())
     arch = get_arch()
 
     print(f"Building RCFlow {version} for {target_platform}-{arch}")

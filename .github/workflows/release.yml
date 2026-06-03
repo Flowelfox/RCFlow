@@ -96,7 +96,7 @@ jobs:
       - name: Build and sign backend package
         env:
           GPG_KEY_ID: ${{ env.GPG_KEY_ID }}
-        run: uv run python scripts/bundle.py --platform linux --installer --sign
+        run: uv run python scripts/bundle.py --platform linux --installer --sign --release
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4.6.2
@@ -130,7 +130,7 @@ jobs:
         run: uv sync --extra bundle --extra tray
 
       - name: Build backend package
-        run: uv run python scripts/bundle.py --platform macos --installer
+        run: uv run python scripts/bundle.py --platform macos --installer --release
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4.6.2
@@ -166,7 +166,7 @@ jobs:
         shell: pwsh
 
       - name: Build backend package
-        run: uv run python scripts/bundle.py --platform windows --installer
+        run: uv run python scripts/bundle.py --platform windows --installer --release
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4.6.2
@@ -293,15 +293,15 @@ jobs:
         run: |
           CLIENT_VERSION="${{ env.CLIENT_VERSION }}"
           CLIENT_ARCH=$(uname -m | sed 's/x86_64/amd64/')
-          DMG_NAME="rcflow-v${CLIENT_VERSION}-macos-client-${CLIENT_ARCH}"
+          DMG_PATH="dist/rcflow-v${CLIENT_VERSION}-macos-client-${CLIENT_ARCH}.dmg"
           APP_PATH="rcflowclient/build/macos/Build/Products/Release/RCFlow.app"
-          STAGE=$(mktemp -d)
-          cp -R "$APP_PATH" "$STAGE/"
-          ln -s /Applications "$STAGE/Applications"
           mkdir -p dist
-          hdiutil create -srcfolder "$STAGE" -volname "RCFlow Client" \
-            -fs HFS+ -format UDZO -o "dist/${DMG_NAME}.dmg"
-          rm -rf "$STAGE"
+          # Styled drag-to-Applications image (background + icon layout). Pillow
+          # is best-effort — without it the icon layout still applies, just no
+          # custom background.
+          python3 -m pip install --quiet pillow || python3 -m pip install --quiet --user pillow || true
+          python3 scripts/bundle_macos_client.py \
+            --styled-dmg --app "$APP_PATH" --out "$DMG_PATH" --volname "RCFlow Client"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4.6.2
