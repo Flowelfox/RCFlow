@@ -61,6 +61,18 @@ SignedUninstaller=yes
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
+[InstallDelete]
+; Wipe replaceable program dirs from a prior install BEFORE copying the new
+; files. Inno overwrites but never removes orphaned files, so a build that
+; *removed* a file (e.g. migrations squashed from ~19 down to 5) would otherwise
+; leave the obsolete ones behind — and stale alembic migrations produce
+; "Multiple head revisions", crashing the worker on startup. These dirs are
+; fully re-supplied by [Files]; user data lives under %LOCALAPPDATA%\rcflow and
+; is untouched.
+Type: filesandordirs; Name: "{app}\migrations"
+Type: filesandordirs; Name: "{app}\_internal"
+Type: filesandordirs; Name: "{app}\tools"
+
 [Files]
 ; Main executable and internal files
 Source: "{#BundleDir}\rcflow.exe"; DestDir: "{app}"; Flags: ignoreversion
