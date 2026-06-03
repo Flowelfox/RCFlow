@@ -28,6 +28,7 @@ import queue
 import signal
 import subprocess
 import sys
+import threading
 import time
 import tkinter as tk
 import traceback
@@ -216,6 +217,10 @@ class RCFlowMacOSGUI:
         self._gui_started_it = False
         # Retained NSActivity token (prevents App Nap / sudden termination).
         self._activity_token: object | None = None
+        # Background tailer that streams the service's log file into the GUI log
+        # pane when the worker runs as a service (no child stdout to read).
+        self._service_log_thread: threading.Thread | None = None
+        self._service_log_stop = threading.Event()
         self._quitting = False
         self._keep_app_alive()
         # Thread-safe queue for UI callbacks posted from background threads.
@@ -898,6 +903,51 @@ class RCFlowMacOSGUI:
             # Retain the token on self — releasing it ends the activity.
             self._activity_token = info.beginActivityWithOptions_reason_(options, "RCFlow worker running")
 
+    def _start_service_log_stream(self) -> None:
+        """Tail the service's stdout log into the GUI log pane (idempotent).
+
+        A service-owned worker is not our subprocess, so there is no child stdout
+        to read — the GUI log pane would stay empty.  Stream the launchd
+        ``StandardOutPath`` file instead so the user sees server output for an
+        adopted/managed worker too.
+        """
+        if self._service_log_thread is not None and self._service_log_thread.is_alive():
+            return
+        self._service_log_stop.clear()
+        self._service_log_thread = threading.Thread(target=self._stream_service_logs, daemon=True)
+        self._service_log_thread.start()
+
+    def _stop_service_log_stream(self) -> None:
+        self._service_log_stop.set()
+        self._service_log_thread = None
+
+    def _stream_service_logs(self) -> None:
+        from src.services.worker_service.config import worker_log_paths  # noqa: PLC0415
+
+        stdout_path, _ = worker_log_paths()
+        # Wait briefly for the file to appear (the service may still be starting).
+        for _ in range(50):
+            if self._service_log_stop.is_set():
+                return
+            if stdout_path.exists():
+                break
+            time.sleep(0.1)
+        try:
+            with stdout_path.open("r", encoding="utf-8", errors="replace") as fh:
+                # Backfill the tail of recent history, then follow new lines.
+                history = fh.readlines()[-200:]
+                for line in history:
+                    self._log_buffer.append(line.rstrip("\n"))
+                fh.seek(0, 2)
+                while not self._service_log_stop.is_set():
+                    line = fh.readline()
+                    if line:
+                        self._log_buffer.append(line.rstrip("\n"))
+                    else:
+                        time.sleep(0.3)
+        except OSError:
+            pass
+
     def _worker_running(self) -> bool:
         """Return True if a worker is serving — our child OR an adopted service."""
         if self._server.is_running():
@@ -1014,6 +1064,7 @@ class RCFlowMacOSGUI:
                 return
             self._service_adopted = False
             self._gui_started_it = False
+            self._stop_service_log_stream()
             return
         self._server.stop()
 
@@ -1036,6 +1087,10 @@ class RCFlowMacOSGUI:
         protocol = "WSS" if self._wss_var.get() else "WS"
         self._set_status(f"Running ({protocol}) — recovered", sticky=True)
         self._update_tray_status()
+        # A service-owned worker has no child stdout — stream its log file so the
+        # GUI log pane is not empty.
+        if self._service_adopted:
+            self._start_service_log_stream()
 
     # ── Log display ───────────────────────────────────────────────────────
 
@@ -1144,6 +1199,7 @@ class RCFlowMacOSGUI:
                 # The worker (child or adopted service) is gone — drop adoption.
                 self._service_adopted = False
                 self._gui_started_it = False
+                self._stop_service_log_stream()
                 self._ip_entry.configure(state="normal")
                 self._port_entry.configure(state="normal")
                 self._wss_check.configure(state="normal")

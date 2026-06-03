@@ -165,6 +165,17 @@ def resolve_current_version() -> str:
     ``scripts/bundle.py``; returns ``""`` when neither is available so the
     caller can short-circuit auto-check in dev/unknown environments.
     """
+    from src.paths import get_install_dir, is_frozen  # noqa: PLC0415
+
+    # In a frozen build the bundled ``VERSION`` file is authoritative — it carries
+    # the build's real version including any ``-dev`` suffix, whereas
+    # ``importlib.metadata`` returns the clean pyproject version baked into the
+    # bundled dist-info (so a dev build would otherwise display as a release).
+    if is_frozen():
+        with contextlib.suppress(Exception):
+            version_file = get_install_dir() / "VERSION"
+            if version_file.exists():
+                return normalize_version(version_file.read_text(encoding="utf-8").strip())
     try:
         from importlib.metadata import version as _pkg_version  # noqa: PLC0415
 
@@ -172,8 +183,6 @@ def resolve_current_version() -> str:
     except Exception:
         pass
     with contextlib.suppress(Exception):
-        from src.paths import get_install_dir  # noqa: PLC0415
-
         version_file = get_install_dir() / "VERSION"
         if version_file.exists():
             return normalize_version(version_file.read_text(encoding="utf-8").strip())
