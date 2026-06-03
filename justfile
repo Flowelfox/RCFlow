@@ -166,15 +166,13 @@ bundle-macos-client:
     mkdir -p dist
     CLIENT_VERSION=$(grep '^version:' rcflowclient/pubspec.yaml | sed 's/version: //' | sed 's/+.*//')
     CLIENT_ARCH=$(uname -m | sed 's/x86_64/amd64/')
-    DMG_NAME="rcflow-v${CLIENT_VERSION}-macos-client-${CLIENT_ARCH}"
+    DMG_PATH="dist/rcflow-v${CLIENT_VERSION}-macos-client-${CLIENT_ARCH}.dmg"
     APP_PATH="rcflowclient/build/macos/Build/Products/Release/RCFlow.app"
-    STAGE=$(mktemp -d)
-    cp -R "$APP_PATH" "$STAGE/"
-    ln -s /Applications "$STAGE/Applications"
-    hdiutil create -srcfolder "$STAGE" -volname "RCFlow Client" -fs HFS+ -format UDZO \
-      -o "dist/${DMG_NAME}.dmg"
-    rm -rf "$STAGE"
-    printf 'Built dist/%s.dmg\n' "$DMG_NAME"
+    # Styled DMG (background + drag-to-Applications layout). --extra bundle pulls
+    # in Pillow for the background image; the icon layout applies without it too.
+    uv run --extra bundle python scripts/bundle_macos_client.py \
+      --styled-dmg --app "$APP_PATH" --out "$DMG_PATH" --volname "RCFlow Client"
+    printf 'Built %s\n' "$DMG_PATH"
 
 # Build and install macOS Flutter client (must be on macOS)
 [macos]

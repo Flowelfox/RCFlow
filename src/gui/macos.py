@@ -907,18 +907,17 @@ class RCFlowMacOSGUI:
         return False
 
     def _shutdown_worker(self) -> None:
-        """Stop the worker on GUI quit per the lifecycle rule.
+        """Reap a GUI-spawned worker child on exit — never stop a service.
 
-        A GUI-started, *un-enabled* service stops with the GUI ("no GUI ⇒ no
-        worker").  An enabled service, or one started externally (CLI/boot),
-        persists.  A dev/no-service child is always reaped.
+        Only a dev / no-service child (which cannot outlive the GUI anyway) is
+        reaped here.  An installed service is **never** stopped on a normal or
+        abrupt exit — it must survive the GUI; the only way to stop it on quit is
+        the explicit "Stop" choice in the quit prompt (:meth:`_on_tray_quit`).
         """
-        if self._service_adopted:
-            with contextlib.suppress(Exception):
-                if self._gui_started_it and not self._service.detect().enabled:
-                    self._service.stop()
-        else:
-            self._server.stop_sync()
+        with contextlib.suppress(Exception):
+            if self._service.detect().installed:
+                return
+        self._server.stop_sync()
 
     def _on_toggle(self) -> None:
         if self._worker_running():
@@ -947,6 +946,27 @@ class RCFlowMacOSGUI:
             self._set_status("Starting (service)...")
             self._root.after(1500, self._update_tray_status)
             return
+
+        # Installed (frozen) app with no service yet: register and run the worker
+        # as the launchd service so it survives the GUI and the CLI controls the
+        # same instance — instead of a GUI-owned child that dies on quit.  This is
+        # what makes the worker persistent and the quit prompt meaningful.  Dev
+        # (unfrozen) runs keep the lightweight child so they don't install a
+        # launchd agent on the developer's machine.
+        if is_frozen():
+            try:
+                self._service.install(enable=False)
+                self._service.start()
+            except Exception as exc:
+                logger.exception("Worker-service install/start failed; falling back to a child process")
+                self._set_status(f"Service start failed: {exc}", error=True)
+            else:
+                self._service_adopted = True
+                self._gui_started_it = True
+                self._on_adopted_server()
+                self._set_status("Starting (service)...")
+                self._root.after(1500, self._update_tray_status)
+                return
 
         host = self._ip_var.get().strip()
         port_str = self._port_var.get().strip()
@@ -1656,6 +1676,12 @@ class RCFlowMacOSGUI:
         if NSAlert is None:
             return "quit"
         try:
+            # Bring the app forward first.  A menu-bar-only (LSUIElement) app does
+            # not auto-focus, so without activating, the alert can open *behind*
+            # other windows and look like "nothing happened" (the reported bug).
+            if NSApplication is not None:
+                with contextlib.suppress(Exception):
+                    NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
             alert = NSAlert.alloc().init()
             alert.setMessageText_("Quit RCFlow Worker?")
             alert.setInformativeText_(
@@ -1669,6 +1695,11 @@ class RCFlowMacOSGUI:
             cancel_btn = alert.addButtonWithTitle_("Cancel")  # 1002
             with contextlib.suppress(Exception):
                 cancel_btn.setKeyEquivalent_("\x1b")  # Escape → Cancel
+            with contextlib.suppress(Exception):
+                # Float the alert above everything (NSStatusWindowLevel = 25).
+                win = alert.window()
+                win.setLevel_(25)
+                win.makeKeyAndOrderFront_(None)
             resp = int(alert.runModal())
         except Exception:
             logger.exception("Quit confirmation dialog failed — defaulting to leave-running")
@@ -1684,10 +1715,13 @@ class RCFlowMacOSGUI:
             return
 
         # When an installed worker service is running it outlives the GUI, so ask
-        # whether to leave it running or stop it.  (A dev/no-service child cannot
-        # outlive the GUI — it dies via the parent-death watchdog — so it skips
-        # the prompt and is always reaped below.)
-        service_running = self._service_adopted and self._service.detect().running
+        # whether to leave it running or stop it.  Gate on the live service probe
+        # (installed plist + a worker on the port) rather than the in-memory
+        # adoption flag, which may be stale/unset — that was why the prompt was
+        # skipped.  A dev/no-service child cannot outlive the GUI, so it skips the
+        # prompt and is reaped below.
+        st = self._service.detect()
+        service_running = st.installed and st.running
         stop_service = False
         if service_running:
             decision = self._ask_quit_decision()
