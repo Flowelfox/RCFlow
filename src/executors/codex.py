@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 class CodexExecutor(BaseExecutor):
     """Executor that manages OpenAI Codex CLI as a one-shot subprocess per turn.
 
-    Unlike ``ClaudeCodeExecutor`` which keeps a persistent bidirectional
+    Unlike the Claude Code executor which keeps a persistent bidirectional
     process, Codex CLI uses a one-shot model: each turn spawns
     ``codex exec --json --full-auto PROMPT``, reads JSONL from stdout
     until ``turn.completed`` or process exit, and then the process

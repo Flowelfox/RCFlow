@@ -521,6 +521,58 @@ void main() {
     });
   });
 
+  group('buildToolStartHistory — AskUserQuestion resolution', () {
+    test('answered question restores answers into the body, expanded', () {
+      final messages = <DisplayMessage>[];
+      buildToolStartHistory(
+        {
+          'type': 'tool_start',
+          'metadata': {
+            'tool_name': 'AskUserQuestion',
+            'tool_input': {
+              'questions': [
+                {'question': 'Which option?'}
+              ],
+            },
+            'answered': true,
+            'answer': 'Which option?: Option A',
+          },
+        },
+        'sess1',
+        messages,
+      );
+
+      expect(messages.length, 1);
+      final m = messages.single;
+      expect(m.isQuestion, isTrue);
+      expect(m.finished, isTrue);
+      expect(m.expanded, isTrue);
+      expect(m.content, 'Which option?: Option A');
+    });
+
+    test('unanswered question replays as not finished', () {
+      final messages = <DisplayMessage>[];
+      buildToolStartHistory(
+        {
+          'type': 'tool_start',
+          'metadata': {
+            'tool_name': 'AskUserQuestion',
+            'tool_input': {
+              'questions': [
+                {'question': 'Which option?'}
+              ],
+            },
+          },
+        },
+        'sess1',
+        messages,
+      );
+
+      expect(messages.single.finished, isFalse);
+      expect(messages.single.content, '');
+    });
+  });
+
   group('handleAgentSessionStart', () {
     late PaneState pane;
 

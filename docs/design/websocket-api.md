@@ -1,5 +1,5 @@
 ---
-updated: 2026-05-09
+updated: 2026-06-02
 ---
 
 # WebSocket API
@@ -191,6 +191,16 @@ Answer a question from Claude Code (AskUserQuestion):
   "answers": {"question text": "selected answer"}
 }
 ```
+
+> **Flow.** With the Agent SDK, `AskUserQuestion` is intercepted in-process by the
+> SDK `can_use_tool` callback *before* Claude Code runs the tool: the callback
+> pushes the question widget (`tool_start`) and blocks until this `question_answer`
+> arrives, then returns the selected `answers` to Claude Code as the tool's result
+> so the model continues in the **same** turn. The structured `answers` map is
+> preferred (a flat `"question: answer"` string is parsed as a fallback). The
+> buffered `tool_start` is annotated `answered`/`answer` for history replay; the
+> relay drops the resolved tool_use/tool_result from the chat since the widget
+> already shows the answer.
 
 Send a mid-turn interactive response (plan mode approval, question answers, etc.):
 

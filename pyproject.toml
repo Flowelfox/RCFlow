@@ -24,6 +24,7 @@ dependencies = [
     "miniupnpc>=2.2.8",
     "rust-just[dev]>=1.46.0",
     "wtpython @ git+https://github.com/Flowelfox/worktree-manager-python",
+    "claude-agent-sdk>=0.2.87",
 ]
 
 [project.optional-dependencies]
@@ -80,7 +81,16 @@ skip_empty = true
 fail_under = 54
 
 [tool.ty.src]
-exclude = ["scripts/", "src/gui/macos.py"]
+# GUI modules import optional native UI deps (customtkinter, pystray, PIL,
+# PyObjC) from the `tray`/gui extras that aren't installed for the isolated
+# `uvx ty` run, so type-checking them is pure noise — exclude them.
+exclude = [
+    "scripts/",
+    "src/gui/macos.py",
+    "src/gui/linux_app.py",
+    "src/gui/windows.py",
+    "src/gui/_dashboard_ctk.py",
+]
 
 [[tool.ty.overrides]]
 include = ["tests/test_api/**"]

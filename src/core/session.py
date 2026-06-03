@@ -32,7 +32,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from src.core.permissions import PermissionManager
-    from src.executors.claude_code import ClaudeCodeExecutor
+    from src.executors.claude_code_sdk import ClaudeCodeSdkExecutor
     from src.executors.codex import CodexExecutor
     from src.executors.opencode import OpenCodeExecutor
 
@@ -106,7 +106,7 @@ class ActiveSession:
         self.metadata: dict[str, Any] = {}
         self.paused_at: datetime | None = None
         # Claude Code mode: when set, subsequent messages bypass the outer LLM
-        self.claude_code_executor: ClaudeCodeExecutor | None = None
+        self.claude_code_executor: ClaudeCodeSdkExecutor | None = None
         self._claude_code_stream_task: asyncio.Task[None] | None = None
         # Codex CLI mode: same pattern as Claude Code but with one-shot processes
         self.codex_executor: CodexExecutor | None = None
@@ -129,12 +129,16 @@ class ActiveSession:
         self._plan_review_approved: bool = False
         # The text the user sent in response to the plan review (approval text or feedback).
         self._plan_review_feedback: str | None = None
-        # AskUserQuestion gate — set when an AskUserQuestion tool_use is intercepted.
-        # The relay blocks here until the user submits an answer (or the timeout
-        # expires).  Without this gate, Claude Code auto-cancels the question and
-        # the assistant proceeds as if the user had refused to answer.
+        # AskUserQuestion gate.  Under the Agent SDK the ``can_use_tool`` callback
+        # pushes the question widget and blocks on ``_question_event`` until the
+        # user submits; ``send_interactive_response`` stores the structured
+        # ``_question_answers`` and sets the event, and the callback returns them
+        # to Claude Code as the tool's answer (so the model continues in the same
+        # turn).  ``_question_tool_use_id`` lets the relay drop the resolved
+        # tool_use / tool_result from the display (the widget already shows it).
         self._question_event: asyncio.Event | None = None
-        self._question_response: str | None = None
+        self._question_answers: dict[str, str] | None = None
+        self._question_tool_use_id: str | None = None
         # Token usage accumulators (running totals across all turns).  Stored on
         # a composed object; the historical flat attributes are re-exposed via
         # delegating properties below.

@@ -1192,6 +1192,7 @@ class PaneState extends ChangeNotifier {
     if (!_host.connected) return;
     msg.selectedAnswers = answers;
     msg.finished = true;
+    msg.expanded = true; // show the answers in the collapsible body by default
     _ws?.answerQuestion(msg.sessionId ?? _sessionId, answers);
     notifyListeners();
   }

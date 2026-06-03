@@ -211,6 +211,7 @@ def run_pyinstaller(target_platform: str, *, windowed: bool = False) -> Path:
         "src.database.engine",
         "src.executors",
         "src.executors.claude_code",
+        "src.executors.claude_code_sdk",
         "src.executors.codex",
         "src.logs",
         "src.models",
@@ -314,6 +315,17 @@ def run_pyinstaller(target_platform: str, *, windowed: bool = False) -> Path:
 
     for imp in hidden_imports:
         cmd.extend(["--hidden-import", imp])
+
+    # Collect claude-agent-sdk fully — it lazily loads its _internal transport +
+    # control protocol that PyInstaller's static analysis would miss.  Do NOT
+    # collect-all `mcp`: walking its submodules imports `mcp.cli`, which hard
+    # sys.exit(1)s at import without the optional `typer` dep and aborts the
+    # build.  The mcp modules the SDK actually uses are pulled in by static
+    # analysis; pin the package roots as hidden imports as a safety net.
+    collect_all_pkgs = ["claude_agent_sdk"]
+    for pkg in collect_all_pkgs:
+        cmd.extend(["--collect-all", pkg])
+    cmd.extend(["--hidden-import", "mcp", "--hidden-import", "mcp.client.stdio"])
 
     for src_path, dest_path in datas:
         cmd.extend(["--add-data", f"{src_path}{os.pathsep}{dest_path}"])
@@ -676,9 +688,8 @@ def build_windows_installer(bundle_dir: Path, version: str, arch: str) -> Path |
         size_mb = output_path.stat().st_size / (1024 * 1024)
         print(f"Installer created: {output_path} ({size_mb:.1f} MB)")
         return output_path
-    else:
-        print(f"WARNING: Expected installer at {output_path} but it was not found.", file=sys.stderr)
-        return None
+    print(f"WARNING: Expected installer at {output_path} but it was not found.", file=sys.stderr)
+    return None
 
 
 def build_deb(bundle_dir: Path, version: str, arch: str) -> Path | None:
@@ -1116,9 +1127,8 @@ fi
         size_mb = deb_path.stat().st_size / (1024 * 1024)
         print(f"Package created: {deb_path} ({size_mb:.1f} MB)")
         return deb_path
-    else:
-        print(f"WARNING: Expected .deb at {deb_path} but it was not found.", file=sys.stderr)
-        return None
+    print(f"WARNING: Expected .deb at {deb_path} but it was not found.", file=sys.stderr)
+    return None
 
 
 def build_macos_pkg(bundle_dir: Path, version: str, arch: str) -> Path | None:
@@ -1483,13 +1493,19 @@ def build_macos_dmg(app_path: Path, version: str, arch: str) -> Path | None:
     _make_dmg_background(icns_src, bg_png)
 
     # ── Create a blank read-write DMG ────────────────────────────────
-    print(f"Creating DMG: {final_dmg.name}...")
+    # Size the volume from the actual .app footprint (plus headroom for the
+    # background image, HFS+ overhead, and future growth) rather than a fixed
+    # cap — the bundled app grows as dependencies are added and a hardcoded
+    # size silently overflows mid-copy ("No space left on device").
+    app_bytes = sum(f.stat().st_size for f in app_path.rglob("*") if f.is_file())
+    dmg_mb = max(400, int(app_bytes / (1024 * 1024) * 1.4) + 50)
+    print(f"Creating DMG: {final_dmg.name}... ({dmg_mb} MB volume for a {app_bytes // (1024 * 1024)} MB app)")
     subprocess.check_call(
         [
             "hdiutil",
             "create",
             "-size",
-            "400m",
+            f"{dmg_mb}m",
             "-fs",
             "HFS+",
             "-volname",
