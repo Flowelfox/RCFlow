@@ -924,29 +924,41 @@ class RCFlowMacOSGUI:
     def _stream_service_logs(self) -> None:
         from src.services.worker_service.config import worker_log_paths  # noqa: PLC0415
 
-        stdout_path, _ = worker_log_paths()
-        # Wait briefly for the file to appear (the service may still be starting).
+        # Tail BOTH stdout and stderr: Python logging (uvicorn, src.*) writes to
+        # stderr, so stdout is usually empty — tailing only stdout showed nothing.
+        paths = list(worker_log_paths())
+        # Wait briefly for at least one file to appear (service may be starting).
         for _ in range(50):
             if self._service_log_stop.is_set():
                 return
-            if stdout_path.exists():
+            if any(p.exists() for p in paths):
                 break
             time.sleep(0.1)
+        handles = []
         try:
-            with stdout_path.open("r", encoding="utf-8", errors="replace") as fh:
-                # Backfill the tail of recent history, then follow new lines.
-                history = fh.readlines()[-200:]
-                for line in history:
+            for path in paths:
+                try:
+                    fh = path.open("r", encoding="utf-8", errors="replace")
+                except OSError:
+                    continue
+                # Backfill recent history, then follow.
+                for line in fh.readlines()[-200:]:
                     self._log_buffer.append(line.rstrip("\n"))
                 fh.seek(0, 2)
-                while not self._service_log_stop.is_set():
+                handles.append(fh)
+            while not self._service_log_stop.is_set():
+                progressed = False
+                for fh in handles:
                     line = fh.readline()
                     if line:
                         self._log_buffer.append(line.rstrip("\n"))
-                    else:
-                        time.sleep(0.3)
-        except OSError:
-            pass
+                        progressed = True
+                if not progressed:
+                    time.sleep(0.3)
+        finally:
+            for fh in handles:
+                with contextlib.suppress(Exception):
+                    fh.close()
 
     def _worker_running(self) -> bool:
         """Return True if a worker is serving — our child OR an adopted service."""
