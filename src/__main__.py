@@ -663,6 +663,98 @@ def _cmd_set_api_key(args: argparse.Namespace) -> None:
     print("API key updated successfully.")
 
 
+# ── Worker-service control (shared with the GUI via the same controller) ─────
+
+
+def _service_controller():
+    """Return the platform worker-service controller, or exit with a clear error."""
+    from src.services.worker_service import get_controller  # noqa: PLC0415
+
+    try:
+        return get_controller()
+    except RuntimeError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+
+def _run_service_op(label: str, op) -> None:
+    """Invoke a controller mutation, mapping staged/failed ops to a clean exit."""
+    try:
+        op()
+    except NotImplementedError as exc:
+        print(f"{label} is not available on this platform yet: {exc}", file=sys.stderr)
+        sys.exit(2)
+    except (RuntimeError, OSError) as exc:
+        print(f"ERROR: {label} failed: {exc}", file=sys.stderr)
+        sys.exit(1)
+    print(f"{label}: ok")
+
+
+def _cmd_service_install(args: argparse.Namespace) -> None:
+    """Register the worker service with the OS supervisor."""
+    ctl = _service_controller()
+    _run_service_op("install", lambda: ctl.install(enable=args.enable, port=args.port))
+
+
+def _cmd_service_uninstall(args: argparse.Namespace) -> None:
+    """Stop and remove the worker-service registration."""
+    ctl = _service_controller()
+    _run_service_op("uninstall", ctl.uninstall)
+
+
+def _cmd_service_start(args: argparse.Namespace) -> None:
+    """Start the worker service now."""
+    ctl = _service_controller()
+    _run_service_op("start", ctl.start)
+
+
+def _cmd_service_stop(args: argparse.Namespace) -> None:
+    """Stop the worker service now (final — no respawn)."""
+    ctl = _service_controller()
+    _run_service_op("stop", ctl.stop)
+
+
+def _cmd_service_restart(args: argparse.Namespace) -> None:
+    """Restart the worker service."""
+    ctl = _service_controller()
+    _run_service_op("restart", ctl.restart)
+
+
+def _cmd_service_enable(args: argparse.Namespace) -> None:
+    """Enable worker-service autostart at login/boot."""
+    ctl = _service_controller()
+    _run_service_op("enable", ctl.enable)
+
+
+def _cmd_service_disable(args: argparse.Namespace) -> None:
+    """Disable worker-service autostart (a running worker keeps running)."""
+    ctl = _service_controller()
+    _run_service_op("disable", ctl.disable)
+
+
+def _cmd_service_status(args: argparse.Namespace) -> None:
+    """Print the worker-service state (installed/running/enabled/pid/port)."""
+    st = _service_controller().status()
+    print("RCFlow Worker Service")
+    print(f"  Installed : {'yes' if st.installed else 'no'}")
+    print(f"  Running   : {'yes' if st.running else 'no'}")
+    print(f"  Enabled   : {'yes' if st.enabled else 'no'} (autostart)")
+    print(f"  PID       : {st.pid if st.pid is not None else '—'}")
+    print(f"  Port      : {st.port if st.port is not None else '—'}")
+    # Exit non-zero when stopped so scripts/`&&` chains can branch on liveness.
+    sys.exit(0 if st.running else 3)
+
+
+def _cmd_service_logs(args: argparse.Namespace) -> None:
+    """Stream the worker-service logs."""
+    ctl = _service_controller()
+    try:
+        for line in ctl.logs(follow=args.follow, lines=args.lines):
+            print(line)
+    except KeyboardInterrupt:
+        sys.exit(130)
+
+
 def main() -> None:
     """Run the application entry point."""
     parser = argparse.ArgumentParser(prog="rcflow", description="RCFlow action server")
@@ -729,6 +821,50 @@ def main() -> None:
     set_api_key_parser = subparsers.add_parser("set-api-key", help="Set a new API key")
     set_api_key_parser.add_argument("value", help="The new API key value")
     set_api_key_parser.set_defaults(func=_cmd_set_api_key)
+
+    # ── Worker-service control ──────────────────────────────────────────────
+    # `run` is the raw foreground worker the service execs; these verbs ask the
+    # OS supervisor (launchd/systemd/NSSM) to manage that worker, and the GUI
+    # drives the very same service through the shared controller.
+    install_parser = subparsers.add_parser("install", help="Register the worker as an OS service")
+    install_parser.add_argument(
+        "--enable",
+        action="store_true",
+        help="Also enable autostart at login/boot",
+    )
+    install_parser.add_argument(
+        "--port",
+        type=int,
+        default=None,
+        help="Persist this port for the service before installing",
+    )
+    install_parser.set_defaults(func=_cmd_service_install)
+
+    uninstall_parser = subparsers.add_parser("uninstall", help="Remove the worker service")
+    uninstall_parser.set_defaults(func=_cmd_service_uninstall)
+
+    start_parser = subparsers.add_parser("start", help="Start the worker service")
+    start_parser.set_defaults(func=_cmd_service_start)
+
+    stop_parser = subparsers.add_parser("stop", help="Stop the worker service (final — no respawn)")
+    stop_parser.set_defaults(func=_cmd_service_stop)
+
+    restart_parser = subparsers.add_parser("restart", help="Restart the worker service")
+    restart_parser.set_defaults(func=_cmd_service_restart)
+
+    enable_parser = subparsers.add_parser("enable", help="Enable worker autostart at login/boot")
+    enable_parser.set_defaults(func=_cmd_service_enable)
+
+    disable_parser = subparsers.add_parser("disable", help="Disable worker autostart")
+    disable_parser.set_defaults(func=_cmd_service_disable)
+
+    status_parser = subparsers.add_parser("status", help="Show worker-service state")
+    status_parser.set_defaults(func=_cmd_service_status)
+
+    logs_parser = subparsers.add_parser("logs", help="Stream worker-service logs")
+    logs_parser.add_argument("-f", "--follow", action="store_true", help="Follow the log output")
+    logs_parser.add_argument("-n", "--lines", type=int, default=200, help="Lines of history to show")
+    logs_parser.set_defaults(func=_cmd_service_logs)
 
     args = parser.parse_args()
 

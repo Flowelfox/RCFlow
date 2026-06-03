@@ -415,52 +415,15 @@ JSONEOF
             ;;
     esac
 
-    # Setup LaunchAgent
+    # Setup LaunchAgent — delegate to the canonical installer in the binary so
+    # this curl-install matches the DMG/.pkg and `rcflow install` exactly
+    # (crash-only KeepAlive; CLI + GUI control the same registration).
     if [ "$setup_service" = true ]; then
-        info "Setting up launchd LaunchAgent..."
-        mkdir -p "$HOME/Library/LaunchAgents"
-        plist_path="$HOME/Library/LaunchAgents/${service_label}.plist"
-
-        # Unload existing
-        if [ -f "$plist_path" ]; then
-            launchctl unload "$plist_path" > /dev/null 2>&1 || true
-        fi
-
-        cat > "$plist_path" <<PLISTEOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key>
-  <string>${service_label}</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>${install_prefix}/rcflow</string>
-    <string>run</string>
-  </array>
-  <key>WorkingDirectory</key>
-  <string>${install_prefix}</string>
-  <key>RunAtLoad</key>
-  <true/>
-  <key>KeepAlive</key>
-  <true/>
-  <key>ProcessType</key>
-  <string>Background</string>
-  <key>StandardOutPath</key>
-  <string>${install_prefix}/logs/service-stdout.log</string>
-  <key>StandardErrorPath</key>
-  <string>${install_prefix}/logs/service-stderr.log</string>
-</dict>
-</plist>
-PLISTEOF
-
-        chmod 644 "$plist_path"
-        launchctl load -w "$plist_path"
-
-        if launchctl list "$service_label" > /dev/null 2>&1; then
+        info "Registering launchd LaunchAgent via rcflow install..."
+        if "${install_prefix}/rcflow" install --enable; then
             ok "LaunchAgent installed and running"
         else
-            warn "Service registration may have failed. Check: launchctl list ${service_label}"
+            warn "Service registration may have failed. Check: launchctl print gui/$(id -u)/${service_label}"
         fi
     fi
 

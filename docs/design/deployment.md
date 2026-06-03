@@ -1,5 +1,5 @@
 ---
-updated: 2026-04-28
+updated: 2026-06-03
 ---
 
 # Platform Support, Deployment & Bundling
@@ -224,6 +224,43 @@ No checksum or signature verification is performed beyond TLS — the user-facin
 
 ---
 
+## Worker Service Control
+
+The worker is a single OS-supervised service per machine (macOS launchd `com.rcflow.server`, Linux systemd `rcflow.service`, Windows NSSM `RCFlow`). **Both the CLI and the GUI are controllers of that same instance** — whichever starts it first, the other *adopts* and controls the same worker, and both reflect true service state (queried from the supervisor and corroborated by a loopback port probe). The shared controller lives in `src/services/worker_service/` (`get_controller()` dispatches per platform); the CLI verbs and the macOS GUI both call into it.
+
+**Two independent axes** (systemd/launchd vocabulary):
+
+- **enable / disable** — autostart at login/boot. `rcflow enable` / `rcflow disable`; the GUI "Start with…" toggle maps here.
+- **start / stop / restart** — the running instance, now. Disabling does not stop a running worker; stopping does not clear the autostart setting.
+
+**"Stop always means stop."** The historical macOS bug was a launchd plist with `KeepAlive=true`: the GUI's Stop killed the visible process but launchd instantly respawned it. Two changes fix this:
+
+1. The canonical plist (`src/services/worker_service/config.py:macos_plist_dict`) uses **crash-only** KeepAlive (`{"SuccessfulExit": false}`) — respawn only after an *abnormal* exit, never after a clean operator stop.
+2. `stop()` on macOS runs `launchctl bootout`, which removes the job from the domain so launchd holds no respawn contract. An old `KeepAlive=true` plist is auto-rewritten to crash-only on first `status`/`start` (migration).
+
+**macOS launchctl mapping** (domain target `gui/<uid>/com.rcflow.server`):
+
+| Operation | launchctl |
+|-----------|-----------|
+| install(enable) | write plist (`RunAtLoad=enable`, crash-only KeepAlive) → `bootstrap gui/$UID <plist>` → `enable` if requested |
+| start | `kickstart gui/$UID/<label>` (bootstrap if unloaded) |
+| stop | `bootout gui/$UID/<label>` — final; plist kept on disk so the enabled choice survives |
+| restart | `kickstart -k …` |
+| enable / disable | `enable` / `disable` + plist `RunAtLoad` rewrite |
+| uninstall | `bootout` + `disable` + delete plist |
+| status | parse `launchctl print …` (state/pid) + port-probe fallback |
+| logs | tail the service stdout log |
+
+**GUI lifecycle ("no GUI ⇒ no worker", reconciled with headless).** On launch the macOS GUI calls `detect()`: a running service is adopted (no second worker spawned); an installed-but-stopped service is left stopped (it does not auto-start a service the user deliberately stopped); with no service installed it falls back to a GUI-owned subprocess (dev). On quit, the GUI stops the worker **only** if it started an *un-enabled* service itself this session — an enabled service, or one started by the CLI / at boot, persists. This lets a casual desktop user treat the GUI as the worker's lifecycle while a server admin runs it headlessly via `rcflow enable && rcflow start`.
+
+**Two launchd labels (macOS).** `com.rcflow.server` is the *worker service* (above). `com.rcflow.worker` is a separate *GUI-autostart* agent that only launches the menu-bar dashboard at login (`--minimized`). They are intentionally distinct; a future rename of the GUI agent to `com.rcflow.gui` is staged.
+
+**Install parity.** Every install path converges on the identical registration by delegating to the binary's `rcflow install --enable`: `install_macos.sh` (and therefore the `.pkg` postinstall, which runs it), `get-worker.sh`, and `bundle.py run_install` (macOS) / `just bundle-macos-worker-install`. None of them hand-write a plist anymore, so they cannot drift (and never reintroduce `KeepAlive=true`).
+
+> **Status:** the macOS launchd backend is fully implemented. The Linux (systemd) and Windows (NSSM) backends currently implement read-only `status`/`detect`/`logs`; their mutating operations are staged behind `NotImplementedError` until the existing Linux-GUI D-Bus logic and a Windows NSSM path are folded into the shared controller.
+
+---
+
 ## Bundling & Distribution
 
 RCFlow is distributed as a self-contained package built with PyInstaller. End users download a single archive, run an install script, and get RCFlow running as a system service.
@@ -321,7 +358,7 @@ The `src/paths.py` module provides functions that resolve paths correctly in bot
 
 The `rcflow` entry point supports subcommands relevant to bundled operation:
 
-- `rcflow` / `rcflow run` — Start the server (headless)
+- `rcflow` / `rcflow run` — Start the server **in the foreground** of the current process (this is what the OS service execs; it is *not* the service controller)
 - `rcflow gui` — Run with GUI window + system tray (default on frozen Windows / macOS builds)
 - `rcflow tray` — Alias for `rcflow gui` (backwards compatibility)
 - `rcflow migrate [revision]` — Run database migrations (default: `head`)
@@ -329,6 +366,15 @@ The `rcflow` entry point supports subcommands relevant to bundled operation:
 - `rcflow info` — Print server configuration (bind address, port, WSS status)
 - `rcflow api-key` — Print the current API key
 - `rcflow set-api-key <value>` — Save a new API key
+
+**Worker-service control** (manage the OS-supervised worker — see [Worker Service Control](#worker-service-control)):
+
+- `rcflow install [--enable] [--port N]` — Register the worker as an OS service
+- `rcflow uninstall` — Remove the service registration
+- `rcflow start` / `rcflow stop` / `rcflow restart` — Control the running worker (`stop` is final — no respawn)
+- `rcflow enable` / `rcflow disable` — Toggle autostart at login/boot (independent of running state)
+- `rcflow status` — Print installed/running/enabled/pid/port (exit 0 running, 3 stopped)
+- `rcflow logs [-f] [-n N]` — Stream the service logs
 
 On frozen Windows builds, the default command (no subcommand) launches `gui` mode.
 

@@ -67,6 +67,7 @@ from src.gui.updater import (
     resolve_current_version,
 )
 from src.paths import is_frozen
+from src.services.worker_service import get_controller
 
 # AppKit / Foundation imports — only available on macOS with PyObjC. Wrap
 # in a single try/except so the module still imports on other platforms
@@ -194,6 +195,16 @@ class RCFlowMacOSGUI:
     def __init__(self) -> None:
         self._log_buffer = LogBuffer()
         self._server = ServerManager(self._log_buffer)
+        # Shared worker-service controller (launchd-backed). When a service is
+        # installed, the GUI adopts and drives it through this controller — the
+        # same instance the CLI controls — instead of spawning its own child.
+        # ``ServerManager`` above remains the dev / no-service fallback.
+        self._service = get_controller()
+        # True while the GUI is tracking a service-owned worker (not a child).
+        self._service_adopted = False
+        # True only when *this* GUI session issued ``service.start()`` (vs.
+        # adopting a pre-existing one) — gates the quit-stops-adhoc rule.
+        self._gui_started_it = False
         self._quitting = False
         # Thread-safe queue for UI callbacks posted from background threads.
         # Background threads must NEVER call self._root.after() directly —
@@ -804,7 +815,7 @@ class RCFlowMacOSGUI:
         time.  No-op while the server is running because both checkboxes are
         already disabled by the start path.
         """
-        if self._server.is_running():
+        if self._worker_running():
             return
         upnp_on = bool(self._upnp_var.get())
         natpmp_on = bool(self._natpmp_var.get())
@@ -848,13 +859,56 @@ class RCFlowMacOSGUI:
 
     # ── Server controls ───────────────────────────────────────────────────
 
-    def _on_toggle(self) -> None:
+    def _worker_running(self) -> bool:
+        """Return True if a worker is serving — our child OR an adopted service."""
         if self._server.is_running():
+            return True
+        if self._service_adopted:
+            return self._service.detect().running
+        return False
+
+    def _shutdown_worker(self) -> None:
+        """Stop the worker on GUI quit per the lifecycle rule.
+
+        A GUI-started, *un-enabled* service stops with the GUI ("no GUI ⇒ no
+        worker").  An enabled service, or one started externally (CLI/boot),
+        persists.  A dev/no-service child is always reaped.
+        """
+        if self._service_adopted:
+            with contextlib.suppress(Exception):
+                if self._gui_started_it and not self._service.detect().enabled:
+                    self._service.stop()
+        else:
+            self._server.stop_sync()
+
+    def _on_toggle(self) -> None:
+        if self._worker_running():
             self._stop_server()
         else:
             self._start_server()
 
     def _start_server(self) -> None:
+        # Prefer the installed worker service: adopt a running one, or start it
+        # (CLI + GUI then drive the same instance). Fall back to a GUI-owned
+        # subprocess only when no service is installed (dev / unmanaged).
+        detected = self._service.detect()
+        if detected.running:
+            self._service_adopted = True
+            self._on_adopted_server()
+            return
+        if self._service.status().installed:
+            try:
+                self._service.start()
+            except Exception as exc:
+                self._set_status(f"Service start failed: {exc}", error=True)
+                return
+            self._service_adopted = True
+            self._gui_started_it = True
+            self._on_adopted_server()
+            self._set_status("Starting (service)...")
+            self._root.after(1500, self._update_tray_status)
+            return
+
         host = self._ip_var.get().strip()
         port_str = self._port_var.get().strip()
 
@@ -890,6 +944,18 @@ class RCFlowMacOSGUI:
 
     def _stop_server(self) -> None:
         self._set_status("Stopping...")
+        # A service-owned worker is stopped through the controller (launchctl
+        # bootout — final, no KeepAlive respawn). Only a GUI-spawned child goes
+        # through ServerManager.
+        if self._service_adopted or self._service.detect().running:
+            try:
+                self._service.stop()
+            except Exception as exc:
+                self._set_status(f"Service stop failed: {exc}", error=True)
+                return
+            self._service_adopted = False
+            self._gui_started_it = False
+            return
         self._server.stop()
 
     def _on_adopted_server(self) -> None:
@@ -998,7 +1064,7 @@ class RCFlowMacOSGUI:
             pass
 
         self._drain_log_queue()
-        running = self._server.is_running()
+        running = self._worker_running()
 
         if running:
             protocol = "WSS" if self._wss_var.get() else "WS"
@@ -1016,6 +1082,9 @@ class RCFlowMacOSGUI:
             if self._toggle_btn.cget("text") == "Stop":
                 rc = self._server.exit_code
                 self._server.clear()
+                # The worker (child or adopted service) is gone — drop adoption.
+                self._service_adopted = False
+                self._gui_started_it = False
                 self._ip_entry.configure(state="normal")
                 self._port_entry.configure(state="normal")
                 self._wss_check.configure(state="normal")
@@ -1564,9 +1633,10 @@ class RCFlowMacOSGUI:
             self._ipc_server = None
         remove_ipc_file()
 
-        # Stop the server synchronously — blocks until the child process is
-        # dead so it cannot be orphaned when we destroy the Tk root next.
-        self._server.stop_sync()
+        # Stop the worker per the lifecycle rule (ad-hoc service or dev child
+        # dies with the GUI; an enabled/external service persists).  Blocks until
+        # a child is dead so it cannot be orphaned when we destroy the Tk root.
+        self._shutdown_worker()
 
         self._root.after(0, self._root.destroy)
 
@@ -1598,7 +1668,7 @@ class RCFlowMacOSGUI:
             return  # _on_tray_quit already handled cleanup
         self._quitting = True
         remove_ipc_file()
-        self._server.stop_sync(timeout=5)
+        self._shutdown_worker()
 
     def run(self, *, minimized: bool = False) -> None:
         """Start the menu bar icon and CTk event loop.
@@ -1669,14 +1739,24 @@ class RCFlowMacOSGUI:
             logger.warning("Menu bar icon unavailable — keeping settings window visible")
             _t("tray unavailable — window visible")
 
-        # If a previous GUI crashed, the server subprocess it spawned may
-        # still be running (reparented to launchd).  Adopt it so the user
-        # can stop it from this new GUI instead of leaving it orphaned.
-        adopted_pid = self._server.adopt_if_running()
-        if adopted_pid is None:
-            self._root.after(0, self._start_server)
-        else:
+        # Reconcile with the worker service first: adopt a running one (started
+        # by the CLI, by launchd at login, or by a previous GUI) so the user
+        # controls the same instance.  An installed-but-stopped service is left
+        # stopped — don't auto-start a service the user (or `rcflow stop`)
+        # deliberately stopped.  Only with no service installed do we fall back
+        # to the pidfile-orphan adoption / dev child spawn.
+        detected = self._service.detect()
+        if detected.running:
+            self._service_adopted = True
             self._root.after(0, self._on_adopted_server)
+        elif self._service.status().installed:
+            self._root.after(0, lambda: self._set_status("Stopped"))
+        else:
+            adopted_pid = self._server.adopt_if_running()
+            if adopted_pid is None:
+                self._root.after(0, self._start_server)
+            else:
+                self._root.after(0, self._on_adopted_server)
 
         self._root.after(0, self._refresh_update_ui)
         if self._update_auto_var.get() and self._updater.current_version:

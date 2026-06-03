@@ -1880,6 +1880,13 @@ def run_install(bundle_dir: Path, installer_path: Path | None, target_platform: 
         if dest.exists():
             shutil.rmtree(dest)
         shutil.copytree(app_path, dest)
+        # Register the launchd worker service so every install path (DMG, .pkg,
+        # get-worker.sh, and this dev shortcut) converges on the identical,
+        # crash-only-KeepAlive registration. The bundled binary's `install`
+        # command writes the canonical plist and enables autostart.
+        worker_bin = dest / "Contents" / "MacOS" / "rcflow"
+        print(f"Registering worker service via {worker_bin} install --enable...")
+        subprocess.run([str(worker_bin), "install", "--enable"], check=False)
     elif target_platform == "windows":
         if installer_path:
             print(f"Launching {installer_path.name}...")
