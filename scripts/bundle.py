@@ -1890,6 +1890,28 @@ def generate_checksums(artifacts: list[Path]) -> Path | None:
     return checksums_path
 
 
+def _macos_register_for_spotlight(app_path: Path) -> None:
+    """Register a freshly-installed .app with LaunchServices and Spotlight.
+
+    A bundle copied into place (vs. moved by Finder) is not always picked up by
+    LaunchServices/Spotlight right away, so it can be missing from Spotlight app
+    search and "Open With" until the next index pass.  ``lsregister -f`` forces
+    the LaunchServices registration and ``mdimport`` forces the Spotlight import
+    so the app is findable immediately (by name — e.g. "RCFlow Worker", "worker",
+    "rc").  Best-effort: both are cosmetic and never fail the install.
+
+    Note: this cannot help if the machine's Spotlight index is itself in an error
+    state — rebuild it with ``sudo mdutil -E /`` (or System Settings → Spotlight).
+    """
+    lsregister = (
+        "/System/Library/Frameworks/CoreServices.framework/Versions/A/"
+        "Frameworks/LaunchServices.framework/Support/lsregister"
+    )
+    if os.path.exists(lsregister):
+        subprocess.run([lsregister, "-f", str(app_path)], check=False, capture_output=True)
+    subprocess.run(["mdimport", str(app_path)], check=False, capture_output=True)
+
+
 def run_install(bundle_dir: Path, installer_path: Path | None, target_platform: str) -> None:
     """Run the platform-appropriate installer after a successful build."""
     if target_platform == "linux":
@@ -1916,6 +1938,7 @@ def run_install(bundle_dir: Path, installer_path: Path | None, target_platform: 
         worker_bin = dest / "Contents" / "MacOS" / "rcflow"
         print(f"Registering worker service via {worker_bin} install --enable...")
         subprocess.run([str(worker_bin), "install", "--enable"], check=False)
+        _macos_register_for_spotlight(dest)
     elif target_platform == "windows":
         if installer_path:
             print(f"Launching {installer_path.name}...")
