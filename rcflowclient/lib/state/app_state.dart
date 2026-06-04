@@ -862,6 +862,7 @@ class AppState extends ChangeNotifier implements PaneHost {
     String? filePath,
     String? commentBody,
     int? line,
+    String? projectName,
   }) {
     final pane = _panes[paneId];
     if (pane == null) return;
@@ -874,8 +875,12 @@ class AppState extends ChangeNotifier implements PaneHost {
 
     // For the fix agent, capture the project/worktree before startNewChat
     // clears them so the full-perms session edits the worktree the user picked.
+    // [projectName] (the PR's auto-linked local project) is forwarded for ALL
+    // kinds so the resulting session shows that project's badge; for fix it is
+    // preferred over the pane's manually-selected project.
     final isFix = kind == 'fix';
-    final projectName = isFix ? pane.selectedProjectName : null;
+    final resolvedProject =
+        projectName ?? (isFix ? pane.selectedProjectName : null);
     final worktreePath = isFix ? pane.pendingWorktreePath : null;
 
     closeGithubPrView(paneId);
@@ -889,7 +894,7 @@ class AppState extends ChangeNotifier implements PaneHost {
       filePath: filePath,
       commentBody: isFix ? commentBody : null,
       line: isFix ? line : null,
-      projectName: projectName,
+      projectName: resolvedProject,
       selectedWorktreePath: worktreePath,
     );
   }

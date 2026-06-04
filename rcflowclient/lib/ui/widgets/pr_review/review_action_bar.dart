@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
+import '../../../models/app_notification.dart';
 import '../../../models/github_pr_info.dart';
 import '../../../services/websocket_service.dart';
+import '../../../state/app_state.dart';
 import '../../../theme.dart';
 import '../../../theme/spacing.dart';
 import '../diff/diff_viewer.dart';
@@ -107,7 +110,7 @@ class _ReviewActionBarState extends State<ReviewActionBar> {
 
   Future<void> _submit() async {
     setState(() => _submitting = true);
-    final messenger = ScaffoldMessenger.maybeOf(context);
+    final appState = context.read<AppState>();
     try {
       // Persist the chosen verdict + summary, then post the review.
       await widget.ws.patchGithubPrDraft(
@@ -122,15 +125,16 @@ class _ReviewActionBarState extends State<ReviewActionBar> {
       );
       final state =
           (result['review'] as Map<String, dynamic>?)?['state'] as String?;
-      messenger?.showSnackBar(
-        SnackBar(
-          content: Text('Review submitted${state != null ? ' ($state)' : ''}'),
-        ),
+      appState.showNotification(
+        level: NotificationLevel.success,
+        title: 'Review submitted${state != null ? ' ($state)' : ''}',
       );
       await widget.onSubmitted(result);
     } catch (e) {
-      messenger?.showSnackBar(
-        SnackBar(content: Text('Failed to submit review: $e')),
+      appState.showNotification(
+        level: NotificationLevel.error,
+        title: 'Failed to submit review',
+        body: '$e',
       );
     } finally {
       if (mounted) setState(() => _submitting = false);
@@ -138,7 +142,7 @@ class _ReviewActionBarState extends State<ReviewActionBar> {
   }
 
   Future<void> _merge() async {
-    final messenger = ScaffoldMessenger.maybeOf(context);
+    final appState = context.read<AppState>();
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -180,18 +184,18 @@ class _ReviewActionBarState extends State<ReviewActionBar> {
       );
       final merged = result['merged'] as bool? ?? false;
       final message = result['message'] as String?;
-      messenger?.showSnackBar(
-        SnackBar(
-          content: Text(
-            merged
-                ? 'Pull request merged'
-                : 'Merge failed${message != null ? ': $message' : ''}',
-          ),
-        ),
+      appState.showNotification(
+        level: merged ? NotificationLevel.success : NotificationLevel.error,
+        title: merged ? 'Pull request merged' : 'Merge failed',
+        body: merged ? null : message,
       );
       await widget.onMerged(result);
     } catch (e) {
-      messenger?.showSnackBar(SnackBar(content: Text('Failed to merge: $e')));
+      appState.showNotification(
+        level: NotificationLevel.error,
+        title: 'Failed to merge',
+        body: '$e',
+      );
     } finally {
       if (mounted) setState(() => _merging = false);
     }

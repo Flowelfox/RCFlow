@@ -1544,6 +1544,59 @@ class RestClient {
     }
   }
 
+  /// Resolve a cached PR's repository to a local project folder on the worker.
+  ///
+  /// Returns `{"pr_id": "...", "project_name": String?, "project_path": String?}`.
+  /// Both `project_name` and `project_path` are null when the PR's repo does not
+  /// map to any known local project.
+  Future<Map<String, dynamic>> getGithubPrProject(String prId) async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url = _serverUrl!.http('/api/integrations/github/prs/$prId/project');
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.getUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      final response = await request.close();
+      final body = await response.transform(utf8.decoder).join();
+      if (response.statusCode != 200) {
+        throw Exception('Server returned ${response.statusCode}: $body');
+      }
+      return jsonDecode(body) as Map<String, dynamic>;
+    } finally {
+      client.close();
+    }
+  }
+
+  /// Fetch a file's full content at the PR [side] ("head" or "base").
+  ///
+  /// Used by the diff viewer to expand context lines hidden between/around the
+  /// patch hunks. Returns the raw backend payload, which includes a `content`
+  /// string with the full file text at the requested ref.
+  Future<Map<String, dynamic>> getGithubPrFile(
+    String prId,
+    String path, {
+    String side = 'head',
+  }) async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url = _serverUrl!.http('/api/integrations/github/prs/$prId/file', {
+      'path': path,
+      'side': side,
+    });
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.getUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      final response = await request.close();
+      final body = await response.transform(utf8.decoder).join();
+      if (response.statusCode != 200) {
+        throw Exception('Server returned ${response.statusCode}: $body');
+      }
+      return jsonDecode(body) as Map<String, dynamic>;
+    } finally {
+      client.close();
+    }
+  }
+
   /// Fetch the inline review threads for a cached PR.
   ///
   /// Returns `{"pr_id": "...", "threads": [...], "total": N}`. Each thread has
@@ -1628,6 +1681,8 @@ class RestClient {
     required int line,
     required String side,
     required String body,
+    int? startLine,
+    String? startSide,
   }) async {
     if (_serverUrl == null) throw StateError('Not connected');
     final url = _serverUrl!.http(
@@ -1640,7 +1695,15 @@ class RestClient {
       request.headers.contentType = io.ContentType.json;
       request.add(
         utf8.encode(
-          jsonEncode({'path': path, 'line': line, 'side': side, 'body': body}),
+          jsonEncode({
+            'path': path,
+            'line': line,
+            'side': side,
+            'body': body,
+            // Range anchor — only sent when this is a multi-line comment.
+            'start_line': ?startLine,
+            if (startLine != null) 'start_side': ?startSide,
+          }),
         ),
       );
       final response = await request.close();
@@ -1738,6 +1801,33 @@ class RestClient {
         );
       }
       return jsonDecode(responseBody) as Map<String, dynamic>;
+    } finally {
+      client.close();
+    }
+  }
+
+  /// Delete a review-thread comment, identified by its REST [commentId] (the
+  /// comment's `database_id`). Returns `{"deleted": true, "comment_id": N}`.
+  ///
+  /// The backend maps a GitHub 403 (not the comment's author) to HTTP 502.
+  Future<Map<String, dynamic>> deleteGithubPrComment(
+    String prId,
+    int commentId,
+  ) async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url = _serverUrl!.http(
+      '/api/integrations/github/prs/$prId/comments/$commentId',
+    );
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.deleteUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      final response = await request.close();
+      final body = await response.transform(utf8.decoder).join();
+      if (response.statusCode != 200) {
+        throw Exception('Server returned ${response.statusCode}: $body');
+      }
+      return jsonDecode(body) as Map<String, dynamic>;
     } finally {
       client.close();
     }

@@ -453,6 +453,15 @@ class WebSocketService {
   Future<Map<String, dynamic>> getGithubPrFiles(String prId) =>
       _rest.getGithubPrFiles(prId);
 
+  Future<Map<String, dynamic>> getGithubPrProject(String prId) =>
+      _rest.getGithubPrProject(prId);
+
+  Future<Map<String, dynamic>> getGithubPrFile(
+    String prId,
+    String path, {
+    String side = 'head',
+  }) => _rest.getGithubPrFile(prId, path, side: side);
+
   Future<Map<String, dynamic>> getGithubPrThreads(String prId) =>
       _rest.getGithubPrThreads(prId);
 
@@ -471,12 +480,16 @@ class WebSocketService {
     required int line,
     required String side,
     required String body,
+    int? startLine,
+    String? startSide,
   }) => _rest.addGithubPrDraftComment(
     prId,
     path: path,
     line: line,
     side: side,
     body: body,
+    startLine: startLine,
+    startSide: startSide,
   );
 
   Future<Map<String, dynamic>> deleteGithubPrDraftComment(
@@ -495,6 +508,11 @@ class WebSocketService {
     int commentId,
     String body,
   ) => _rest.replyGithubPrComment(prId, commentId, body);
+
+  Future<Map<String, dynamic>> deleteGithubPrComment(
+    String prId,
+    int commentId,
+  ) => _rest.deleteGithubPrComment(prId, commentId);
 
   Future<Map<String, dynamic>> resolveGithubPrThread(
     String prId,

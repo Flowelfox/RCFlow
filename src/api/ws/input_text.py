@@ -474,10 +474,13 @@ async def ws_input_text(
                         comment_body=assist_comment,
                     )
                     is_fix = assist_kind == "fix"
+                    # Attach the linked project to every assist session (so the
+                    # session shows the project badge); the worktree is only used
+                    # by the writable fix session.
                     assist_session_id = await prompt_router.prepare_assist_session(
                         purpose=f"pr_{assist_kind}",
                         read_only=not is_fix,
-                        project_name=assist_project if is_fix else None,
+                        project_name=assist_project,
                     )
                     await websocket.send_json(
                         {

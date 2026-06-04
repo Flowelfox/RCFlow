@@ -464,6 +464,14 @@ class GitHubService:
             json={"body": body},
         )
 
+    async def delete_review_comment(self, owner: str, repo: str, comment_id: int) -> None:
+        """Delete a pull-request review comment (only the author's own).
+
+        ``comment_id`` is the REST ``database_id``. Raises
+        :class:`GitHubServiceError` (403) if the token's user is not the author.
+        """
+        await self._rest("DELETE", f"/repos/{owner}/{repo}/pulls/comments/{comment_id}")
+
     async def resolve_thread(self, thread_id: str, *, resolved: bool = True) -> dict[str, Any]:
         """Resolve or unresolve a review thread (by its GraphQL node id)."""
         mutation = _RESOLVE_THREAD_MUTATION if resolved else _UNRESOLVE_THREAD_MUTATION
@@ -492,6 +500,24 @@ class GitHubService:
         if commit_message:
             payload["commit_message"] = commit_message
         return await self._rest("PUT", f"/repos/{owner}/{repo}/pulls/{number}/merge", json=payload)
+
+    async def get_file_content(self, owner: str, repo: str, path: str, ref: str) -> str:
+        """Fetch a file's full text at a ref (sha or branch) as raw content.
+
+        Used to expand diff context beyond the patch hunks. Raises
+        :class:`GitHubServiceError` (404) if the file does not exist at ``ref``.
+        """
+        url = f"{GITHUB_API_URL}/repos/{owner}/{repo}/contents/{path}"
+        try:
+            resp = await self._client.get(
+                url, params={"ref": ref}, headers={"Accept": "application/vnd.github.raw"}
+            )
+        except httpx.TimeoutException as exc:
+            raise GitHubServiceError("GitHub API request timed out") from exc
+        except httpx.RequestError as exc:
+            raise GitHubServiceError(f"GitHub API request failed: {exc}") from exc
+        self._raise_for_status(resp)
+        return resp.text
 
     async def create_pull_request(
         self,

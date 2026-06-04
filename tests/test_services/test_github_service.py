@@ -210,6 +210,19 @@ class TestScopes:
         await svc.aclose()
 
     @pytest.mark.asyncio
+    async def test_get_file_content_returns_raw_text(self):
+        svc = GitHubService(token="x")
+        resp = httpx.Response(
+            200,
+            text="line1\nline2\n",
+            request=httpx.Request("GET", "https://api.github.com/repos/o/r/contents/a.py"),
+        )
+        svc._client.get = AsyncMock(return_value=resp)  # type: ignore[method-assign]
+        out = await svc.get_file_content("o", "r", "a.py", "deadbeef")
+        assert out == "line1\nline2\n"
+        await svc.aclose()
+
+    @pytest.mark.asyncio
     async def test_token_info_fine_grained_has_no_scope_header(self):
         svc = GitHubService(token="x")
         resp = httpx.Response(

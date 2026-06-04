@@ -105,3 +105,22 @@ async def test_push_branch_no_remote_raises(tmp_path):
     _init_work_repo(work)  # no github origin
     with pytest.raises(git_ops.GitOpsError, match="No GitHub"):
         await git_ops.push_branch(work, "tok")
+
+
+@pytest.mark.asyncio
+async def test_find_local_repo_matches_by_remote(tmp_path):
+    projects = tmp_path / "Projects"
+    projects.mkdir()
+    # A matching clone of acme/web.
+    match = projects / "web"
+    _init_work_repo(match)
+    _git(match, "remote", "add", "origin", "https://github.com/Acme/Web.git")
+    # A non-matching repo + a plain (non-git) dir.
+    other = projects / "other"
+    _init_work_repo(other)
+    _git(other, "remote", "add", "origin", "git@github.com:someone/else.git")
+    (projects / "notarepo").mkdir()
+
+    found = await git_ops.find_local_repo([projects], "acme", "web")  # case-insensitive
+    assert found == match
+    assert await git_ops.find_local_repo([projects], "no", "match") is None

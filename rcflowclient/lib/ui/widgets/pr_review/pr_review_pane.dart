@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../../models/app_notification.dart';
 import '../../../models/github_pr_info.dart';
 import '../../../services/websocket_service.dart';
 import '../../../state/app_state.dart';
@@ -92,8 +93,18 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
   List<Map<String, dynamic>> _files = [];
   int _selectedIndex = 0;
 
-  /// File-list layout: false = flat (full path per row), true = directory tree.
-  bool _treeView = false;
+  /// File-list layout mode (flat list / directory tree / commented-only).
+  FileListMode _fileListMode = FileListMode.flat;
+
+  /// The local project the PR's repo resolves to, or null if unmapped. Loaded
+  /// in [_load] and forwarded into every assist session so the session shows
+  /// the project badge.
+  String? _linkedProjectName;
+
+  /// The current GitHub user's login (from the integration status), used to
+  /// decide which review comments the user is allowed to delete. Null until the
+  /// status check completes (or if it omits a login).
+  String? _currentUserLogin;
 
   /// Directory paths currently collapsed in tree view (default = all expanded).
   final Set<String> _collapsedDirs = {};
@@ -121,6 +132,18 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
 
   /// True while the open composer's comment is being POSTed to the draft.
   bool _submittingComposer = false;
+
+  /// True while a gutter range-drag is in progress in the [DiffViewer]; the
+  /// diff scroll view is frozen during it so the drag doesn't fight the scroll.
+  bool _gutterDragging = false;
+
+  /// Cache of the full head-side file content (split into lines) per file path,
+  /// used to answer the diff viewer's expand-context requests without refetching.
+  final Map<String, List<String>> _fileContentCache = {};
+
+  /// Paths whose content is currently being fetched, to dedupe concurrent
+  /// expand requests for the same file.
+  final Set<String> _fetchingFileContent = {};
 
   WebSocketService? get _ws {
     final worker = widget.appState.getWorker(widget.pr.workerId);
@@ -163,6 +186,11 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
       _loadedPrId = widget.pr.id;
       _composerAnchor = null;
       _submittingComposer = false;
+      _gutterDragging = false;
+      _linkedProjectName = null;
+      _currentUserLogin = null;
+      _fileContentCache.clear();
+      _fetchingFileContent.clear();
     });
 
     // Check the GitHub integration status first so we can show a helpful hint
@@ -173,7 +201,10 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
           status['configured'] as bool? ??
           (status['token_set'] as bool? ?? true);
       if (!mounted) return;
-      setState(() => _tokenConfigured = configured);
+      setState(() {
+        _tokenConfigured = configured;
+        _currentUserLogin = status['login'] as String?;
+      });
       if (!configured) {
         setState(() => _loading = false);
         return;
@@ -200,6 +231,17 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
         _loading = false;
       });
       return;
+    }
+
+    // Resolve the PR's repo to a local project (best-effort) so assist sessions
+    // opened from here carry the project and show its badge.
+    try {
+      final project = await worker.ws.getGithubPrProject(widget.pr.id);
+      if (mounted && _loadedPrId == widget.pr.id) {
+        setState(() => _linkedProjectName = project['project_name'] as String?);
+      }
+    } catch (_) {
+      // Best-effort; leave [_linkedProjectName] null.
     }
 
     // Threads and the draft are best-effort; a failure here shouldn't blank
@@ -292,6 +334,7 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
           appState: widget.appState,
           mode: _mode,
           onModeChanged: (m) => setState(() => _mode = m),
+          linkedProjectName: _linkedProjectName,
         ),
         Expanded(child: _buildBody(context)),
       ],
@@ -389,12 +432,29 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
 
   /// Open the inline composer for a new comment anchored at ([line], [side]) of
   /// [path]. Just sets the active anchor; the composer renders inline inside the
-  /// [DiffViewer] (see [_buildComposerInline]).
-  void _openComposer(String path, int line, String side) {
+  /// [DiffViewer] (see [_buildComposerInline]). [startLine] is set for a
+  /// multi-line range comment and left null for a single line.
+  void _openComposer(String path, int line, String side, {int? startLine}) {
     setState(() {
-      _composerAnchor = ComposerAnchor(path: path, line: line, side: side);
+      _composerAnchor = ComposerAnchor(
+        path: path,
+        line: line,
+        side: side,
+        startLine: startLine,
+      );
       _submittingComposer = false;
     });
+  }
+
+  /// Open the inline composer for a multi-line range selection spanning
+  /// [startLine]..[endLine] on [side]. The composer anchors after the END row.
+  void _openRangeComposer(
+    String path,
+    int startLine,
+    int endLine,
+    String side,
+  ) {
+    _openComposer(path, endLine, side, startLine: startLine);
   }
 
   /// Close the inline composer without submitting.
@@ -411,7 +471,6 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
     if (ws == null) return;
     final trimmed = body.trim();
     if (trimmed.isEmpty) return;
-    final messenger = ScaffoldMessenger.maybeOf(context);
     setState(() => _submittingComposer = true);
     try {
       await ws.addGithubPrDraftComment(
@@ -420,6 +479,10 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
         line: anchor.line,
         side: anchor.side,
         body: trimmed,
+        // For a range comment the backend anchors start_line..line; start_side
+        // defaults to side on the backend, so we pass the (same) side.
+        startLine: anchor.startLine,
+        startSide: anchor.startLine != null ? anchor.side : null,
       );
       if (mounted) {
         setState(() {
@@ -430,10 +493,57 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
       await _refreshDraft();
     } catch (e) {
       if (mounted) setState(() => _submittingComposer = false);
-      messenger?.showSnackBar(
-        SnackBar(content: Text('Failed to queue comment: $e')),
+      widget.appState.showNotification(
+        level: NotificationLevel.error,
+        title: 'Failed to queue comment',
+        body: '$e',
       );
     }
+  }
+
+  /// Answer the diff viewer's request for hidden context lines on [filename].
+  ///
+  /// Fetches the file's full head-side content once (cached), splits it into
+  /// lines, and returns the requested inclusive 1-based NEW-side slice. Returns
+  /// an empty list if the file content can't be fetched, or for an out-of-range
+  /// request (which the viewer treats as "no more lines / EOF").
+  Future<List<String>> _fetchExpandContext(
+    String filename,
+    String side,
+    int startLine,
+    int endLineInclusive,
+  ) async {
+    final ws = _ws;
+    if (ws == null) return const [];
+
+    var lines = _fileContentCache[filename];
+    if (lines == null) {
+      if (_fetchingFileContent.contains(filename)) return const [];
+      _fetchingFileContent.add(filename);
+      try {
+        final result = await ws.getGithubPrFile(widget.pr.id, filename);
+        final content = result['content'] as String? ?? '';
+        lines = content.split('\n');
+        // GitHub file content usually ends with a trailing newline, which split
+        // turns into a spurious empty final element; drop it so line counts and
+        // EOF detection line up with the 1-based new-side numbering.
+        if (lines.isNotEmpty && lines.last.isEmpty) {
+          lines.removeLast();
+        }
+        _fileContentCache[filename] = lines;
+      } catch (_) {
+        return const [];
+      } finally {
+        _fetchingFileContent.remove(filename);
+      }
+    }
+
+    // 1-based new-side line numbers → 0-based list indices. Clamp to the file's
+    // bounds; a short/empty return signals EOF to the viewer.
+    final fromIdx = (startLine - 1).clamp(0, lines.length);
+    final toIdx = endLineInclusive.clamp(0, lines.length);
+    if (fromIdx >= toIdx) return const [];
+    return lines.sublist(fromIdx, toIdx);
   }
 
   Widget _buildFileList(BuildContext context) {
@@ -442,20 +552,40 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
       children: [
         _buildFileListToolbar(context),
         Divider(height: 1, color: context.appColors.divider),
-        Expanded(
-          child: _treeView
-              ? _buildFileTree(context)
-              : _buildFlatFileList(context),
-        ),
+        Expanded(child: _buildFileListBody(context)),
       ],
     );
   }
 
-  /// Header above the file list with the flat/tree layout toggle.
+  Widget _buildFileListBody(BuildContext context) {
+    switch (_fileListMode) {
+      case FileListMode.tree:
+        return _buildFileTree(context);
+      case FileListMode.commented:
+        return _buildCommentedFileList(context);
+      case FileListMode.flat:
+        return _buildFlatFileList(context);
+    }
+  }
+
+  /// File indices that carry at least one review thread or queued draft comment.
+  /// Order follows [_files] so the rail stays stable across mode switches.
+  List<int> _commentedFileIndices() {
+    final commentedPaths = <String>{
+      for (final t in _threads) t.path,
+      for (final d in _draftComments) d.path,
+    }..remove('');
+    return [
+      for (var i = 0; i < _files.length; i++)
+        if (commentedPaths.contains(_files[i]['filename'] as String? ?? '')) i,
+    ];
+  }
+
+  /// Header above the file list with the flat/tree/commented layout toggle.
   Widget _buildFileListToolbar(BuildContext context) {
     final colors = context.appColors;
-    Widget toggle(bool tree, IconData icon, String tooltip) {
-      final selected = _treeView == tree;
+    Widget toggle(FileListMode mode, IconData icon, String tooltip) {
+      final selected = _fileListMode == mode;
       return SizedBox(
         width: 26,
         height: 22,
@@ -467,7 +597,7 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
             icon,
             color: selected ? colors.accentLight : colors.textMuted,
           ),
-          onPressed: () => setState(() => _treeView = tree),
+          onPressed: () => setState(() => _fileListMode = mode),
         ),
       );
     }
@@ -496,8 +626,13 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                toggle(false, Icons.notes, 'Flat list'),
-                toggle(true, Icons.account_tree, 'Directory tree'),
+                toggle(FileListMode.flat, Icons.notes, 'Flat list'),
+                toggle(FileListMode.tree, Icons.account_tree, 'Directory tree'),
+                toggle(
+                  FileListMode.commented,
+                  Icons.mode_comment_outlined,
+                  'Commented files only',
+                ),
               ],
             ),
           ),
@@ -512,6 +647,40 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
       padding: const EdgeInsets.symmetric(vertical: kSpace1),
       itemCount: _files.length,
       itemBuilder: (context, index) {
+        final file = _files[index];
+        final filename = file['filename'] as String? ?? '';
+        return _buildFileLeaf(
+          context,
+          index: index,
+          label: filename.split('/').last,
+          file: file,
+          indent: kSpace3,
+        );
+      },
+    );
+  }
+
+  /// Flat list of only the files that have a review thread or queued draft
+  /// comment. Reuses the flat leaf rendering; shows a placeholder when none.
+  Widget _buildCommentedFileList(BuildContext context) {
+    final indices = _commentedFileIndices();
+    if (indices.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(kSpace4),
+          child: Text(
+            'No commented files',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: context.appColors.textMuted, fontSize: 11),
+          ),
+        ),
+      );
+    }
+    return ListView.builder(
+      padding: const EdgeInsets.symmetric(vertical: kSpace1),
+      itemCount: indices.length,
+      itemBuilder: (context, i) {
+        final index = indices[i];
         final file = _files[index];
         final filename = file['filename'] as String? ?? '';
         return _buildFileLeaf(
@@ -733,6 +902,7 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
                     widget.pr,
                     'explain',
                     filePath: filename,
+                    projectName: _linkedProjectName,
                   ),
                 ),
             ],
@@ -750,6 +920,11 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
                   ),
                 )
               : SingleChildScrollView(
+                  // Freeze vertical scroll while a gutter range-drag is active
+                  // so the drag doesn't fight the scroll view.
+                  physics: _gutterDragging
+                      ? const NeverScrollableScrollPhysics()
+                      : null,
                   child: DiffViewer(
                     diff: patch,
                     mode: _mode,
@@ -758,6 +933,20 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
                     onAddComment: ws == null
                         ? null
                         : (line, side) => _openComposer(filename, line, side),
+                    onAddRangeComment: ws == null
+                        ? null
+                        : (start, end, side) =>
+                              _openRangeComposer(filename, start, end, side),
+                    onGutterDragStart: ws == null
+                        ? null
+                        : () => setState(() => _gutterDragging = true),
+                    onGutterDragEnd: ws == null
+                        ? null
+                        : () => setState(() => _gutterDragging = false),
+                    onExpandContext: ws == null
+                        ? null
+                        : (side, start, end) =>
+                              _fetchExpandContext(filename, side, start, end),
                     composerAnchor: composerAnchor,
                     composerBuilder: ws == null
                         ? null
@@ -768,6 +957,7 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
                             ws: ws,
                             prId: widget.pr.id,
                             thread: t,
+                            currentUserLogin: _currentUserLogin,
                             onChanged: _refreshThreads,
                             onFix: () => widget.appState.startPrAssist(
                               widget.paneId,
@@ -775,6 +965,7 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
                               'fix',
                               filePath: t.path,
                               line: t.line,
+                              projectName: _linkedProjectName,
                               commentBody: t.comments.isNotEmpty
                                   ? t.comments.first.body
                                   : '',
@@ -847,7 +1038,9 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
   Widget _buildComposerInline(BuildContext context, ComposerAnchor anchor) {
     return _InlineCommentComposer(
       // Key by anchor so switching the open row gets a fresh controller.
-      key: ValueKey('${anchor.path}:${anchor.line}:${anchor.side}'),
+      key: ValueKey(
+        '${anchor.path}:${anchor.startLine}:${anchor.line}:${anchor.side}',
+      ),
       anchor: anchor,
       submitting: _submittingComposer,
       onCancel: _cancelComposer,
@@ -974,12 +1167,17 @@ class _PrReviewHeader extends StatelessWidget {
   final DiffViewMode mode;
   final ValueChanged<DiffViewMode> onModeChanged;
 
+  /// The PR's auto-linked local project (or null). Forwarded into the assist
+  /// sessions started from the header and shown as a small chip.
+  final String? linkedProjectName;
+
   const _PrReviewHeader({
     required this.paneId,
     required this.pr,
     required this.appState,
     required this.mode,
     required this.onModeChanged,
+    this.linkedProjectName,
   });
 
   @override
@@ -1047,6 +1245,10 @@ class _PrReviewHeader extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 6),
+            if (linkedProjectName != null) ...[
+              _projectChip(context, linkedProjectName!),
+              const SizedBox(width: 6),
+            ],
           ],
           Expanded(
             child: Text(
@@ -1076,7 +1278,12 @@ class _PrReviewHeader extends StatelessWidget {
                   size: 14,
                 ),
                 tooltip: 'Summarise this PR (AI assist)',
-                onPressed: () => appState.startPrAssist(paneId, pr, 'summary'),
+                onPressed: () => appState.startPrAssist(
+                  paneId,
+                  pr,
+                  'summary',
+                  projectName: linkedProjectName,
+                ),
               ),
             ),
             SizedBox(
@@ -1108,21 +1315,22 @@ class _PrReviewHeader extends StatelessWidget {
               ),
             ),
           ],
-          if (appState.paneCount > 1)
-            SizedBox(
-              width: 26,
-              height: 26,
-              child: IconButton(
-                padding: EdgeInsets.zero,
-                icon: Icon(
-                  Icons.close_rounded,
-                  color: context.appColors.textMuted,
-                  size: 14,
-                ),
-                tooltip: 'Close',
-                onPressed: () => appState.closePane(paneId),
+          // Close this pane. Closing the last pane is allowed — it returns to
+          // the welcome screen.
+          SizedBox(
+            width: 26,
+            height: 26,
+            child: IconButton(
+              padding: EdgeInsets.zero,
+              icon: Icon(
+                Icons.close_rounded,
+                color: context.appColors.textMuted,
+                size: 14,
               ),
+              tooltip: 'Close pane',
+              onPressed: () => appState.closePane(paneId),
             ),
+          ),
         ],
       ),
     );
@@ -1142,7 +1350,6 @@ class _PrReviewHeader extends StatelessWidget {
     BuildContext context,
     GithubPrInfo pr,
   ) async {
-    final messenger = ScaffoldMessenger.maybeOf(context);
     final pane = appState.panes[paneId];
     final worktreeController = TextEditingController();
     final projectController = TextEditingController(
@@ -1243,16 +1450,18 @@ class _PrReviewHeader extends StatelessWidget {
 
     final title = titleController.text.trim();
     if (title.isEmpty) {
-      messenger?.showSnackBar(
-        const SnackBar(content: Text('A title is required to open a PR.')),
+      appState.showNotification(
+        level: NotificationLevel.warning,
+        title: 'A title is required to open a PR.',
       );
       return;
     }
 
     final ws = appState.getWorker(pr.workerId)?.ws;
     if (ws == null) {
-      messenger?.showSnackBar(
-        const SnackBar(content: Text('Worker not connected.')),
+      appState.showNotification(
+        level: NotificationLevel.warning,
+        title: 'Worker not connected.',
       );
       return;
     }
@@ -1276,12 +1485,49 @@ class _PrReviewHeader extends StatelessWidget {
       if (prJson != null) {
         appState.upsertGithubPr(prJson, workerId: pr.workerId);
       }
-      messenger?.showSnackBar(
-        SnackBar(content: Text('PR opened: ${result['url'] ?? ''}')),
+      appState.showNotification(
+        level: NotificationLevel.success,
+        title: 'Pull request opened',
+        body: '${result['url'] ?? ''}',
       );
     } catch (e) {
-      messenger?.showSnackBar(SnackBar(content: Text('Failed to open PR: $e')));
+      appState.showNotification(
+        level: NotificationLevel.error,
+        title: 'Failed to open PR',
+        body: '$e',
+      );
     }
+  }
+
+  /// Small muted chip showing the PR's auto-linked local project so the user
+  /// can see which folder assist sessions started from here will run against.
+  Widget _projectChip(BuildContext context, String name) {
+    final colors = context.appColors;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+      decoration: BoxDecoration(
+        color: colors.bgElevated,
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: colors.divider, width: 0.5),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.folder_outlined, size: 11, color: colors.textMuted),
+          const SizedBox(width: 3),
+          Text(
+            name,
+            style: TextStyle(
+              color: colors.textMuted,
+              fontSize: 10,
+              fontWeight: FontWeight.w500,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _stateBadge(BuildContext context, GithubPrInfo pr) {
@@ -1366,6 +1612,19 @@ class _DiffModeToggle extends StatelessWidget {
 // ---------------------------------------------------------------------------
 // Directory-tree model for the tree-view file list
 // ---------------------------------------------------------------------------
+
+/// File-list layout modes for the PR review left rail.
+enum FileListMode {
+  /// One row per file, full path tail.
+  flat,
+
+  /// Nested, collapsible directory tree.
+  tree,
+
+  /// Flat list of only the files that carry at least one review thread or
+  /// queued draft comment.
+  commented,
+}
 
 /// A leaf in the directory tree: a changed file's display name and its index
 /// into the pane's `_files` list (used to map selection back).
@@ -1464,7 +1723,10 @@ class _InlineCommentComposerState extends State<_InlineCommentComposer> {
               ),
               const SizedBox(width: kGapInline),
               Text(
-                'Comment on line ${anchor.line} (${anchor.side})',
+                anchor.startLine != null && anchor.startLine != anchor.line
+                    ? 'Commenting on lines '
+                          '${anchor.startLine}–${anchor.line} (${anchor.side})'
+                    : 'Comment on line ${anchor.line} (${anchor.side})',
                 style: TextStyle(
                   color: colors.accentLight,
                   fontSize: 10,

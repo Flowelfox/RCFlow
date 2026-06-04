@@ -367,6 +367,36 @@ async def get_github_pr_diff(pr_id: str, request: Request) -> dict[str, Any]:
     return {"pr_id": str(pr.id), "diff": diff}
 
 
+@router.get(
+    "/prs/{pr_id}/file",
+    summary="Get a file's full content at the PR head or base",
+    description=(
+        "Fetches the full text of a file at the PR's head (default) or base, so "
+        "the client can expand diff context beyond the patch hunks. Requires "
+        "GITHUB_TOKEN."
+    ),
+)
+async def get_github_pr_file(
+    pr_id: str,
+    request: Request,
+    path: str = Query(..., description="File path within the repo"),
+    side: str = Query("head", description="Which version to fetch: head or base"),
+) -> dict[str, Any]:
+    """Return a file's full content at the PR head or base ref."""
+    pr = await _load_pr(request, pr_id)
+    if side not in ("head", "base"):
+        raise HTTPException(status_code=422, detail="side must be head or base")
+    ref = pr.head_sha if side == "head" else pr.base_ref
+    svc = _get_github_service(request)
+    try:
+        content = await svc.get_file_content(pr.repo_owner, pr.repo_name, path, ref)
+    except GitHubServiceError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    finally:
+        await svc.aclose()
+    return {"pr_id": str(pr.id), "path": path, "side": side, "ref": ref, "content": content}
+
+
 # ---------------------------------------------------------------------------
 # Review threads, drafts, submission, merge
 # ---------------------------------------------------------------------------
@@ -413,12 +443,19 @@ async def _resync_pr(request: Request, pr: GitHubPRModel) -> dict[str, Any]:
 
 
 class AddDraftCommentRequest(BaseModel):
-    """Queue an inline comment on the pending review."""
+    """Queue an inline comment on the pending review.
+
+    ``line``/``side`` are the end (or only) line. For a multi-line comment also
+    set ``start_line`` (and optionally ``start_side``) — GitHub anchors the
+    comment to the ``start_line``..``line`` range.
+    """
 
     path: str
     line: int
     side: str = "RIGHT"  # LEFT|RIGHT
     body: str
+    start_line: int | None = None
+    start_side: str | None = None  # LEFT|RIGHT; defaults to side
 
 
 class PatchDraftRequest(BaseModel):
@@ -549,13 +586,22 @@ async def add_github_pr_draft_comment(pr_id: str, body: AddDraftCommentRequest, 
     pr = await _load_pr(request, pr_id)
     if body.side not in ("LEFT", "RIGHT"):
         raise HTTPException(status_code=422, detail="side must be LEFT or RIGHT")
+    if body.start_line is not None:
+        if body.start_side is not None and body.start_side not in ("LEFT", "RIGHT"):
+            raise HTTPException(status_code=422, detail="start_side must be LEFT or RIGHT")
+        if body.start_line > body.line:
+            raise HTTPException(status_code=422, detail="start_line must be <= line")
     db_factory = request.app.state.db_session_factory
     await _load_draft(request, pr, create=True)
     async with db_factory() as db:
         stmt = select(GitHubReviewDraftModel).where(GitHubReviewDraftModel.pr_id == pr.id)
         draft = (await db.execute(stmt)).scalar_one()
         comments = json.loads(draft.comments or "[]")
-        comments.append({"path": body.path, "line": body.line, "side": body.side, "body": body.body})
+        comment: dict[str, Any] = {"path": body.path, "line": body.line, "side": body.side, "body": body.body}
+        if body.start_line is not None:
+            comment["start_line"] = body.start_line
+            comment["start_side"] = body.start_side or body.side
+        comments.append(comment)
         draft.comments = json.dumps(comments)
         await db.commit()
         await db.refresh(draft)
@@ -648,6 +694,47 @@ async def reply_github_pr_comment(pr_id: str, comment_id: int, body: ReplyReques
     finally:
         await svc.aclose()
     return {"id": reply.get("id"), "body": reply.get("body")}
+
+
+@router.delete(
+    "/prs/{pr_id}/comments/{comment_id}",
+    summary="Delete a review-thread comment",
+    description=(
+        "Deletes a review-thread comment (by its GitHub comment id). Only the "
+        "comment's author may delete it — GitHub returns 403 otherwise. Requires "
+        "GITHUB_TOKEN."
+    ),
+)
+async def delete_github_pr_comment(pr_id: str, comment_id: int, request: Request) -> dict[str, Any]:
+    """Delete a review-thread comment (author-only)."""
+    pr = await _load_pr(request, pr_id)
+    svc = _get_github_service(request)
+    try:
+        await svc.delete_review_comment(pr.repo_owner, pr.repo_name, comment_id)
+    except GitHubServiceError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    finally:
+        await svc.aclose()
+    return {"deleted": True, "comment_id": comment_id}
+
+
+@router.get(
+    "/prs/{pr_id}/project",
+    summary="Resolve the PR's local project",
+    description=(
+        "Finds the local checkout of the PR's repository among the configured "
+        "projects directories (by matching the git origin remote). Returns the "
+        "project folder name + path, or nulls when no local clone is found."
+    ),
+)
+async def get_github_pr_project(pr_id: str, request: Request) -> dict[str, Any]:
+    """Resolve the PR's repo to a local project folder (badge/working dir)."""
+    pr = await _load_pr(request, pr_id)
+    settings = request.app.state.settings
+    match = await git_ops.find_local_repo(list(settings.projects_dirs), pr.repo_owner, pr.repo_name)
+    if match is None:
+        return {"pr_id": str(pr.id), "project_name": None, "project_path": None}
+    return {"pr_id": str(pr.id), "project_name": match.name, "project_path": str(match)}
 
 
 @router.post(

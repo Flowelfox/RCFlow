@@ -79,9 +79,10 @@ All under `/api/integrations/github/`, `X-API-Key` required. See [HTTP API](http
 | GET  | `/prs/{id}`        | Single cached PR by local UUID |
 | GET  | `/prs/{id}/files`  | Live changed files, each with a per-file unified-diff `patch` |
 | GET  | `/prs/{id}/diff`   | Live whole-PR unified diff as raw text |
+| GET  | `/prs/{id}/file`   | A file's full text at the PR head/base (`?path=&side=`) — for expanding diff context |
 | GET  | `/prs/{id}/threads` | Live inline review threads (GraphQL read) |
 | GET/PATCH | `/prs/{id}/draft` | Get / update the local pending review (verdict + body) |
-| POST/DELETE | `/prs/{id}/draft/comments[/{index}]` | Queue / remove an inline comment on the draft |
+| POST/DELETE | `/prs/{id}/draft/comments[/{index}]` | Queue / remove an inline comment on the draft (POST takes `start_line`/`start_side` for a multi-line range) |
 | POST | `/prs/{id}/review` | Submit the review (APPROVE/REQUEST_CHANGES/COMMENT) + queued comments |
 | POST | `/prs/{id}/comments/{comment_id}/reply` | Reply to a review-thread comment |
 | POST | `/prs/{id}/threads/{thread_id}/resolve` | Resolve / unresolve a thread |

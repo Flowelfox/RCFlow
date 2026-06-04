@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../../models/app_notification.dart';
 import '../../../models/github_pr_info.dart';
 import '../../../state/app_state.dart';
 import '../../../theme.dart';
@@ -50,14 +51,14 @@ class _PrListPanelState extends State<PrListPanel>
   /// worker without a GitHub token.
   Future<void> _syncPrs(AppState state) async {
     if (_syncing) return;
-    final messenger = ScaffoldMessenger.of(context);
     final workers = state.workerConfigs
         .map((c) => state.getWorker(c.id))
         .where((w) => w != null && w.isConnected)
         .toList();
     if (workers.isEmpty) {
-      messenger.showSnackBar(
-        const SnackBar(content: Text('No connected workers to sync')),
+      state.showNotification(
+        level: NotificationLevel.warning,
+        title: 'No connected workers to sync',
       );
       return;
     }
@@ -70,13 +71,16 @@ class _PrListPanelState extends State<PrListPanel>
         // Refresh the cached list explicitly in case any broadcast was missed.
         w.ws.listGithubPrs();
       }
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text('Synced $total pull request${total == 1 ? '' : 's'}'),
-        ),
+      state.showNotification(
+        level: NotificationLevel.success,
+        title: 'Synced $total pull request${total == 1 ? '' : 's'}',
       );
     } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('Sync failed: $e')));
+      state.showNotification(
+        level: NotificationLevel.error,
+        title: 'Sync failed',
+        body: '$e',
+      );
     } finally {
       if (mounted) setState(() => _syncing = false);
     }
@@ -303,6 +307,11 @@ class _PrListPanelState extends State<PrListPanel>
                 padding: EdgeInsets.zero,
                 child: StatefulBuilder(
                   builder: (ctx, setMenuState) {
+                    // Recompute live inside the builder so the "All" checkbox
+                    // and per-repo rows reflect the current selection after a
+                    // toggle (the outer [allSelected] is captured stale).
+                    final allReposSelected = _hiddenRepos.isEmpty;
+
                     void toggleAll(bool? value) {
                       setState(() {
                         if (value == true) {
@@ -400,7 +409,7 @@ class _PrListPanelState extends State<PrListPanel>
                             ),
                           ),
                           row(
-                            checked: allSelected,
+                            checked: allReposSelected,
                             label: 'All',
                             onChanged: toggleAll,
                             emphasised: true,

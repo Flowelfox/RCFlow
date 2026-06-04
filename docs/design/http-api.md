@@ -188,6 +188,7 @@ All under `/api/integrations/github/`. See [GitHub Integration](github.md).
 | GET  | `/api/integrations/github/prs`               | Yes | List cached PRs. Optional `?role=`, `?state=`, `?q=`. Returns `{prs, total}` |
 | GET  | `/api/integrations/github/prs/{id}`          | Yes | Single cached PR by local UUID |
 | GET  | `/api/integrations/github/prs/{id}/files`    | Yes | Live changed files (each with a per-file unified-diff `patch`). Returns `{pr_id, files, total}` |
+| GET  | `/api/integrations/github/prs/{id}/file`     | Yes | Full file content at the PR head (default) or base, for expanding diff context beyond the patch hunks. Query `?path=`, `?side=head|base`. Returns `{pr_id, path, side, ref, content}` |
 | GET  | `/api/integrations/github/prs/{id}/diff`     | Yes | Live whole-PR unified diff as raw text. Returns `{pr_id, diff}` |
 | GET  | `/api/integrations/github/prs/{id}/threads`  | Yes | Live inline review threads (path, line, side, resolved/outdated, comments). Returns `{pr_id, threads, total}` |
 | GET/PATCH | `/api/integrations/github/prs/{id}/draft` | Yes | Get / update the local pending review (verdict + summary body) |

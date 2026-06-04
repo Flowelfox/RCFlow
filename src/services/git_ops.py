@@ -59,6 +59,26 @@ async def parse_github_remote(repo_path: str | Path, remote: str = "origin") -> 
     return match.group(1), match.group(2)
 
 
+async def find_local_repo(search_dirs: list[Path], owner: str, repo: str) -> Path | None:
+    """Find the local checkout of ``owner/repo`` among ``search_dirs``' subdirs.
+
+    Scans each search dir's immediate subdirectories, reads their ``origin``
+    GitHub remote, and returns the first whose owner/repo matches (case-
+    insensitive). Returns None when no local clone is found.
+    """
+    target = (owner.lower(), repo.lower())
+    for base in search_dirs:
+        if not base.is_dir():
+            continue
+        for child in sorted(base.iterdir()):
+            if not (child / ".git").exists():
+                continue
+            parsed = await parse_github_remote(child)
+            if parsed and (parsed[0].lower(), parsed[1].lower()) == target:
+                return child
+    return None
+
+
 async def current_branch(repo_path: str | Path) -> str:
     """Return the current branch name. Raises if detached / not a repo."""
     code, name, err = await _run_git(["rev-parse", "--abbrev-ref", "HEAD"], repo_path)

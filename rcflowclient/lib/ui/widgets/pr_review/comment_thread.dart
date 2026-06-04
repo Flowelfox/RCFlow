@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
+import '../../../models/app_notification.dart';
 import '../../../services/websocket_service.dart';
+import '../../../state/app_state.dart';
 import '../../../theme.dart';
 import '../../../theme/spacing.dart';
 import '../diff/diff_viewer.dart';
@@ -22,6 +25,10 @@ class CommentThread extends StatefulWidget {
   /// off to a full-perms agent session (see [AppState.startPrAssist]).
   final void Function()? onFix;
 
+  /// The current GitHub user's login. Comments authored by this login show a
+  /// delete action; null disables deletion entirely.
+  final String? currentUserLogin;
+
   const CommentThread({
     super.key,
     required this.ws,
@@ -29,6 +36,7 @@ class CommentThread extends StatefulWidget {
     required this.thread,
     required this.onChanged,
     this.onFix,
+    this.currentUserLogin,
   });
 
   @override
@@ -90,6 +98,55 @@ class _CommentThreadState extends State<CommentThread> {
       if (mounted) setState(() => _error = e.toString());
     } finally {
       if (mounted) setState(() => _togglingResolve = false);
+    }
+  }
+
+  /// Confirm then delete [c] (the user's own comment) via the backend, then
+  /// refresh the threads. Surfaces an app notification on failure.
+  Future<void> _deleteComment(DiffThreadComment c) async {
+    // Hoist context-derived objects before any await.
+    final appState = context.read<AppState>();
+    final navigator = Navigator.of(context);
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        final colors = ctx.appColors;
+        return AlertDialog(
+          backgroundColor: colors.bgElevated,
+          title: Text(
+            'Delete this comment?',
+            style: TextStyle(color: colors.textPrimary, fontSize: 15),
+          ),
+          content: Text(
+            'This permanently deletes your review comment on GitHub.',
+            style: TextStyle(color: colors.textSecondary, fontSize: 13),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => navigator.pop(false),
+              child: Text('Cancel', style: TextStyle(color: colors.textMuted)),
+            ),
+            FilledButton(
+              onPressed: () => navigator.pop(true),
+              style: FilledButton.styleFrom(backgroundColor: colors.errorText),
+              child: const Text('Delete'),
+            ),
+          ],
+        );
+      },
+    );
+    if (confirmed != true) return;
+
+    try {
+      await widget.ws.deleteGithubPrComment(widget.prId, c.databaseId);
+      await widget.onChanged();
+    } catch (e) {
+      appState.showNotification(
+        level: NotificationLevel.error,
+        title: 'Failed to delete comment',
+        body: '$e',
+      );
     }
   }
 
@@ -283,6 +340,8 @@ class _CommentThreadState extends State<CommentThread> {
 
   Widget _buildComment(BuildContext context, DiffThreadComment c) {
     final colors = context.appColors;
+    final canDelete =
+        widget.currentUserLogin != null && c.author == widget.currentUserLogin;
     return Padding(
       padding: const EdgeInsets.only(bottom: kGapTight),
       child: Column(
@@ -307,6 +366,16 @@ class _CommentThreadState extends State<CommentThread> {
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
+              if (canDelete)
+                IconButton(
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                  iconSize: 14,
+                  splashRadius: 12,
+                  tooltip: 'Delete this comment',
+                  icon: Icon(Icons.delete_outline, color: colors.textMuted),
+                  onPressed: () => _deleteComment(c),
+                ),
             ],
           ),
           const SizedBox(height: 2),
