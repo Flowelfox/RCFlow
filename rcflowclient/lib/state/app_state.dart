@@ -845,6 +845,32 @@ class AppState extends ChangeNotifier implements PaneHost {
     );
   }
 
+  /// Start a read-only PR-assist session (summarise the PR, or explain one
+  /// file) for the PR shown in [paneId]. Switches the pane to chat so the
+  /// streamed analysis is visible; the server ack binds the session to it.
+  void startPrAssist(
+    String paneId,
+    GithubPrInfo pr,
+    String kind, {
+    String? filePath,
+  }) {
+    final pane = _panes[paneId];
+    if (pane == null) return;
+
+    final worker = _registry[pr.workerId];
+    if (worker == null || !worker.isConnected) {
+      addSystemMessage('Worker not connected', isError: true);
+      return;
+    }
+
+    closeGithubPrView(paneId);
+    pane.startNewChat();
+    pane.setTargetWorker(pr.workerId);
+    pane.pendingAck = true;
+
+    worker.ws.startPrAssist(pr.id, kind, filePath: filePath);
+  }
+
   PaneState get activePane {
     assert(_panes.isNotEmpty, 'No panes available');
     return _panes[_activePaneId]!;

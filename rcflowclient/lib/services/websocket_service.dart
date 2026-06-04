@@ -74,6 +74,19 @@ class WebSocketService {
     _transport.sendInput(msg);
   }
 
+  /// Start a read-only PR-assist session (summarise / explain) over the input
+  /// WebSocket. The server responds with an ack containing the session_id,
+  /// handled by the standard ack routing in AppState._handleInputMessage.
+  void startPrAssist(String prId, String kind, {String? filePath}) {
+    final msg = <String, dynamic>{
+      'type': 'start_pr_assist',
+      'pr_id': prId,
+      'kind': kind,
+      'file_path': ?filePath,
+    };
+    _transport.sendInput(msg);
+  }
+
   Future<Map<String, dynamic>> uploadAttachment({
     required List<int> bytes,
     required String fileName,

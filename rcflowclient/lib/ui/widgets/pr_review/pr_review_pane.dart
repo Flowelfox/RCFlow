@@ -528,18 +528,40 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
           padding: const EdgeInsets.fromLTRB(
             kSpace3,
             kSpace2,
-            kSpace3,
+            kSpace2,
             kSpace1,
           ),
-          child: SelectableText(
-            filename,
-            style: TextStyle(
-              color: context.appColors.textSecondary,
-              fontSize: 12,
-              fontFamily: 'monospace',
-              fontWeight: FontWeight.w500,
-            ),
-            maxLines: 1,
+          child: Row(
+            children: [
+              Expanded(
+                child: SelectableText(
+                  filename,
+                  style: TextStyle(
+                    color: context.appColors.textSecondary,
+                    fontSize: 12,
+                    fontFamily: 'monospace',
+                    fontWeight: FontWeight.w500,
+                  ),
+                  maxLines: 1,
+                ),
+              ),
+              if (patch != null && patch.isNotEmpty)
+                TextButton.icon(
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: kSpace2),
+                    minimumSize: const Size(0, 26),
+                    foregroundColor: context.appColors.textMuted,
+                  ),
+                  icon: const Icon(Icons.auto_awesome, size: 13),
+                  label: const Text('Explain', style: TextStyle(fontSize: 11)),
+                  onPressed: () => widget.appState.startPrAssist(
+                    widget.paneId,
+                    widget.pr,
+                    'explain',
+                    filePath: filename,
+                  ),
+                ),
+            ],
           ),
         ),
         Expanded(
@@ -842,6 +864,20 @@ class _PrReviewHeader extends StatelessWidget {
             const SizedBox(width: 6),
             _DiffModeToggle(mode: mode, onChanged: onModeChanged),
             const SizedBox(width: 6),
+            SizedBox(
+              width: 26,
+              height: 26,
+              child: IconButton(
+                padding: EdgeInsets.zero,
+                icon: Icon(
+                  Icons.auto_awesome,
+                  color: context.appColors.textMuted,
+                  size: 14,
+                ),
+                tooltip: 'Summarise this PR (AI assist)',
+                onPressed: () => appState.startPrAssist(paneId, pr, 'summary'),
+              ),
+            ),
             SizedBox(
               width: 26,
               height: 26,

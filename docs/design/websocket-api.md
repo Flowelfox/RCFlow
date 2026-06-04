@@ -22,6 +22,7 @@ Streaming protocol for prompts (input) and responses + live state (output). Two 
   - [Prompt + attachments](#input-text-protocol)
   - [`cancel_queued`, `edit_queued`](#input-text-protocol) — see Queueing
   - [`start_plan_session`](#input-text-protocol)
+  - [`start_pr_assist`](github.md#websocket-messages) (read-only PR summarise / explain)
   - [`end_session`, `pause_session`, `resume_session`, `restore_session`, `dismiss_session_end_ask`](#input-text-protocol)
   - [`question_answer`, `interactive_response`](#input-text-protocol)
   - [`permission_response`](#input-text-protocol)

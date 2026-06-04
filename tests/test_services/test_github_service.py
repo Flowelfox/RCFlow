@@ -291,3 +291,24 @@ class TestReview:
         assert captured["json"]["merge_method"] == "squash" and captured["json"]["commit_title"] == "T"
         assert out["merged"] is True
         await svc.aclose()
+
+    @pytest.mark.asyncio
+    async def test_create_pull_request_returns_parsed(self):
+        svc = GitHubService(token="x")
+        captured: dict = {}
+
+        async def fake_rest(method, path, *, params=None, json=None):
+            captured["method"] = method
+            captured["path"] = path
+            captured["json"] = json
+            return _PULL
+
+        svc._rest = AsyncMock(side_effect=fake_rest)  # type: ignore[method-assign]
+        out = await svc.create_pull_request(
+            "acme", "web", title="New", head="acme:feat", base="main", body="b", draft=True
+        )
+        assert captured["method"] == "POST" and captured["path"].endswith("/repos/acme/web/pulls")
+        assert captured["json"]["head"] == "acme:feat" and captured["json"]["draft"] is True
+        # Returns a normalised PR dict (so it can be cached/upserted).
+        assert out["number"] == 42 and out["github_id"] == "PR_kwABC"
+        await svc.aclose()

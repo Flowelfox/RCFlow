@@ -45,12 +45,14 @@ manager.
 | Method | Description |
 |--------|-------------|
 | `test_token()` | Validate the token and return the authenticated user (`GET /user`) — used by the integration `status` preflight |
-| `_rest(method, path, …)` | Execute a REST request (relative path or absolute URL), decode JSON, translate non-2xx to `GitHubServiceError` |
-| `_gql(query, variables)` | Execute a GraphQL request and return the `data` payload |
-| `aclose()` | Close the underlying HTTP client |
+| `list_pull_requests(role)` / `get_pull_request` / `list_pr_files` / `get_pr_diff` | Read PRs, detail, per-file patches, whole-PR diff (REST) |
+| `list_review_threads` | Read inline review threads (GraphQL) |
+| `create_review` / `reply_review_comment` / `resolve_thread` | Submit a review, reply to a thread, resolve/unresolve (REST + GraphQL) |
+| `merge_pull_request` / `create_pull_request` | Merge / open a PR (REST) |
+| `_rest` / `_gql` / `aclose` | REST request, GraphQL request, close client |
 
-REST writes and review-thread reads are layered on `_rest` / `_gql` in later
-phases.
+The read-only assist prompts (summarise / explain) are built in
+`src/services/pr_assist.py` from a cached PR plus its live diff.
 
 ## Roadmap
 
@@ -61,8 +63,9 @@ The feature lands in phases (GitHub-backed from day one):
 | **0** *(done)* | Config secret + `GitHubService` transport/auth skeleton + this doc |
 | **1** | Backend PR read: list (`for_me` / `created`), files (per-file `patch` = unified diff), `github_prs` model + migration, REST routes under `/api/integrations/github`, list broadcast |
 | **2** *(MVP ship)* | Client review pane: PR list (For me / Created tabs), file tree + unified/split diff viewer (extracted from the tool-block diff renderer) |
-| **3** | Inline comment threads (GraphQL read, REST write), approve / request-changes / comment, merge |
-| **4** | On-demand agent assistance: summarise/explain, apply fixes from comments to a worktree, author & open the PR |
+| **3** *(done)* | Inline comment threads (GraphQL read, REST write), approve / request-changes / comment, merge |
+| **4a** *(done)* | On-demand **read-only** agent assist: summarise the PR / explain one file (seeded one-shot session, deny-all perms) |
+| **4b** | Git-mutating agent assist: apply fixes from comments to a worktree, author a change & open the PR (`GitHubService.create_pull_request` exists; worktree/push orchestration staged) |
 
 ## HTTP Endpoints
 
@@ -91,11 +94,12 @@ edited before they post to GitHub.
 
 ## WebSocket Messages
 
-Inbound (client → server, on either `/ws/input/text` or `/ws/output/text`):
+Inbound (client → server):
 
 | Type | Effect |
 |------|--------|
 | `list_github_prs` | Server replies with `github_pr_list` — all cached PRs for this backend, newest first |
+| `start_pr_assist` | `{pr_id, kind: "summary"\|"explain", file_path?}` — builds a seeded read-only one-shot session from the PR's diff and acks with its `session_id`; the analysis streams into that session like any agent turn (no file mutation) |
 
 Outbound (server → all connected output clients), mirroring the Linear broadcasts:
 

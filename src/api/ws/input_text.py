@@ -448,6 +448,42 @@ async def ws_input_text(
                     )
                 continue
 
+            if msg_type == "start_pr_assist":
+                from src.services.github_service import GitHubServiceError  # noqa: PLC0415
+                from src.services.pr_assist import build_pr_assist_prompt  # noqa: PLC0415
+
+                pr_id_str = message.get("pr_id")
+                assist_kind = message.get("kind") or "summary"
+                assist_file = message.get("file_path") or None
+                if not pr_id_str:
+                    await websocket.send_json({"type": "error", "content": "Missing pr_id", "code": "MISSING_PR_ID"})
+                    continue
+                try:
+                    pr_info, assist_prompt = await build_pr_assist_prompt(
+                        settings=websocket.app.state.settings,
+                        db_factory=websocket.app.state.db_session_factory,
+                        pr_id=pr_id_str,
+                        kind=assist_kind,
+                        file_path=assist_file,
+                    )
+                    assist_session_id = await prompt_router.prepare_readonly_assist_session(
+                        purpose=f"pr_{assist_kind}",
+                    )
+                    await websocket.send_json(
+                        {
+                            "type": "ack",
+                            "session_id": assist_session_id,
+                            "purpose": f"pr_{assist_kind}",
+                            "pr": pr_info,
+                        }
+                    )
+                    assist_task = asyncio.create_task(prompt_router.handle_prompt(assist_prompt, assist_session_id))
+                    background_tasks.add(assist_task)
+                    assist_task.add_done_callback(background_tasks.discard)
+                except (ValueError, RuntimeError, GitHubServiceError) as e:
+                    await websocket.send_json({"type": "error", "content": str(e), "code": "PR_ASSIST_ERROR"})
+                continue
+
             if msg_type != "prompt":
                 await websocket.send_json(
                     {

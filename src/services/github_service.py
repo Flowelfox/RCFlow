@@ -437,6 +437,29 @@ class GitHubService:
             payload["commit_message"] = commit_message
         return await self._rest("PUT", f"/repos/{owner}/{repo}/pulls/{number}/merge", json=payload)
 
+    async def create_pull_request(
+        self,
+        owner: str,
+        repo: str,
+        *,
+        title: str,
+        head: str,
+        base: str,
+        body: str = "",
+        draft: bool = False,
+    ) -> dict[str, Any]:
+        """Open a pull request and return the normalised PR dict.
+
+        ``head`` is the branch with changes (``user:branch`` for a fork);
+        ``base`` is the target branch. The backend opens the PR so the agent
+        never needs the token.
+        """
+        payload: dict[str, Any] = {"title": title, "head": head, "base": base, "draft": draft}
+        if body:
+            payload["body"] = body
+        created = await self._rest("POST", f"/repos/{owner}/{repo}/pulls", json=payload)
+        return _parse_pull(created)
+
     async def aclose(self) -> None:
         """Close the underlying async client."""
         await self._client.aclose()

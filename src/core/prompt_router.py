@@ -893,6 +893,58 @@ class PromptRouter:
         planning_prompt = _build_planning_prompt(task_title, task_description, plan_path)
         return session.id, planning_prompt
 
+    async def prepare_readonly_assist_session(
+        self,
+        *,
+        purpose: str,
+        project_name: str | None = None,
+    ) -> str:
+        """Create a read-only one-shot session for on-demand AI assistance.
+
+        Used by the PR-review "summarise / explain" helpers. Seeds deny-all
+        permission rules (no Bash/Edit/Write/Agent) so the assist is pure
+        analysis of the prompt. Returns the session id; the caller fires
+        :meth:`handle_prompt` with the seeded prompt as a background task (same
+        pattern as :meth:`prepare_plan_session`).
+        """
+        session = self._session_manager.create_session(SessionType.ONE_SHOT)
+        if project_name:
+            self._apply_project_name(session, project_name)
+        session.metadata["session_purpose"] = purpose
+
+        session.metadata["permission_rules"] = [
+            {"tool_name": "Bash", "decision": "deny", "scope": "tool_session", "path_prefix": None},
+            {"tool_name": "Edit", "decision": "deny", "scope": "tool_session", "path_prefix": None},
+            {"tool_name": "Write", "decision": "deny", "scope": "tool_session", "path_prefix": None},
+            {"tool_name": "Agent", "decision": "deny", "scope": "tool_session", "path_prefix": None},
+        ]
+        from src.core.permissions import PermissionManager  # noqa: PLC0415
+
+        pm = PermissionManager()
+        pm.restore_rules(session.metadata["permission_rules"])
+        session.permission_manager = pm
+
+        # Persist a session row so the assist session is listed and survives a
+        # restart (mirrors the plan-session persistence above).
+        if self._db_session_factory is not None:
+            backend_id = self._settings.RCFLOW_BACKEND_ID if self._settings else ""
+            async with self._db_session_factory() as db:
+                session_uuid = uuid.UUID(session.id)
+                existing = await db.get(SessionModel, session_uuid)
+                if existing is None:
+                    db.add(
+                        SessionModel(
+                            id=session_uuid,
+                            backend_id=backend_id,
+                            created_at=session.created_at,
+                            ended_at=session.ended_at,
+                            session_type=session.session_type.value,
+                            status=session.status.value,
+                        )
+                    )
+                    await db.commit()
+        return session.id
+
     # ------------------------------------------------------------------
     # Main prompt handler
     # ------------------------------------------------------------------
