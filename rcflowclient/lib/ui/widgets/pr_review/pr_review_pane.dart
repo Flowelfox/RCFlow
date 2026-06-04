@@ -591,6 +591,16 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
                             prId: widget.pr.id,
                             thread: t,
                             onChanged: _refreshThreads,
+                            onFix: () => widget.appState.startPrAssist(
+                              widget.paneId,
+                              widget.pr,
+                              'fix',
+                              filePath: t.path,
+                              line: t.line,
+                              commentBody: t.comments.isNotEmpty
+                                  ? t.comments.first.body
+                                  : '',
+                            ),
                           ),
                     draftBuilder: (d) => _buildDraftCommentInline(context, d),
                   ),
@@ -884,6 +894,20 @@ class _PrReviewHeader extends StatelessWidget {
               child: IconButton(
                 padding: EdgeInsets.zero,
                 icon: Icon(
+                  Icons.add_to_queue_outlined,
+                  color: context.appColors.textMuted,
+                  size: 14,
+                ),
+                tooltip: 'Open a PR from a worktree',
+                onPressed: () => _openPrFromWorktreeDialog(context, pr),
+              ),
+            ),
+            SizedBox(
+              width: 26,
+              height: 26,
+              child: IconButton(
+                padding: EdgeInsets.zero,
+                icon: Icon(
                   Icons.open_in_new,
                   color: context.appColors.textMuted,
                   size: 14,
@@ -918,6 +942,154 @@ class _PrReviewHeader extends StatelessWidget {
     if (uri == null) return;
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
+  }
+
+  /// Prompt for the worktree/project + PR metadata, then open a PR from that
+  /// worktree via the GitHub integration REST endpoint.
+  Future<void> _openPrFromWorktreeDialog(
+    BuildContext context,
+    GithubPrInfo pr,
+  ) async {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    final pane = appState.panes[paneId];
+    final worktreeController = TextEditingController();
+    final projectController = TextEditingController(
+      text: pane?.selectedProjectName ?? '',
+    );
+    final titleController = TextEditingController();
+    final baseController = TextEditingController(text: 'main');
+    final commitController = TextEditingController();
+
+    final submitted = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        final colors = ctx.appColors;
+        InputDecoration deco(String hint) => InputDecoration(
+          hintText: hint,
+          isDense: true,
+          filled: true,
+          fillColor: colors.bgOverlay,
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: kSpace3,
+            vertical: kSpace2,
+          ),
+          border: OutlineInputBorder(
+            borderSide: BorderSide.none,
+            borderRadius: BorderRadius.circular(kRadiusSmall),
+          ),
+        );
+        Widget field(
+          String label,
+          TextEditingController controller,
+          String hint,
+        ) => Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              label,
+              style: TextStyle(color: colors.textMuted, fontSize: 11),
+            ),
+            const SizedBox(height: kGapTight),
+            TextField(
+              controller: controller,
+              style: TextStyle(color: colors.textPrimary, fontSize: 13),
+              decoration: deco(hint),
+            ),
+            const SizedBox(height: kGapRelaxed),
+          ],
+        );
+        return AlertDialog(
+          backgroundColor: colors.bgElevated,
+          title: Text(
+            'Open a PR from a worktree',
+            style: TextStyle(color: colors.textPrimary, fontSize: 15),
+          ),
+          content: SizedBox(
+            width: 360,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  field(
+                    'Worktree path (optional)',
+                    worktreeController,
+                    '/path/to/worktree',
+                  ),
+                  field(
+                    'Project name (used if no path)',
+                    projectController,
+                    'my-project',
+                  ),
+                  field('Title', titleController, 'PR title'),
+                  field('Base branch', baseController, 'main'),
+                  field(
+                    'Commit message (optional)',
+                    commitController,
+                    'Commit pending changes first',
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: Text('Cancel', style: TextStyle(color: colors.textMuted)),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              style: FilledButton.styleFrom(backgroundColor: colors.accent),
+              child: const Text('Open PR'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (submitted != true) return;
+
+    final title = titleController.text.trim();
+    if (title.isEmpty) {
+      messenger?.showSnackBar(
+        const SnackBar(content: Text('A title is required to open a PR.')),
+      );
+      return;
+    }
+
+    final ws = appState.getWorker(pr.workerId)?.ws;
+    if (ws == null) {
+      messenger?.showSnackBar(
+        const SnackBar(content: Text('Worker not connected.')),
+      );
+      return;
+    }
+
+    final worktreePath = worktreeController.text.trim();
+    final projectName = projectController.text.trim();
+    final base = baseController.text.trim().isEmpty
+        ? 'main'
+        : baseController.text.trim();
+    final commitMessage = commitController.text.trim();
+
+    try {
+      final result = await ws.openGithubPr(
+        selectedWorktreePath: worktreePath.isEmpty ? null : worktreePath,
+        projectName: projectName.isEmpty ? null : projectName,
+        title: title,
+        base: base,
+        commitMessage: commitMessage.isEmpty ? null : commitMessage,
+      );
+      final prJson = result['pr'] as Map<String, dynamic>?;
+      if (prJson != null) {
+        appState.upsertGithubPr(prJson, workerId: pr.workerId);
+      }
+      messenger?.showSnackBar(
+        SnackBar(content: Text('PR opened: ${result['url'] ?? ''}')),
+      );
+    } catch (e) {
+      messenger?.showSnackBar(SnackBar(content: Text('Failed to open PR: $e')));
     }
   }
 

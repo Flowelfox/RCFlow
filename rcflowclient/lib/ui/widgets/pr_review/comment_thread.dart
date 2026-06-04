@@ -18,12 +18,17 @@ class CommentThread extends StatefulWidget {
   /// Called after a successful reply or resolve so the parent can refresh.
   final Future<void> Function() onChanged;
 
+  /// When non-null, renders a "Fix with agent" action that hands this thread
+  /// off to a full-perms agent session (see [AppState.startPrAssist]).
+  final void Function()? onFix;
+
   const CommentThread({
     super.key,
     required this.ws,
     required this.prId,
     required this.thread,
     required this.onChanged,
+    this.onFix,
   });
 
   @override
@@ -195,6 +200,29 @@ class _CommentThreadState extends State<CommentThread> {
                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
               ),
+              if (widget.onFix != null) ...[
+                const SizedBox(width: kGapTight),
+                TextButton.icon(
+                  onPressed: widget.onFix,
+                  icon: Icon(
+                    Icons.auto_fix_high,
+                    size: 14,
+                    color: colors.accentLight,
+                  ),
+                  label: Text(
+                    'Fix with agent',
+                    style: TextStyle(color: colors.accentLight, fontSize: 12),
+                  ),
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: kSpace2,
+                      vertical: kSpace1,
+                    ),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ),
+              ],
             ],
           ),
           if (_replying) ...[

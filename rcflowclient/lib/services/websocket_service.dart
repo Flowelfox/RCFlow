@@ -74,15 +74,30 @@ class WebSocketService {
     _transport.sendInput(msg);
   }
 
-  /// Start a read-only PR-assist session (summarise / explain) over the input
-  /// WebSocket. The server responds with an ack containing the session_id,
-  /// handled by the standard ack routing in AppState._handleInputMessage.
-  void startPrAssist(String prId, String kind, {String? filePath}) {
+  /// Start a PR-assist session over the input WebSocket. For the read-only
+  /// kinds (``summary`` / ``explain``) only the PR id, kind and optional file
+  /// path are sent. For ``fix`` the comment body plus the worktree/project the
+  /// full-perms agent should edit are also supplied. The server responds with
+  /// an ack containing the session_id, handled by the standard ack routing in
+  /// AppState._handleInputMessage.
+  void startPrAssist(
+    String prId,
+    String kind, {
+    String? filePath,
+    String? commentBody,
+    int? line,
+    String? projectName,
+    String? selectedWorktreePath,
+  }) {
     final msg = <String, dynamic>{
       'type': 'start_pr_assist',
       'pr_id': prId,
       'kind': kind,
       'file_path': ?filePath,
+      'comment_body': ?commentBody,
+      'line': ?line,
+      'project_name': ?projectName,
+      'selected_worktree_path': ?selectedWorktreePath,
     };
     _transport.sendInput(msg);
   }
@@ -492,6 +507,27 @@ class WebSocketService {
     method: method,
     commitTitle: commitTitle,
     commitMessage: commitMessage,
+  );
+
+  /// Open a pull request from a local worktree. Returns `{pr, url}`.
+  Future<Map<String, dynamic>> openGithubPr({
+    String? selectedWorktreePath,
+    String? projectName,
+    required String title,
+    String body = '',
+    String base = 'main',
+    String? headBranch,
+    String? commitMessage,
+    bool draft = false,
+  }) => _rest.openGithubPr(
+    selectedWorktreePath: selectedWorktreePath,
+    projectName: projectName,
+    title: title,
+    body: body,
+    base: base,
+    headBranch: headBranch,
+    commitMessage: commitMessage,
+    draft: draft,
   );
 
   Future<Map<String, dynamic>> syncLinearIssues() => _rest.syncLinearIssues();

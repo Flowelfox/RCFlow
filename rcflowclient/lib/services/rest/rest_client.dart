@@ -1779,6 +1779,53 @@ class RestClient {
     }
   }
 
+  /// Open a pull request from a local worktree. The server pushes the
+  /// worktree's branch (optionally committing pending changes first) and
+  /// opens a PR for it. Returns `{"pr": {...}, "url": "..."}`.
+  Future<Map<String, dynamic>> openGithubPr({
+    String? selectedWorktreePath,
+    String? projectName,
+    required String title,
+    String body = '',
+    String base = 'main',
+    String? headBranch,
+    String? commitMessage,
+    bool draft = false,
+  }) async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url = _serverUrl!.http('/api/integrations/github/open-pr');
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.postUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      request.headers.contentType = io.ContentType.json;
+      request.add(
+        utf8.encode(
+          jsonEncode({
+            'selected_worktree_path': ?selectedWorktreePath,
+            'project_name': ?projectName,
+            'title': title,
+            'body': body,
+            'base': base,
+            'head_branch': ?headBranch,
+            'commit_message': ?commitMessage,
+            'draft': draft,
+          }),
+        ),
+      );
+      final response = await request.close();
+      final responseBody = await response.transform(utf8.decoder).join();
+      if (response.statusCode != 200 && response.statusCode != 201) {
+        throw Exception(
+          'Server returned ${response.statusCode}: $responseBody',
+        );
+      }
+      return jsonDecode(responseBody) as Map<String, dynamic>;
+    } finally {
+      client.close();
+    }
+  }
+
   Future<Map<String, dynamic>> getArtifacts({
     String? search,
     int limit = 100,

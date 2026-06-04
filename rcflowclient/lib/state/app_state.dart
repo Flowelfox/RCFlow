@@ -845,14 +845,23 @@ class AppState extends ChangeNotifier implements PaneHost {
     );
   }
 
-  /// Start a read-only PR-assist session (summarise the PR, or explain one
-  /// file) for the PR shown in [paneId]. Switches the pane to chat so the
-  /// streamed analysis is visible; the server ack binds the session to it.
+  /// Start a PR-assist session for the PR shown in [paneId]. Switches the pane
+  /// to chat so the streamed work is visible; the server ack binds the session
+  /// to it.
+  ///
+  /// The read-only kinds (``summary`` / ``explain``) only need the PR and an
+  /// optional [filePath]. The ``fix`` kind runs a full-perms agent that edits
+  /// the worktree the user picked, so it also forwards [commentBody], [line],
+  /// the selected project name, and the pending worktree path — captured BEFORE
+  /// [closeGithubPrView]/[startNewChat] clear them (same ordering as
+  /// [startPlanSession]).
   void startPrAssist(
     String paneId,
     GithubPrInfo pr,
     String kind, {
     String? filePath,
+    String? commentBody,
+    int? line,
   }) {
     final pane = _panes[paneId];
     if (pane == null) return;
@@ -863,12 +872,26 @@ class AppState extends ChangeNotifier implements PaneHost {
       return;
     }
 
+    // For the fix agent, capture the project/worktree before startNewChat
+    // clears them so the full-perms session edits the worktree the user picked.
+    final isFix = kind == 'fix';
+    final projectName = isFix ? pane.selectedProjectName : null;
+    final worktreePath = isFix ? pane.pendingWorktreePath : null;
+
     closeGithubPrView(paneId);
     pane.startNewChat();
     pane.setTargetWorker(pr.workerId);
     pane.pendingAck = true;
 
-    worker.ws.startPrAssist(pr.id, kind, filePath: filePath);
+    worker.ws.startPrAssist(
+      pr.id,
+      kind,
+      filePath: filePath,
+      commentBody: isFix ? commentBody : null,
+      line: isFix ? line : null,
+      projectName: projectName,
+      selectedWorktreePath: worktreePath,
+    );
   }
 
   PaneState get activePane {
