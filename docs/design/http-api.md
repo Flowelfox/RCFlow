@@ -197,6 +197,7 @@ All under `/api/integrations/github/`. See [GitHub Integration](github.md).
 | POST | `/api/integrations/github/prs/{id}/comments/{comment_id}/reply` | Yes | Reply to a review-thread comment |
 | POST | `/api/integrations/github/prs/{id}/threads/{thread_id}/resolve` | Yes | Resolve / unresolve a thread (`?resolved=`) |
 | POST | `/api/integrations/github/prs/{id}/merge`    | Yes | Merge the PR (`method` merge/squash/rebase, default squash) |
+| POST | `/api/integrations/github/open-pr`           | Yes | Push a worktree's branch (PAT auth via GIT_ASKPASS) and open a PR (`{selected_worktree_path\|project_name, title, base, head_branch?, commit_message?}`) |
 
 ## Auth header
 

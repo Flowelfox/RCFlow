@@ -455,6 +455,11 @@ async def ws_input_text(
                 pr_id_str = message.get("pr_id")
                 assist_kind = message.get("kind") or "summary"
                 assist_file = message.get("file_path") or None
+                assist_comment = message.get("comment_body") or None
+                assist_line = message.get("line")
+                # fix runs in (and edits) the worktree the client selected.
+                assist_project = message.get("project_name") or None
+                assist_worktree = message.get("selected_worktree_path") or None
                 if not pr_id_str:
                     await websocket.send_json({"type": "error", "content": "Missing pr_id", "code": "MISSING_PR_ID"})
                     continue
@@ -465,9 +470,14 @@ async def ws_input_text(
                         pr_id=pr_id_str,
                         kind=assist_kind,
                         file_path=assist_file,
+                        line=assist_line,
+                        comment_body=assist_comment,
                     )
-                    assist_session_id = await prompt_router.prepare_readonly_assist_session(
+                    is_fix = assist_kind == "fix"
+                    assist_session_id = await prompt_router.prepare_assist_session(
                         purpose=f"pr_{assist_kind}",
+                        read_only=not is_fix,
+                        project_name=assist_project if is_fix else None,
                     )
                     await websocket.send_json(
                         {
@@ -477,7 +487,14 @@ async def ws_input_text(
                             "pr": pr_info,
                         }
                     )
-                    assist_task = asyncio.create_task(prompt_router.handle_prompt(assist_prompt, assist_session_id))
+                    assist_task = asyncio.create_task(
+                        prompt_router.handle_prompt(
+                            assist_prompt,
+                            assist_session_id,
+                            project_name=assist_project if is_fix else None,
+                            selected_worktree_path=assist_worktree if is_fix else None,
+                        )
+                    )
                     background_tasks.add(assist_task)
                     assist_task.add_done_callback(background_tasks.discard)
                 except (ValueError, RuntimeError, GitHubServiceError) as e:

@@ -1,9 +1,13 @@
-"""Build seeded prompts for on-demand, read-only AI review assistance.
+"""Build seeded prompts for on-demand PR-review AI assistance.
 
 The PR-review feature is human-led; the agent only assists when asked. These
-helpers turn a cached pull request plus its live diff into a prompt for a
-read-only one-shot agent session (summarise the PR, or walk through one file).
-The agent never mutates anything — the caller seeds deny-all permission rules.
+helpers turn a cached pull request into a seeded prompt for a one-shot agent
+session:
+- ``summary`` / ``explain`` — read-only analysis of the live diff (the caller
+  seeds deny-all permission rules; the agent never mutates anything).
+- ``fix`` — writable: the prompt asks the agent to address a review comment by
+  editing the worktree the human selected; the agent is told NOT to push or
+  open a PR (the human does that via the ``open-pr`` flow).
 """
 
 from __future__ import annotations
@@ -24,7 +28,10 @@ if TYPE_CHECKING:
 # Cap diff/patch text fed to the model so a huge PR cannot blow the context.
 MAX_DIFF_CHARS = 40_000
 
-PR_ASSIST_KINDS = ("summary", "explain")
+# summary/explain are read-only (analyse the diff). fix is writable: the agent
+# edits the selected worktree to address a review comment.
+PR_ASSIST_KINDS = ("summary", "explain", "fix")
+READ_ONLY_KINDS = ("summary", "explain")
 
 
 def _truncate(text: str, limit: int = MAX_DIFF_CHARS) -> str:
@@ -62,6 +69,20 @@ def _explain_prompt(pr: GitHubPRModel, file_path: str, patch: str) -> str:
     )
 
 
+def _fix_prompt(pr: GitHubPRModel, file_path: str | None, line: int | None, comment: str) -> str:
+    loc = f" around `{file_path}`" + (f":{line}" if line else "") if file_path else ""
+    return (
+        f"You are helping address a review comment on GitHub pull request "
+        f'#{pr.number} "{pr.title}" ({pr.repo_owner}/{pr.repo_name}). You are '
+        "working in a local checkout of that branch.\n\n"
+        f'Review comment{loc}:\n"""\n{comment}\n"""\n\n'
+        "Read the relevant file(s) in the working directory, make the change "
+        "that addresses this comment, and keep the edit minimal and focused. Do "
+        "NOT push or open a pull request — the human reviews your change and "
+        "pushes it. Explain briefly what you changed and why."
+    )
+
+
 async def build_pr_assist_prompt(
     *,
     settings: Any,
@@ -69,19 +90,25 @@ async def build_pr_assist_prompt(
     pr_id: str,
     kind: str,
     file_path: str | None = None,
+    line: int | None = None,
+    comment_body: str | None = None,
 ) -> tuple[dict[str, Any], str]:
-    """Build a read-only assist prompt for a cached PR.
+    """Build an assist prompt for a cached PR.
 
-    Returns ``(pr_info, prompt)`` where ``pr_info`` is a small dict describing
-    the PR (for display/labels). Fetches the live diff/patch from GitHub.
+    ``summary``/``explain`` are read-only and fetch the live diff/patch from
+    GitHub. ``fix`` is writable: it builds a prompt from the review ``comment_body``
+    and lets the agent read/edit the selected worktree itself (no GitHub fetch).
+
+    Returns ``(pr_info, prompt)``.
 
     Raises:
-        ValueError: unknown ``kind``, PR not found, missing token, or (for
-            ``explain``) the file is not part of the PR / has no textual patch.
+        ValueError: unknown ``kind``, PR not found, missing token (read-only
+            kinds), missing ``comment_body`` (fix), or (``explain``) the file is
+            not part of the PR / has no textual patch.
     """
     if kind not in PR_ASSIST_KINDS:
         raise ValueError(f"Unknown assist kind: {kind!r}")
-    if not settings.GITHUB_TOKEN:
+    if kind in READ_ONLY_KINDS and not settings.GITHUB_TOKEN:
         raise ValueError("GitHub token is not configured.")
 
     try:
@@ -98,23 +125,28 @@ async def build_pr_assist_prompt(
     if pr is None:
         raise ValueError("Pull request not found")
 
-    svc = GitHubService(token=settings.GITHUB_TOKEN)
-    try:
-        if kind == "summary":
-            diff = await svc.get_pr_diff(pr.repo_owner, pr.repo_name, pr.number)
-            prompt = _summary_prompt(pr, diff)
-        else:  # explain
-            if not file_path:
-                raise ValueError("file_path is required for the explain assist")
-            files = await svc.list_pr_files(pr.repo_owner, pr.repo_name, pr.number)
-            match = next((f for f in files if f["filename"] == file_path), None)
-            if match is None:
-                raise ValueError(f"File not part of this PR: {file_path}")
-            if not match.get("patch"):
-                raise ValueError("That file has no textual diff to explain (binary or too large).")
-            prompt = _explain_prompt(pr, file_path, match["patch"])
-    finally:
-        await svc.aclose()
+    if kind == "fix":
+        if not comment_body:
+            raise ValueError("comment_body is required for the fix assist")
+        prompt = _fix_prompt(pr, file_path, line, comment_body)
+    else:
+        svc = GitHubService(token=settings.GITHUB_TOKEN)
+        try:
+            if kind == "summary":
+                diff = await svc.get_pr_diff(pr.repo_owner, pr.repo_name, pr.number)
+                prompt = _summary_prompt(pr, diff)
+            else:  # explain
+                if not file_path:
+                    raise ValueError("file_path is required for the explain assist")
+                files = await svc.list_pr_files(pr.repo_owner, pr.repo_name, pr.number)
+                match = next((f for f in files if f["filename"] == file_path), None)
+                if match is None:
+                    raise ValueError(f"File not part of this PR: {file_path}")
+                if not match.get("patch"):
+                    raise ValueError("That file has no textual diff to explain (binary or too large).")
+                prompt = _explain_prompt(pr, file_path, match["patch"])
+        finally:
+            await svc.aclose()
 
     pr_info = {
         "id": str(pr.id),

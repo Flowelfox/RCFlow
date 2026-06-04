@@ -8,7 +8,10 @@ import pytest
 
 from src.services.pr_assist import (
     MAX_DIFF_CHARS,
+    PR_ASSIST_KINDS,
+    READ_ONLY_KINDS,
     _explain_prompt,
+    _fix_prompt,
     _summary_prompt,
     _truncate,
     build_pr_assist_prompt,
@@ -46,6 +49,28 @@ def test_summary_prompt_mentions_pr_and_diff():
 def test_explain_prompt_scopes_to_file():
     p = _explain_prompt(_PR(), "app/main.py", "@@ -1 +1 @@")
     assert "app/main.py" in p and "read-only" in p.lower()
+
+
+def test_fix_prompt_includes_comment_and_no_push():
+    p = _fix_prompt(_PR(), "app/main.py", 12, "use <= not <")
+    assert "use <= not <" in p and "app/main.py" in p
+    assert "do not push" in p.lower() or "do NOT push" in p
+
+
+def test_kind_sets():
+    assert "fix" in PR_ASSIST_KINDS and "fix" not in READ_ONLY_KINDS
+    assert set(READ_ONLY_KINDS) == {"summary", "explain"}
+
+
+@pytest.mark.asyncio
+async def test_fix_skips_token_check():
+    # fix does not need a token; it should get PAST the token gate and fail on
+    # the (bad) PR id instead of complaining about the token.
+    settings = SimpleNamespace(GITHUB_TOKEN="", RCFLOW_BACKEND_ID="b")
+    with pytest.raises(ValueError, match="Invalid PR id"):
+        await build_pr_assist_prompt(
+            settings=settings, db_factory=lambda: None, pr_id="bad", kind="fix", comment_body="x"
+        )
 
 
 @pytest.mark.asyncio

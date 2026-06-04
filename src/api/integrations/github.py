@@ -37,6 +37,7 @@ from pydantic import BaseModel
 from src.api.deps import verify_http_api_key
 from src.database.models import GitHubPR as GitHubPRModel
 from src.database.models import GitHubReviewDraft as GitHubReviewDraftModel
+from src.services import git_ops
 from src.services.github_service import GitHubService, GitHubServiceError
 
 if TYPE_CHECKING:
@@ -674,3 +675,86 @@ async def merge_github_pr(pr_id: str, request: Request, body: MergeRequest | Non
         await svc.aclose()
     pr_data = await _resync_pr(request, pr)
     return {"merged": bool(result.get("merged")), "message": result.get("message"), "pr": pr_data}
+
+
+# ---------------------------------------------------------------------------
+# Author & open a PR from a local worktree (push + create)
+# ---------------------------------------------------------------------------
+
+
+class OpenPrRequest(BaseModel):
+    """Push a worktree's branch and open a pull request for it."""
+
+    selected_worktree_path: str | None = None
+    project_name: str | None = None  # resolved under projects_dirs when no path given
+    title: str
+    body: str = ""
+    base: str = "main"
+    head_branch: str | None = None  # default: the worktree's current branch
+    commit_message: str | None = None  # if set, commit pending changes first
+    draft: bool = False
+
+
+def _resolve_worktree_path(request: Request, body: OpenPrRequest) -> str:
+    """Resolve the worktree to operate on (explicit path, else project folder)."""
+    if body.selected_worktree_path:
+        return body.selected_worktree_path
+    settings = request.app.state.settings
+    if body.project_name:
+        for base in settings.projects_dirs:
+            candidate = base / body.project_name
+            if candidate.is_dir():
+                return str(candidate)
+    raise HTTPException(status_code=422, detail="Provide selected_worktree_path or a valid project_name")
+
+
+@router.post(
+    "/open-pr",
+    summary="Open a pull request from a local worktree",
+    description=(
+        "Pushes the selected worktree's branch to GitHub (authenticated with "
+        "GITHUB_TOKEN) and opens a pull request for it. Optionally commits "
+        "pending changes first. Requires GITHUB_TOKEN and a GitHub 'origin' "
+        "remote on the worktree."
+    ),
+)
+async def open_github_pr(body: OpenPrRequest, request: Request) -> dict[str, Any]:
+    """Commit (optional) → push the worktree branch → open a PR → cache it."""
+    settings = request.app.state.settings
+    session_manager = request.app.state.session_manager
+    db_factory = request.app.state.db_session_factory
+    if not settings.GITHUB_TOKEN:
+        raise HTTPException(status_code=503, detail="GitHub token is not configured.")
+
+    worktree_path = _resolve_worktree_path(request, body)
+
+    try:
+        owner_repo = await git_ops.parse_github_remote(worktree_path)
+        if owner_repo is None:
+            raise HTTPException(status_code=422, detail="No GitHub 'origin' remote on the worktree.")
+        if body.commit_message:
+            await git_ops.commit_all(worktree_path, body.commit_message)
+        branch = await git_ops.push_branch(
+            worktree_path, settings.GITHUB_TOKEN, branch=body.head_branch, owner_repo=owner_repo
+        )
+    except git_ops.GitOpsError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    owner, repo = owner_repo
+    svc = GitHubService(token=settings.GITHUB_TOKEN)
+    try:
+        parsed = await svc.create_pull_request(
+            owner, repo, title=body.title, head=branch, base=body.base, body=body.body, draft=body.draft
+        )
+    except GitHubServiceError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    finally:
+        await svc.aclose()
+
+    parsed["role"] = "created"
+    async with db_factory() as db:
+        rows = await _upsert_prs(db, settings.RCFLOW_BACKEND_ID, [parsed])
+        row = rows[0]
+    result = _pr_to_dict(row)
+    session_manager.broadcast_github_pr_update(result)
+    return {"pr": result, "url": result["url"]}

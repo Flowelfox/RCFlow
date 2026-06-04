@@ -65,7 +65,7 @@ The feature lands in phases (GitHub-backed from day one):
 | **2** *(MVP ship)* | Client review pane: PR list (For me / Created tabs), file tree + unified/split diff viewer (extracted from the tool-block diff renderer) |
 | **3** *(done)* | Inline comment threads (GraphQL read, REST write), approve / request-changes / comment, merge |
 | **4a** *(done)* | On-demand **read-only** agent assist: summarise the PR / explain one file (seeded one-shot session, deny-all perms) |
-| **4b** | Git-mutating agent assist: apply fixes from comments to a worktree, author a change & open the PR (`GitHubService.create_pull_request` exists; worktree/push orchestration staged) |
+| **4b** *(backend done)* | Git-mutating assist: **apply-fix** runs a full-perms agent session in the worktree you pick, seeded with a review comment; **open-pr** pushes that worktree's branch (PAT auth) and opens the PR. Client buttons land next. Fork PRs are best-effort (same-repo origin assumed). |
 
 ## HTTP Endpoints
 
@@ -86,6 +86,11 @@ All under `/api/integrations/github/`, `X-API-Key` required. See [HTTP API](http
 | POST | `/prs/{id}/comments/{comment_id}/reply` | Reply to a review-thread comment |
 | POST | `/prs/{id}/threads/{thread_id}/resolve` | Resolve / unresolve a thread |
 | POST | `/prs/{id}/merge` | Merge the PR (squash default) |
+| POST | `/open-pr` | Push a selected worktree's branch (PAT auth) and open a PR for it |
+
+The `open-pr` push authenticates with `GITHUB_TOKEN` supplied through a
+temporary `GIT_ASKPASS` helper, so the token never appears in argv, git config,
+or logs (`src/services/git_ops.py`).
 
 Read = GraphQL (threads); writes = REST (review, reply, merge); thread
 resolution = GraphQL mutation. The pending review is held locally in
@@ -99,7 +104,7 @@ Inbound (client → server):
 | Type | Effect |
 |------|--------|
 | `list_github_prs` | Server replies with `github_pr_list` — all cached PRs for this backend, newest first |
-| `start_pr_assist` | `{pr_id, kind: "summary"\|"explain", file_path?}` — builds a seeded read-only one-shot session from the PR's diff and acks with its `session_id`; the analysis streams into that session like any agent turn (no file mutation) |
+| `start_pr_assist` | `{pr_id, kind, file_path?, line?, comment_body?, project_name?, selected_worktree_path?}` — acks a `session_id` and streams the assist into it. `summary`/`explain` are read-only diff analysis; `fix` runs a **full-perms** agent session in the selected worktree to address `comment_body` (the agent edits but does not push) |
 
 Outbound (server → all connected output clients), mirroring the Linear broadcasts:
 
