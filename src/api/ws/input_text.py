@@ -460,6 +460,9 @@ async def ws_input_text(
                 # fix runs in (and edits) the worktree the client selected.
                 assist_project = message.get("project_name") or None
                 assist_worktree = message.get("selected_worktree_path") or None
+                # The coding agent to run (claude_code/codex/opencode); required
+                # in direct-tool mode where the prompt must name a #tool.
+                assist_agent = message.get("agent") or None
                 if not pr_id_str:
                     await websocket.send_json({"type": "error", "content": "Missing pr_id", "code": "MISSING_PR_ID"})
                     continue
@@ -496,6 +499,10 @@ async def ws_input_text(
                             assist_session_id,
                             project_name=assist_project if is_fix else None,
                             selected_worktree_path=assist_worktree if is_fix else None,
+                            # The agent badge selects the tool directly — no
+                            # #tool parsing of the prompt text (so "#123" in the
+                            # diff/comment is safe).
+                            direct_tool=assist_agent or "claude_code",
                         )
                     )
                     background_tasks.add(assist_task)

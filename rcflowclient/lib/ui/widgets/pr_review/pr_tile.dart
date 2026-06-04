@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../models/github_pr_info.dart';
 import '../../../state/app_state.dart';
 import '../../../theme.dart';
+import '../session_panel/github_pr_drag_data.dart';
 import '../session_panel/helpers.dart';
 
 /// Sidebar tile for a single cached GitHub pull request.
@@ -24,7 +25,7 @@ class PrTile extends StatelessWidget {
     final isActive = _isPrActive();
     final (badgeLabel, badgeColor) = _stateBadge(context);
 
-    return Container(
+    final tile = Container(
       decoration: BoxDecoration(
         color: isActive
             ? context.appColors.accent.withAlpha(25)
@@ -119,6 +120,66 @@ class PrTile extends StatelessWidget {
           onSelected?.call();
         },
       ),
+    );
+
+    // Drag a PR onto a pane to open/split it there (mirrors session/task drag).
+    return Draggable<GithubPrDragData>(
+      data: GithubPrDragData(
+        prId: pr.id,
+        workerId: pr.workerId,
+        label: pr.title,
+      ),
+      feedback: Material(
+        color: Colors.transparent,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: context.appColors.bgElevated,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: context.appColors.accent.withAlpha(120)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withAlpha(100),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(_stateIcon(), color: badgeColor, size: 14),
+              const SizedBox(width: 6),
+              Text(
+                '#${pr.number}',
+                style: TextStyle(
+                  color: context.appColors.textMuted,
+                  fontSize: 11,
+                  fontFamily: 'monospace',
+                  decoration: TextDecoration.none,
+                ),
+              ),
+              const SizedBox(width: 6),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 180),
+                child: Text(
+                  pr.title,
+                  style: TextStyle(
+                    color: context.appColors.textPrimary,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                    decoration: TextDecoration.none,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      childWhenDragging: Opacity(opacity: 0.4, child: tile),
+      child: tile,
     );
   }
 

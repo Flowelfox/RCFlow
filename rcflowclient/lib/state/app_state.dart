@@ -766,6 +766,28 @@ class AppState extends ChangeNotifier implements PaneHost {
     notifyListeners();
   }
 
+  /// Split [paneId] along [zone], opening the GitHub PR [prId] in the new pane.
+  void splitPaneWithGithubPr(String paneId, DropZone zone, String prId) {
+    if (_splitRoot == null || !_panes.containsKey(paneId)) return;
+
+    final newId = 'pane_${_nextPaneId++}';
+    final newPane = PaneState(paneId: newId, host: this)
+      ..addListener(_onPaneChanged);
+    _panes[newId] = newPane;
+    _paneTypes[newId] = PaneType.prReview;
+    newPane.setGithubPrId(prId);
+
+    _splitRoot = treeSplitPaneAtPosition(
+      _splitRoot!,
+      paneId,
+      newId,
+      dropZoneAxis(zone),
+      insertFirst: dropZoneIsFirst(zone),
+    );
+    _activePaneId = newId;
+    notifyListeners();
+  }
+
   /// Convert a task pane back to a chat pane.
   void closeTaskView(String paneId) {
     _paneTypes.remove(paneId);
@@ -873,15 +895,14 @@ class AppState extends ChangeNotifier implements PaneHost {
       return;
     }
 
-    // For the fix agent, capture the project/worktree before startNewChat
-    // clears them so the full-perms session edits the worktree the user picked.
-    // [projectName] (the PR's auto-linked local project) is forwarded for ALL
-    // kinds so the resulting session shows that project's badge; for fix it is
-    // preferred over the pane's manually-selected project.
+    // [projectName] is the PR's auto-linked local project — forwarded for ALL
+    // kinds so the session shows that project's badge. We do NOT fall back to
+    // the pane's manually-selected project (that attaches an unrelated repo).
     final isFix = kind == 'fix';
-    final resolvedProject =
-        projectName ?? (isFix ? pane.selectedProjectName : null);
+    final resolvedProject = projectName;
     final worktreePath = isFix ? pane.pendingWorktreePath : null;
+    // The coding agent the worker should run (direct-tool mode needs it).
+    final agent = defaultAgentForWorker(pr.workerId);
 
     closeGithubPrView(paneId);
     pane.startNewChat();
@@ -896,6 +917,7 @@ class AppState extends ChangeNotifier implements PaneHost {
       line: isFix ? line : null,
       projectName: resolvedProject,
       selectedWorktreePath: worktreePath,
+      agent: agent,
     );
   }
 

@@ -13,6 +13,7 @@ import 'output_display.dart';
 import 'pane_header.dart';
 import 'session_panel.dart' show TerminalDragData;
 import 'session_panel/task_drag_data.dart';
+import 'session_panel/github_pr_drag_data.dart';
 import 'artifact_pane.dart';
 import 'linear_issue_pane.dart';
 import 'pr_review/pr_review_pane.dart';
@@ -81,7 +82,8 @@ class _SessionPaneState extends State<SessionPane> {
         onWillAcceptWithDetails: (details) =>
             details.data is SessionDragData ||
             details.data is TerminalDragData ||
-            details.data is TaskDragData,
+            details.data is TaskDragData ||
+            details.data is GithubPrDragData,
         onMove: (details) {
           final box = context.findRenderObject() as RenderBox?;
           if (box == null || !box.hasSize) return;
@@ -114,6 +116,8 @@ class _SessionPaneState extends State<SessionPane> {
             );
           } else if (data is TaskDragData) {
             appState.splitPaneWithTask(widget.pane.paneId, zone, data.taskId);
+          } else if (data is GithubPrDragData) {
+            appState.splitPaneWithGithubPr(widget.pane.paneId, zone, data.prId);
           }
         },
         builder: (context, candidateData, rejectedData) {

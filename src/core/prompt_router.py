@@ -1123,6 +1123,7 @@ class PromptRouter:
         task_id: str | None = None,
         display_text: str | None = None,
         queued_id: str | None = None,
+        direct_tool: str | None = None,
     ) -> str:
         """Handle a user prompt. Creates a new session or resumes an existing one.
 
@@ -1260,11 +1261,13 @@ class PromptRouter:
             await self._forward_to_opencode(session, _display)
             return session.id
 
-        # Direct tool mode: bypass LLM entirely, parse #tool_name syntax
+        # Direct tool mode: bypass LLM entirely. The tool comes from an explicit
+        # ``direct_tool`` parameter when provided (e.g. PR-assist passing the
+        # agent badge), otherwise it is parsed from the text's #tool_name syntax.
         if self.is_direct_tool_mode:
             session.set_active()
             session.buffer.push_text(MessageType.TEXT_CHUNK, _make_user_buffer_data())
-            await self._context._handle_direct_prompt(session, text)
+            await self._context._handle_direct_prompt(session, text, explicit_tool=direct_tool)
             return session.id
 
         # Bare agent mention: when the user sends only "#ClaudeCode" or "#Codex"

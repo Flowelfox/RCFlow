@@ -146,7 +146,7 @@ class _PrListPanelState extends State<PrListPanel>
                 dividerHeight: 0,
                 tabs: const [
                   Tab(text: 'For me'),
-                  Tab(text: 'Created'),
+                  Tab(text: 'Owned'),
                 ],
               ),
             ),

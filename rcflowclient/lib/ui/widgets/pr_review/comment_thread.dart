@@ -154,6 +154,17 @@ class _CommentThreadState extends State<CommentThread> {
   Widget build(BuildContext context) {
     final colors = context.appColors;
     final thread = widget.thread;
+    // The user's own comment in this thread (if any) — drives the Delete action
+    // in the button row.
+    DiffThreadComment? ownComment;
+    if (widget.currentUserLogin != null) {
+      for (final c in thread.comments) {
+        if (c.author == widget.currentUserLogin) {
+          ownComment = c;
+          break;
+        }
+      }
+    }
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.symmetric(
@@ -280,6 +291,29 @@ class _CommentThreadState extends State<CommentThread> {
                   ),
                 ),
               ],
+              if (ownComment != null) ...[
+                const SizedBox(width: kGapTight),
+                TextButton.icon(
+                  onPressed: () => _deleteComment(ownComment!),
+                  icon: Icon(
+                    Icons.delete_outline,
+                    size: 14,
+                    color: colors.errorText,
+                  ),
+                  label: Text(
+                    'Delete',
+                    style: TextStyle(color: colors.errorText, fontSize: 12),
+                  ),
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: kSpace2,
+                      vertical: kSpace1,
+                    ),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ),
+              ],
             ],
           ),
           if (_replying) ...[
@@ -340,8 +374,6 @@ class _CommentThreadState extends State<CommentThread> {
 
   Widget _buildComment(BuildContext context, DiffThreadComment c) {
     final colors = context.appColors;
-    final canDelete =
-        widget.currentUserLogin != null && c.author == widget.currentUserLogin;
     return Padding(
       padding: const EdgeInsets.only(bottom: kGapTight),
       child: Column(
@@ -358,24 +390,7 @@ class _CommentThreadState extends State<CommentThread> {
                 ),
               ),
               const SizedBox(width: kGapTight),
-              Expanded(
-                child: Text(
-                  c.createdAt,
-                  style: TextStyle(color: colors.textMuted, fontSize: 10),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              if (canDelete)
-                IconButton(
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
-                  iconSize: 14,
-                  splashRadius: 12,
-                  tooltip: 'Delete this comment',
-                  icon: Icon(Icons.delete_outline, color: colors.textMuted),
-                  onPressed: () => _deleteComment(c),
-                ),
+              Expanded(child: _timeLabel(context, c.createdAt)),
             ],
           ),
           const SizedBox(height: 2),
@@ -384,6 +399,31 @@ class _CommentThreadState extends State<CommentThread> {
             style: TextStyle(color: colors.textSecondary, fontSize: 12),
           ),
         ],
+      ),
+    );
+  }
+
+  /// Relative time (e.g. "3h ago") with the exact local datetime on hover.
+  /// Falls back to the raw string when it can't be parsed.
+  Widget _timeLabel(BuildContext context, String iso) {
+    final colors = context.appColors;
+    final style = TextStyle(color: colors.textMuted, fontSize: 10);
+    final dt = DateTime.tryParse(iso)?.toLocal();
+    if (dt == null) {
+      return Text(
+        iso,
+        style: style,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      );
+    }
+    return Tooltip(
+      message: _absoluteLocal(dt),
+      child: Text(
+        _relativeTime(dt),
+        style: style,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
       ),
     );
   }
@@ -406,4 +446,22 @@ class _CommentThreadState extends State<CommentThread> {
       ),
     );
   }
+}
+
+String _relativeTime(DateTime dt) {
+  final diff = DateTime.now().difference(dt);
+  if (diff.isNegative) return 'just now';
+  if (diff.inSeconds < 30) return 'just now';
+  if (diff.inMinutes < 1) return '${diff.inSeconds}s ago';
+  if (diff.inHours < 1) return '${diff.inMinutes}m ago';
+  if (diff.inDays < 1) return '${diff.inHours}h ago';
+  if (diff.inDays < 30) return '${diff.inDays}d ago';
+  if (diff.inDays < 365) return '${(diff.inDays / 30).floor()}mo ago';
+  return '${(diff.inDays / 365).floor()}y ago';
+}
+
+String _absoluteLocal(DateTime dt) {
+  String two(int n) => n.toString().padLeft(2, '0');
+  return '${dt.year}-${two(dt.month)}-${two(dt.day)} '
+      '${two(dt.hour)}:${two(dt.minute)}:${two(dt.second)}';
 }

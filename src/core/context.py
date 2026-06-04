@@ -501,50 +501,70 @@ class ContextBuilder:
             return False
         return True
 
-    def _parse_direct_tool_prompt(self, text: str) -> tuple[ToolDefinition, dict[str, Any], str] | str:
+    def _parse_direct_tool_prompt(
+        self, text: str, *, explicit_tool: str | None = None
+    ) -> tuple[ToolDefinition, dict[str, Any], str] | str:
         """Parse a direct-mode prompt into (tool_def, tool_input, display_text) or an error string.
 
-        The ``#tool_name`` and ``@ProjectName`` mentions can appear anywhere in the
-        text and in any order.  Everything else becomes the prompt/command.
+        When ``explicit_tool`` is given (the tool was chosen out-of-band, e.g. an
+        agent badge passed as a separate parameter), the tool is resolved from it
+        and the ``text`` is used **verbatim** — no ``#tool``/``@project`` mentions
+        are parsed out of it, so a literal ``#123`` or ``@name`` in the prompt is
+        harmless. The working directory then comes from the session's selected
+        project (see :meth:`_handle_direct_prompt`).
 
-        Examples that all produce the same result::
+        Otherwise the ``#tool_name`` and ``@ProjectName`` mentions are parsed from
+        the text (they can appear anywhere, in any order); everything else becomes
+        the prompt/command::
 
             #claude_code @RCFlow fix the bug
             @RCFlow #ClaudeCode fix the bug
             fix the bug @RCFlow #claude_code
         """
-        # Find #tool mention anywhere in text
-        tool_mentions = self._TOOL_MENTION_RE.findall(text)
-        if not tool_mentions:
-            available = [t.name for t in self._r._tool_registry.list_tools()]
-            return f"Direct tool mode requires #tool_name syntax. Available tools: {', '.join(available)}"
-
-        # Resolve the first valid tool mention
-        tool_def: ToolDefinition | None = None
-        tool_mention_used: str = ""
-        for mention in tool_mentions:
-            candidate = self._r._tool_registry.get(mention)
-            if candidate is not None:
-                tool_def = candidate
-                tool_mention_used = mention
-                break
-
-        if tool_def is None:
-            available = [t.name for t in self._r._tool_registry.list_tools()]
-            return f"Unknown tool: #{tool_mentions[0]}. Available tools: {', '.join(available)}"
-
-        # Strip the matched #tool from text
-        clean = re.sub(rf"(?:^|\s)#{re.escape(tool_mention_used)}(?:\s|$)", " ", text, count=1).strip()
-
-        # Extract @ProjectName mentions for working directory
+        tool_def: ToolDefinition | None
+        tool_mention_used: str
         working_dir: str | None = None
-        project_mentions = self._MENTION_RE.findall(clean)
-        for mention in project_mentions:
-            resolved_path = self._resolve_project_path(mention)
-            if resolved_path is not None:
-                working_dir = str(resolved_path)
-                clean = re.sub(rf"(?:^|\s)@{re.escape(mention)}(?:\s|$)", " ", clean, count=1).strip()
-                break
+
+        if explicit_tool is not None:
+            tool_def = self._r._tool_registry.get(explicit_tool.lstrip("#"))
+            if tool_def is None:
+                available = [t.name for t in self._r._tool_registry.list_tools()]
+                return f"Unknown agent: {explicit_tool!r}. Available tools: {', '.join(available)}"
+            tool_mention_used = tool_def.name
+            # Verbatim — do NOT strip #/@ mentions from the prompt.
+            clean = text.strip()
+        else:
+            # Find #tool mention anywhere in text
+            tool_mentions = self._TOOL_MENTION_RE.findall(text)
+            if not tool_mentions:
+                available = [t.name for t in self._r._tool_registry.list_tools()]
+                return f"Direct tool mode requires #tool_name syntax. Available tools: {', '.join(available)}"
+
+            # Resolve the first valid tool mention
+            tool_def = None
+            tool_mention_used = ""
+            for mention in tool_mentions:
+                candidate = self._r._tool_registry.get(mention)
+                if candidate is not None:
+                    tool_def = candidate
+                    tool_mention_used = mention
+                    break
+
+            if tool_def is None:
+                available = [t.name for t in self._r._tool_registry.list_tools()]
+                return f"Unknown tool: #{tool_mentions[0]}. Available tools: {', '.join(available)}"
+
+            # Strip the matched #tool from text
+            clean = re.sub(rf"(?:^|\s)#{re.escape(tool_mention_used)}(?:\s|$)", " ", text, count=1).strip()
+
+            # Extract @ProjectName mentions for working directory
+            project_mentions = self._MENTION_RE.findall(clean)
+            for mention in project_mentions:
+                resolved_path = self._resolve_project_path(mention)
+                if resolved_path is not None:
+                    working_dir = str(resolved_path)
+                    clean = re.sub(rf"(?:^|\s)@{re.escape(mention)}(?:\s|$)", " ", clean, count=1).strip()
+                    break
 
         display_text = clean
 
@@ -574,9 +594,11 @@ class ContextBuilder:
 
         return (tool_def, tool_input, display_text)
 
-    async def _handle_direct_prompt(self, session: ActiveSession, text: str) -> None:
+    async def _handle_direct_prompt(
+        self, session: ActiveSession, text: str, *, explicit_tool: str | None = None
+    ) -> None:
         """Handle a prompt in direct tool mode (no LLM)."""
-        parsed = self._parse_direct_tool_prompt(text)
+        parsed = self._parse_direct_tool_prompt(text, explicit_tool=explicit_tool)
         if isinstance(parsed, str):
             session.buffer.push_text(
                 MessageType.ERROR,

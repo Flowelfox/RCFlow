@@ -88,6 +88,7 @@ class WebSocketService {
     int? line,
     String? projectName,
     String? selectedWorktreePath,
+    String? agent,
   }) {
     final msg = <String, dynamic>{
       'type': 'start_pr_assist',
@@ -98,6 +99,7 @@ class WebSocketService {
       'line': ?line,
       'project_name': ?projectName,
       'selected_worktree_path': ?selectedWorktreePath,
+      'agent': ?agent,
     };
     _transport.sendInput(msg);
   }
