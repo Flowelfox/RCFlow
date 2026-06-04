@@ -3,11 +3,14 @@ import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../models/github_pr_info.dart';
+import '../../../services/websocket_service.dart';
 import '../../../state/app_state.dart';
 import '../../../state/pane_state.dart';
 import '../../../theme.dart';
 import '../../../theme/spacing.dart';
 import '../diff/diff_viewer.dart';
+import 'comment_thread.dart';
+import 'review_action_bar.dart';
 
 /// Full-pane review view for a cached GitHub pull request.
 ///
@@ -88,9 +91,26 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
   List<Map<String, dynamic>> _files = [];
   int _selectedIndex = 0;
 
+  /// All review threads for the PR (across files), mapped from the backend.
+  List<DiffThread> _threads = [];
+
+  /// The local review draft event ("APPROVE"|"REQUEST_CHANGES"|"COMMENT").
+  String _draftEvent = 'COMMENT';
+
+  /// The local review draft summary body.
+  String _draftBody = '';
+
+  /// Queued (not-yet-submitted) inline comments across all files.
+  List<DraftComment> _draftComments = [];
+
   /// PR id the current [_files] belong to; guards against showing stale files
   /// after the pane is repointed at a different PR.
   String? _loadedPrId;
+
+  WebSocketService? get _ws {
+    final worker = widget.appState.getWorker(widget.pr.workerId);
+    return worker?.ws;
+  }
 
   @override
   void initState() {
@@ -120,6 +140,10 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
       _loading = true;
       _error = null;
       _files = [];
+      _threads = [];
+      _draftComments = [];
+      _draftEvent = 'COMMENT';
+      _draftBody = '';
       _selectedIndex = 0;
       _loadedPrId = widget.pr.id;
     });
@@ -158,7 +182,87 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
         _error = e.toString();
         _loading = false;
       });
+      return;
     }
+
+    // Threads and the draft are best-effort; a failure here shouldn't blank
+    // out the diff the user already has.
+    await _refreshThreads();
+    await _refreshDraft();
+  }
+
+  /// Refetch the review threads and remap them into [DiffThread]s.
+  Future<void> _refreshThreads() async {
+    final ws = _ws;
+    if (ws == null) return;
+    try {
+      final result = await ws.getGithubPrThreads(widget.pr.id);
+      if (!mounted || _loadedPrId != widget.pr.id) return;
+      final raw = (result['threads'] as List<dynamic>? ?? [])
+          .cast<Map<String, dynamic>>();
+      setState(() => _threads = raw.map(_threadFromJson).toList());
+    } catch (_) {
+      // Best-effort; leave existing threads in place.
+    }
+  }
+
+  /// Refetch the local review draft and remap its queued comments.
+  Future<void> _refreshDraft() async {
+    final ws = _ws;
+    if (ws == null) return;
+    try {
+      final draft = await ws.getGithubPrDraft(widget.pr.id);
+      if (!mounted || _loadedPrId != widget.pr.id) return;
+      final comments = (draft['comments'] as List<dynamic>? ?? [])
+          .cast<Map<String, dynamic>>();
+      setState(() {
+        _draftEvent = draft['event'] as String? ?? 'COMMENT';
+        _draftBody = draft['body'] as String? ?? '';
+        _draftComments = [
+          for (var i = 0; i < comments.length; i++)
+            _draftCommentFromJson(comments[i], i),
+        ];
+      });
+    } catch (_) {
+      // Best-effort.
+    }
+  }
+
+  static DiffThread _threadFromJson(Map<String, dynamic> json) {
+    final comments = (json['comments'] as List<dynamic>? ?? [])
+        .cast<Map<String, dynamic>>();
+    return DiffThread(
+      threadId: json['thread_id'] as String? ?? '',
+      isResolved: json['is_resolved'] as bool? ?? false,
+      isOutdated: json['is_outdated'] as bool? ?? false,
+      path: json['path'] as String? ?? '',
+      line: (json['line'] as num?)?.toInt(),
+      side: json['side'] as String? ?? 'RIGHT',
+      comments: comments
+          .map(
+            (c) => DiffThreadComment(
+              id: c['id']?.toString() ?? '',
+              databaseId: (c['database_id'] as num?)?.toInt() ?? 0,
+              author: c['author'] as String? ?? '',
+              body: c['body'] as String? ?? '',
+              createdAt: c['created_at'] as String? ?? '',
+            ),
+          )
+          .toList(),
+    );
+  }
+
+  static DraftComment _draftCommentFromJson(
+    Map<String, dynamic> json,
+    int index,
+  ) {
+    return DraftComment(
+      index: index,
+      path: json['path'] as String? ?? '',
+      line: (json['line'] as num?)?.toInt() ?? 0,
+      side: json['side'] as String? ?? 'RIGHT',
+      body: json['body'] as String? ?? '',
+    );
   }
 
   @override
@@ -207,14 +311,137 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
 
     final selected = _files[_selectedIndex.clamp(0, _files.length - 1)];
     final patch = selected['patch'] as String?;
+    final ws = _ws;
 
-    return Row(
+    return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        SizedBox(width: 240, child: _buildFileList(context)),
-        Container(width: 1, color: context.appColors.divider),
-        Expanded(child: _buildDiffArea(context, selected, patch)),
+        Expanded(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SizedBox(width: 240, child: _buildFileList(context)),
+              Container(width: 1, color: context.appColors.divider),
+              Expanded(child: _buildDiffArea(context, selected, patch)),
+            ],
+          ),
+        ),
+        if (ws != null)
+          ReviewActionBar(
+            ws: ws,
+            pr: widget.pr,
+            draftEvent: _draftEvent,
+            draftBody: _draftBody,
+            draftComments: _draftComments,
+            onSubmitted: _onReviewSubmitted,
+            onMerged: _onMerged,
+            onRemoveDraftComment: _removeDraftComment,
+          ),
       ],
+    );
+  }
+
+  /// Map a backend PR dict (returned by submit/merge) onto the cached PR via
+  /// AppState so the header/state badge update in place.
+  void _applyPrUpdate(Map<String, dynamic>? prJson) {
+    if (prJson == null) return;
+    widget.appState.upsertGithubPr(prJson, workerId: widget.pr.workerId);
+  }
+
+  Future<void> _onReviewSubmitted(Map<String, dynamic> result) async {
+    _applyPrUpdate(result['pr'] as Map<String, dynamic>?);
+    await _refreshThreads();
+    await _refreshDraft();
+  }
+
+  Future<void> _onMerged(Map<String, dynamic> result) async {
+    _applyPrUpdate(result['pr'] as Map<String, dynamic>?);
+    await _refreshThreads();
+  }
+
+  Future<void> _removeDraftComment(DraftComment comment) async {
+    final ws = _ws;
+    if (ws == null) return;
+    try {
+      await ws.deleteGithubPrDraftComment(widget.pr.id, comment.index);
+    } catch (_) {
+      // ignore; refresh below reflects truth
+    }
+    await _refreshDraft();
+  }
+
+  /// Open a composer for a new inline comment anchored at ([line], [side]) of
+  /// the currently-selected file, POST it to the draft, then refresh.
+  Future<void> _addCommentFor(String path, int line, String side) async {
+    final ws = _ws;
+    if (ws == null) return;
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    final body = await _promptForComment(context, path, line, side);
+    if (body == null || body.trim().isEmpty) return;
+    try {
+      await ws.addGithubPrDraftComment(
+        widget.pr.id,
+        path: path,
+        line: line,
+        side: side,
+        body: body.trim(),
+      );
+      await _refreshDraft();
+    } catch (e) {
+      messenger?.showSnackBar(
+        SnackBar(content: Text('Failed to queue comment: $e')),
+      );
+    }
+  }
+
+  Future<String?> _promptForComment(
+    BuildContext context,
+    String path,
+    int line,
+    String side,
+  ) {
+    final controller = TextEditingController();
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: ctx.appColors.bgElevated,
+        title: Text(
+          'Comment on line $line',
+          style: TextStyle(color: ctx.appColors.textPrimary, fontSize: 15),
+        ),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          minLines: 2,
+          maxLines: 6,
+          style: TextStyle(color: ctx.appColors.textPrimary, fontSize: 13),
+          decoration: InputDecoration(
+            hintText: 'Add a review comment…',
+            filled: true,
+            fillColor: ctx.appColors.bgOverlay,
+            border: OutlineInputBorder(
+              borderSide: BorderSide.none,
+              borderRadius: BorderRadius.circular(kRadiusSmall),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: Text(
+              'Cancel',
+              style: TextStyle(color: ctx.appColors.textMuted),
+            ),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(controller.text),
+            style: FilledButton.styleFrom(
+              backgroundColor: ctx.appColors.accent,
+            ),
+            child: const Text('Queue comment'),
+          ),
+        ],
+      ),
     );
   }
 
@@ -290,6 +517,10 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
     String? patch,
   ) {
     final filename = file['filename'] as String? ?? '';
+    final ws = _ws;
+    // Filter threads/drafts down to the file currently rendered.
+    final fileThreads = _threads.where((t) => t.path == filename).toList();
+    final fileDrafts = _draftComments.where((d) => d.path == filename).toList();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -323,10 +554,81 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
                   ),
                 )
               : SingleChildScrollView(
-                  child: DiffViewer(diff: patch, mode: _mode),
+                  child: DiffViewer(
+                    diff: patch,
+                    mode: _mode,
+                    threads: fileThreads,
+                    draftComments: fileDrafts,
+                    onAddComment: ws == null
+                        ? null
+                        : (line, side) => _addCommentFor(filename, line, side),
+                    threadBuilder: ws == null
+                        ? null
+                        : (t) => CommentThread(
+                            ws: ws,
+                            prId: widget.pr.id,
+                            thread: t,
+                            onChanged: _refreshThreads,
+                          ),
+                    draftBuilder: (d) => _buildDraftCommentInline(context, d),
+                  ),
                 ),
         ),
       ],
+    );
+  }
+
+  /// Inline "pending" rendering of a queued draft comment under its diff row.
+  Widget _buildDraftCommentInline(BuildContext context, DraftComment d) {
+    final colors = context.appColors;
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.symmetric(
+        horizontal: kSpace2,
+        vertical: kSpace1,
+      ),
+      padding: const EdgeInsets.all(kSpace2),
+      decoration: BoxDecoration(
+        color: colors.accent.withAlpha(18),
+        borderRadius: BorderRadius.circular(kRadiusSmall),
+        border: Border.all(color: colors.accent.withAlpha(80)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.pending_outlined, size: 13, color: colors.accentLight),
+          const SizedBox(width: kGapInline),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Pending comment · line ${d.line} (${d.side})',
+                  style: TextStyle(
+                    color: colors.accentLight,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  d.body,
+                  style: TextStyle(color: colors.textSecondary, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+            iconSize: 14,
+            splashRadius: 12,
+            tooltip: 'Remove queued comment',
+            icon: Icon(Icons.close, color: colors.textMuted),
+            onPressed: () => _removeDraftComment(d),
+          ),
+        ],
+      ),
     );
   }
 

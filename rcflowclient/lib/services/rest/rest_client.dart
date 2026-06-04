@@ -1517,6 +1517,268 @@ class RestClient {
     }
   }
 
+  /// Fetch the inline review threads for a cached PR.
+  ///
+  /// Returns `{"pr_id": "...", "threads": [...], "total": N}`. Each thread has
+  /// `thread_id` (GraphQL node id), `is_resolved`, `is_outdated`, `path`,
+  /// `line`, `side` ("LEFT"|"RIGHT"), and `comments` (each with `id`,
+  /// `database_id`, `author`, `body`, `created_at`).
+  Future<Map<String, dynamic>> getGithubPrThreads(String prId) async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url = _serverUrl!.http('/api/integrations/github/prs/$prId/threads');
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.getUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      final response = await request.close();
+      final body = await response.transform(utf8.decoder).join();
+      if (response.statusCode != 200) {
+        throw Exception('Server returned ${response.statusCode}: $body');
+      }
+      return jsonDecode(body) as Map<String, dynamic>;
+    } finally {
+      client.close();
+    }
+  }
+
+  /// Fetch the local (not-yet-submitted) review draft for a cached PR.
+  ///
+  /// Returns `{"pr_id": "...", "event": "COMMENT", "body": "...",
+  /// "comments": [{"path", "line", "side", "body"}, ...]}`.
+  Future<Map<String, dynamic>> getGithubPrDraft(String prId) async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url = _serverUrl!.http('/api/integrations/github/prs/$prId/draft');
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.getUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      final response = await request.close();
+      final body = await response.transform(utf8.decoder).join();
+      if (response.statusCode != 200) {
+        throw Exception('Server returned ${response.statusCode}: $body');
+      }
+      return jsonDecode(body) as Map<String, dynamic>;
+    } finally {
+      client.close();
+    }
+  }
+
+  /// Patch the review draft's verdict [event] and/or summary [body].
+  ///
+  /// Returns the updated draft dict.
+  Future<Map<String, dynamic>> patchGithubPrDraft(
+    String prId, {
+    String? event,
+    String? body,
+  }) async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url = _serverUrl!.http('/api/integrations/github/prs/$prId/draft');
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.openUrl('PATCH', url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      request.headers.contentType = io.ContentType.json;
+      request.add(utf8.encode(jsonEncode({'event': ?event, 'body': ?body})));
+      final response = await request.close();
+      final responseBody = await response.transform(utf8.decoder).join();
+      if (response.statusCode != 200) {
+        throw Exception(
+          'Server returned ${response.statusCode}: $responseBody',
+        );
+      }
+      return jsonDecode(responseBody) as Map<String, dynamic>;
+    } finally {
+      client.close();
+    }
+  }
+
+  /// Queue an inline comment into the review draft for a cached PR.
+  ///
+  /// Returns the updated draft dict.
+  Future<Map<String, dynamic>> addGithubPrDraftComment(
+    String prId, {
+    required String path,
+    required int line,
+    required String side,
+    required String body,
+  }) async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url = _serverUrl!.http(
+      '/api/integrations/github/prs/$prId/draft/comments',
+    );
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.postUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      request.headers.contentType = io.ContentType.json;
+      request.add(
+        utf8.encode(
+          jsonEncode({'path': path, 'line': line, 'side': side, 'body': body}),
+        ),
+      );
+      final response = await request.close();
+      final responseBody = await response.transform(utf8.decoder).join();
+      if (response.statusCode != 200 && response.statusCode != 201) {
+        throw Exception(
+          'Server returned ${response.statusCode}: $responseBody',
+        );
+      }
+      return jsonDecode(responseBody) as Map<String, dynamic>;
+    } finally {
+      client.close();
+    }
+  }
+
+  /// Remove the queued draft comment at [index] for a cached PR.
+  ///
+  /// Returns the updated draft dict.
+  Future<Map<String, dynamic>> deleteGithubPrDraftComment(
+    String prId,
+    int index,
+  ) async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url = _serverUrl!.http(
+      '/api/integrations/github/prs/$prId/draft/comments/$index',
+    );
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.deleteUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      final response = await request.close();
+      final body = await response.transform(utf8.decoder).join();
+      if (response.statusCode != 200) {
+        throw Exception('Server returned ${response.statusCode}: $body');
+      }
+      return jsonDecode(body) as Map<String, dynamic>;
+    } finally {
+      client.close();
+    }
+  }
+
+  /// Submit a review for a cached PR, posting any queued draft comments.
+  ///
+  /// [event] is one of "APPROVE", "REQUEST_CHANGES", "COMMENT". Returns
+  /// `{"review": {"id", "state"}, "pr": {...full PR...}}`. The draft is
+  /// cleared server-side on success.
+  Future<Map<String, dynamic>> submitGithubPrReview(
+    String prId, {
+    required String event,
+    String? body,
+  }) async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url = _serverUrl!.http('/api/integrations/github/prs/$prId/review');
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.postUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      request.headers.contentType = io.ContentType.json;
+      request.add(utf8.encode(jsonEncode({'event': event, 'body': ?body})));
+      final response = await request.close();
+      final responseBody = await response.transform(utf8.decoder).join();
+      if (response.statusCode != 200 && response.statusCode != 201) {
+        throw Exception(
+          'Server returned ${response.statusCode}: $responseBody',
+        );
+      }
+      return jsonDecode(responseBody) as Map<String, dynamic>;
+    } finally {
+      client.close();
+    }
+  }
+
+  /// Reply to a review thread comment (identified by its [commentId], the
+  /// comment's GitHub `database_id`). Returns `{"id", "body"}`.
+  Future<Map<String, dynamic>> replyGithubPrComment(
+    String prId,
+    int commentId,
+    String body,
+  ) async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url = _serverUrl!.http(
+      '/api/integrations/github/prs/$prId/comments/$commentId/reply',
+    );
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.postUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      request.headers.contentType = io.ContentType.json;
+      request.add(utf8.encode(jsonEncode({'body': body})));
+      final response = await request.close();
+      final responseBody = await response.transform(utf8.decoder).join();
+      if (response.statusCode != 200 && response.statusCode != 201) {
+        throw Exception(
+          'Server returned ${response.statusCode}: $responseBody',
+        );
+      }
+      return jsonDecode(responseBody) as Map<String, dynamic>;
+    } finally {
+      client.close();
+    }
+  }
+
+  /// Resolve or unresolve a review thread (identified by its GraphQL
+  /// [threadId]). Returns `{"thread_id", "resolved"}`.
+  Future<Map<String, dynamic>> resolveGithubPrThread(
+    String prId,
+    String threadId,
+    bool resolved,
+  ) async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url = _serverUrl!.http(
+      '/api/integrations/github/prs/$prId/threads/$threadId/resolve',
+      {'resolved': resolved.toString()},
+    );
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.postUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      final response = await request.close();
+      final body = await response.transform(utf8.decoder).join();
+      if (response.statusCode != 200) {
+        throw Exception('Server returned ${response.statusCode}: $body');
+      }
+      return jsonDecode(body) as Map<String, dynamic>;
+    } finally {
+      client.close();
+    }
+  }
+
+  /// Merge a cached PR using [method] ("squash"|"merge"|"rebase").
+  ///
+  /// Returns `{"merged": bool, "message": "...", "pr": {...}}`.
+  Future<Map<String, dynamic>> mergeGithubPr(
+    String prId, {
+    required String method,
+    String? commitTitle,
+    String? commitMessage,
+  }) async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url = _serverUrl!.http('/api/integrations/github/prs/$prId/merge');
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.postUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      request.headers.contentType = io.ContentType.json;
+      request.add(
+        utf8.encode(
+          jsonEncode({
+            'method': method,
+            'commit_title': ?commitTitle,
+            'commit_message': ?commitMessage,
+          }),
+        ),
+      );
+      final response = await request.close();
+      final body = await response.transform(utf8.decoder).join();
+      if (response.statusCode != 200) {
+        throw Exception('Server returned ${response.statusCode}: $body');
+      }
+      return jsonDecode(body) as Map<String, dynamic>;
+    } finally {
+      client.close();
+    }
+  }
+
   Future<Map<String, dynamic>> getArtifacts({
     String? search,
     int limit = 100,

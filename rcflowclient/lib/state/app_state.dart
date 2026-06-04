@@ -588,6 +588,23 @@ class AppState extends ChangeNotifier implements PaneHost {
     notifyListeners();
   }
 
+  /// Upsert a single cached PR from a backend PR dict and notify listeners.
+  ///
+  /// Used by the PR review pane after a review submission or merge returns the
+  /// updated PR so the header/state badge refresh in place without waiting for
+  /// the next sync push.
+  void upsertGithubPr(Map<String, dynamic> prJson, {required String workerId}) {
+    if (prJson['id'] is! String) return;
+    _githubPrStore.upsert(
+      GithubPrInfo.fromJson(
+        prJson,
+        workerId: workerId,
+        workerName: _workerName(workerId),
+      ),
+    );
+    notifyListeners();
+  }
+
   void _handleGithubPrUpdate(Map<String, dynamic> msg, String workerId) {
     final prId = msg['id'] as String?;
     if (prId == null) return;

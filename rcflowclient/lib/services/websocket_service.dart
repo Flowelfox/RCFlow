@@ -420,6 +420,67 @@ class WebSocketService {
   Future<Map<String, dynamic>> getGithubPrFiles(String prId) =>
       _rest.getGithubPrFiles(prId);
 
+  Future<Map<String, dynamic>> getGithubPrThreads(String prId) =>
+      _rest.getGithubPrThreads(prId);
+
+  Future<Map<String, dynamic>> getGithubPrDraft(String prId) =>
+      _rest.getGithubPrDraft(prId);
+
+  Future<Map<String, dynamic>> patchGithubPrDraft(
+    String prId, {
+    String? event,
+    String? body,
+  }) => _rest.patchGithubPrDraft(prId, event: event, body: body);
+
+  Future<Map<String, dynamic>> addGithubPrDraftComment(
+    String prId, {
+    required String path,
+    required int line,
+    required String side,
+    required String body,
+  }) => _rest.addGithubPrDraftComment(
+    prId,
+    path: path,
+    line: line,
+    side: side,
+    body: body,
+  );
+
+  Future<Map<String, dynamic>> deleteGithubPrDraftComment(
+    String prId,
+    int index,
+  ) => _rest.deleteGithubPrDraftComment(prId, index);
+
+  Future<Map<String, dynamic>> submitGithubPrReview(
+    String prId, {
+    required String event,
+    String? body,
+  }) => _rest.submitGithubPrReview(prId, event: event, body: body);
+
+  Future<Map<String, dynamic>> replyGithubPrComment(
+    String prId,
+    int commentId,
+    String body,
+  ) => _rest.replyGithubPrComment(prId, commentId, body);
+
+  Future<Map<String, dynamic>> resolveGithubPrThread(
+    String prId,
+    String threadId,
+    bool resolved,
+  ) => _rest.resolveGithubPrThread(prId, threadId, resolved);
+
+  Future<Map<String, dynamic>> mergeGithubPr(
+    String prId, {
+    required String method,
+    String? commitTitle,
+    String? commitMessage,
+  }) => _rest.mergeGithubPr(
+    prId,
+    method: method,
+    commitTitle: commitTitle,
+    commitMessage: commitMessage,
+  );
+
   Future<Map<String, dynamic>> syncLinearIssues() => _rest.syncLinearIssues();
 
   Future<Map<String, dynamic>> createLinearIssue({

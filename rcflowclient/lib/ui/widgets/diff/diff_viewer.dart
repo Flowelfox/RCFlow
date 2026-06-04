@@ -15,6 +15,76 @@ enum DiffViewMode {
 /// Classification of a single parsed diff line.
 enum DiffLineType { hunk, deletion, addition, context }
 
+/// One comment within a [DiffThread].
+class DiffThreadComment {
+  /// GitHub GraphQL node id of the comment.
+  final String id;
+
+  /// GitHub REST `database_id` — used as the target when replying.
+  final int databaseId;
+  final String author;
+  final String body;
+  final String createdAt;
+
+  const DiffThreadComment({
+    required this.id,
+    required this.databaseId,
+    required this.author,
+    required this.body,
+    required this.createdAt,
+  });
+}
+
+/// An existing inline review thread anchored to a diff line.
+///
+/// The pane maps the backend JSON into these before handing them to the
+/// [DiffViewer]; the viewer itself stays free of REST/JSON concerns.
+class DiffThread {
+  /// GitHub GraphQL node id of the thread (the resolve target).
+  final String threadId;
+  final bool isResolved;
+  final bool isOutdated;
+  final String path;
+
+  /// Diff line the thread anchors to (interpreted with [side]).
+  final int? line;
+
+  /// "LEFT" (old/deletion side) or "RIGHT" (new/addition side).
+  final String side;
+  final List<DiffThreadComment> comments;
+
+  const DiffThread({
+    required this.threadId,
+    required this.isResolved,
+    required this.isOutdated,
+    required this.path,
+    required this.line,
+    required this.side,
+    required this.comments,
+  });
+}
+
+/// A locally-queued (not-yet-submitted) inline comment.
+class DraftComment {
+  /// Index of this comment in the backend draft's `comments` list. Used as the
+  /// delete target.
+  final int index;
+  final String path;
+  final int line;
+
+  /// "LEFT" or "RIGHT".
+  final String side;
+  final String body;
+
+  const DraftComment({
+    required this.index,
+    required this.path,
+    required this.line,
+    required this.side,
+    required this.body,
+  });
+}
+
 /// One parsed line of a unified diff, with the resolved line numbers.
 class DiffLine {
   final DiffLineType type;
@@ -40,10 +110,41 @@ class DiffViewer extends StatelessWidget {
   final String diff;
   final DiffViewMode mode;
 
+  /// Existing review threads for the file rendered here. Each is anchored to a
+  /// diff row by ([DiffThread.line], [DiffThread.side]) and rendered inline
+  /// immediately after that row. Threads whose anchor row cannot be found
+  /// (typically outdated) are collected and rendered in a list below the diff.
+  ///
+  /// Defaults to empty so the tool-block use of [DiffViewer] is unaffected.
+  final List<DiffThread> threads;
+
+  /// Locally-queued draft comments for this file, rendered inline (in a
+  /// distinct "pending" style) after the row they anchor to. Defaults to empty.
+  final List<DraftComment> draftComments;
+
+  /// Invoked when the user taps the add-comment affordance on a diff row.
+  /// Receives the resolved ([line], [side]) for that row. When null (the
+  /// default, e.g. in tool blocks) no affordance is shown.
+  final void Function(int line, String side)? onAddComment;
+
+  /// Builds the inline widget for an existing thread. Required whenever
+  /// [threads] is non-empty; the pane supplies a [CommentThread]. Kept as a
+  /// builder so [DiffViewer] does not depend on PR-review widgets.
+  final Widget Function(DiffThread thread)? threadBuilder;
+
+  /// Builds the inline widget for a queued draft comment. Required whenever
+  /// [draftComments] is non-empty.
+  final Widget Function(DraftComment comment)? draftBuilder;
+
   const DiffViewer({
     super.key,
     required this.diff,
     this.mode = DiffViewMode.unified,
+    this.threads = const [],
+    this.draftComments = const [],
+    this.onAddComment,
+    this.threadBuilder,
+    this.draftBuilder,
   });
 
   // Diff add/del colours (copied verbatim from the original tool-block renderer).
@@ -115,6 +216,34 @@ class DiffViewer extends StatelessWidget {
     return rows;
   }
 
+  /// Resolve the ([line], [side]) an add-comment affordance / anchor should use
+  /// for [row], or null when the row has no concrete line number (e.g. hunk
+  /// headers). Additions and context anchor to the RIGHT (new) side; deletions
+  /// anchor to the LEFT (old) side.
+  static ({int line, String side})? _rowAnchor(DiffLine row) {
+    switch (row.type) {
+      case DiffLineType.addition:
+      case DiffLineType.context:
+        if (row.newLineNo != null) return (line: row.newLineNo!, side: 'RIGHT');
+        return null;
+      case DiffLineType.deletion:
+        if (row.oldLineNo != null) return (line: row.oldLineNo!, side: 'LEFT');
+        return null;
+      case DiffLineType.hunk:
+        return null;
+    }
+  }
+
+  /// True when [row] is the anchor row for a thread/draft with ([line], [side]).
+  ///
+  /// side=="RIGHT" anchors to the row whose newLineNo == line; side=="LEFT"
+  /// anchors to the row whose oldLineNo == line.
+  static bool _rowMatches(DiffLine row, int? line, String side) {
+    if (line == null) return false;
+    if (side == 'LEFT') return row.oldLineNo == line;
+    return row.newLineNo == line; // RIGHT (default)
+  }
+
   @override
   Widget build(BuildContext context) {
     final rows = _parse(diff);
@@ -126,27 +255,82 @@ class DiffViewer extends StatelessWidget {
     });
     final gutterChars = maxLineNo.toString().length;
 
+    // Track which threads/drafts found an anchor row; anything left over is
+    // rendered as "outdated" below the diff so nothing is silently dropped.
+    final anchoredThreads = <DiffThread>{};
+    final anchoredDrafts = <DraftComment>{};
+
     final colors = context.appColors;
+
+    final children = <Widget>[];
+    for (final row in rows) {
+      children.add(
+        mode == DiffViewMode.split
+            ? _buildSplitRow(context, row, gutterChars)
+            : _buildUnifiedRow(context, row, gutterChars),
+      );
+
+      // Inline existing threads anchored to this row.
+      if (threadBuilder != null) {
+        for (final t in threads) {
+          if (anchoredThreads.contains(t)) continue;
+          if (_rowMatches(row, t.line, t.side)) {
+            anchoredThreads.add(t);
+            children.add(threadBuilder!(t));
+          }
+        }
+      }
+
+      // Inline queued draft comments anchored to this row.
+      if (draftBuilder != null) {
+        for (final d in draftComments) {
+          if (anchoredDrafts.contains(d)) continue;
+          if (_rowMatches(row, d.line, d.side)) {
+            anchoredDrafts.add(d);
+            children.add(draftBuilder!(d));
+          }
+        }
+      }
+    }
+
+    // Threads whose anchor row was not found (outdated / wrong file slice).
+    final outdated = threadBuilder == null
+        ? const <DiffThread>[]
+        : threads.where((t) => !anchoredThreads.contains(t)).toList();
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 2, 12, 10),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(kRadiusSmall),
-        child: Container(
-          width: double.infinity,
-          decoration: BoxDecoration(
-            border: Border.all(color: colors.divider),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          ClipRRect(
             borderRadius: BorderRadius.circular(kRadiusSmall),
+            child: Container(
+              width: double.infinity,
+              decoration: BoxDecoration(
+                border: Border.all(color: colors.divider),
+                borderRadius: BorderRadius.circular(kRadiusSmall),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: children,
+              ),
+            ),
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              for (final row in rows)
-                mode == DiffViewMode.split
-                    ? _buildSplitRow(context, row, gutterChars)
-                    : _buildUnifiedRow(context, row, gutterChars),
-            ],
-          ),
-        ),
+          if (outdated.isNotEmpty) ...[
+            const SizedBox(height: kGapTight),
+            Text(
+              'Outdated threads',
+              style: TextStyle(
+                color: colors.textMuted,
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: kGapInline),
+            for (final t in outdated) threadBuilder!(t),
+          ],
+        ],
       ),
     );
   }
@@ -186,6 +370,7 @@ class DiffViewer extends StatelessWidget {
         newGutter = (row.newLineNo?.toString() ?? '').padLeft(gutterChars);
     }
 
+    final anchor = _rowAnchor(row);
     return Container(
       color: bgColor,
       padding: const EdgeInsets.fromLTRB(8, 1, 8, 1),
@@ -210,7 +395,30 @@ class DiffViewer extends StatelessWidget {
           Expanded(
             child: Text(row.text, style: _monoStyle.copyWith(color: textColor)),
           ),
+          if (onAddComment != null && anchor != null)
+            _addCommentButton(context, anchor),
         ],
+      ),
+    );
+  }
+
+  /// A compact "add inline comment" affordance shown at the end of a diff row.
+  Widget _addCommentButton(
+    BuildContext context,
+    ({int line, String side}) anchor,
+  ) {
+    final colors = context.appColors;
+    return SizedBox(
+      width: 18,
+      height: 16,
+      child: IconButton(
+        padding: EdgeInsets.zero,
+        constraints: const BoxConstraints(),
+        iconSize: 13,
+        splashRadius: 12,
+        tooltip: 'Comment on line ${anchor.line}',
+        icon: Icon(Icons.add_comment_outlined, color: colors.textMuted),
+        onPressed: () => onAddComment!(anchor.line, anchor.side),
       ),
     );
   }
@@ -274,6 +482,7 @@ class DiffViewer extends StatelessWidget {
         newText2 = colors.toolOutputText;
     }
 
+    final anchor = _rowAnchor(row);
     return Row(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -298,6 +507,11 @@ class DiffViewer extends StatelessWidget {
             gutterChars: gutterChars,
           ),
         ),
+        if (onAddComment != null && anchor != null)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 2),
+            child: _addCommentButton(context, anchor),
+          ),
       ],
     );
   }
