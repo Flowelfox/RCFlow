@@ -772,6 +772,13 @@ class ClaudeCodeAgent:
                                     "tool_input": tool_input,
                                 },
                             )
+                            # A Claude Code native background command (``Bash`` with
+                            # ``run_in_background``) finishes between turns and wakes
+                            # the model.  Count it so the between-turns drain stays
+                            # alive to stream the completion + continuation instead of
+                            # leaving them buffered until the next user message.
+                            if tool_name == "Bash" and tool_input.get("run_in_background"):
+                                session._pending_bg_tasks += 1
                             # Snapshot file before Edit/Write so we can compute
                             # a diff once the tool_result arrives.
                             if tool_name in ("Edit", "Write") and isinstance(tool_input.get("file_path"), str):
@@ -845,6 +852,16 @@ class ClaudeCodeAgent:
                             # Resolved AskUserQuestion — the widget already shows
                             # the answer; drop the synthetic result from the chat.
                             session._question_tool_use_id = None
+                        elif block.get("task_notification"):
+                            # A Claude Code native background command finished (not an
+                            # RCFlow Monitor — its id isn't tracked).  Clear the pending
+                            # count so the drain can stop, and relabel the output (it is
+                            # not a "Monitor").
+                            session._pending_bg_tasks = max(0, session._pending_bg_tasks - 1)
+                            verb = block.get("task_verb", "exited")
+                            summary = block.get("task_summary", "")
+                            content = f"Background task {verb}: {summary}" if summary else f"Background task {verb}"
+                            await self._process_tool_result(session, content, bool(block.get("is_error", False)))
                         else:
                             await self._process_tool_result(
                                 session,
@@ -1203,6 +1220,9 @@ class ClaudeCodeAgent:
         Called from session-end / interrupt / pause hooks so persistent or
         in-flight monitors do not look perpetually alive in the UI.
         """
+        # A terminated/paused session must not keep the between-turns drain alive
+        # waiting on a background command that will never report now.
+        session._pending_bg_tasks = 0
         if not session._active_monitors:
             return
         live = list(session._active_monitors.items())
@@ -1427,11 +1447,18 @@ class ClaudeCodeAgent:
             SessionStatus.FAILED,
             SessionStatus.PAUSED,
         )
-        while session._active_monitors and executor.is_running:
+        while (session._active_monitors or session._pending_bg_tasks > 0) and executor.is_running:
             if session.status in terminal_statuses:
                 return
             try:
-                await self._relay_claude_code_stream(session, executor.read_more_events())
+                # While a Claude Code native background command is pending, stream
+                # the FULL continuation (the model's woken response), not just the
+                # Monitor-style user/tool_result events — otherwise it buffers in
+                # the queue until the next user message.
+                include_assistant = session._pending_bg_tasks > 0
+                await self._relay_claude_code_stream(
+                    session, executor.read_more_events(include_assistant=include_assistant)
+                )
             except asyncio.CancelledError:
                 raise
             except Exception:

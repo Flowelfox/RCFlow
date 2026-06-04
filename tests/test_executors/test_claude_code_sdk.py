@@ -138,21 +138,14 @@ class TestTaskNotificationMapping:
 
     def test_completed_maps_to_clean_terminal(self):
         events = sdk_message_to_events(_task_notification(status="completed", summary="done"))
-        assert events == [
-            {
-                "type": "user",
-                "message": {
-                    "content": [
-                        {
-                            "type": "tool_result",
-                            "tool_use_id": "tu_mon",
-                            "content": "Monitor exited: done",
-                            "is_error": False,
-                        }
-                    ]
-                },
-            }
-        ]
+        block = events[0]["message"]["content"][0]
+        assert block["tool_use_id"] == "tu_mon"
+        assert block["content"] == "Monitor exited: done"
+        assert block["is_error"] is False
+        # Tagged so the relay can tell a native background command from a Monitor.
+        assert block["task_notification"] is True
+        assert block["task_verb"] == "exited"
+        assert block["task_summary"] == "done"
 
     def test_stopped_is_terminal_and_error(self):
         ev = sdk_message_to_events(_task_notification(status="stopped", summary="killed"))[0]

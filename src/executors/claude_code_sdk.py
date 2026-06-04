@@ -143,6 +143,13 @@ def sdk_message_to_events(message: Message) -> list[dict[str, Any]]:
                             "tool_use_id": message.tool_use_id,
                             "content": f"Monitor {verb}: {message.summary}",
                             "is_error": message.status != "completed",
+                            # Marks a between-turns task terminal so the relay can
+                            # tell an RCFlow Monitor watch (tracked in
+                            # ``_active_monitors``) from a Claude Code native
+                            # background command (which is not) and relabel it.
+                            "task_notification": True,
+                            "task_verb": verb,
+                            "task_summary": message.summary,
                         }
                     ]
                 },
@@ -376,16 +383,22 @@ class ClaudeCodeSdkExecutor(BaseExecutor):
         async for chunk in self._stream_turn(prompt, options):
             yield chunk
 
-    async def read_more_events(self) -> AsyncGenerator[ExecutionChunk, None]:
+    async def read_more_events(self, *, include_assistant: bool = False) -> AsyncGenerator[ExecutionChunk, None]:
         """Drain between-turn messages from the persistent reader's queue.
 
-        Called repeatedly by ``_drain_monitor_events`` while a Monitor watch is
-        live.  Yields only ``user`` (tool_result) events — i.e. Monitor events
-        and the synthesised ``TaskNotificationMessage`` terminal that ends the
-        watch (``MONITOR_END``).  The model's between-turn "Monitor event" wake
-        narration and per-notification ``result`` events are dropped so the chat
-        is not spammed.  Returns on an idle gap so the drain loop can re-check
-        ``_active_monitors`` (it exits once the terminal empties them).
+        Called repeatedly by ``_drain_monitor_events`` between turns.  By default
+        yields only ``user`` (tool_result) events — RCFlow Monitor ticks and the
+        synthesised ``TaskNotificationMessage`` terminal (``MONITOR_END``) — and
+        drops the model's per-event "Monitor event" wake narration / ``result``
+        events so a high-frequency watch does not spam the chat.
+
+        With ``include_assistant=True`` it yields **all** event types, so the
+        model's *continuation* turn after a Claude Code native background command
+        completes (assistant text + tool calls + ``result``) streams live instead
+        of buffering in the queue until the next user message.
+
+        Returns on an idle gap so the drain loop can re-check whether anything is
+        still pending.
         """
         if self._queue is None:
             return
@@ -398,7 +411,7 @@ class ClaudeCodeSdkExecutor(BaseExecutor):
                 self._connected = False
                 return
             for event in sdk_message_to_events(message):
-                if event.get("type") == "user":
+                if include_assistant or event.get("type") == "user":
                     yield _event_chunk(event)
 
     async def send_input(self, data: str) -> None:

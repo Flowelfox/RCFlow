@@ -173,6 +173,13 @@ class ActiveSession:
         # Persists across turns — a monitor may keep emitting events while the
         # outer assistant continues other work.  Cleared by session-end hooks.
         self._active_monitors: dict[str, MonitorState] = {}
+        # Count of Claude Code *native* background commands (``Bash`` with
+        # ``run_in_background``) whose completion is still pending.  Unlike an
+        # RCFlow Monitor these register nothing in ``_active_monitors``; the count
+        # keeps the between-turns drain alive so the task's completion *and the
+        # model's continuation* stream live instead of buffering until the next
+        # user message.
+        self._pending_bg_tasks: int = 0
         # Fenced code blocks extracted from the latest user prompt on the
         # LLM-mediated path. Consumed by ``PromptRouter._execute_tool`` when an
         # agent tool is invoked so verbatim code blocks always reach the
