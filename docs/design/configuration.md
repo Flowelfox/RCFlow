@@ -1,5 +1,5 @@
 ---
-updated: 2026-05-05
+updated: 2026-06-04
 ---
 
 # Configuration
@@ -52,6 +52,9 @@ All configuration is via environment variables, loaded from a `settings.json` fi
 | `LINEAR_API_KEY`        | no       |                 | Linear personal API token for issue sync |
 | `LINEAR_TEAM_ID`        | no       |                 | Optional. Linear team ID to restrict syncs to a specific team. When blank, issues are synced from all teams accessible via the API key. |
 | `LINEAR_SYNC_ON_STARTUP`| no       | `false`         | Automatically sync Linear issues from API on server startup |
+| `GITHUB_TOKEN`          | no       |                 | GitHub personal access token used to review pull requests (needs `repo` + `read:org` scope) |
+| `GITHUB_DEFAULT_REPO`   | no       |                 | Optional. Default repository in `owner/name` form to scope pull-request listing. When blank, all accessible repositories are used. |
+| `GITHUB_SYNC_ON_STARTUP`| no       | `false`         | Automatically sync GitHub pull requests from API on server startup |
 | `UPNP_ENABLED`          | no       | `false`         | Enable UPnP IGD port forwarding. When true, the worker asks the local router to forward an external port to its internal `RCFLOW_PORT` on startup and releases it on shutdown. Non-fatal if no IGD is discovered. Also togglable via `rcflow run --upnp` / `--no-upnp`. |
 | `UPNP_LEASE_SECONDS`    | no       | `3600`          | Router-side lease duration for the UPnP mapping. Service renews at 50% of this value. `0` = permanent (not accepted by all routers). |
 | `UPNP_DISCOVERY_TIMEOUT_MS` | no   | `2000`          | SSDP M-SEARCH timeout (ms) for IGD discovery. Increase on slow or congested LANs. |

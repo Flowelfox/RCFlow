@@ -31,6 +31,7 @@ class PaneNavEntry {
   final String? taskId;
   final String? artifactId;
   final String? linearIssueId;
+  final String? githubPrId;
 
   /// Tool name when [paneType] is [PaneType.workerSettings].
   /// One of ``"claude_code"``, ``"codex"``, or ``"opencode"``.
@@ -46,6 +47,7 @@ class PaneNavEntry {
     this.taskId,
     this.artifactId,
     this.linearIssueId,
+    this.githubPrId,
     this.workerSettingsTool,
     this.workerSettingsSection,
   });
@@ -221,6 +223,18 @@ class PaneState extends ChangeNotifier {
 
   void clearLinearIssueId() {
     _view.linearIssueId = null;
+    notifyListeners();
+  }
+
+  String? get githubPrId => _view.githubPrId;
+
+  void setGithubPrId(String? githubPrId) {
+    _view.githubPrId = githubPrId;
+    notifyListeners();
+  }
+
+  void clearGithubPrId() {
+    _view.githubPrId = null;
     notifyListeners();
   }
 
@@ -1130,7 +1144,10 @@ class PaneState extends ChangeNotifier {
     try {
       _ws?.interruptSubprocess(sid);
     } catch (e) {
-      _msg.addSystemMessage('Failed to interrupt subprocess: $e', isError: true);
+      _msg.addSystemMessage(
+        'Failed to interrupt subprocess: $e',
+        isError: true,
+      );
     }
   }
 

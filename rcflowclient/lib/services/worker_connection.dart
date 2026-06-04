@@ -86,8 +86,7 @@ class WorkerConnection extends ChangeNotifier {
   /// Increment the generation counter for *scope* and notify listeners so
   /// any open dynamic-model dropdown re-fetches.
   void bumpModelCatalog(String scope) {
-    modelCatalogGeneration[scope] =
-        (modelCatalogGeneration[scope] ?? 0) + 1;
+    modelCatalogGeneration[scope] = (modelCatalogGeneration[scope] ?? 0) + 1;
     notifyListeners();
   }
 
@@ -142,7 +141,7 @@ class WorkerConnection extends ChangeNotifier {
   /// ``session_update`` broadcast.  Consumers use this to rehydrate the
   /// pinned queue on reconnect.  See ``Queued User Messages`` in ``docs/design/sessions.md``.
   void Function(String sessionId, List<Map<String, dynamic>> snapshot)?
-      onQueuedMessagesSnapshot;
+  onQueuedMessagesSnapshot;
 
   // Pending auto-load session after connect
   String? _pendingAutoLoadSessionId;
@@ -213,6 +212,7 @@ class WorkerConnection extends ChangeNotifier {
       ws.listSessions(offset: 0, limit: _sessionPageSize);
       ws.listTasks();
       ws.listLinearIssues();
+      ws.listGithubPrs();
       ws.requestArtifacts();
       _fetchServerInfo();
       _fetchTokenLimits();
@@ -390,7 +390,9 @@ class WorkerConnection extends ChangeNotifier {
       // badges (list responses don't always include the full badge set).
       // Badges are overwritten by individual session_update messages that
       // always carry the authoritative badge list.
-      if (parsed.badges.isEmpty && existing != null && existing.badges.isNotEmpty) {
+      if (parsed.badges.isEmpty &&
+          existing != null &&
+          existing.badges.isNotEmpty) {
         parsed = parsed.copyWith(badges: existing.badges);
       }
       // Preserve pending ScheduleWakeup timers when the list response omits
@@ -852,7 +854,9 @@ class WorkerConnection extends ChangeNotifier {
   ) {
     final p = (provider ?? '').toLowerCase();
     if (p == 'none' || p == 'bedrock') return true;
-    if (p == 'anthropic') return anthropicKey != null && anthropicKey.isNotEmpty;
+    if (p == 'anthropic') {
+      return anthropicKey != null && anthropicKey.isNotEmpty;
+    }
     if (p == 'openai') return openaiKey != null && openaiKey.isNotEmpty;
     // Unknown provider — assume configured; server-side init will raise if
     // it's actually wrong.

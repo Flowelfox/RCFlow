@@ -1,5 +1,5 @@
 ---
-updated: 2026-06-02
+updated: 2026-06-04
 ---
 
 # WebSocket API
@@ -26,7 +26,7 @@ Streaming protocol for prompts (input) and responses + live state (output). Two 
   - [`question_answer`, `interactive_response`](#input-text-protocol)
   - [`permission_response`](#input-text-protocol)
   - [`subscribe`, `unsubscribe`, `subscribe_all`](#session-subscription)
-  - [`list_sessions`, `list_tasks`, `list_artifacts`, `list_linear_issues`](#session-list)
+  - [`list_sessions`, `list_tasks`, `list_artifacts`, `list_linear_issues`, `list_github_prs`](#session-list)
 - **Output messages (server → client)**
   - [`text_chunk`, `tool_start`, `tool_output`, `error`](#output-text-protocol)
   - [`session_end_ask`, `session_end`, `summary`, `turn_complete`](#output-text-protocol)
@@ -42,6 +42,7 @@ Streaming protocol for prompts (input) and responses + live state (output). Two 
   - [`task_list`, `task_update`, `task_deleted`](#task-messages)
   - [`artifact_list`, `artifact_deleted`](#artifact-messages)
   - [`linear_issue_*`](linear.md#websocket-messages)
+  - [`github_pr_list`, `github_pr_update`, `github_pr_deleted`](github.md#websocket-messages)
 - **Reference**
   - [Error codes](#output-text-protocol) (search `Recognised error codes`)
   - [Task status transitions](#task-status-transitions)

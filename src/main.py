@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from src.api.http import router as http_router
+from src.api.integrations.github import router as github_router
 from src.api.integrations.linear import router as linear_router
 from src.api.routes.dashboard import router as dashboard_router
 from src.api.ws.input_text import router as input_text_router
@@ -329,6 +330,33 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         _bg_tasks.add(_t)
         _t.add_done_callback(_bg_tasks.discard)
 
+    # GitHub startup sync (non-blocking background task)
+    if settings.GITHUB_SYNC_ON_STARTUP and settings.GITHUB_TOKEN:
+        from src.api.integrations.github import _pr_to_dict, _upsert_prs  # noqa: PLC0415
+        from src.services.github_service import GitHubService as _GitHubService  # noqa: PLC0415
+        from src.services.github_service import GitHubServiceError as _GitHubServiceError  # noqa: PLC0415
+
+        async def _run_github_startup_sync() -> None:
+            repo = settings.GITHUB_DEFAULT_REPO or None
+            try:
+                parsed = []
+                async with _GitHubService(settings.GITHUB_TOKEN) as svc:
+                    for r in ("for_me", "created"):
+                        parsed.extend(await svc.list_pull_requests(r, repo=repo))
+                async with db_session_factory() as db:
+                    upserted = await _upsert_prs(db, settings.RCFLOW_BACKEND_ID, parsed)
+                for row in upserted:
+                    session_manager.broadcast_github_pr_update(_pr_to_dict(row))
+                logger.info("GitHub startup sync: %d PRs", len(upserted))
+            except _GitHubServiceError as exc:
+                logger.warning("GitHub startup sync failed: %s", exc)
+            except Exception as exc:
+                logger.warning("GitHub startup sync unexpected error: %s", exc)
+
+        _gt = asyncio.create_task(_run_github_startup_sync())
+        _bg_tasks.add(_gt)
+        _gt.add_done_callback(_bg_tasks.discard)
+
     yield
 
     # Shutdown
@@ -382,6 +410,7 @@ def create_app() -> FastAPI:
 
     app.include_router(http_router)
     app.include_router(linear_router)
+    app.include_router(github_router)
     app.include_router(dashboard_router)
     app.include_router(input_text_router)
     app.include_router(output_text_router)

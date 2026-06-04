@@ -15,6 +15,7 @@ import 'session_panel.dart' show TerminalDragData;
 import 'session_panel/task_drag_data.dart';
 import 'artifact_pane.dart';
 import 'linear_issue_pane.dart';
+import 'pr_review/pr_review_pane.dart';
 import 'statistics_pane.dart';
 import 'task_pane.dart';
 import 'terminal_pane.dart';
@@ -121,6 +122,7 @@ class _SessionPaneState extends State<SessionPane> {
           final isTaskPane = paneType == PaneType.task;
           final isArtifactPane = paneType == PaneType.artifact;
           final isLinearIssuePane = paneType == PaneType.linearIssue;
+          final isPrReviewPane = paneType == PaneType.prReview;
           final isWorkerSettingsPane = paneType == PaneType.workerSettings;
           final terminalInfo = isTerminalPane
               ? appState.getTerminalPaneInfo(widget.pane.paneId)
@@ -176,6 +178,11 @@ class _SessionPaneState extends State<SessionPane> {
                         )
                       : isLinearIssuePane
                       ? LinearIssuePane(
+                          paneId: widget.pane.paneId,
+                          pane: widget.pane,
+                        )
+                      : isPrReviewPane
+                      ? PrReviewPane(
                           paneId: widget.pane.paneId,
                           pane: widget.pane,
                         )
@@ -253,11 +260,8 @@ class _OutputWithRightPanelsState extends State<_OutputWithRightPanels> {
                   onHorizontalDragStart: (_) =>
                       setState(() => _dragging = true),
                   onHorizontalDragUpdate: (details) {
-                    final newWidth =
-                        (pane.rightPanelWidth - details.delta.dx).clamp(
-                          PaneState.rightPanelMinWidth,
-                          dynamicMax,
-                        );
+                    final newWidth = (pane.rightPanelWidth - details.delta.dx)
+                        .clamp(PaneState.rightPanelMinWidth, dynamicMax);
                     pane.setRightPanelWidth(newWidth);
                   },
                   onHorizontalDragEnd: (_) => setState(() => _dragging = false),
@@ -384,7 +388,10 @@ class _BookmarkTab extends StatelessWidget {
         borderRadius: const BorderRadius.horizontal(left: Radius.circular(6)),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 150),
-          padding: const EdgeInsets.symmetric(horizontal: kSpace1, vertical: 10),
+          padding: const EdgeInsets.symmetric(
+            horizontal: kSpace1,
+            vertical: 10,
+          ),
           decoration: BoxDecoration(
             color: isActive
                 ? context.appColors.bgSurface

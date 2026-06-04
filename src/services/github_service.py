@@ -1,0 +1,448 @@
+"""GitHub REST + GraphQL API client.
+
+Wraps the GitHub API using httpx.  All methods are async.  Authentication uses
+a Personal Access Token (PAT) passed as the ``Authorization`` header.
+
+The PR-review feature reads simple resources (pull-request lists, files, diffs)
+and performs all writes (review comments, review submission, merge) over the
+**REST v3** API, and reads review threads — the one place where resolved-state
+and line anchoring are coherent — over the **GraphQL v4** API.  This module is
+the single entry point for both; Phase 0 ships the transport + auth check only,
+later phases add the PR/review methods on top of :meth:`_rest` / :meth:`_gql`.
+
+Usage::
+
+    async with GitHubService(token="ghp_...") as gh:
+        user = await gh.test_token()  # -> {"login": "...", ...}
+"""
+
+from __future__ import annotations
+
+import logging
+from datetime import UTC, datetime
+from typing import Any
+
+import httpx
+
+logger = logging.getLogger(__name__)
+
+GITHUB_API_URL = "https://api.github.com"
+GITHUB_GRAPHQL_URL = "https://api.github.com/graphql"
+# Pin the REST media type + API version so responses are stable across GitHub's
+# rolling API changes (https://docs.github.com/en/rest/about-the-rest-api/api-versions).
+GITHUB_API_VERSION = "2022-11-28"
+
+# Listing buckets — map to GitHub search qualifiers.
+PR_ROLE_QUALIFIERS: dict[str, str] = {
+    "for_me": "review-requested:@me",
+    "created": "author:@me",
+}
+
+
+def _parse_dt(value: str | None) -> datetime:
+    if not value:
+        return datetime.now(UTC)
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return datetime.now(UTC)
+
+
+def _parse_pull(pr: dict[str, Any]) -> dict[str, Any]:
+    """Normalise a REST pull-request object to a github_prs-ready dict.
+
+    ``role`` is left unset — the caller stamps the listing bucket.  ``additions``
+    / ``deletions`` / ``changed_files`` are only present on the detail endpoint
+    (``GET .../pulls/{n}``), not on search items.
+    """
+    base = pr.get("base") or {}
+    head = pr.get("head") or {}
+    base_repo = base.get("repo") or {}
+    user = pr.get("user") or {}
+    merged = bool(pr.get("merged") or pr.get("merged_at"))
+
+    return {
+        "github_id": pr["node_id"],
+        "repo_owner": (base_repo.get("owner") or {}).get("login", ""),
+        "repo_name": base_repo.get("name", ""),
+        "number": pr["number"],
+        "title": pr.get("title", ""),
+        "body": pr.get("body"),
+        "state": "merged" if merged else pr.get("state", "open"),
+        "draft": bool(pr.get("draft", False)),
+        "author": user.get("login", ""),
+        "author_avatar_url": user.get("avatar_url"),
+        "url": pr.get("html_url", ""),
+        "base_ref": base.get("ref", ""),
+        "head_ref": head.get("ref", ""),
+        "head_sha": head.get("sha", ""),
+        "additions": pr.get("additions", 0),
+        "deletions": pr.get("deletions", 0),
+        "changed_files": pr.get("changed_files", 0),
+        "created_at": _parse_dt(pr.get("created_at")),
+        "updated_at": _parse_dt(pr.get("updated_at")),
+    }
+
+
+def _parse_file(f: dict[str, Any]) -> dict[str, Any]:
+    """Normalise a REST PR-file object.
+
+    ``patch`` IS a unified diff (absent for binary or oversized files).
+    """
+    return {
+        "filename": f.get("filename", ""),
+        "previous_filename": f.get("previous_filename"),
+        "status": f.get("status", ""),  # added|modified|removed|renamed|...
+        "additions": f.get("additions", 0),
+        "deletions": f.get("deletions", 0),
+        "changes": f.get("changes", 0),
+        "patch": f.get("patch"),
+        "sha": f.get("sha", ""),
+        "blob_url": f.get("blob_url"),
+    }
+
+
+_THREADS_QUERY = """
+query Threads($owner: String!, $repo: String!, $number: Int!) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      reviewThreads(first: 100) {
+        nodes {
+          id
+          isResolved
+          isOutdated
+          path
+          line
+          diffSide
+          comments(first: 50) {
+            nodes {
+              id
+              databaseId
+              author { login }
+              body
+              createdAt
+            }
+          }
+        }
+      }
+    }
+  }
+}
+"""
+
+_RESOLVE_THREAD_MUTATION = """
+mutation Resolve($threadId: ID!) {
+  resolveReviewThread(input: { threadId: $threadId }) {
+    thread { id isResolved }
+  }
+}
+"""
+
+_UNRESOLVE_THREAD_MUTATION = """
+mutation Unresolve($threadId: ID!) {
+  unresolveReviewThread(input: { threadId: $threadId }) {
+    thread { id isResolved }
+  }
+}
+"""
+
+
+def _parse_thread(node: dict[str, Any]) -> dict[str, Any]:
+    """Normalise a GraphQL reviewThread node.
+
+    ``thread_id`` is the GraphQL node id (needed to resolve/unresolve); each
+    comment carries both its node ``id`` and REST ``database_id`` because
+    replies go through REST (databaseId) while thread resolution is GraphQL.
+    """
+    comments = (node.get("comments") or {}).get("nodes", [])
+    return {
+        "thread_id": node["id"],
+        "is_resolved": bool(node.get("isResolved")),
+        "is_outdated": bool(node.get("isOutdated")),
+        "path": node.get("path"),
+        "line": node.get("line"),
+        "side": node.get("diffSide"),  # LEFT|RIGHT
+        "comments": [
+            {
+                "id": c["id"],
+                "database_id": c.get("databaseId"),
+                "author": (c.get("author") or {}).get("login", ""),
+                "body": c.get("body", ""),
+                "created_at": c.get("createdAt"),
+            }
+            for c in comments
+        ],
+    }
+
+
+def _repo_ref_from_search_item(item: dict[str, Any]) -> tuple[str, str, int]:
+    """Extract (owner, repo, number) from a /search/issues PR item.
+
+    ``repository_url`` looks like ``https://api.github.com/repos/<owner>/<name>``.
+    """
+    repo_url = item.get("repository_url", "")
+    owner, name = "", ""
+    marker = "/repos/"
+    if marker in repo_url:
+        tail = repo_url.split(marker, 1)[1]
+        parts = tail.split("/")
+        if len(parts) >= 2:
+            owner, name = parts[0], parts[1]
+    return owner, name, int(item["number"])
+
+
+class GitHubServiceError(Exception):
+    """Raised when the GitHub API returns an error response."""
+
+    def __init__(self, message: str, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
+class GitHubService:
+    """Async client for the GitHub REST + GraphQL APIs.
+
+    Can be used as an async context manager or standalone (call :meth:`aclose`
+    when done).  Authentication is a Personal Access Token; the same token is
+    used for both the REST and GraphQL endpoints.
+    """
+
+    def __init__(self, token: str) -> None:
+        self._client = httpx.AsyncClient(
+            headers={
+                "Authorization": f"token {token}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": GITHUB_API_VERSION,
+            },
+            timeout=30.0,
+        )
+
+    async def _rest(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        json: dict[str, Any] | None = None,
+    ) -> Any:
+        """Execute a REST request and return the decoded JSON body.
+
+        ``path`` is either an absolute URL or a path relative to
+        :data:`GITHUB_API_URL` (e.g. ``"/user"`` or ``"/repos/o/r/pulls"``).
+        Raises :class:`GitHubServiceError` on transport or HTTP-status errors.
+        """
+        url = path if path.startswith("http") else f"{GITHUB_API_URL}{path}"
+        try:
+            resp = await self._client.request(method, url, params=params, json=json)
+        except httpx.TimeoutException as exc:
+            raise GitHubServiceError("GitHub API request timed out") from exc
+        except httpx.RequestError as exc:
+            raise GitHubServiceError(f"GitHub API request failed: {exc}") from exc
+
+        self._raise_for_status(resp)
+        if resp.status_code == 204 or not resp.content:
+            return None
+        return resp.json()
+
+    async def _gql(self, query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Execute a GraphQL request and return the ``data`` payload."""
+        payload: dict[str, Any] = {"query": query}
+        if variables:
+            payload["variables"] = variables
+
+        try:
+            resp = await self._client.post(GITHUB_GRAPHQL_URL, json=payload)
+        except httpx.TimeoutException as exc:
+            raise GitHubServiceError("GitHub API request timed out") from exc
+        except httpx.RequestError as exc:
+            raise GitHubServiceError(f"GitHub API request failed: {exc}") from exc
+
+        self._raise_for_status(resp)
+        body = resp.json()
+        if body.get("errors"):
+            msgs = "; ".join(e.get("message", "unknown") for e in body["errors"])
+            raise GitHubServiceError(f"GitHub GraphQL error: {msgs}")
+        return body.get("data", {})
+
+    @staticmethod
+    def _raise_for_status(resp: httpx.Response) -> None:
+        """Translate non-2xx GitHub responses into :class:`GitHubServiceError`."""
+        if resp.status_code == 401:
+            raise GitHubServiceError("GitHub token is invalid or expired", status_code=401)
+        if resp.status_code == 403:
+            # 403 doubles as the rate-limit signal on GitHub.
+            if resp.headers.get("X-RateLimit-Remaining") == "0":
+                raise GitHubServiceError("GitHub API rate limit exceeded", status_code=403)
+            raise GitHubServiceError("GitHub API access forbidden (check token scopes)", status_code=403)
+        if resp.status_code >= 400:
+            raise GitHubServiceError(f"GitHub API returned HTTP {resp.status_code}", status_code=resp.status_code)
+
+    async def test_token(self) -> dict[str, Any]:
+        """Verify the token and return the authenticated user.
+
+        Returns the ``GET /user`` payload (``login``, ``id``, ``name``, …).
+        Raises :class:`GitHubServiceError` if the token is missing scopes or
+        invalid — used by the integration ``status`` endpoint as a preflight.
+        """
+        user = await self._rest("GET", "/user")
+        logger.info("GitHub token validated for user %s", user.get("login"))
+        return user
+
+    async def list_pull_requests(self, role: str, repo: str | None = None) -> list[dict[str, Any]]:
+        """List open pull requests for a listing bucket.
+
+        ``role`` is ``"for_me"`` (review-requested) or ``"created"`` (authored).
+        Searches via ``/search/issues`` then fetches each PR's detail so the
+        cache holds complete metadata (additions/deletions/base/head). PR review
+        lists are small, so the per-PR detail fetch is acceptable for the MVP.
+        Optionally scoped to a single ``owner/name`` ``repo``.
+        """
+        qualifier = PR_ROLE_QUALIFIERS.get(role)
+        if qualifier is None:
+            raise GitHubServiceError(f"Unknown PR role: {role!r}")
+        query = f"is:pr is:open {qualifier}"
+        if repo:
+            query += f" repo:{repo}"
+
+        data = await self._rest(
+            "GET", "/search/issues", params={"q": query, "sort": "updated", "order": "desc", "per_page": 50}
+        )
+        prs: list[dict[str, Any]] = []
+        for item in data.get("items", []):
+            owner, name, number = _repo_ref_from_search_item(item)
+            if not owner or not name:
+                continue
+            full = await self.get_pull_request(owner, name, number)
+            full["role"] = role
+            prs.append(full)
+        logger.info("Fetched %d GitHub PRs for role=%s", len(prs), role)
+        return prs
+
+    async def get_pull_request(self, owner: str, repo: str, number: int) -> dict[str, Any]:
+        """Fetch a single pull request's full detail (normalised)."""
+        pr = await self._rest("GET", f"/repos/{owner}/{repo}/pulls/{number}")
+        return _parse_pull(pr)
+
+    async def list_pr_files(self, owner: str, repo: str, number: int) -> list[dict[str, Any]]:
+        """List the changed files of a pull request (paginated).
+
+        Each entry's ``patch`` is the file's unified diff (absent for binary or
+        oversized files), which feeds the client diff viewer directly.
+        """
+        files: list[dict[str, Any]] = []
+        page = 1
+        while True:
+            batch = await self._rest(
+                "GET", f"/repos/{owner}/{repo}/pulls/{number}/files", params={"per_page": 100, "page": page}
+            )
+            if not batch:
+                break
+            files.extend(_parse_file(f) for f in batch)
+            if len(batch) < 100:
+                break
+            page += 1
+        return files
+
+    async def get_pr_diff(self, owner: str, repo: str, number: int) -> str:
+        """Fetch a pull request's whole-PR unified diff as raw text.
+
+        Uses the ``application/vnd.github.diff`` media type rather than JSON.
+        """
+        url = f"{GITHUB_API_URL}/repos/{owner}/{repo}/pulls/{number}"
+        try:
+            resp = await self._client.get(url, headers={"Accept": "application/vnd.github.diff"})
+        except httpx.TimeoutException as exc:
+            raise GitHubServiceError("GitHub API request timed out") from exc
+        except httpx.RequestError as exc:
+            raise GitHubServiceError(f"GitHub API request failed: {exc}") from exc
+        self._raise_for_status(resp)
+        return resp.text
+
+    # ------------------------------------------------------------------
+    # Review threads (read = GraphQL, write = REST)
+    # ------------------------------------------------------------------
+
+    async def list_review_threads(self, owner: str, repo: str, number: int) -> list[dict[str, Any]]:
+        """List a pull request's review threads (inline comment conversations).
+
+        Read via GraphQL — the only API where resolved-state and line anchoring
+        are coherent. Returns normalised thread dicts (see :func:`_parse_thread`).
+        """
+        data = await self._gql(_THREADS_QUERY, {"owner": owner, "repo": repo, "number": number})
+        pr = ((data.get("repository") or {}).get("pullRequest")) or {}
+        nodes = (pr.get("reviewThreads") or {}).get("nodes", [])
+        return [_parse_thread(n) for n in nodes]
+
+    async def create_review(
+        self,
+        owner: str,
+        repo: str,
+        number: int,
+        *,
+        event: str,
+        body: str = "",
+        comments: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Submit a pull-request review.
+
+        ``event`` is ``APPROVE``, ``REQUEST_CHANGES`` or ``COMMENT``. ``comments``
+        are inline comments, each ``{path, line, side, body}`` (``side`` is
+        ``LEFT``/``RIGHT``); they post against the PR's latest commit.
+        """
+        if event not in ("APPROVE", "REQUEST_CHANGES", "COMMENT"):
+            raise GitHubServiceError(f"Invalid review event: {event!r}")
+        payload: dict[str, Any] = {"event": event}
+        if body:
+            payload["body"] = body
+        if comments:
+            payload["comments"] = comments
+        return await self._rest("POST", f"/repos/{owner}/{repo}/pulls/{number}/reviews", json=payload)
+
+    async def reply_review_comment(
+        self, owner: str, repo: str, number: int, comment_id: int, body: str
+    ) -> dict[str, Any]:
+        """Reply to an existing review-thread comment (by its REST database id)."""
+        return await self._rest(
+            "POST",
+            f"/repos/{owner}/{repo}/pulls/{number}/comments/{comment_id}/replies",
+            json={"body": body},
+        )
+
+    async def resolve_thread(self, thread_id: str, *, resolved: bool = True) -> dict[str, Any]:
+        """Resolve or unresolve a review thread (by its GraphQL node id)."""
+        mutation = _RESOLVE_THREAD_MUTATION if resolved else _UNRESOLVE_THREAD_MUTATION
+        return await self._gql(mutation, {"threadId": thread_id})
+
+    async def merge_pull_request(
+        self,
+        owner: str,
+        repo: str,
+        number: int,
+        *,
+        method: str = "squash",
+        commit_title: str | None = None,
+        commit_message: str | None = None,
+    ) -> dict[str, Any]:
+        """Merge a pull request.
+
+        ``method`` is ``merge``, ``squash`` or ``rebase``. Raises
+        :class:`GitHubServiceError` (405) if the PR is not mergeable.
+        """
+        if method not in ("merge", "squash", "rebase"):
+            raise GitHubServiceError(f"Invalid merge method: {method!r}")
+        payload: dict[str, Any] = {"merge_method": method}
+        if commit_title:
+            payload["commit_title"] = commit_title
+        if commit_message:
+            payload["commit_message"] = commit_message
+        return await self._rest("PUT", f"/repos/{owner}/{repo}/pulls/{number}/merge", json=payload)
+
+    async def aclose(self) -> None:
+        """Close the underlying async client."""
+        await self._client.aclose()
+
+    async def __aenter__(self) -> GitHubService:
+        return self
+
+    async def __aexit__(self, *_: object) -> None:
+        await self.aclose()

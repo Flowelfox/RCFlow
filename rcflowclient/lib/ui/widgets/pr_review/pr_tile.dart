@@ -1,0 +1,159 @@
+import 'package:flutter/material.dart';
+
+import '../../../models/github_pr_info.dart';
+import '../../../state/app_state.dart';
+import '../../../theme.dart';
+import '../session_panel/helpers.dart';
+
+/// Sidebar tile for a single cached GitHub pull request.
+class PrTile extends StatelessWidget {
+  final GithubPrInfo pr;
+  final AppState state;
+  final VoidCallback? onSelected;
+
+  const PrTile({
+    super.key,
+    required this.pr,
+    required this.state,
+    this.onSelected,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isViewed = _isPrViewed();
+    final isActive = _isPrActive();
+    final (badgeLabel, badgeColor) = _stateBadge(context);
+
+    return Container(
+      decoration: BoxDecoration(
+        color: isActive
+            ? context.appColors.accent.withAlpha(25)
+            : isViewed
+            ? context.appColors.accent.withAlpha(12)
+            : null,
+        border: isActive
+            ? Border(
+                left: BorderSide(color: context.appColors.accent, width: 3),
+              )
+            : isViewed
+            ? Border(
+                left: BorderSide(
+                  color: context.appColors.accent.withAlpha(80),
+                  width: 2,
+                ),
+              )
+            : null,
+      ),
+      child: ListTile(
+        leading: Container(
+          width: 30,
+          height: 30,
+          decoration: BoxDecoration(
+            color: badgeColor.withAlpha(30),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Icon(_stateIcon(), color: badgeColor, size: 16),
+        ),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+              decoration: BoxDecoration(
+                color: context.appColors.bgElevated,
+                borderRadius: BorderRadius.circular(4),
+                border: Border.all(
+                  color: context.appColors.divider,
+                  width: 0.5,
+                ),
+              ),
+              child: Text(
+                '#${pr.number}',
+                style: TextStyle(
+                  color: context.appColors.textMuted,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                pr.title,
+                style: TextStyle(
+                  color: isActive
+                      ? context.appColors.accentLight
+                      : context.appColors.textPrimary,
+                  fontSize: 12,
+                  fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+        subtitle: Text(
+          _subtitle(badgeLabel),
+          style: TextStyle(color: context.appColors.textMuted, fontSize: 10),
+        ),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              '+${pr.additions}',
+              style: const TextStyle(color: Color(0xFF56D364), fontSize: 10),
+            ),
+            const SizedBox(width: 4),
+            Text(
+              '-${pr.deletions}',
+              style: const TextStyle(color: Color(0xFFF85149), fontSize: 10),
+            ),
+          ],
+        ),
+        dense: true,
+        visualDensity: const VisualDensity(vertical: -4),
+        contentPadding: const EdgeInsets.only(left: 16, right: 8),
+        onTap: () {
+          state.openGithubPrInPane(pr.id);
+          onSelected?.call();
+        },
+      ),
+    );
+  }
+
+  bool _isPrViewed() {
+    for (final pane in state.panes.values) {
+      if (pane.githubPrId == pr.id) return true;
+    }
+    return false;
+  }
+
+  bool _isPrActive() {
+    if (state.hasNoPanes) return false;
+    return state.activePane.githubPrId == pr.id;
+  }
+
+  IconData _stateIcon() {
+    if (pr.isMerged) return Icons.merge_type;
+    if (pr.state == 'closed') return Icons.cancel_outlined;
+    if (pr.draft) return Icons.edit_note;
+    return Icons.call_merge;
+  }
+
+  (String, Color) _stateBadge(BuildContext context) {
+    if (pr.isMerged) return ('Merged', const Color(0xFF8B5CF6));
+    if (pr.state == 'closed') return ('Closed', const Color(0xFFEF4444));
+    if (pr.draft) return ('Draft', const Color(0xFF6B7280));
+    return ('Open', const Color(0xFF10B981));
+  }
+
+  String _subtitle(String badgeLabel) {
+    final local = pr.updatedAt.toLocal();
+    final time =
+        '${monthAbbr(local.month)} ${local.day}, '
+        '${local.hour.toString().padLeft(2, '0')}:'
+        '${local.minute.toString().padLeft(2, '0')}';
+    return '${pr.repoSlug} · $badgeLabel · $time';
+  }
+}

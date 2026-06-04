@@ -1468,6 +1468,55 @@ class RestClient {
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // GitHub integration
+  // ---------------------------------------------------------------------------
+
+  /// Fetch the GitHub integration status.
+  ///
+  /// Returns a map describing whether a token is configured and the last sync
+  /// time, e.g. `{"configured": true, "synced_at": "..."}`.
+  Future<Map<String, dynamic>> fetchGithubStatus() async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url = _serverUrl!.http('/api/integrations/github/status');
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.getUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      final response = await request.close();
+      final body = await response.transform(utf8.decoder).join();
+      if (response.statusCode != 200) {
+        throw Exception('Server returned ${response.statusCode}: $body');
+      }
+      return jsonDecode(body) as Map<String, dynamic>;
+    } finally {
+      client.close();
+    }
+  }
+
+  /// Fetch the changed files (with unified-diff patches) for a cached PR.
+  ///
+  /// Returns `{"pr_id": "...", "files": [...], "total": N}`. Each file entry has
+  /// `filename`, `previous_filename`, `status`, `additions`, `deletions`,
+  /// `changes`, `patch` (nullable for binary/large files), `sha`, `blob_url`.
+  Future<Map<String, dynamic>> getGithubPrFiles(String prId) async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url = _serverUrl!.http('/api/integrations/github/prs/$prId/files');
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.getUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      final response = await request.close();
+      final body = await response.transform(utf8.decoder).join();
+      if (response.statusCode != 200) {
+        throw Exception('Server returned ${response.statusCode}: $body');
+      }
+      return jsonDecode(body) as Map<String, dynamic>;
+    } finally {
+      client.close();
+    }
+  }
+
   Future<Map<String, dynamic>> getArtifacts({
     String? search,
     int limit = 100,

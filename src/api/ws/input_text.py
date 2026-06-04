@@ -10,6 +10,7 @@ from sqlalchemy import select
 from src.api.deps import handle_ws_first_message_auth, verify_ws_api_key
 from src.core.attachment_store import AttachmentStore, ResolvedAttachment
 from src.core.session import SessionStatus
+from src.database.models import GitHubPR as GitHubPRModel
 from src.database.models import LinearIssue as LinearIssueModel
 
 logger = logging.getLogger(__name__)
@@ -378,6 +379,25 @@ async def ws_input_text(
                     await websocket.send_json({"type": "linear_issue_list", "issues": issues_out})
                 else:
                     await websocket.send_json({"type": "linear_issue_list", "issues": []})
+                continue
+
+            if msg_type == "list_github_prs":
+                from src.api.integrations.github import _pr_to_dict  # noqa: PLC0415
+
+                db_session_factory = websocket.app.state.db_session_factory
+                if db_session_factory is not None:
+                    settings = websocket.app.state.settings
+                    async with db_session_factory() as db:
+                        stmt = (
+                            select(GitHubPRModel)
+                            .where(GitHubPRModel.backend_id == settings.RCFLOW_BACKEND_ID)
+                            .order_by(GitHubPRModel.updated_at.desc())
+                        )
+                        pr_rows = (await db.execute(stmt)).scalars().all()
+                        prs_out = [_pr_to_dict(p) for p in pr_rows]
+                    await websocket.send_json({"type": "github_pr_list", "prs": prs_out})
+                else:
+                    await websocket.send_json({"type": "github_pr_list", "prs": []})
                 continue
 
             if msg_type == "start_plan_session":

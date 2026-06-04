@@ -411,6 +411,15 @@ class WebSocketService {
     _transport.sendOutput({'type': 'list_linear_issues'});
   }
 
+  void listGithubPrs() {
+    _transport.sendOutput({'type': 'list_github_prs'});
+  }
+
+  Future<Map<String, dynamic>> fetchGithubStatus() => _rest.fetchGithubStatus();
+
+  Future<Map<String, dynamic>> getGithubPrFiles(String prId) =>
+      _rest.getGithubPrFiles(prId);
+
   Future<Map<String, dynamic>> syncLinearIssues() => _rest.syncLinearIssues();
 
   Future<Map<String, dynamic>> createLinearIssue({

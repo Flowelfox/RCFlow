@@ -1,5 +1,5 @@
 ---
-updated: 2026-04-26
+updated: 2026-06-04
 ---
 
 # HTTP API
@@ -176,6 +176,27 @@ Linux/macOS only.
 ## Linear Integration
 
 All under `/api/integrations/linear/`. See [Linear Integration](linear.md#http-endpoints) for full table.
+
+## GitHub Integration
+
+All under `/api/integrations/github/`. See [GitHub Integration](github.md).
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET  | `/api/integrations/github/status`            | Yes | Token configured + validity preflight (returns `{configured, valid, login}`) |
+| POST | `/api/integrations/github/sync`              | Yes | Re-sync open PRs from GitHub. Optional `?role=for_me\|created` (default both). Returns `{synced}` |
+| GET  | `/api/integrations/github/prs`               | Yes | List cached PRs. Optional `?role=`, `?state=`, `?q=`. Returns `{prs, total}` |
+| GET  | `/api/integrations/github/prs/{id}`          | Yes | Single cached PR by local UUID |
+| GET  | `/api/integrations/github/prs/{id}/files`    | Yes | Live changed files (each with a per-file unified-diff `patch`). Returns `{pr_id, files, total}` |
+| GET  | `/api/integrations/github/prs/{id}/diff`     | Yes | Live whole-PR unified diff as raw text. Returns `{pr_id, diff}` |
+| GET  | `/api/integrations/github/prs/{id}/threads`  | Yes | Live inline review threads (path, line, side, resolved/outdated, comments). Returns `{pr_id, threads, total}` |
+| GET/PATCH | `/api/integrations/github/prs/{id}/draft` | Yes | Get / update the local pending review (verdict + summary body) |
+| POST | `/api/integrations/github/prs/{id}/draft/comments`         | Yes | Queue an inline comment `{path, line, side, body}` on the draft |
+| DELETE | `/api/integrations/github/prs/{id}/draft/comments/{index}` | Yes | Remove a queued inline comment |
+| POST | `/api/integrations/github/prs/{id}/review`   | Yes | Submit the review (`event` APPROVE/REQUEST_CHANGES/COMMENT) with queued comments; clears the draft |
+| POST | `/api/integrations/github/prs/{id}/comments/{comment_id}/reply` | Yes | Reply to a review-thread comment |
+| POST | `/api/integrations/github/prs/{id}/threads/{thread_id}/resolve` | Yes | Resolve / unresolve a thread (`?resolved=`) |
+| POST | `/api/integrations/github/prs/{id}/merge`    | Yes | Merge the PR (`method` merge/squash/rebase, default squash) |
 
 ## Auth header
 

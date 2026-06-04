@@ -5,10 +5,12 @@ import 'package:flutter/widgets.dart';
 import 'dart:math';
 
 import '../models/artifact_info.dart';
+import '../models/github_pr_info.dart';
 import '../models/linear_issue_info.dart';
 import 'clipboard_paste_controller.dart';
 import 'toast_notifier.dart';
 import 'stores/artifact_store.dart';
+import 'stores/github_pr_store.dart';
 import 'stores/linear_issue_store.dart';
 import 'stores/project_data_cache.dart';
 import 'stores/task_store.dart';
@@ -566,6 +568,90 @@ class AppState extends ChangeNotifier implements PaneHost {
     if (_paneTypes[paneId] != PaneType.linearIssue) return;
     _paneTypes.remove(paneId);
     _panes[paneId]?.clearLinearIssueId();
+    notifyListeners();
+  }
+
+  // --- GitHub PR tracking ---
+  final GithubPrStore _githubPrStore = GithubPrStore();
+
+  /// All GitHub PRs sorted by updatedAt descending.
+  List<GithubPrInfo> get githubPrs => _githubPrStore.all();
+
+  /// GitHub PRs grouped by workerId (for sidebar display).
+  Map<String, List<GithubPrInfo>> get githubPrsByWorker =>
+      _githubPrStore.byWorker(_registry.configs);
+
+  GithubPrInfo? getGithubPr(String prId) => _githubPrStore.get(prId);
+
+  void _handleGithubPrList(List<dynamic> list, String workerId) {
+    _githubPrStore.replaceWorker(workerId, _workerName(workerId), list);
+    notifyListeners();
+  }
+
+  void _handleGithubPrUpdate(Map<String, dynamic> msg, String workerId) {
+    final prId = msg['id'] as String?;
+    if (prId == null) return;
+    _githubPrStore.upsert(
+      GithubPrInfo.fromJson(
+        msg,
+        workerId: workerId,
+        workerName: _workerName(workerId),
+      ),
+    );
+    notifyListeners();
+  }
+
+  void _handleGithubPrDeleted(Map<String, dynamic> msg) {
+    final prId = msg['id'] as String?;
+    if (prId == null) return;
+    _githubPrStore.remove(prId);
+
+    // Close any pane currently viewing this PR
+    for (final entry in _panes.entries.toList()) {
+      if (_paneTypes[entry.key] == PaneType.prReview &&
+          entry.value.githubPrId == prId) {
+        closeGithubPrView(entry.key);
+      }
+    }
+    notifyListeners();
+  }
+
+  /// Show a GitHub PR review in the active pane (converting it in-place).
+  void openGithubPrInPane(String prId) {
+    if (_splitRoot != null && _panes.containsKey(_activePaneId)) {
+      activePane.pushNavHistory(_currentNavEntry(_activePaneId));
+
+      if (_paneTypes[_activePaneId] == PaneType.terminal) {
+        for (final info in _terminals.values) {
+          if (info.paneId == _activePaneId) {
+            info.paneId = null;
+            break;
+          }
+        }
+      }
+      _paneTypes[_activePaneId] = PaneType.prReview;
+      activePane.setGithubPrId(prId);
+      notifyListeners();
+      return;
+    }
+
+    // No panes — create one
+    final newId = 'pane_${_nextPaneId++}';
+    final newPane = PaneState(paneId: newId, host: this)
+      ..addListener(_onPaneChanged);
+    _panes[newId] = newPane;
+    _paneTypes[newId] = PaneType.prReview;
+    newPane.setGithubPrId(prId);
+    _splitRoot = PaneLeaf(newId);
+    _activePaneId = newId;
+    notifyListeners();
+  }
+
+  /// Close a GitHub PR review pane (convert to chat).
+  void closeGithubPrView(String paneId) {
+    if (_paneTypes[paneId] != PaneType.prReview) return;
+    _paneTypes.remove(paneId);
+    _panes[paneId]?.clearGithubPrId();
     notifyListeners();
   }
 
@@ -1204,13 +1290,15 @@ class AppState extends ChangeNotifier implements PaneHost {
         taskId: closedTaskId,
         artifactId: closedArtifactId,
         linearIssueId: pane.linearIssueId,
+        githubPrId: pane.githubPrId,
       );
       // Only record if the pane had meaningful state
       if (record.sessionId != null ||
           record.terminalId != null ||
           record.taskId != null ||
           record.artifactId != null ||
-          record.linearIssueId != null) {
+          record.linearIssueId != null ||
+          record.githubPrId != null) {
         _closedPaneHistory.add(record);
         if (_closedPaneHistory.length > _maxClosedPaneHistory) {
           _closedPaneHistory.removeAt(0);
@@ -1304,6 +1392,21 @@ class AppState extends ChangeNotifier implements PaneHost {
         } else {
           splitPane(_activePaneId, SplitAxis.horizontal);
           openLinearIssueInPane(record.linearIssueId!);
+        }
+        return;
+      }
+      reopenLastClosedPane();
+      return;
+    }
+
+    // GitHub PR pane: reopen if the PR still exists
+    if (record.paneType == PaneType.prReview && record.githubPrId != null) {
+      if (_githubPrStore.get(record.githubPrId!) != null) {
+        if (hasNoPanes) {
+          openGithubPrInPane(record.githubPrId!);
+        } else {
+          splitPane(_activePaneId, SplitAxis.horizontal);
+          openGithubPrInPane(record.githubPrId!);
         }
         return;
       }
@@ -1705,6 +1808,15 @@ class AppState extends ChangeNotifier implements PaneHost {
       case WsOutputType.linearIssueDeleted:
         _handleLinearIssueDeleted(msg);
         return;
+      case WsOutputType.githubPrList:
+        _handleGithubPrList(msg['prs'] as List<dynamic>? ?? [], workerId);
+        return;
+      case WsOutputType.githubPrUpdate:
+        _handleGithubPrUpdate(msg, workerId);
+        return;
+      case WsOutputType.githubPrDeleted:
+        _handleGithubPrDeleted(msg);
+        return;
       default:
         break; // fall through to per-pane dispatch
     }
@@ -1882,6 +1994,7 @@ class AppState extends ChangeNotifier implements PaneHost {
         pane.clearTaskId();
         pane.clearArtifactId();
         pane.clearLinearIssueId();
+        pane.clearGithubPrId();
         if (entry.sessionId != null) {
           pane.switchSession(entry.sessionId!, recordHistory: false);
         } else {
@@ -1890,22 +2003,32 @@ class AppState extends ChangeNotifier implements PaneHost {
       case PaneType.task:
         _paneTypes[paneId] = PaneType.task;
         pane.clearArtifactId();
+        pane.clearGithubPrId();
         pane.setTaskId(entry.taskId);
       case PaneType.artifact:
         _paneTypes[paneId] = PaneType.artifact;
         pane.clearTaskId();
         pane.clearLinearIssueId();
+        pane.clearGithubPrId();
         pane.setArtifactId(entry.artifactId);
       case PaneType.linearIssue:
         _paneTypes[paneId] = PaneType.linearIssue;
         pane.clearTaskId();
         pane.clearArtifactId();
+        pane.clearGithubPrId();
         pane.setLinearIssueId(entry.linearIssueId);
+      case PaneType.prReview:
+        _paneTypes[paneId] = PaneType.prReview;
+        pane.clearTaskId();
+        pane.clearArtifactId();
+        pane.clearLinearIssueId();
+        pane.setGithubPrId(entry.githubPrId);
       case PaneType.workerSettings:
         _paneTypes[paneId] = PaneType.workerSettings;
         pane.clearTaskId();
         pane.clearArtifactId();
         pane.clearLinearIssueId();
+        pane.clearGithubPrId();
         if (entry.workerSettingsTool != null) {
           pane.setWorkerSettings(
             entry.workerSettingsTool!,
@@ -1931,6 +2054,7 @@ class AppState extends ChangeNotifier implements PaneHost {
       taskId: pane?.taskId,
       artifactId: pane?.artifactId,
       linearIssueId: pane?.linearIssueId,
+      githubPrId: pane?.githubPrId,
       workerSettingsTool: pane?.workerSettingsTool,
       workerSettingsSection: pane?.workerSettingsSection,
     );
@@ -2077,6 +2201,7 @@ class _ClosedPaneRecord {
   final String? taskId;
   final String? artifactId;
   final String? linearIssueId;
+  final String? githubPrId;
 
   const _ClosedPaneRecord({
     this.sessionId,
@@ -2086,5 +2211,6 @@ class _ClosedPaneRecord {
     this.taskId,
     this.artifactId,
     this.linearIssueId,
+    this.githubPrId,
   });
 }

@@ -1,5 +1,5 @@
 ---
-updated: 2026-04-26
+updated: 2026-06-04
 ---
 
 # Database Schema
@@ -202,6 +202,64 @@ CREATE TABLE linear_issues (
 );
 CREATE INDEX ix_linear_issues_backend_id ON linear_issues(backend_id);
 CREATE INDEX ix_linear_issues_state_type ON linear_issues(state_type);
+```
+
+### `github_prs` table
+
+Cached GitHub pull-request metadata (synced from the GitHub API). Diffs and
+file patches are fetched live; only metadata is cached. See [GitHub Integration](github.md).
+
+```sql
+CREATE TABLE github_prs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    backend_id VARCHAR(36) NOT NULL,
+    github_id VARCHAR(255) NOT NULL,         -- PR GraphQL node id (stable across renames)
+    repo_owner VARCHAR(255) NOT NULL,
+    repo_name VARCHAR(255) NOT NULL,
+    number INTEGER NOT NULL,                 -- PR number within the repo
+    title VARCHAR(500) NOT NULL,
+    body TEXT,
+    state VARCHAR(20) NOT NULL,              -- open|closed|merged
+    draft BOOLEAN NOT NULL DEFAULT FALSE,
+    author VARCHAR(255) NOT NULL,
+    author_avatar_url TEXT,
+    url TEXT NOT NULL,                       -- html_url
+    base_ref VARCHAR(255) NOT NULL DEFAULT '',
+    head_ref VARCHAR(255) NOT NULL DEFAULT '',
+    head_sha VARCHAR(64) NOT NULL DEFAULT '',
+    additions INTEGER NOT NULL DEFAULT 0,
+    deletions INTEGER NOT NULL DEFAULT 0,
+    changed_files INTEGER NOT NULL DEFAULT 0,
+    role VARCHAR(20) NOT NULL DEFAULT '',    -- last-synced listing bucket: for_me|created
+    created_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL,
+    synced_at TIMESTAMPTZ NOT NULL,
+    task_id UUID REFERENCES tasks(id) ON DELETE SET NULL,
+    UNIQUE(backend_id, github_id)
+);
+CREATE INDEX ix_github_prs_backend_id ON github_prs(backend_id);
+CREATE INDEX ix_github_prs_role ON github_prs(role);
+CREATE INDEX ix_github_prs_state ON github_prs(state);
+```
+
+### `github_review_drafts` table
+
+A human's in-progress review of a PR before it is submitted to GitHub — the
+overall verdict, summary body, and queued inline comments. One draft per
+`(backend_id, pr_id)`, cleared on submit. See [GitHub Integration](github.md).
+
+```sql
+CREATE TABLE github_review_drafts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    backend_id VARCHAR(36) NOT NULL,
+    pr_id UUID NOT NULL REFERENCES github_prs(id) ON DELETE CASCADE,
+    event VARCHAR(20) NOT NULL DEFAULT 'COMMENT',  -- APPROVE|REQUEST_CHANGES|COMMENT
+    body TEXT NOT NULL DEFAULT '',
+    comments TEXT NOT NULL DEFAULT '[]',           -- JSON array of {path, line, side, body}
+    created_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL,
+    UNIQUE(backend_id, pr_id)
+);
 ```
 
 ### `session_turns` table

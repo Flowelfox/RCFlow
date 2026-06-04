@@ -13,6 +13,7 @@ import '../../dialogs/worker_edit_dialog.dart';
 import '../../onboarding_keys.dart' as onboarding;
 import '../notification_toast.dart';
 import '../settings_menu.dart';
+import '../pr_review/pr_list_panel.dart';
 import 'artifact_list_panel.dart';
 import 'helpers.dart';
 import 'task_list_panel.dart';
@@ -196,7 +197,7 @@ class _SessionListPanelState extends State<SessionListPanel>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 4, vsync: this);
     final settings = Provider.of<AppState>(context, listen: false).settings;
     _workerSearchQuery = settings.workersFilterSearch;
     _workerSearchController.text = _workerSearchQuery;
@@ -251,6 +252,7 @@ class _SessionListPanelState extends State<SessionListPanel>
                     Tab(text: 'Workers'),
                     Tab(text: 'Tasks'),
                     Tab(text: 'Artifacts'),
+                    Tab(text: 'Pull Requests'),
                   ],
                 ),
               ),
@@ -271,6 +273,8 @@ class _SessionListPanelState extends State<SessionListPanel>
               TaskListPanel(onTaskSelected: widget.onSessionSelected),
               // Artifacts tab
               ArtifactListPanel(onArtifactSelected: widget.onSessionSelected),
+              // Pull Requests tab
+              PrListPanel(onPrSelected: widget.onSessionSelected),
             ],
           ),
         ),
@@ -655,7 +659,9 @@ class _SessionListPanelState extends State<SessionListPanel>
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: context.appColors.bgSurface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(kRadiusLarge)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(kRadiusLarge),
+        ),
         title: Text(
           'End $count session${count == 1 ? '' : 's'}',
           style: TextStyle(color: context.appColors.textPrimary, fontSize: 16),
@@ -744,10 +750,7 @@ class _SessionListPanelState extends State<SessionListPanel>
       collapsedProjects: _collapsedWorkerProjects[config.id] ?? const {},
       onProjectToggle: (collapseKey) {
         setState(() {
-          final set = _collapsedWorkerProjects.putIfAbsent(
-            config.id,
-            () => {},
-          );
+          final set = _collapsedWorkerProjects.putIfAbsent(config.id, () => {});
           if (set.contains(collapseKey)) {
             set.remove(collapseKey);
           } else {
@@ -874,10 +877,8 @@ class _SessionListPanelState extends State<SessionListPanel>
                       k == LogicalKeyboardKey.metaLeft ||
                       k == LogicalKeyboardKey.metaRight,
                 )) {
-              final isUp =
-                  event.logicalKey == LogicalKeyboardKey.arrowUp;
-              final isDown =
-                  event.logicalKey == LogicalKeyboardKey.arrowDown;
+              final isUp = event.logicalKey == LogicalKeyboardKey.arrowUp;
+              final isDown = event.logicalKey == LogicalKeyboardKey.arrowDown;
               if (isUp || isDown) {
                 _handleKeyboardReorder(state, isUp: isUp);
                 return KeyEventResult.handled;
@@ -1044,7 +1045,9 @@ class _SessionListPanelState extends State<SessionListPanel>
                               children: [
                                 for (final status in _statusOrder)
                                   Padding(
-                                    padding: const EdgeInsets.only(right: kSpace1),
+                                    padding: const EdgeInsets.only(
+                                      right: kSpace1,
+                                    ),
                                     child: _SessionStatusFilterChip(
                                       label: _statusLabels[status]!,
                                       color: _statusColors[status]!,
@@ -1168,7 +1171,10 @@ class _SidebarNotifications extends StatelessWidget {
           children: [
             const Divider(height: 1),
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: kSpace2, vertical: 6),
+              padding: const EdgeInsets.symmetric(
+                horizontal: kSpace2,
+                vertical: 6,
+              ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [

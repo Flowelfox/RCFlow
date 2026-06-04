@@ -50,6 +50,9 @@ enum WsOutputType {
   linearIssueList,
   linearIssueUpdate,
   linearIssueDeleted,
+  githubPrList,
+  githubPrUpdate,
+  githubPrDeleted,
 
   // --- Diagnostic / log (silently consumed, not rendered) ---
   agentLog,
@@ -58,8 +61,7 @@ enum WsOutputType {
   sessionList,
   sessionUpdate,
   sessionReorder,
-  draftUpdate,
-  ;
+  draftUpdate;
 
   /// Parse a raw JSON type string. Returns null for unknown types so callers
   /// can handle the unknown-type path explicitly without try/catch.
@@ -104,6 +106,9 @@ enum WsOutputType {
       'linear_issue_list' => WsOutputType.linearIssueList,
       'linear_issue_update' => WsOutputType.linearIssueUpdate,
       'linear_issue_deleted' => WsOutputType.linearIssueDeleted,
+      'github_pr_list' => WsOutputType.githubPrList,
+      'github_pr_update' => WsOutputType.githubPrUpdate,
+      'github_pr_deleted' => WsOutputType.githubPrDeleted,
       'agent_log' => WsOutputType.agentLog,
       'session_list' => WsOutputType.sessionList,
       'session_update' => WsOutputType.sessionUpdate,
