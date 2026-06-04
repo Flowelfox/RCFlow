@@ -1623,7 +1623,10 @@ class RCFlowMacOSGUI:
         return img
 
     def _update_tray_status(self) -> None:
-        running = self._server.is_running()
+        # Use the combined check (GUI child OR adopted service) — matching the
+        # dashboard.  ``_server.is_running()`` alone is False for a service-owned
+        # worker, which left the tray menu showing "Stopped" while the worker ran.
+        running = self._worker_running()
         if self._ns_status_text is not None:
             with contextlib.suppress(Exception):
                 text = "RCFlow Worker: Running" if running else "RCFlow Worker: Stopped"
