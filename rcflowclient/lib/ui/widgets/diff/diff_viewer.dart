@@ -64,6 +64,24 @@ class DiffThread {
   });
 }
 
+/// Identifies the diff row that currently has an open inline comment composer.
+///
+/// Anchored exactly like [DraftComment]: side "LEFT" matches the row whose
+/// `oldLineNo == line`, side "RIGHT" matches the row whose `newLineNo == line`.
+class ComposerAnchor {
+  final String path;
+  final int line;
+
+  /// "LEFT" or "RIGHT".
+  final String side;
+
+  const ComposerAnchor({
+    required this.path,
+    required this.line,
+    required this.side,
+  });
+}
+
 /// A locally-queued (not-yet-submitted) inline comment.
 class DraftComment {
   /// Index of this comment in the backend draft's `comments` list. Used as the
@@ -136,6 +154,15 @@ class DiffViewer extends StatelessWidget {
   /// [draftComments] is non-empty.
   final Widget Function(DraftComment comment)? draftBuilder;
 
+  /// The diff row that currently has an open inline comment composer, or null
+  /// when no composer is open. Anchored with the same row-matching logic as
+  /// [draftComments]. Defaults to null (e.g. in tool blocks).
+  final ComposerAnchor? composerAnchor;
+
+  /// Builds the inline composer widget rendered immediately after the row that
+  /// [composerAnchor] points at. Required whenever [composerAnchor] is set.
+  final Widget Function(ComposerAnchor anchor)? composerBuilder;
+
   const DiffViewer({
     super.key,
     required this.diff,
@@ -145,6 +172,8 @@ class DiffViewer extends StatelessWidget {
     this.onAddComment,
     this.threadBuilder,
     this.draftBuilder,
+    this.composerAnchor,
+    this.composerBuilder,
   });
 
   // Diff add/del colours (copied verbatim from the original tool-block renderer).
@@ -259,6 +288,8 @@ class DiffViewer extends StatelessWidget {
     // rendered as "outdated" below the diff so nothing is silently dropped.
     final anchoredThreads = <DiffThread>{};
     final anchoredDrafts = <DraftComment>{};
+    // Whether the single inline composer (if any) has been placed yet.
+    var composerRendered = false;
 
     final colors = context.appColors;
 
@@ -290,6 +321,16 @@ class DiffViewer extends StatelessWidget {
             children.add(draftBuilder!(d));
           }
         }
+      }
+
+      // Inline composer anchored to this row (at most one).
+      final anchor = composerAnchor;
+      if (composerBuilder != null &&
+          anchor != null &&
+          !composerRendered &&
+          _rowMatches(row, anchor.line, anchor.side)) {
+        composerRendered = true;
+        children.add(composerBuilder!(anchor));
       }
     }
 

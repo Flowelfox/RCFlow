@@ -6,6 +6,7 @@ import '../../services/websocket_service.dart';
 import '../../services/worker_connection.dart';
 import '../../theme.dart';
 import '../widgets/custom_title_bar.dart';
+import '../widgets/pr_review/github_scope_checklist.dart';
 import '../../theme/spacing.dart';
 
 part 'config_layout.dart';
@@ -466,8 +467,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
     if (_codingAgentToolNames.contains(toolName) &&
         _effectiveToolProvider(toolName).isEmpty) {
       setState(() {
-        _toolSettingsError[toolName] =
-            'Pick a provider before saving.';
+        _toolSettingsError[toolName] = 'Pick a provider before saving.';
       });
       return;
     }
@@ -890,6 +890,8 @@ class ServerConfigContentState extends State<ServerConfigContent> {
         return Icons.inventory_2_outlined;
       case 'Linear':
         return Icons.dashboard_outlined;
+      case 'GitHub':
+        return Icons.merge_type;
       case 'Logging':
         return Icons.receipt_long_outlined;
       default:
@@ -1038,7 +1040,9 @@ class ServerConfigContentState extends State<ServerConfigContent> {
                               vertical: kSpace2,
                             ),
                             shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(kRadiusMedium),
+                              borderRadius: BorderRadius.circular(
+                                kRadiusMedium,
+                              ),
                             ),
                           ),
                           child: _saving
@@ -1338,9 +1342,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
                 label: 'Uninstall',
                 loading: isUninstalling,
                 accent: false,
-                onPressed: isUninstalling
-                    ? null
-                    : () => _confirmUninstall(key),
+                onPressed: isUninstalling ? null : () => _confirmUninstall(key),
               ),
               if (updateAvailable && installed) ...[
                 const SizedBox(width: kGapTight),
@@ -2267,7 +2269,10 @@ class ServerConfigContentState extends State<ServerConfigContent> {
               borderSide: BorderSide.none,
               borderRadius: BorderRadius.circular(8),
             ),
-            contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: kSpace2),
+            contentPadding: EdgeInsets.symmetric(
+              horizontal: 10,
+              vertical: kSpace2,
+            ),
           ),
         );
       case 'model_select':
@@ -2323,7 +2328,10 @@ class ServerConfigContentState extends State<ServerConfigContent> {
               borderSide: BorderSide.none,
               borderRadius: BorderRadius.circular(8),
             ),
-            contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: kSpace2),
+            contentPadding: EdgeInsets.symmetric(
+              horizontal: 10,
+              vertical: kSpace2,
+            ),
           ),
         );
     }
@@ -2377,12 +2385,22 @@ class ServerConfigContentState extends State<ServerConfigContent> {
           onChanged: (v) => _onValueChanged(opt.key, v, opt.value),
         );
       case 'secret':
-        return _SecretField(
+        final secretField = _SecretField(
           option: opt,
           controller: _textControllers[opt.key]!,
           isModified: isModified,
           onChanged: (v) => _onValueChanged(opt.key, v, opt.value),
         );
+        if (opt.key == 'GITHUB_TOKEN') {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              secretField,
+              GithubScopeChecklist(ws: widget.ws),
+            ],
+          );
+        }
+        return secretField;
       case 'textarea':
         return _TextAreaField(
           option: opt,

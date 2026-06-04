@@ -16,6 +16,7 @@ from src.services.github_service import (
     _parse_pull,
     _parse_thread,
     _repo_ref_from_search_item,
+    evaluate_scopes,
 )
 
 # ---------------------------------------------------------------------------
@@ -175,6 +176,51 @@ class TestService:
         )
         with pytest.raises(GitHubServiceError, match="rate limit"):
             GitHubService._raise_for_status(resp)
+
+
+class TestScopes:
+    def test_evaluate_repo_and_org_satisfied(self):
+        r = evaluate_scopes(["repo", "read:org", "gist"])
+        assert r[0]["scope"] == "repo" and r[0]["satisfied"] is True and r[0]["required"] is True
+        assert r[1]["scope"] == "read:org" and r[1]["satisfied"] is True and r[1]["required"] is False
+
+    def test_public_repo_satisfies_repo(self):
+        r = evaluate_scopes(["public_repo"])
+        assert r[0]["satisfied"] is True  # alt scope counts
+        assert r[1]["satisfied"] is False
+
+    def test_empty_grants_unsatisfied(self):
+        r = evaluate_scopes([])
+        assert all(s["satisfied"] is False for s in r)
+
+    @pytest.mark.asyncio
+    async def test_token_info_classic_parses_scopes(self):
+        svc = GitHubService(token="x")
+        resp = httpx.Response(
+            200,
+            headers={"X-OAuth-Scopes": "repo, read:org, gist"},
+            json={"login": "alice"},
+            request=httpx.Request("GET", "https://api.github.com/user"),
+        )
+        svc._client.get = AsyncMock(return_value=resp)  # type: ignore[method-assign]
+        info = await svc.token_info()
+        assert info["login"] == "alice"
+        assert info["fine_grained"] is False
+        assert info["scopes"] == ["repo", "read:org", "gist"]
+        await svc.aclose()
+
+    @pytest.mark.asyncio
+    async def test_token_info_fine_grained_has_no_scope_header(self):
+        svc = GitHubService(token="x")
+        resp = httpx.Response(
+            200,
+            json={"login": "bob"},  # no X-OAuth-Scopes header
+            request=httpx.Request("GET", "https://api.github.com/user"),
+        )
+        svc._client.get = AsyncMock(return_value=resp)  # type: ignore[method-assign]
+        info = await svc.token_info()
+        assert info["fine_grained"] is True and info["scopes"] == []
+        await svc.aclose()
 
 
 # ---------------------------------------------------------------------------

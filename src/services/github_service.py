@@ -38,6 +38,40 @@ PR_ROLE_QUALIFIERS: dict[str, str] = {
     "created": "author:@me",
 }
 
+# Classic-PAT scopes the PR-review feature needs, in display order. ``alt`` is a
+# weaker scope that also satisfies the requirement (e.g. public-only access).
+REQUIRED_SCOPES: list[dict[str, Any]] = [
+    {
+        "scope": "repo",
+        "alt": "public_repo",
+        "required": True,
+        "description": "Read/write pull requests, merge, create, and push (use public_repo for public repos only)",
+    },
+    {
+        "scope": "read:org",
+        "alt": None,
+        "required": False,
+        "description": "Filter pull requests by review-requested and access org repositories",
+    },
+]
+
+
+def evaluate_scopes(granted: list[str]) -> list[dict[str, Any]]:
+    """Mark each required scope satisfied/unsatisfied against ``granted``."""
+    granted_set = set(granted)
+    result: list[dict[str, Any]] = []
+    for spec in REQUIRED_SCOPES:
+        ok = spec["scope"] in granted_set or (spec["alt"] is not None and spec["alt"] in granted_set)
+        result.append(
+            {
+                "scope": spec["scope"],
+                "description": spec["description"],
+                "required": spec["required"],
+                "satisfied": ok,
+            }
+        )
+    return result
+
 
 def _parse_dt(value: str | None) -> datetime:
     if not value:
@@ -287,6 +321,28 @@ class GitHubService:
         user = await self._rest("GET", "/user")
         logger.info("GitHub token validated for user %s", user.get("login"))
         return user
+
+    async def token_info(self) -> dict[str, Any]:
+        """Verify the token and report its login + granted classic-PAT scopes.
+
+        Classic PATs return their granted scopes in the ``X-OAuth-Scopes``
+        response header. Fine-grained PATs do not expose that header (their
+        access is repository permissions, not scopes), so ``fine_grained`` is
+        True and ``scopes`` is empty — the caller validates them functionally.
+        """
+        try:
+            resp = await self._client.get(f"{GITHUB_API_URL}/user")
+        except httpx.TimeoutException as exc:
+            raise GitHubServiceError("GitHub API request timed out") from exc
+        except httpx.RequestError as exc:
+            raise GitHubServiceError(f"GitHub API request failed: {exc}") from exc
+        self._raise_for_status(resp)
+
+        raw = resp.headers.get("X-OAuth-Scopes")
+        fine_grained = raw is None
+        scopes = [s.strip() for s in (raw or "").split(",") if s.strip()]
+        user = resp.json()
+        return {"login": user.get("login"), "scopes": scopes, "fine_grained": fine_grained}
 
     async def list_pull_requests(self, role: str, repo: str | None = None) -> list[dict[str, Any]]:
         """List open pull requests for a listing bucket.

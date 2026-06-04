@@ -38,7 +38,7 @@ from src.api.deps import verify_http_api_key
 from src.database.models import GitHubPR as GitHubPRModel
 from src.database.models import GitHubReviewDraft as GitHubReviewDraftModel
 from src.services import git_ops
-from src.services.github_service import GitHubService, GitHubServiceError
+from src.services.github_service import GitHubService, GitHubServiceError, evaluate_scopes
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -180,19 +180,44 @@ async def _upsert_prs(
     ),
 )
 async def github_status(request: Request) -> dict[str, Any]:
-    """Return GitHub token configuration + validity."""
+    """Return GitHub token configuration, validity, and a scope checklist.
+
+    ``scopes`` lists every scope the PR-review feature needs with a per-scope
+    ``satisfied`` flag (checked against the token's granted scopes). For
+    fine-grained tokens scopes are not enumerable, so ``fine_grained`` is True
+    and ``satisfied`` is null (validity is confirmed by the live API check).
+    """
     settings = request.app.state.settings
+    base_scopes = evaluate_scopes([])  # required list with satisfied=False as the unconfigured shape
     if not settings.GITHUB_TOKEN:
-        return {"configured": False, "valid": False, "login": None}
+        return {"configured": False, "valid": False, "login": None, "fine_grained": False, "scopes": base_scopes}
 
     svc = GitHubService(token=settings.GITHUB_TOKEN)
     try:
-        user = await svc.test_token()
+        info = await svc.token_info()
     except GitHubServiceError as exc:
-        return {"configured": True, "valid": False, "login": None, "error": str(exc)}
+        return {
+            "configured": True,
+            "valid": False,
+            "login": None,
+            "fine_grained": False,
+            "scopes": base_scopes,
+            "error": str(exc),
+        }
     finally:
         await svc.aclose()
-    return {"configured": True, "valid": True, "login": user.get("login")}
+
+    fine_grained = info["fine_grained"]
+    # Fine-grained tokens don't report scopes, so the boxes can't be ticked.
+    scopes = [{**s, "satisfied": None} for s in base_scopes] if fine_grained else evaluate_scopes(info["scopes"])
+    return {
+        "configured": True,
+        "valid": True,
+        "login": info["login"],
+        "fine_grained": fine_grained,
+        "granted": info["scopes"],
+        "scopes": scopes,
+    }
 
 
 @router.post(

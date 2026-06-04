@@ -8,6 +8,7 @@ import '../../../state/app_state.dart';
 import '../../../state/pane_state.dart';
 import '../../../theme.dart';
 import '../../../theme/spacing.dart';
+import '../collapsible_group_header.dart';
 import '../diff/diff_viewer.dart';
 import 'comment_thread.dart';
 import 'review_action_bar.dart';
@@ -91,6 +92,12 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
   List<Map<String, dynamic>> _files = [];
   int _selectedIndex = 0;
 
+  /// File-list layout: false = flat (full path per row), true = directory tree.
+  bool _treeView = false;
+
+  /// Directory paths currently collapsed in tree view (default = all expanded).
+  final Set<String> _collapsedDirs = {};
+
   /// All review threads for the PR (across files), mapped from the backend.
   List<DiffThread> _threads = [];
 
@@ -106,6 +113,14 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
   /// PR id the current [_files] belong to; guards against showing stale files
   /// after the pane is repointed at a different PR.
   String? _loadedPrId;
+
+  /// The diff row that currently has an open inline comment composer, or null
+  /// when none is open. Lifted here so the composer renders inline inside the
+  /// [DiffViewer] (GitHub-style) instead of in a popup dialog.
+  ComposerAnchor? _composerAnchor;
+
+  /// True while the open composer's comment is being POSTed to the draft.
+  bool _submittingComposer = false;
 
   WebSocketService? get _ws {
     final worker = widget.appState.getWorker(widget.pr.workerId);
@@ -146,6 +161,8 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
       _draftBody = '';
       _selectedIndex = 0;
       _loadedPrId = widget.pr.id;
+      _composerAnchor = null;
+      _submittingComposer = false;
     });
 
     // Check the GitHub integration status first so we can show a helpful hint
@@ -370,145 +387,297 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
     await _refreshDraft();
   }
 
-  /// Open a composer for a new inline comment anchored at ([line], [side]) of
-  /// the currently-selected file, POST it to the draft, then refresh.
-  Future<void> _addCommentFor(String path, int line, String side) async {
+  /// Open the inline composer for a new comment anchored at ([line], [side]) of
+  /// [path]. Just sets the active anchor; the composer renders inline inside the
+  /// [DiffViewer] (see [_buildComposerInline]).
+  void _openComposer(String path, int line, String side) {
+    setState(() {
+      _composerAnchor = ComposerAnchor(path: path, line: line, side: side);
+      _submittingComposer = false;
+    });
+  }
+
+  /// Close the inline composer without submitting.
+  void _cancelComposer() {
+    setState(() {
+      _composerAnchor = null;
+      _submittingComposer = false;
+    });
+  }
+
+  /// POST the composer's [body] to the draft, then close it and refresh.
+  Future<void> _submitComposer(ComposerAnchor anchor, String body) async {
     final ws = _ws;
     if (ws == null) return;
+    final trimmed = body.trim();
+    if (trimmed.isEmpty) return;
     final messenger = ScaffoldMessenger.maybeOf(context);
-    final body = await _promptForComment(context, path, line, side);
-    if (body == null || body.trim().isEmpty) return;
+    setState(() => _submittingComposer = true);
     try {
       await ws.addGithubPrDraftComment(
         widget.pr.id,
-        path: path,
-        line: line,
-        side: side,
-        body: body.trim(),
+        path: anchor.path,
+        line: anchor.line,
+        side: anchor.side,
+        body: trimmed,
       );
+      if (mounted) {
+        setState(() {
+          _composerAnchor = null;
+          _submittingComposer = false;
+        });
+      }
       await _refreshDraft();
     } catch (e) {
+      if (mounted) setState(() => _submittingComposer = false);
       messenger?.showSnackBar(
         SnackBar(content: Text('Failed to queue comment: $e')),
       );
     }
   }
 
-  Future<String?> _promptForComment(
-    BuildContext context,
-    String path,
-    int line,
-    String side,
-  ) {
-    final controller = TextEditingController();
-    return showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: ctx.appColors.bgElevated,
-        title: Text(
-          'Comment on line $line',
-          style: TextStyle(color: ctx.appColors.textPrimary, fontSize: 15),
+  Widget _buildFileList(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _buildFileListToolbar(context),
+        Divider(height: 1, color: context.appColors.divider),
+        Expanded(
+          child: _treeView
+              ? _buildFileTree(context)
+              : _buildFlatFileList(context),
         ),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          minLines: 2,
-          maxLines: 6,
-          style: TextStyle(color: ctx.appColors.textPrimary, fontSize: 13),
-          decoration: InputDecoration(
-            hintText: 'Add a review comment…',
-            filled: true,
-            fillColor: ctx.appColors.bgOverlay,
-            border: OutlineInputBorder(
-              borderSide: BorderSide.none,
-              borderRadius: BorderRadius.circular(kRadiusSmall),
-            ),
+      ],
+    );
+  }
+
+  /// Header above the file list with the flat/tree layout toggle.
+  Widget _buildFileListToolbar(BuildContext context) {
+    final colors = context.appColors;
+    Widget toggle(bool tree, IconData icon, String tooltip) {
+      final selected = _treeView == tree;
+      return SizedBox(
+        width: 26,
+        height: 22,
+        child: IconButton(
+          padding: EdgeInsets.zero,
+          iconSize: 14,
+          tooltip: tooltip,
+          icon: Icon(
+            icon,
+            color: selected ? colors.accentLight : colors.textMuted,
           ),
+          onPressed: () => setState(() => _treeView = tree),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(kSpace3, kSpace1, kSpace2, kSpace1),
+      child: Row(
+        children: [
+          Expanded(
             child: Text(
-              'Cancel',
-              style: TextStyle(color: ctx.appColors.textMuted),
+              '${_files.length} file${_files.length == 1 ? '' : 's'}',
+              style: TextStyle(
+                color: colors.textMuted,
+                fontSize: 10,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.5,
+              ),
             ),
           ),
-          FilledButton(
-            onPressed: () => Navigator.of(ctx).pop(controller.text),
-            style: FilledButton.styleFrom(
-              backgroundColor: ctx.appColors.accent,
+          Container(
+            decoration: BoxDecoration(
+              color: colors.bgElevated,
+              borderRadius: BorderRadius.circular(kRadiusSmall),
+              border: Border.all(color: colors.divider, width: 0.5),
             ),
-            child: const Text('Queue comment'),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                toggle(false, Icons.notes, 'Flat list'),
+                toggle(true, Icons.account_tree, 'Directory tree'),
+              ],
+            ),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildFileList(BuildContext context) {
+  /// Flat file list — one row per file with its full path tail.
+  Widget _buildFlatFileList(BuildContext context) {
     return ListView.builder(
       padding: const EdgeInsets.symmetric(vertical: kSpace1),
       itemCount: _files.length,
       itemBuilder: (context, index) {
         final file = _files[index];
         final filename = file['filename'] as String? ?? '';
-        final additions = (file['additions'] as num?)?.toInt() ?? 0;
-        final deletions = (file['deletions'] as num?)?.toInt() ?? 0;
-        final isSelected = index == _selectedIndex;
-        return InkWell(
-          onTap: () => setState(() => _selectedIndex = index),
-          child: Container(
-            color: isSelected ? context.appColors.accent.withAlpha(25) : null,
-            padding: const EdgeInsets.symmetric(
-              horizontal: kSpace3,
-              vertical: 6,
-            ),
-            child: Row(
-              children: [
-                Icon(
-                  _statusIcon(file['status'] as String?),
-                  size: 13,
-                  color: context.appColors.textMuted,
-                ),
-                const SizedBox(width: kGapInline),
-                Expanded(
-                  child: Text(
-                    filename.split('/').last,
-                    style: TextStyle(
-                      color: isSelected
-                          ? context.appColors.accentLight
-                          : context.appColors.textPrimary,
-                      fontSize: 11,
-                      fontWeight: isSelected
-                          ? FontWeight.w600
-                          : FontWeight.w400,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                const SizedBox(width: kGapInline),
-                Text(
-                  '+$additions',
-                  style: const TextStyle(
-                    color: Color(0xFF56D364),
-                    fontSize: 10,
-                  ),
-                ),
-                const SizedBox(width: 2),
-                Text(
-                  '-$deletions',
-                  style: const TextStyle(
-                    color: Color(0xFFF85149),
-                    fontSize: 10,
-                  ),
-                ),
-              ],
-            ),
-          ),
+        return _buildFileLeaf(
+          context,
+          index: index,
+          label: filename.split('/').last,
+          file: file,
+          indent: kSpace3,
         );
       },
     );
+  }
+
+  /// A selectable file row used by both flat and tree views. Selecting it
+  /// points [_selectedIndex] at this file's index in [_files].
+  Widget _buildFileLeaf(
+    BuildContext context, {
+    required int index,
+    required String label,
+    required Map<String, dynamic> file,
+    required double indent,
+  }) {
+    final colors = context.appColors;
+    final additions = (file['additions'] as num?)?.toInt() ?? 0;
+    final deletions = (file['deletions'] as num?)?.toInt() ?? 0;
+    final isSelected = index == _selectedIndex;
+    return InkWell(
+      onTap: () => setState(() => _selectedIndex = index),
+      child: Container(
+        color: isSelected ? colors.accent.withAlpha(25) : null,
+        padding: EdgeInsets.only(
+          left: indent,
+          right: kSpace3,
+          top: 6,
+          bottom: 6,
+        ),
+        child: Row(
+          children: [
+            Icon(
+              _statusIcon(file['status'] as String?),
+              size: 13,
+              color: colors.textMuted,
+            ),
+            const SizedBox(width: kGapInline),
+            Expanded(
+              child: Text(
+                label,
+                style: TextStyle(
+                  color: isSelected ? colors.accentLight : colors.textPrimary,
+                  fontSize: 11,
+                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            const SizedBox(width: kGapInline),
+            Text(
+              '+$additions',
+              style: const TextStyle(color: Color(0xFF56D364), fontSize: 10),
+            ),
+            const SizedBox(width: 2),
+            Text(
+              '-$deletions',
+              style: const TextStyle(color: Color(0xFFF85149), fontSize: 10),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Directory-tree file list. Files are grouped into a nested tree by
+  /// splitting each filename on "/"; directories are collapsible and leaves
+  /// map back to the file's index in [_files] via [_buildFileLeaf].
+  Widget _buildFileTree(BuildContext context) {
+    final root = _buildTreeRoot();
+    final rows = <Widget>[];
+    _appendTreeRows(context, root, rows, depth: 0, prefix: '');
+    return ListView(
+      padding: const EdgeInsets.symmetric(vertical: kSpace1),
+      children: rows,
+    );
+  }
+
+  /// Build the in-memory directory tree from [_files] filenames. Each node maps
+  /// a directory segment to either a child [_TreeNode] (directory) or, for the
+  /// final segment, records the file's index in [_files] on the leaf.
+  _TreeNode _buildTreeRoot() {
+    final root = _TreeNode();
+    for (var i = 0; i < _files.length; i++) {
+      final filename = _files[i]['filename'] as String? ?? '';
+      final parts = filename.split('/');
+      var node = root;
+      for (var p = 0; p < parts.length; p++) {
+        final segment = parts[p];
+        final isLeaf = p == parts.length - 1;
+        if (isLeaf) {
+          node.files.add(_TreeLeaf(name: segment, fileIndex: i));
+        } else {
+          node = node.dirs.putIfAbsent(segment, () => _TreeNode());
+        }
+      }
+    }
+    return root;
+  }
+
+  /// Recursively flatten the tree into rows: directory headers (collapsible)
+  /// followed by their files when expanded.
+  void _appendTreeRows(
+    BuildContext context,
+    _TreeNode node,
+    List<Widget> rows, {
+    required int depth,
+    required String prefix,
+  }) {
+    final dirNames = node.dirs.keys.toList()..sort();
+    for (final dirName in dirNames) {
+      final dirPath = prefix.isEmpty ? dirName : '$prefix/$dirName';
+      final collapsed = _collapsedDirs.contains(dirPath);
+      final child = node.dirs[dirName]!;
+      rows.add(
+        CollapsibleGroupHeader(
+          label: dirName,
+          count: child.fileCount,
+          collapsed: collapsed,
+          icon: Icons.folder_outlined,
+          padding: EdgeInsets.only(
+            left: kSpace3 + depth * kSpace4,
+            right: kSpace3,
+            top: 4,
+            bottom: 4,
+          ),
+          onToggle: () => setState(() {
+            if (collapsed) {
+              _collapsedDirs.remove(dirPath);
+            } else {
+              _collapsedDirs.add(dirPath);
+            }
+          }),
+        ),
+      );
+      if (!collapsed) {
+        _appendTreeRows(
+          context,
+          child,
+          rows,
+          depth: depth + 1,
+          prefix: dirPath,
+        );
+      }
+    }
+
+    final files = node.files.toList()
+      ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    for (final leaf in files) {
+      rows.add(
+        _buildFileLeaf(
+          context,
+          index: leaf.fileIndex,
+          label: leaf.name,
+          file: _files[leaf.fileIndex],
+          indent: kSpace3 + (depth + 1) * kSpace4,
+        ),
+      );
+    }
   }
 
   Widget _buildDiffArea(
@@ -521,6 +690,11 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
     // Filter threads/drafts down to the file currently rendered.
     final fileThreads = _threads.where((t) => t.path == filename).toList();
     final fileDrafts = _draftComments.where((d) => d.path == filename).toList();
+    // Only show the composer when it belongs to the file currently rendered.
+    final composerAnchor =
+        (_composerAnchor != null && _composerAnchor!.path == filename)
+        ? _composerAnchor
+        : null;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -583,7 +757,11 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
                     draftComments: fileDrafts,
                     onAddComment: ws == null
                         ? null
-                        : (line, side) => _addCommentFor(filename, line, side),
+                        : (line, side) => _openComposer(filename, line, side),
+                    composerAnchor: composerAnchor,
+                    composerBuilder: ws == null
+                        ? null
+                        : (a) => _buildComposerInline(context, a),
                     threadBuilder: ws == null
                         ? null
                         : (t) => CommentThread(
@@ -661,6 +839,19 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
           ),
         ],
       ),
+    );
+  }
+
+  /// Inline comment composer rendered under the anchored diff row (GitHub-style)
+  /// in place of the old popup dialog.
+  Widget _buildComposerInline(BuildContext context, ComposerAnchor anchor) {
+    return _InlineCommentComposer(
+      // Key by anchor so switching the open row gets a fresh controller.
+      key: ValueKey('${anchor.path}:${anchor.line}:${anchor.side}'),
+      anchor: anchor,
+      submitting: _submittingComposer,
+      onCancel: _cancelComposer,
+      onSubmit: (body) => _submitComposer(anchor, body),
     );
   }
 
@@ -1167,6 +1358,194 @@ class _DiffModeToggle extends StatelessWidget {
             fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
           ),
         ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Directory-tree model for the tree-view file list
+// ---------------------------------------------------------------------------
+
+/// A leaf in the directory tree: a changed file's display name and its index
+/// into the pane's `_files` list (used to map selection back).
+class _TreeLeaf {
+  final String name;
+  final int fileIndex;
+
+  const _TreeLeaf({required this.name, required this.fileIndex});
+}
+
+/// A directory node: nested subdirectories plus the files directly inside it.
+class _TreeNode {
+  final Map<String, _TreeNode> dirs = {};
+  final List<_TreeLeaf> files = [];
+
+  /// Total number of files under this node (recursively).
+  int get fileCount {
+    var count = files.length;
+    for (final child in dirs.values) {
+      count += child.fileCount;
+    }
+    return count;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Inline comment composer (rendered under a diff row by the DiffViewer)
+// ---------------------------------------------------------------------------
+
+/// A small inline composer card shown directly beneath a diff row, styled after
+/// [CommentThread]'s reply composer. Owns its own [TextEditingController] so
+/// typing survives parent rebuilds (e.g. when other state changes).
+class _InlineCommentComposer extends StatefulWidget {
+  final ComposerAnchor anchor;
+  final bool submitting;
+  final VoidCallback onCancel;
+  final ValueChanged<String> onSubmit;
+
+  const _InlineCommentComposer({
+    super.key,
+    required this.anchor,
+    required this.submitting,
+    required this.onCancel,
+    required this.onSubmit,
+  });
+
+  @override
+  State<_InlineCommentComposer> createState() => _InlineCommentComposerState();
+}
+
+class _InlineCommentComposerState extends State<_InlineCommentComposer> {
+  final _controller = TextEditingController();
+  final _focusNode = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    // Autofocus once the row is laid out.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _focusNode.requestFocus();
+    });
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    final anchor = widget.anchor;
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.symmetric(
+        horizontal: kSpace2,
+        vertical: kSpace1,
+      ),
+      padding: const EdgeInsets.all(kSpace3),
+      decoration: BoxDecoration(
+        color: colors.bgElevated,
+        borderRadius: BorderRadius.circular(kRadiusMedium),
+        border: Border.all(color: colors.accent.withAlpha(80)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.add_comment_outlined,
+                size: 13,
+                color: colors.accentLight,
+              ),
+              const SizedBox(width: kGapInline),
+              Text(
+                'Comment on line ${anchor.line} (${anchor.side})',
+                style: TextStyle(
+                  color: colors.accentLight,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: kGapTight),
+          TextField(
+            controller: _controller,
+            focusNode: _focusNode,
+            enabled: !widget.submitting,
+            minLines: 2,
+            maxLines: 6,
+            style: TextStyle(color: colors.textPrimary, fontSize: 13),
+            decoration: InputDecoration(
+              hintText: 'Add a review comment…',
+              isDense: true,
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: kSpace3,
+                vertical: kSpace2,
+              ),
+              filled: true,
+              fillColor: colors.bgOverlay,
+              border: OutlineInputBorder(
+                borderSide: BorderSide.none,
+                borderRadius: BorderRadius.circular(kRadiusSmall),
+              ),
+            ),
+          ),
+          const SizedBox(height: kGapTight),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              TextButton(
+                onPressed: widget.submitting ? null : widget.onCancel,
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: kSpace3,
+                    vertical: kSpace1,
+                  ),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                child: Text(
+                  'Cancel',
+                  style: TextStyle(color: colors.textMuted, fontSize: 12),
+                ),
+              ),
+              const SizedBox(width: kGapTight),
+              FilledButton(
+                onPressed: widget.submitting
+                    ? null
+                    : () => widget.onSubmit(_controller.text),
+                style: FilledButton.styleFrom(
+                  backgroundColor: colors.accent,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: kSpace4,
+                    vertical: kSpace2,
+                  ),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(kRadiusSmall),
+                  ),
+                ),
+                child: widget.submitting
+                    ? const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Text('Comment', style: TextStyle(fontSize: 12)),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }

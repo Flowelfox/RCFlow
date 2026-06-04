@@ -1472,6 +1472,33 @@ class RestClient {
   // GitHub integration
   // ---------------------------------------------------------------------------
 
+  /// Trigger a server-side sync of open pull requests from GitHub into the
+  /// cache. The backend fetches review-requested + authored PRs and broadcasts
+  /// a `github_pr_update` for each.
+  ///
+  /// When [role] is given (`for_me` or `created`), only that subset is synced.
+  /// Returns `{"synced": int}`.
+  Future<Map<String, dynamic>> syncGithubPrs({String? role}) async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url = _serverUrl!.http(
+      '/api/integrations/github/sync',
+      role != null ? {'role': role} : null,
+    );
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.postUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      final response = await request.close();
+      final body = await response.transform(utf8.decoder).join();
+      if (response.statusCode != 200 && response.statusCode != 201) {
+        throw Exception('Server returned ${response.statusCode}: $body');
+      }
+      return jsonDecode(body) as Map<String, dynamic>;
+    } finally {
+      client.close();
+    }
+  }
+
   /// Fetch the GitHub integration status.
   ///
   /// Returns a map describing whether a token is configured and the last sync

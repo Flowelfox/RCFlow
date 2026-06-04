@@ -443,6 +443,11 @@ class WebSocketService {
     _transport.sendOutput({'type': 'list_github_prs'});
   }
 
+  /// Trigger a server-side sync of open pull requests from GitHub. The backend
+  /// broadcasts `github_pr_update` for each synced PR. Returns `{"synced": int}`.
+  Future<Map<String, dynamic>> syncGithubPrs({String? role}) =>
+      _rest.syncGithubPrs(role: role);
+
   Future<Map<String, dynamic>> fetchGithubStatus() => _rest.fetchGithubStatus();
 
   Future<Map<String, dynamic>> getGithubPrFiles(String prId) =>
