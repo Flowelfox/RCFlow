@@ -19,6 +19,8 @@ import asyncio
 import contextlib
 import json
 import logging
+import os
+import time
 import uuid
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from typing import TYPE_CHECKING, Any
@@ -45,6 +47,16 @@ if TYPE_CHECKING:
     from src.tools.loader import ToolDefinition
 
 logger = logging.getLogger(__name__)
+
+# Opt-in raw-SDK tracing: set RCFLOW_DEBUG_SDK=1 to log every SDK message (type +
+# timing) as it arrives, plus turn/drain boundaries.  Off by default (no overhead,
+# no behaviour change) — used to diagnose streaming/buffering reports.
+_DEBUG_SDK = os.environ.get("RCFLOW_DEBUG_SDK", "") not in ("", "0", "false", "False")
+
+
+def _sdk_trace(msg: str) -> None:
+    if _DEBUG_SDK:
+        logger.warning("SDK_TRACE %.3f %s", time.monotonic(), msg)
 
 # Callback type the agent layer supplies to handle AskUserQuestion + permissions.
 CanUseTool = Callable[[str, dict[str, Any], "ToolPermissionContext"], Awaitable["PermissionResult"]]
@@ -328,6 +340,8 @@ class ClaudeCodeSdkExecutor(BaseExecutor):
         """Single persistent consumer of the SDK message stream → queue."""
         try:
             async for message in client.receive_messages():
+                if _DEBUG_SDK:
+                    _sdk_trace(f"read_loop recv {type(message).__name__} :: {repr(message)[:240]}")
                 await queue.put(message)
         except asyncio.CancelledError:
             raise
@@ -339,21 +353,26 @@ class ClaudeCodeSdkExecutor(BaseExecutor):
     async def _stream_turn(self, prompt: str, options: ClaudeAgentOptions) -> AsyncGenerator[ExecutionChunk, None]:
         client = await self._ensure_client(options)
         assert self._queue is not None  # noqa: S101 — set by _ensure_client
+        _sdk_trace(f"stream_turn query qsize={self._queue.qsize()} prompt={prompt[:60]!r}")
         await client.query(prompt)
         self._got_result = False
         self._result_text = ""
         while True:
             message = await self._queue.get()
             if message is _STREAM_END:
+                _sdk_trace("stream_turn STREAM_END")
                 self._connected = False
                 return
             for event in sdk_message_to_events(message):
-                if event.get("type") == "result":
+                etype = event.get("type")
+                if etype == "result":
                     self._got_result = True
                     self._result_text = json.dumps(event)
                     self._exit_code = 0
+                    _sdk_trace("stream_turn yield result -> RETURN (turn boundary)")
                     yield _event_chunk(event)
                     return  # turn boundary — the reader keeps filling the queue
+                _sdk_trace(f"stream_turn yield {etype}")
                 yield _event_chunk(event)
 
     async def execute_streaming(
