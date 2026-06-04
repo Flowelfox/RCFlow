@@ -65,7 +65,6 @@ class PaneMessageStore {
 
   // Dynamic streaming.
   Timer? _streamingTimer;
-  String? _activeToolName;
 
   /// The list that streaming content should be appended to: either the active
   /// tool sub-group's children, or the top-level message list.
@@ -253,12 +252,11 @@ class PaneMessageStore {
           toolInput: input,
         ),
       );
-      // No _activeToolName: the question is finished via answerQuestion (or the
-      // session-end sweep), never by finalizeStream.
+      // The question is finished via answerQuestion (or the session-end
+      // sweep), never by finalizeStream (which skips isQuestion blocks).
       _scheduleNotify();
       return;
     }
-    _activeToolName = name;
     if (_inAgentMode) {
       _ensureAgentToolGroup();
     }
@@ -342,16 +340,18 @@ class PaneMessageStore {
 
     final target = _streamTarget;
     if (target != null) {
-      if (_activeToolName != null &&
-          target.type == DisplayMessageType.toolBlock &&
-          !target.isQuestion) {
+      // Finish any open tool/output block (questions excepted — they are
+      // resolved via answerQuestion / the session-end sweep). A standalone
+      // TOOL_OUTPUT, e.g. a native background command's between-turns completion
+      // notice, creates an orphan 'output' toolBlock via appendToolOutput; it
+      // must be closed here too, otherwise that block spins forever.
+      if (target.type == DisplayMessageType.toolBlock && !target.isQuestion) {
         target.finished = true;
       } else if (target.type == DisplayMessageType.assistant) {
         target.finished = true;
       }
     }
 
-    _activeToolName = null;
     _notify();
   }
 
