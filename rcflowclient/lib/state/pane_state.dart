@@ -871,14 +871,12 @@ class PaneState extends ChangeNotifier {
       _host.requestUnsubscribe(oldSessionId, oldWorkerId);
     }
 
-    // Sync the project chip with the session's confirmed project.
-    // Also auto-opens the project panel when switching to a session that
-    // already has a project attached (handles back-navigation and restore).
+    // Sync the project chip with the session's confirmed project. The right
+    // panel is left closed by default (no tab auto-activates on session open).
     final mainPath = session?.mainProjectPath;
     if (mainPath != null) {
       _selectedProjectName = mainPath.split('/').last;
       _selectedProjectPath = mainPath;
-      _activeRightPanel = 'project';
     } else {
       _selectedProjectName = null;
       _selectedProjectPath = null;
@@ -1316,16 +1314,12 @@ class PaneState extends ChangeNotifier {
   /// Sync chip state from a confirmed server-side project path.
   /// Called when a session_update transitions main_project_path from null→non-null
   /// (i.e. the server has accepted and echoed back our project_name selection).
+  /// Updates the chip only — the right panel is not auto-opened.
   void syncProjectFromSession(String path) {
     final name = path.split('/').last;
-    if (_selectedProjectName == name &&
-        _selectedProjectPath == path &&
-        _activeRightPanel == 'project') {
-      return;
-    }
+    if (_selectedProjectName == name && _selectedProjectPath == path) return;
     _selectedProjectName = name;
     _selectedProjectPath = path;
-    _activeRightPanel = 'project';
     notifyListeners();
   }
 

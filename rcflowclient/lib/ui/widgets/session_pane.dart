@@ -199,10 +199,22 @@ class _SessionPaneState extends State<SessionPane> {
                           children: [
                             const PaneHeader(),
                             Expanded(
-                              child: _OutputWithRightPanels(pane: widget.pane),
+                              child: _OutputWithRightPanels(
+                                pane: widget.pane,
+                                attachOnboardingKey: !multiPane,
+                              ),
                             ),
                             const QueuedMessagesBar(),
-                            InputArea(key: onboarding.inputAreaKey),
+                            // The onboarding GlobalKey can only live in one place
+                            // in the tree. Attaching it to every split pane makes
+                            // Flutter thrash it between them (the input area /
+                            // right rail appearing to be "shared" and flickering).
+                            // Onboarding only runs with a single pane, so attach
+                            // it only then — in split mode no pane carries it and
+                            // each renders its own input area independently.
+                            InputArea(
+                              key: multiPane ? null : onboarding.inputAreaKey,
+                            ),
                           ],
                         ),
                 ),
@@ -223,7 +235,15 @@ class _SessionPaneState extends State<SessionPane> {
 /// tapping the active tab closes it.
 class _OutputWithRightPanels extends StatefulWidget {
   final PaneState pane;
-  const _OutputWithRightPanels({required this.pane});
+
+  /// Whether to attach the onboarding GlobalKey to the right rail. Only true for
+  /// a single pane — in split mode no pane carries it (a GlobalKey can't exist
+  /// in two panes at once, which causes the rail to look "shared"/flicker).
+  final bool attachOnboardingKey;
+  const _OutputWithRightPanels({
+    required this.pane,
+    required this.attachOnboardingKey,
+  });
 
   @override
   State<_OutputWithRightPanels> createState() => _OutputWithRightPanelsState();
@@ -299,6 +319,7 @@ class _OutputWithRightPanelsState extends State<_OutputWithRightPanels> {
               hasTodos: hasTodos,
               activePanel: activePanel,
               pane: pane,
+              attachOnboardingKey: widget.attachOnboardingKey,
             ),
           ],
         );
@@ -312,18 +333,20 @@ class _OutputWithRightPanelsState extends State<_OutputWithRightPanels> {
 class _RightBookmarks extends StatelessWidget {
   final bool hasTodos;
   final String? activePanel;
+  final bool attachOnboardingKey;
   final PaneState pane;
 
   const _RightBookmarks({
     required this.hasTodos,
     required this.activePanel,
     required this.pane,
+    required this.attachOnboardingKey,
   });
 
   @override
   Widget build(BuildContext context) {
     return Column(
-      key: onboarding.rightBookmarksKey,
+      key: attachOnboardingKey ? onboarding.rightBookmarksKey : null,
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
         _BookmarkTab(

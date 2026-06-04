@@ -83,7 +83,21 @@ class _ReviewActionBarState extends State<ReviewActionBar> {
     super.initState();
     _verdict = _ReviewVerdictApi.fromEvent(widget.draftEvent);
     _summaryController = TextEditingController(text: widget.draftBody);
+    // Re-evaluate the Submit button's enabled state as the summary is typed.
+    _summaryController.addListener(_onSummaryChanged);
   }
+
+  void _onSummaryChanged() {
+    if (mounted) setState(() {});
+  }
+
+  /// A review can be submitted only when it carries something: an
+  /// approve/request-changes verdict, a non-empty summary, or queued comments.
+  /// A bare "Comment" review with no body and no inline comments is empty.
+  bool get _canSubmit =>
+      _verdict != ReviewVerdict.comment ||
+      _summaryController.text.trim().isNotEmpty ||
+      widget.draftComments.isNotEmpty;
 
   @override
   void didUpdateWidget(ReviewActionBar oldWidget) {
@@ -101,6 +115,7 @@ class _ReviewActionBarState extends State<ReviewActionBar> {
 
   @override
   void dispose() {
+    _summaryController.removeListener(_onSummaryChanged);
     _summaryController.dispose();
     super.dispose();
   }
@@ -249,7 +264,7 @@ class _ReviewActionBarState extends State<ReviewActionBar> {
           SizedBox(
             width: double.infinity,
             child: FilledButton.icon(
-              onPressed: busy ? null : _submit,
+              onPressed: (busy || !_canSubmit) ? null : _submit,
               icon: _submitting
                   ? const SizedBox(
                       width: 14,

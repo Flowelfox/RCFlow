@@ -54,6 +54,7 @@ class SettingsService {
   static const _tasksCollapsedGroupsKey = 'rcflow_tasks_collapsed_groups';
   static const _tasksGroupByWorkerKey = 'rcflow_tasks_group_by_worker';
   static const _workersGroupByProjectKey = 'rcflow_workers_group_by_project';
+  static const _prFileListModeKey = 'rcflow_pr_file_list_mode';
   static const _artifactsGroupByProjectKey =
       'rcflow_artifacts_group_by_project';
   static const _artifactsExpandedWorkersKey =
@@ -84,8 +85,7 @@ class SettingsService {
 
   /// Whether the client should automatically check for updates on startup.
   /// Defaults to true when not explicitly set.
-  bool get autoUpdateEnabled =>
-      _prefs.getBool(_autoUpdateEnabledKey) ?? true;
+  bool get autoUpdateEnabled => _prefs.getBool(_autoUpdateEnabledKey) ?? true;
   set autoUpdateEnabled(bool value) =>
       _prefs.setBool(_autoUpdateEnabledKey, value);
 
@@ -283,6 +283,12 @@ class SettingsService {
 
   String get fontSize => _prefs.getString(_fontSizeKey) ?? 'medium';
   set fontSize(String value) => _prefs.setString(_fontSizeKey, value);
+
+  /// Last-used PR review file-list mode ('flat' | 'tree' | 'commented'); new PR
+  /// panes open with this view preselected.
+  String get prFileListMode => _prefs.getString(_prFileListModeKey) ?? 'flat';
+  set prFileListMode(String value) =>
+      _prefs.setString(_prFileListModeKey, value);
 
   bool get compactMode => _prefs.getBool(_compactModeKey) ?? false;
   set compactMode(bool value) => _prefs.setBool(_compactModeKey, value);

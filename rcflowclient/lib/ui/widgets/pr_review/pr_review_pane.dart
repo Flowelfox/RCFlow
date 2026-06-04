@@ -96,6 +96,9 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
   /// File-list layout mode (flat list / directory tree / commented-only).
   FileListMode _fileListMode = FileListMode.flat;
 
+  /// Width of the changed-files sidebar (resizable via the divider handle).
+  double _fileListWidth = 240;
+
   /// The local project the PR's repo resolves to, or null if unmapped. Loaded
   /// in [_load] and forwarded into every assist session so the session shows
   /// the project badge.
@@ -153,6 +156,12 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
   @override
   void initState() {
     super.initState();
+    // Open with the file-list view the user last picked (persisted per app).
+    final saved = widget.appState.settings.prFileListMode;
+    _fileListMode = FileListMode.values.firstWhere(
+      (m) => m.name == saved,
+      orElse: () => FileListMode.flat,
+    );
     _load();
   }
 
@@ -380,8 +389,29 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              SizedBox(width: 240, child: _buildFileList(context)),
-              Container(width: 1, color: context.appColors.divider),
+              SizedBox(width: _fileListWidth, child: _buildFileList(context)),
+              MouseRegion(
+                cursor: SystemMouseCursors.resizeColumn,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.translucent,
+                  onHorizontalDragUpdate: (d) => setState(() {
+                    _fileListWidth = (_fileListWidth + d.delta.dx).clamp(
+                      160.0,
+                      560.0,
+                    );
+                  }),
+                  child: SizedBox(
+                    width: 6,
+                    child: Center(
+                      child: Container(
+                        width: 1,
+                        height: double.infinity,
+                        color: context.appColors.divider,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
               Expanded(child: _buildDiffArea(context, selected, patch)),
             ],
           ),
@@ -547,13 +577,65 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
   }
 
   Widget _buildFileList(BuildContext context) {
+    final showFixAll =
+        _fileListMode == FileListMode.commented && _threads.isNotEmpty;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _buildFileListToolbar(context),
         Divider(height: 1, color: context.appColors.divider),
         Expanded(child: _buildFileListBody(context)),
+        if (showFixAll) _buildFixAllButton(context),
       ],
+    );
+  }
+
+  /// Bottom-of-the-commented-list action: hand every review comment (with its
+  /// file:line context) to one full-perms agent session, like "Fix with agent"
+  /// on a single comment but covering all of them.
+  Widget _buildFixAllButton(BuildContext context) {
+    final colors = context.appColors;
+    return Container(
+      padding: const EdgeInsets.all(kSpace2),
+      decoration: BoxDecoration(
+        border: Border(top: BorderSide(color: colors.divider)),
+      ),
+      child: SizedBox(
+        width: double.infinity,
+        child: FilledButton.icon(
+          onPressed: _fixAllWithAgent,
+          icon: const Icon(Icons.auto_fix_high, size: 16),
+          label: const Text('Fix all with agent'),
+          style: FilledButton.styleFrom(
+            backgroundColor: colors.accent,
+            padding: const EdgeInsets.symmetric(vertical: kSpace2),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(kRadiusSmall),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _fixAllWithAgent() {
+    final unresolved = _threads.where((t) => !t.isResolved).toList();
+    final threads = unresolved.isNotEmpty ? unresolved : _threads;
+    final buffer = StringBuffer();
+    for (final t in threads) {
+      final loc = '${t.path}${t.line != null ? ':${t.line}' : ''}';
+      buffer.writeln('- $loc');
+      for (final c in t.comments) {
+        buffer.writeln('  ${c.author}: ${c.body}');
+      }
+      buffer.writeln();
+    }
+    widget.appState.startPrAssist(
+      widget.paneId,
+      widget.pr,
+      'fix',
+      commentBody: buffer.toString().trim(),
+      projectName: _linkedProjectName,
     );
   }
 
@@ -597,7 +679,11 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
             icon,
             color: selected ? colors.accentLight : colors.textMuted,
           ),
-          onPressed: () => setState(() => _fileListMode = mode),
+          onPressed: () => setState(() {
+            _fileListMode = mode;
+            // Remember the choice so new PR panes open with this view.
+            widget.appState.settings.prFileListMode = mode.name;
+          }),
         ),
       );
     }
