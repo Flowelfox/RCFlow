@@ -45,6 +45,18 @@ class ReviewActionBar extends StatefulWidget {
   /// Queued inline comments from the draft.
   final List<DraftComment> draftComments;
 
+  /// Merge-conflict status of the PR: null = unknown/still computing, true =
+  /// conflicts with base, false = mergeable. When true the Merge button is
+  /// disabled and a conflict banner is shown.
+  final bool? conflicted;
+
+  /// The conflicting file paths when known, or null when the list could not be
+  /// computed (e.g. no local clone on the worker).
+  final List<String>? conflictFiles;
+
+  /// Backend reason code: clean | computing | conflicting | no_local_clone.
+  final String? conflictReason;
+
   /// Called after a successful review submission. Receives the result map from
   /// `POST /review` so the caller can surface a snackbar + refresh.
   final Future<void> Function(Map<String, dynamic> result) onSubmitted;
@@ -63,6 +75,9 @@ class ReviewActionBar extends StatefulWidget {
     required this.draftEvent,
     required this.draftBody,
     required this.draftComments,
+    this.conflicted,
+    this.conflictFiles,
+    this.conflictReason,
     required this.onSubmitted,
     required this.onMerged,
     required this.onRemoveDraftComment,
@@ -121,7 +136,10 @@ class _ReviewActionBarState extends State<ReviewActionBar> {
   }
 
   bool get _canMerge =>
-      widget.pr.state == 'open' && !widget.pr.draft && !widget.pr.isMerged;
+      widget.pr.state == 'open' &&
+      !widget.pr.draft &&
+      !widget.pr.isMerged &&
+      widget.conflicted != true;
 
   Future<void> _submit() async {
     setState(() => _submitting = true);
@@ -230,6 +248,8 @@ class _ReviewActionBarState extends State<ReviewActionBar> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: [
+          if (widget.conflicted == true || widget.conflictReason == 'computing')
+            _buildConflictBanner(context),
           Row(
             children: [
               Expanded(child: _buildVerdictPicker(context)),
@@ -323,7 +343,7 @@ class _ReviewActionBarState extends State<ReviewActionBar> {
 
   Widget _buildMergeButton(BuildContext context) {
     final colors = context.appColors;
-    return OutlinedButton.icon(
+    final button = OutlinedButton.icon(
       onPressed: (_canMerge && !_merging && !_submitting) ? _merge : null,
       icon: _merging
           ? SizedBox(
@@ -346,6 +366,105 @@ class _ReviewActionBarState extends State<ReviewActionBar> {
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(kRadiusSmall),
         ),
+      ),
+    );
+    if (widget.conflicted == true) {
+      return Tooltip(
+        message:
+            'This pull request has conflicts with ${widget.pr.baseRef} — '
+            'resolve them and push before merging.',
+        child: button,
+      );
+    }
+    return button;
+  }
+
+  /// Banner shown above the action row when the PR has merge conflicts (or while
+  /// the merge status is still being computed). Lists the conflicting files when
+  /// known; otherwise explains why the list is unavailable.
+  Widget _buildConflictBanner(BuildContext context) {
+    final colors = context.appColors;
+    final reason = widget.conflictReason;
+    final files = widget.conflictFiles ?? const [];
+
+    final IconData icon;
+    final Color accent;
+    final String title;
+    Widget? detail;
+
+    if (reason == 'computing') {
+      icon = Icons.hourglass_empty;
+      accent = colors.textMuted;
+      title = 'Checking merge status…';
+    } else {
+      icon = Icons.merge_type;
+      accent = colors.errorText;
+      title = 'Conflicts with ${widget.pr.baseRef} — resolve before merging';
+      if (files.isNotEmpty) {
+        detail = Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (final f in files)
+              Padding(
+                padding: const EdgeInsets.only(top: kGapInline),
+                child: Text(
+                  f,
+                  style: TextStyle(
+                    color: colors.textSecondary,
+                    fontSize: 11,
+                    fontFamily: 'monospace',
+                  ),
+                ),
+              ),
+          ],
+        );
+      } else {
+        detail = Padding(
+          padding: const EdgeInsets.only(top: kGapInline),
+          child: Text(
+            'Conflicting files unavailable — no local clone of this repo on the worker.',
+            style: TextStyle(color: colors.textMuted, fontSize: 11),
+          ),
+        );
+      }
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: kGapTight),
+      padding: const EdgeInsets.symmetric(
+        horizontal: kSpace2,
+        vertical: kSpace2,
+      ),
+      decoration: BoxDecoration(
+        color: colors.bgElevated,
+        borderRadius: BorderRadius.circular(kRadiusSmall),
+        border: Border(left: BorderSide(color: accent, width: 3)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 1),
+            child: Icon(icon, color: accent, size: 16),
+          ),
+          const SizedBox(width: kSpace2),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(
+                    color: colors.textPrimary,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                ?detail,
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

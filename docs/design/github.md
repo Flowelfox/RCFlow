@@ -1,5 +1,5 @@
 ---
-updated: 2026-06-04
+updated: 2026-06-05
 ---
 
 # GitHub Integration — PR Reviews
@@ -86,6 +86,7 @@ All under `/api/integrations/github/`, `X-API-Key` required. See [HTTP API](http
 | POST | `/prs/{id}/review` | Submit the review (APPROVE/REQUEST_CHANGES/COMMENT) + queued comments |
 | POST | `/prs/{id}/comments/{comment_id}/reply` | Reply to a review-thread comment |
 | POST | `/prs/{id}/threads/{thread_id}/resolve` | Resolve / unresolve a thread |
+| GET  | `/prs/{id}/conflicts` | Merge-conflict status + conflicting files → `{conflicted, files, reason}` |
 | POST | `/prs/{id}/merge` | Merge the PR (squash default) |
 | POST | `/open-pr` | Push a selected worktree's branch (PAT auth) and open a PR for it |
 
@@ -97,6 +98,17 @@ Read = GraphQL (threads); writes = REST (review, reply, merge); thread
 resolution = GraphQL mutation. The pending review is held locally in
 `github_review_drafts` until submitted, so inline comments can be queued and
 edited before they post to GitHub.
+
+`/prs/{id}/conflicts` reports whether the PR conflicts with its base. GitHub's
+API reports only *that* a PR conflicts (`mergeable`/`mergeable_state` on the PR
+detail), so the conflicting **file list** is computed from a local 3-way merge
+(`git merge-tree --write-tree`, `src/services/git_ops.py`) against the checkout
+found in `PROJECTS_DIR`. Nothing is written to the working tree. `reason` is one
+of `clean`, `computing` (GitHub still computing — retry), `conflicting`, or
+`no_local_clone` (conflict confirmed but the file list could not be computed —
+no local clone, or git < 2.38). When the PR conflicts the client disables Merge
+and shows a banner listing the files. `/prs/{id}/merge` maps GitHub's HTTP 405
+(not mergeable) to a `409` with a clear message instead of a raw `502`.
 
 ## WebSocket Messages
 

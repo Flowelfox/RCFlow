@@ -124,3 +124,68 @@ async def test_find_local_repo_matches_by_remote(tmp_path):
     found = await git_ops.find_local_repo([projects], "acme", "web")  # case-insensitive
     assert found == match
     assert await git_ops.find_local_repo([projects], "no", "match") is None
+
+
+def _build_pr_remote(tmp_path: Path) -> Path:
+    """Create a bare remote with a `main` branch and a conflicting + a clean PR.
+
+    Layout (common ancestor edits ``a.txt`` = "one"):
+      - ``main``: a.txt -> "main"
+      - ``refs/pull/1/head``: a.txt -> "feature"  (conflicts with main)
+      - ``refs/pull/2/head``: adds b.txt           (merges cleanly with main)
+    """
+    bare = tmp_path / "remote.git"
+    bare.mkdir()
+    _git(bare, "init", "-q", "--bare")
+
+    work = tmp_path / "seed"
+    work.mkdir()
+    _git(work, "init", "-q", "-b", "main")
+    _git(work, "config", "user.email", "t@example.com")
+    _git(work, "config", "user.name", "Test")
+    (work / "a.txt").write_text("one\n")
+    _git(work, "add", "-A")
+    _git(work, "commit", "-q", "-m", "base")
+    _git(work, "remote", "add", "origin", str(bare))
+    _git(work, "push", "-q", "origin", "main")
+
+    # Conflicting PR #1: same line changed differently.
+    _git(work, "checkout", "-q", "-b", "pr1")
+    (work / "a.txt").write_text("feature\n")
+    _git(work, "commit", "-q", "-am", "pr1 edit")
+    _git(work, "push", "-q", "origin", "HEAD:refs/pull/1/head")
+
+    # Clean PR #2: a different file off main.
+    _git(work, "checkout", "-q", "main")
+    _git(work, "checkout", "-q", "-b", "pr2")
+    (work / "b.txt").write_text("new\n")
+    _git(work, "add", "-A")
+    _git(work, "commit", "-q", "-m", "pr2 add")
+    _git(work, "push", "-q", "origin", "HEAD:refs/pull/2/head")
+
+    # Advance main so PR #1 truly conflicts.
+    _git(work, "checkout", "-q", "main")
+    (work / "a.txt").write_text("main\n")
+    _git(work, "commit", "-q", "-am", "main edit")
+    _git(work, "push", "-q", "origin", "main")
+    return bare
+
+
+@pytest.mark.asyncio
+async def test_merge_conflict_files_reports_conflicts(tmp_path):
+    bare = _build_pr_remote(tmp_path)
+    consumer = tmp_path / "consumer"
+    _git(tmp_path, "clone", "-q", str(bare), str(consumer))
+
+    files = await git_ops.merge_conflict_files(consumer, "main", 1)
+    assert files == ["a.txt"]
+
+
+@pytest.mark.asyncio
+async def test_merge_conflict_files_clean_merge(tmp_path):
+    bare = _build_pr_remote(tmp_path)
+    consumer = tmp_path / "consumer"
+    _git(tmp_path, "clone", "-q", str(bare), str(consumer))
+
+    files = await git_ops.merge_conflict_files(consumer, "main", 2)
+    assert files == []

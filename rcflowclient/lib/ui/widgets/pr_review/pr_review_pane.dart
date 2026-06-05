@@ -115,6 +115,13 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
   /// All review threads for the PR (across files), mapped from the backend.
   List<DiffThread> _threads = [];
 
+  /// Merge-conflict status: null = unknown/computing, true/false = conflicts or
+  /// not. [_conflictFiles] is the conflicting paths (null when unavailable, e.g.
+  /// no local clone), and [_conflictReason] is the backend's reason code.
+  bool? _conflicted;
+  List<String>? _conflictFiles;
+  String? _conflictReason;
+
   /// The local review draft event ("APPROVE"|"REQUEST_CHANGES"|"COMMENT").
   String _draftEvent = 'COMMENT';
 
@@ -193,6 +200,9 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
       _draftBody = '';
       _selectedIndex = 0;
       _loadedPrId = widget.pr.id;
+      _conflicted = null;
+      _conflictFiles = null;
+      _conflictReason = null;
       _composerAnchor = null;
       _submittingComposer = false;
       _gutterDragging = false;
@@ -257,6 +267,26 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
     // out the diff the user already has.
     await _refreshThreads();
     await _refreshDraft();
+    await _refreshConflicts();
+  }
+
+  /// Refetch the PR's merge-conflict status (best-effort). Drives the conflict
+  /// banner and the disabled state of the Merge button in the action bar.
+  Future<void> _refreshConflicts() async {
+    final ws = _ws;
+    if (ws == null) return;
+    try {
+      final result = await ws.getGithubPrConflicts(widget.pr.id);
+      if (!mounted || _loadedPrId != widget.pr.id) return;
+      setState(() {
+        _conflicted = result['conflicted'] as bool?;
+        _conflictFiles = (result['files'] as List<dynamic>?)
+            ?.cast<String>();
+        _conflictReason = result['reason'] as String?;
+      });
+    } catch (_) {
+      // Best-effort; leave conflict state as-is.
+    }
   }
 
   /// Refetch the review threads and remap them into [DiffThread]s.
@@ -423,6 +453,9 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
             draftEvent: _draftEvent,
             draftBody: _draftBody,
             draftComments: _draftComments,
+            conflicted: _conflicted,
+            conflictFiles: _conflictFiles,
+            conflictReason: _conflictReason,
             onSubmitted: _onReviewSubmitted,
             onMerged: _onMerged,
             onRemoveDraftComment: _removeDraftComment,
@@ -447,6 +480,7 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
   Future<void> _onMerged(Map<String, dynamic> result) async {
     _applyPrUpdate(result['pr'] as Map<String, dynamic>?);
     await _refreshThreads();
+    await _refreshConflicts();
   }
 
   Future<void> _removeDraftComment(DraftComment comment) async {

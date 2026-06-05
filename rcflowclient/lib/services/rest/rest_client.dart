@@ -1567,6 +1567,33 @@ class RestClient {
     }
   }
 
+  /// Check a cached PR's merge-conflict status against its base branch.
+  ///
+  /// Returns `{"conflicted": bool?, "files": List<String>?, "reason": "..."}`.
+  /// `conflicted` is null while GitHub is still computing mergeability; `files`
+  /// is the list of conflicting paths, an empty list when clean, or null when
+  /// the list could not be computed locally (no local clone). `reason` is one of
+  /// `clean`, `computing`, `conflicting`, `no_local_clone`.
+  Future<Map<String, dynamic>> getGithubPrConflicts(String prId) async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url = _serverUrl!.http(
+      '/api/integrations/github/prs/$prId/conflicts',
+    );
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.getUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      final response = await request.close();
+      final body = await response.transform(utf8.decoder).join();
+      if (response.statusCode != 200) {
+        throw Exception('Server returned ${response.statusCode}: $body');
+      }
+      return jsonDecode(body) as Map<String, dynamic>;
+    } finally {
+      client.close();
+    }
+  }
+
   /// Fetch a file's full content at the PR [side] ("head" or "base").
   ///
   /// Used by the diff viewer to expand context lines hidden between/around the

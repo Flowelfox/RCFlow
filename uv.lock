@@ -1835,7 +1835,7 @@ wheels = [
 
 [[package]]
 name = "rcflow"
-version = "0.43.0"
+version = "0.44.0"
 source = { editable = "." }
 dependencies = [
     { name = "aioboto3" },

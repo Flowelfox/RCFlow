@@ -458,6 +458,9 @@ class WebSocketService {
   Future<Map<String, dynamic>> getGithubPrProject(String prId) =>
       _rest.getGithubPrProject(prId);
 
+  Future<Map<String, dynamic>> getGithubPrConflicts(String prId) =>
+      _rest.getGithubPrConflicts(prId);
+
   Future<Map<String, dynamic>> getGithubPrFile(
     String prId,
     String path, {

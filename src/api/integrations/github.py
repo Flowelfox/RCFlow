@@ -18,6 +18,7 @@ DELETE /prs/{id}/draft/comments/{index}            Remove a queued inline commen
 POST   /prs/{id}/review                            Submit the review (+ queued comments)
 POST   /prs/{id}/comments/{comment_id}/reply       Reply to a review-thread comment
 POST   /prs/{id}/threads/{thread_id}/resolve       Resolve / unresolve a thread
+GET    /prs/{id}/conflicts                          Merge-conflict status + conflicting files
 POST   /prs/{id}/merge                             Merge the pull request
 
 All under /api/integrations/github/ and require X-API-Key authentication.
@@ -737,6 +738,64 @@ async def get_github_pr_project(pr_id: str, request: Request) -> dict[str, Any]:
     return {"pr_id": str(pr.id), "project_name": match.name, "project_path": str(match)}
 
 
+@router.get(
+    "/prs/{pr_id}/conflicts",
+    summary="Check a pull request's merge conflicts",
+    description=(
+        "Reports whether the pull request conflicts with its base branch and, "
+        "when a local clone is available, which files conflict. GitHub's API "
+        "reports only *that* a PR conflicts, so the conflicting file list is "
+        "computed from a local 3-way merge (git merge-tree) against the checkout "
+        "found in the configured projects directories — nothing is written to "
+        "the working tree. Returns conflicted=null while GitHub is still "
+        "computing mergeability, and files=null when no local clone exists or the "
+        "local git is too old. Requires GITHUB_TOKEN."
+    ),
+)
+async def get_github_pr_conflicts(pr_id: str, request: Request) -> dict[str, Any]:
+    """Return merge-conflict status and conflicting files for a PR.
+
+    ``conflicted`` is True/False/None (None = GitHub still computing).
+    ``files`` is the list of conflicting paths, an empty list when clean, or
+    null when the file list could not be computed locally. ``reason`` is one of
+    ``clean``, ``computing``, ``conflicting``, ``no_local_clone``.
+    """
+    pr = await _load_pr(request, pr_id)
+    settings = request.app.state.settings
+    svc = _get_github_service(request)
+    try:
+        detail = await svc.get_pull_request(pr.repo_owner, pr.repo_name, pr.number)
+    except GitHubServiceError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    finally:
+        await svc.aclose()
+
+    mergeable = detail.get("mergeable")
+    state = detail.get("mergeable_state")
+
+    if mergeable is True or state == "clean":
+        return {"pr_id": str(pr.id), "conflicted": False, "files": [], "reason": "clean"}
+    if mergeable is None:
+        # GitHub computes mergeability asynchronously; the client should retry.
+        return {"pr_id": str(pr.id), "conflicted": None, "files": None, "reason": "computing"}
+
+    # Conflict indicated — try to compute the conflicting file list locally.
+    match = await git_ops.find_local_repo(list(settings.projects_dirs), pr.repo_owner, pr.repo_name)
+    if match is None:
+        return {"pr_id": str(pr.id), "conflicted": True, "files": None, "reason": "no_local_clone"}
+    try:
+        files = await git_ops.merge_conflict_files(match, pr.base_ref, pr.number)
+    except git_ops.MergeToolUnavailableError:
+        return {"pr_id": str(pr.id), "conflicted": True, "files": None, "reason": "no_local_clone"}
+    except git_ops.GitOpsError as exc:
+        logger.warning("Local conflict computation failed for PR %s: %s", pr.id, exc)
+        return {"pr_id": str(pr.id), "conflicted": True, "files": None, "reason": "no_local_clone"}
+    # A clean local merge despite GitHub flagging conflict (e.g. stale state).
+    if not files:
+        return {"pr_id": str(pr.id), "conflicted": False, "files": [], "reason": "clean"}
+    return {"pr_id": str(pr.id), "conflicted": True, "files": files, "reason": "conflicting"}
+
+
 @router.post(
     "/prs/{pr_id}/threads/{thread_id}/resolve",
     summary="Resolve or unresolve a review thread",
@@ -782,6 +841,14 @@ async def merge_github_pr(pr_id: str, request: Request, body: MergeRequest | Non
             commit_message=req.commit_message,
         )
     except GitHubServiceError as exc:
+        # GitHub returns 405 when the PR is not in a mergeable state (conflicts,
+        # failing required checks, etc.). Surface a clear message instead of the
+        # raw "HTTP 405".
+        if getattr(exc, "status_code", None) == 405:
+            raise HTTPException(
+                status_code=409,
+                detail="This pull request cannot be merged — it has conflicts with the base branch.",
+            ) from exc
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     finally:
         await svc.aclose()

@@ -1,5 +1,5 @@
 ---
-updated: 2026-06-04
+updated: 2026-06-05
 ---
 
 # HTTP API
@@ -197,7 +197,8 @@ All under `/api/integrations/github/`. See [GitHub Integration](github.md).
 | POST | `/api/integrations/github/prs/{id}/review`   | Yes | Submit the review (`event` APPROVE/REQUEST_CHANGES/COMMENT) with queued comments; clears the draft |
 | POST | `/api/integrations/github/prs/{id}/comments/{comment_id}/reply` | Yes | Reply to a review-thread comment |
 | POST | `/api/integrations/github/prs/{id}/threads/{thread_id}/resolve` | Yes | Resolve / unresolve a thread (`?resolved=`) |
-| POST | `/api/integrations/github/prs/{id}/merge`    | Yes | Merge the PR (`method` merge/squash/rebase, default squash) |
+| GET  | `/api/integrations/github/prs/{id}/conflicts` | Yes | Merge-conflict status + conflicting files (local 3-way merge). Returns `{pr_id, conflicted, files, reason}` |
+| POST | `/api/integrations/github/prs/{id}/merge`    | Yes | Merge the PR (`method` merge/squash/rebase, default squash). Maps GitHub 405 (not mergeable) to 409 |
 | POST | `/api/integrations/github/open-pr`           | Yes | Push a worktree's branch (PAT auth via GIT_ASKPASS) and open a PR (`{selected_worktree_path\|project_name, title, base, head_branch?, commit_message?}`) |
 
 ## Auth header

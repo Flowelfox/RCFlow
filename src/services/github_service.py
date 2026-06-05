@@ -113,6 +113,9 @@ def _parse_pull(pr: dict[str, Any]) -> dict[str, Any]:
         "additions": pr.get("additions", 0),
         "deletions": pr.get("deletions", 0),
         "changed_files": pr.get("changed_files", 0),
+        # Only present on the detail endpoint; null while GitHub computes mergeability.
+        "mergeable": pr.get("mergeable"),
+        "mergeable_state": pr.get("mergeable_state"),
         "created_at": _parse_dt(pr.get("created_at")),
         "updated_at": _parse_dt(pr.get("updated_at")),
     }
@@ -509,9 +512,7 @@ class GitHubService:
         """
         url = f"{GITHUB_API_URL}/repos/{owner}/{repo}/contents/{path}"
         try:
-            resp = await self._client.get(
-                url, params={"ref": ref}, headers={"Accept": "application/vnd.github.raw"}
-            )
+            resp = await self._client.get(url, params={"ref": ref}, headers={"Accept": "application/vnd.github.raw"})
         except httpx.TimeoutException as exc:
             raise GitHubServiceError("GitHub API request timed out") from exc
         except httpx.RequestError as exc:
