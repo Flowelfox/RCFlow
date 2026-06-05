@@ -868,16 +868,20 @@ async def get_github_pr_project(pr_id: str, request: Request) -> dict[str, Any]:
         "found in the configured projects directories — nothing is written to "
         "the working tree. Returns conflicted=null while GitHub is still "
         "computing mergeability, and files=null when no local clone exists or the "
-        "local git is too old. Requires GITHUB_TOKEN."
+        "local git is too old. Also flags PRs blocked by branch protection / "
+        "repository rules (required reviews or status checks), which can't be "
+        "merged even when conflict-free. Requires GITHUB_TOKEN."
     ),
 )
 async def get_github_pr_conflicts(pr_id: str, request: Request) -> dict[str, Any]:
-    """Return merge-conflict status and conflicting files for a PR.
+    """Return merge-conflict / mergeability status for a PR.
 
-    ``conflicted`` is True/False/None (None = GitHub still computing).
-    ``files`` is the list of conflicting paths, an empty list when clean, or
-    null when the file list could not be computed locally. ``reason`` is one of
-    ``clean``, ``computing``, ``conflicting``, ``no_local_clone``.
+    ``conflicted`` is True/False/None (None = GitHub still computing). ``files``
+    is the list of conflicting paths, an empty list when clean, or null when the
+    file list could not be computed locally. ``mergeable`` is whether GitHub will
+    accept a merge now (False for conflicts or blocked-by-rules, null while
+    computing). ``reason`` is one of ``clean``, ``computing``, ``conflicting``,
+    ``no_local_clone``, ``blocked``. ``mergeable_state`` is GitHub's raw state.
     """
     pr = await _load_pr(request, pr_id)
     settings = request.app.state.settings
@@ -892,27 +896,74 @@ async def get_github_pr_conflicts(pr_id: str, request: Request) -> dict[str, Any
     mergeable = detail.get("mergeable")
     state = detail.get("mergeable_state")
 
+    # Blocked by branch protection / repo rules (required reviews or checks):
+    # conflict-free, but GitHub rejects the merge — surface it like conflicts.
+    if state == "blocked":
+        return {
+            "pr_id": str(pr.id),
+            "conflicted": False,
+            "files": [],
+            "mergeable": False,
+            "reason": "blocked",
+            "mergeable_state": state,
+        }
     if mergeable is True or state == "clean":
-        return {"pr_id": str(pr.id), "conflicted": False, "files": [], "reason": "clean"}
-    if mergeable is None:
+        return {
+            "pr_id": str(pr.id),
+            "conflicted": False,
+            "files": [],
+            "mergeable": True,
+            "reason": "clean",
+            "mergeable_state": state,
+        }
+    if mergeable is None or state in (None, "unknown"):
         # GitHub computes mergeability asynchronously; the client should retry.
-        return {"pr_id": str(pr.id), "conflicted": None, "files": None, "reason": "computing"}
+        return {
+            "pr_id": str(pr.id),
+            "conflicted": None,
+            "files": None,
+            "mergeable": None,
+            "reason": "computing",
+            "mergeable_state": state,
+        }
 
     # Conflict indicated — try to compute the conflicting file list locally.
     match = await git_ops.find_local_repo(list(settings.projects_dirs), pr.repo_owner, pr.repo_name)
+    no_clone = {
+        "pr_id": str(pr.id),
+        "conflicted": True,
+        "files": None,
+        "mergeable": False,
+        "reason": "no_local_clone",
+        "mergeable_state": state,
+    }
     if match is None:
-        return {"pr_id": str(pr.id), "conflicted": True, "files": None, "reason": "no_local_clone"}
+        return no_clone
     try:
         files = await git_ops.merge_conflict_files(match, pr.base_ref, pr.number)
     except git_ops.MergeToolUnavailableError:
-        return {"pr_id": str(pr.id), "conflicted": True, "files": None, "reason": "no_local_clone"}
+        return no_clone
     except git_ops.GitOpsError as exc:
         logger.warning("Local conflict computation failed for PR %s: %s", pr.id, exc)
-        return {"pr_id": str(pr.id), "conflicted": True, "files": None, "reason": "no_local_clone"}
+        return no_clone
     # A clean local merge despite GitHub flagging conflict (e.g. stale state).
     if not files:
-        return {"pr_id": str(pr.id), "conflicted": False, "files": [], "reason": "clean"}
-    return {"pr_id": str(pr.id), "conflicted": True, "files": files, "reason": "conflicting"}
+        return {
+            "pr_id": str(pr.id),
+            "conflicted": False,
+            "files": [],
+            "mergeable": True,
+            "reason": "clean",
+            "mergeable_state": state,
+        }
+    return {
+        "pr_id": str(pr.id),
+        "conflicted": True,
+        "files": files,
+        "mergeable": False,
+        "reason": "conflicting",
+        "mergeable_state": state,
+    }
 
 
 @router.post(

@@ -476,13 +476,15 @@ async def ws_input_text(
                         line=assist_line,
                         comment_body=assist_comment,
                     )
-                    is_fix = assist_kind == "fix"
+                    # fix and resolve_conflicts are writable (they edit a local
+                    # checkout); summary/explain are read-only.
+                    is_writable = assist_kind in ("fix", "resolve_conflicts")
                     # Attach the linked project to every assist session (so the
                     # session shows the project badge); the worktree is only used
-                    # by the writable fix session.
+                    # by writable sessions.
                     assist_session_id = await prompt_router.prepare_assist_session(
                         purpose=f"pr_{assist_kind}",
-                        read_only=not is_fix,
+                        read_only=not is_writable,
                         project_name=assist_project,
                     )
                     await websocket.send_json(
@@ -497,8 +499,8 @@ async def ws_input_text(
                         prompt_router.handle_prompt(
                             assist_prompt,
                             assist_session_id,
-                            project_name=assist_project if is_fix else None,
-                            selected_worktree_path=assist_worktree if is_fix else None,
+                            project_name=assist_project if is_writable else None,
+                            selected_worktree_path=assist_worktree if is_writable else None,
                             # The agent badge selects the tool directly — no
                             # #tool parsing of the prompt text (so "#123" in the
                             # diff/comment is safe).

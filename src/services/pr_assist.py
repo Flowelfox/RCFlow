@@ -28,9 +28,10 @@ if TYPE_CHECKING:
 # Cap diff/patch text fed to the model so a huge PR cannot blow the context.
 MAX_DIFF_CHARS = 40_000
 
-# summary/explain are read-only (analyse the diff). fix is writable: the agent
-# edits the selected worktree to address a review comment.
-PR_ASSIST_KINDS = ("summary", "explain", "fix")
+# summary/explain are read-only (analyse the diff). fix and resolve_conflicts
+# are writable: the agent edits a local checkout (a review comment for fix; the
+# merge conflicts for resolve_conflicts).
+PR_ASSIST_KINDS = ("summary", "explain", "fix", "resolve_conflicts")
 READ_ONLY_KINDS = ("summary", "explain")
 
 
@@ -83,6 +84,43 @@ def _fix_prompt(pr: GitHubPRModel, file_path: str | None, line: int | None, comm
     )
 
 
+def _resolve_conflicts_prompt(pr: GitHubPRModel, conflict_files: list[str]) -> str:
+    files_hint = ""
+    if conflict_files:
+        listed = "\n".join(f"- {f}" for f in conflict_files)
+        files_hint = f"\nA pre-check found these conflicting files:\n{listed}\n"
+    return (
+        f"You are resolving the merge conflicts on GitHub pull request "
+        f'#{pr.number} "{pr.title}" ({pr.repo_owner}/{pr.repo_name}). The PR '
+        f"merges head `{pr.head_ref}` into base `{pr.base_ref}`, and the two "
+        "branches currently conflict.\n\n"
+        "You are working in a local checkout of this repository. Resolve the "
+        "conflicts so the PR can merge cleanly:\n"
+        f"1. Make sure the PR head branch `{pr.head_ref}` is checked out "
+        "(fetch/track it from `origin` if it isn't already).\n"
+        f"2. Fetch the latest base and merge it into the head branch: "
+        f"`git fetch origin {pr.base_ref}` then `git merge origin/{pr.base_ref}`. "
+        "Conflicts will appear.\n"
+        "3. For EACH conflicting file, open it, understand what BOTH sides "
+        "intended, and produce a correct merged result that preserves both "
+        "changes' intent — never blindly discard one side. Remove all conflict "
+        "markers (`<<<<<<<`, `=======`, `>>>>>>>`).\n"
+        "4. Where feasible, sanity-check the result (build/lint/tests) so you "
+        "don't leave the tree broken.\n"
+        f"{files_hint}\n"
+        "Then STOP and present a clear REPORT before changing history:\n"
+        "- The files that conflicted.\n"
+        "- For EACH file: what conflicted, HOW you resolved it, and WHY you "
+        "chose that resolution (the reasoning for the merged result).\n"
+        "- Anything uncertain the human should double-check.\n\n"
+        "After showing the report, explicitly ASK the human for permission to "
+        "commit and push the resolution. Do NOT commit or push until they "
+        "approve. Only once they say yes, commit the merge and push the head "
+        f"branch `{pr.head_ref}` to `origin`. If they decline or ask for "
+        "changes, leave the working tree as-is and wait."
+    )
+
+
 async def build_pr_assist_prompt(
     *,
     settings: Any,
@@ -129,6 +167,12 @@ async def build_pr_assist_prompt(
         if not comment_body:
             raise ValueError("comment_body is required for the fix assist")
         prompt = _fix_prompt(pr, file_path, line, comment_body)
+    elif kind == "resolve_conflicts":
+        # comment_body optionally carries the conflicting file list (newline- or
+        # comma-separated) as a hint; the agent re-discovers them via the merge.
+        raw = comment_body or ""
+        conflict_files = [f.strip() for f in raw.replace(",", "\n").splitlines() if f.strip()]
+        prompt = _resolve_conflicts_prompt(pr, conflict_files)
     else:
         svc = GitHubService(token=settings.GITHUB_TOKEN)
         try:

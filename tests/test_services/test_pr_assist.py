@@ -12,6 +12,7 @@ from src.services.pr_assist import (
     READ_ONLY_KINDS,
     _explain_prompt,
     _fix_prompt,
+    _resolve_conflicts_prompt,
     _summary_prompt,
     _truncate,
     build_pr_assist_prompt,
@@ -57,8 +58,25 @@ def test_fix_prompt_includes_comment_and_no_push():
     assert "do not push" in p.lower() or "do NOT push" in p
 
 
+def test_resolve_conflicts_prompt_reports_then_asks_permission():
+    p = _resolve_conflicts_prompt(_PR(), ["a.txt", "src/b.py"])
+    assert "#42" in p and "acme/web" in p
+    assert "main" in p and "fix-sso" in p
+    assert "a.txt" in p and "src/b.py" in p
+    assert "report" in p.lower()
+    # Reports first, then asks before committing/pushing.
+    assert "permission" in p.lower() or "ask" in p.lower()
+    assert "until they approve" in p.lower()
+
+
+def test_resolve_conflicts_prompt_without_file_hint():
+    p = _resolve_conflicts_prompt(_PR(), [])
+    assert "conflict" in p.lower() and "pre-check found" not in p
+
+
 def test_kind_sets():
     assert "fix" in PR_ASSIST_KINDS and "fix" not in READ_ONLY_KINDS
+    assert "resolve_conflicts" in PR_ASSIST_KINDS and "resolve_conflicts" not in READ_ONLY_KINDS
     assert set(READ_ONLY_KINDS) == {"summary", "explain"}
 
 
