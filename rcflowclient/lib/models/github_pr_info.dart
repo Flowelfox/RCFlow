@@ -9,6 +9,10 @@ class GithubPrInfo {
   String? body;
   String state; // open|closed|merged
   bool draft;
+  // GitHub reviewDecision: APPROVED | CHANGES_REQUESTED | REVIEW_REQUIRED | null.
+  String? reviewDecision;
+  // GitHub mergeable: MERGEABLE | CONFLICTING | UNKNOWN | null.
+  String? mergeStatus;
   final String author;
   final String? authorAvatarUrl;
   final String url;
@@ -36,6 +40,8 @@ class GithubPrInfo {
     this.body,
     required this.state,
     required this.draft,
+    this.reviewDecision,
+    this.mergeStatus,
     required this.author,
     this.authorAvatarUrl,
     required this.url,
@@ -69,6 +75,8 @@ class GithubPrInfo {
       body: json['body'] as String?,
       state: json['state'] as String? ?? 'open',
       draft: json['draft'] as bool? ?? false,
+      reviewDecision: json['review_decision'] as String?,
+      mergeStatus: json['merge_status'] as String?,
       author: json['author'] as String? ?? '',
       authorAvatarUrl: json['author_avatar_url'] as String?,
       url: json['url'] as String? ?? '',
@@ -99,6 +107,8 @@ class GithubPrInfo {
     String? body,
     String? state,
     bool? draft,
+    String? reviewDecision,
+    String? mergeStatus,
     int? additions,
     int? deletions,
     int? changedFiles,
@@ -118,6 +128,8 @@ class GithubPrInfo {
       body: body ?? this.body,
       state: state ?? this.state,
       draft: draft ?? this.draft,
+      reviewDecision: reviewDecision ?? this.reviewDecision,
+      mergeStatus: mergeStatus ?? this.mergeStatus,
       author: author,
       authorAvatarUrl: authorAvatarUrl,
       url: url,

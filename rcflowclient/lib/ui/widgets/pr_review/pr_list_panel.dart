@@ -65,22 +65,32 @@ class _PrListPanelState extends State<PrListPanel>
     setState(() => _syncing = true);
     try {
       var total = 0;
+      var failed = 0;
+      // Sync each worker independently — one worker erroring (e.g. an older
+      // backend, or one without a GitHub token) must not abort the whole sweep.
       for (final w in workers) {
-        final result = await w!.ws.syncGithubPrs();
-        total += (result['synced'] as int?) ?? 0;
-        // Refresh the cached list explicitly in case any broadcast was missed.
-        w.ws.listGithubPrs();
+        try {
+          final result = await w!.ws.syncGithubPrs();
+          total += (result['synced'] as int?) ?? 0;
+          // Refresh the cached list explicitly in case a broadcast was missed.
+          w.ws.listGithubPrs();
+        } catch (_) {
+          failed++;
+        }
       }
-      state.showNotification(
-        level: NotificationLevel.success,
-        title: 'Synced $total pull request${total == 1 ? '' : 's'}',
-      );
-    } catch (e) {
-      state.showNotification(
-        level: NotificationLevel.error,
-        title: 'Sync failed',
-        body: '$e',
-      );
+      if (failed == workers.length) {
+        state.showNotification(
+          level: NotificationLevel.error,
+          title: 'Sync failed',
+          body: 'Could not sync any connected worker.',
+        );
+      } else {
+        state.showNotification(
+          level: failed > 0 ? NotificationLevel.warning : NotificationLevel.success,
+          title: 'Synced $total pull request${total == 1 ? '' : 's'}',
+          body: failed > 0 ? '$failed worker${failed == 1 ? '' : 's'} could not be synced.' : null,
+        );
+      }
     } finally {
       if (mounted) setState(() => _syncing = false);
     }

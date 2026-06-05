@@ -54,8 +54,12 @@ class ReviewActionBar extends StatefulWidget {
   /// computed (e.g. no local clone on the worker).
   final List<String>? conflictFiles;
 
-  /// Backend reason code: clean | computing | conflicting | no_local_clone.
+  /// Backend reason code: clean | computing | conflicting | no_local_clone |
+  /// blocked (blocked by branch-protection / repository rules).
   final String? conflictReason;
+
+  /// Called to launch an agent session that resolves the PR's merge conflicts.
+  final VoidCallback? onResolveConflicts;
 
   /// Called after a successful review submission. Receives the result map from
   /// `POST /review` so the caller can surface a snackbar + refresh.
@@ -78,6 +82,7 @@ class ReviewActionBar extends StatefulWidget {
     this.conflicted,
     this.conflictFiles,
     this.conflictReason,
+    this.onResolveConflicts,
     required this.onSubmitted,
     required this.onMerged,
     required this.onRemoveDraftComment,
@@ -135,11 +140,14 @@ class _ReviewActionBarState extends State<ReviewActionBar> {
     super.dispose();
   }
 
+  bool get _blocked => widget.conflictReason == 'blocked';
+
   bool get _canMerge =>
       widget.pr.state == 'open' &&
       !widget.pr.draft &&
       !widget.pr.isMerged &&
-      widget.conflicted != true;
+      widget.conflicted != true &&
+      !_blocked;
 
   Future<void> _submit() async {
     setState(() => _submitting = true);
@@ -248,7 +256,9 @@ class _ReviewActionBarState extends State<ReviewActionBar> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (widget.conflicted == true || widget.conflictReason == 'computing')
+          if (widget.conflicted == true ||
+              widget.conflictReason == 'computing' ||
+              widget.conflictReason == 'blocked')
             _buildConflictBanner(context),
           Row(
             children: [
@@ -376,12 +386,21 @@ class _ReviewActionBarState extends State<ReviewActionBar> {
         child: button,
       );
     }
+    if (_blocked) {
+      return Tooltip(
+        message:
+            'Merging is blocked by repository rules (required reviews or '
+            'status checks). Satisfy them on GitHub before merging.',
+        child: button,
+      );
+    }
     return button;
   }
 
-  /// Banner shown above the action row when the PR has merge conflicts (or while
-  /// the merge status is still being computed). Lists the conflicting files when
-  /// known; otherwise explains why the list is unavailable.
+  /// Banner shown above the action row when the PR can't be merged: merge
+  /// conflicts, blocked by repository rules, or while the status is still being
+  /// computed. For conflicts it lists the files and offers an agent to resolve
+  /// them.
   Widget _buildConflictBanner(BuildContext context) {
     final colors = context.appColors;
     final reason = widget.conflictReason;
@@ -396,37 +415,80 @@ class _ReviewActionBarState extends State<ReviewActionBar> {
       icon = Icons.hourglass_empty;
       accent = colors.textMuted;
       title = 'Checking merge status…';
+    } else if (reason == 'blocked') {
+      icon = Icons.gpp_maybe_outlined;
+      accent = colors.errorText;
+      title = 'Merging blocked by repository rules';
+      detail = Padding(
+        padding: const EdgeInsets.only(top: kGapInline),
+        child: Text(
+          'Required reviews or status checks for ${widget.pr.baseRef} are not '
+          'satisfied. Resolve them on GitHub before merging.',
+          style: TextStyle(color: colors.textMuted, fontSize: 11),
+        ),
+      );
     } else {
       icon = Icons.merge_type;
       accent = colors.errorText;
       title = 'Conflicts with ${widget.pr.baseRef} — resolve before merging';
+      final children = <Widget>[];
       if (files.isNotEmpty) {
-        detail = Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            for (final f in files)
-              Padding(
-                padding: const EdgeInsets.only(top: kGapInline),
-                child: Text(
-                  f,
-                  style: TextStyle(
-                    color: colors.textSecondary,
-                    fontSize: 11,
-                    fontFamily: 'monospace',
-                  ),
+        for (final f in files) {
+          children.add(
+            Padding(
+              padding: const EdgeInsets.only(top: kGapInline),
+              child: Text(
+                f,
+                style: TextStyle(
+                  color: colors.textSecondary,
+                  fontSize: 11,
+                  fontFamily: 'monospace',
                 ),
               ),
-          ],
-        );
+            ),
+          );
+        }
       } else {
-        detail = Padding(
-          padding: const EdgeInsets.only(top: kGapInline),
-          child: Text(
-            'Conflicting files unavailable — no local clone of this repo on the worker.',
-            style: TextStyle(color: colors.textMuted, fontSize: 11),
+        children.add(
+          Padding(
+            padding: const EdgeInsets.only(top: kGapInline),
+            child: Text(
+              'Conflicting files unavailable — no local clone of this repo on the worker.',
+              style: TextStyle(color: colors.textMuted, fontSize: 11),
+            ),
           ),
         );
       }
+      if (widget.onResolveConflicts != null) {
+        children.add(
+          Padding(
+            padding: const EdgeInsets.only(top: kSpace2),
+            child: OutlinedButton.icon(
+              onPressed: widget.onResolveConflicts,
+              icon: const Icon(Icons.auto_fix_high, size: 14),
+              label: const Text(
+                'Resolve with agent',
+                style: TextStyle(fontSize: 12),
+              ),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: colors.accent,
+                side: BorderSide(color: colors.accent.withAlpha(120)),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: kSpace3,
+                  vertical: kSpace1,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(kRadiusSmall),
+                ),
+              ),
+            ),
+          ),
+        );
+      }
+      detail = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: children,
+      );
     }
 
     return Container(

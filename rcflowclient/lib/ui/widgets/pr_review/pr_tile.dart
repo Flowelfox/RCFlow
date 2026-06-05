@@ -5,6 +5,7 @@ import '../../../state/app_state.dart';
 import '../../../theme.dart';
 import '../session_panel/github_pr_drag_data.dart';
 import '../session_panel/helpers.dart';
+import 'pr_status.dart';
 
 /// Sidebar tile for a single cached GitHub pull request.
 class PrTile extends StatelessWidget {
@@ -23,7 +24,9 @@ class PrTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final isViewed = _isPrViewed();
     final isActive = _isPrActive();
-    final (badgeLabel, badgeColor) = _stateBadge(context);
+    final status = prStatusVisual(pr);
+    final badgeLabel = status.label;
+    final badgeColor = status.color;
 
     final tile = Container(
       decoration: BoxDecoration(
@@ -53,7 +56,7 @@ class PrTile extends StatelessWidget {
             color: badgeColor.withAlpha(30),
             borderRadius: BorderRadius.circular(8),
           ),
-          child: Icon(_stateIcon(), color: badgeColor, size: 16),
+          child: Icon(status.icon, color: badgeColor, size: 16),
         ),
         title: Row(
           children: [
@@ -148,7 +151,7 @@ class PrTile extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(_stateIcon(), color: badgeColor, size: 14),
+              Icon(status.icon, color: badgeColor, size: 14),
               const SizedBox(width: 6),
               Text(
                 '#${pr.number}',
@@ -193,20 +196,6 @@ class PrTile extends StatelessWidget {
   bool _isPrActive() {
     if (state.hasNoPanes) return false;
     return state.activePane.githubPrId == pr.id;
-  }
-
-  IconData _stateIcon() {
-    if (pr.isMerged) return Icons.merge_type;
-    if (pr.state == 'closed') return Icons.cancel_outlined;
-    if (pr.draft) return Icons.edit_note;
-    return Icons.call_merge;
-  }
-
-  (String, Color) _stateBadge(BuildContext context) {
-    if (pr.isMerged) return ('Merged', const Color(0xFF8B5CF6));
-    if (pr.state == 'closed') return ('Closed', const Color(0xFFEF4444));
-    if (pr.draft) return ('Draft', const Color(0xFF6B7280));
-    return ('Open', const Color(0xFF10B981));
   }
 
   String _subtitle(String badgeLabel) {

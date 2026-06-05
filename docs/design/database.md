@@ -1,5 +1,5 @@
 ---
-updated: 2026-06-04
+updated: 2026-06-05
 ---
 
 # Database Schema
@@ -221,6 +221,8 @@ CREATE TABLE github_prs (
     body TEXT,
     state VARCHAR(20) NOT NULL,              -- open|closed|merged
     draft BOOLEAN NOT NULL DEFAULT FALSE,
+    review_decision VARCHAR(20),             -- APPROVED|CHANGES_REQUESTED|REVIEW_REQUIRED|null (GraphQL)
+    merge_status VARCHAR(20),                -- MERGEABLE|CONFLICTING|UNKNOWN|null (GraphQL mergeable)
     author VARCHAR(255) NOT NULL,
     author_avatar_url TEXT,
     url TEXT NOT NULL,                       -- html_url

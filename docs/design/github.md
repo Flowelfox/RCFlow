@@ -74,19 +74,20 @@ All under `/api/integrations/github/`, `X-API-Key` required. See [HTTP API](http
 | Method | Path | Description |
 |--------|------|-------------|
 | GET  | `/status`          | Token configured + validity preflight (`{configured, valid, login}`) |
-| POST | `/sync`            | Re-sync open PRs (`?role=for_me\|created`, default both) → `{synced}` |
+| POST | `/sync`            | Re-sync open PRs (`?role=for_me\|created`, default both) → `{synced, archived_pruned, configured}`. No token → no-op (`synced:0, configured:false`), not an error. Each PR is enriched via GraphQL with `review_decision` + `merge_status` for a per-PR status badge |
 | GET  | `/prs`             | List cached PRs (`?role=`, `?state=`, `?q=`) → `{prs, total}` |
 | GET  | `/prs/{id}`        | Single cached PR by local UUID |
 | GET  | `/prs/{id}/files`  | Live changed files, each with a per-file unified-diff `patch` |
 | GET  | `/prs/{id}/diff`   | Live whole-PR unified diff as raw text |
 | GET  | `/prs/{id}/file`   | A file's full text at the PR head/base (`?path=&side=`) — for expanding diff context |
 | GET  | `/prs/{id}/threads` | Live inline review threads (GraphQL read) |
+| GET/POST | `/prs/{id}/conversation` | Global (issue-level) comments + review summaries as a timeline; POST adds a global comment |
 | GET/PATCH | `/prs/{id}/draft` | Get / update the local pending review (verdict + body) |
 | POST/DELETE | `/prs/{id}/draft/comments[/{index}]` | Queue / remove an inline comment on the draft (POST takes `start_line`/`start_side` for a multi-line range) |
 | POST | `/prs/{id}/review` | Submit the review (APPROVE/REQUEST_CHANGES/COMMENT) + queued comments |
 | POST | `/prs/{id}/comments/{comment_id}/reply` | Reply to a review-thread comment |
 | POST | `/prs/{id}/threads/{thread_id}/resolve` | Resolve / unresolve a thread |
-| GET  | `/prs/{id}/conflicts` | Merge-conflict status + conflicting files → `{conflicted, files, reason}` |
+| GET  | `/prs/{id}/conflicts` | Merge-conflict / mergeability status → `{conflicted, files, mergeable, reason, mergeable_state}` |
 | POST | `/prs/{id}/merge` | Merge the PR (squash default) |
 | POST | `/open-pr` | Push a selected worktree's branch (PAT auth) and open a PR for it |
 
@@ -94,21 +95,38 @@ The `open-pr` push authenticates with `GITHUB_TOKEN` supplied through a
 temporary `GIT_ASKPASS` helper, so the token never appears in argv, git config,
 or logs (`src/services/git_ops.py`).
 
+Inline review threads (line-anchored) are separate from the **conversation**:
+`/prs/{id}/conversation` returns the PR's general issue-level comments merged
+with submitted review summaries (approve / request-changes / comment notes) as a
+single oldest-first timeline; POST adds a general comment. The client shows this
+behind a conversation toggle in the PR header, with a composer to post.
+
 Read = GraphQL (threads); writes = REST (review, reply, merge); thread
 resolution = GraphQL mutation. The pending review is held locally in
 `github_review_drafts` until submitted, so inline comments can be queued and
 edited before they post to GitHub.
 
+`/sync` (and the startup sync) drop PRs whose repository is **archived** —
+they are read-only and can't be reviewed or merged. Archived-repo PRs are never
+cached, and any previously-cached rows for a repo that has since been archived
+are pruned (`_persist_synced_prs`) and a `github_pr_deleted` broadcast is sent so
+the client drops them live.
+
 `/prs/{id}/conflicts` reports whether the PR conflicts with its base. GitHub's
 API reports only *that* a PR conflicts (`mergeable`/`mergeable_state` on the PR
 detail), so the conflicting **file list** is computed from a local 3-way merge
 (`git merge-tree --write-tree`, `src/services/git_ops.py`) against the checkout
-found in `PROJECTS_DIR`. Nothing is written to the working tree. `reason` is one
-of `clean`, `computing` (GitHub still computing — retry), `conflicting`, or
+found in `PROJECTS_DIR`. Nothing is written to the working tree. The response is
+`{conflicted, files, mergeable, reason, mergeable_state}`; `reason` is one of
+`clean`, `computing` (GitHub still computing — retry), `conflicting`,
 `no_local_clone` (conflict confirmed but the file list could not be computed —
-no local clone, or git < 2.38). When the PR conflicts the client disables Merge
-and shows a banner listing the files. `/prs/{id}/merge` maps GitHub's HTTP 405
-(not mergeable) to a `409` with a clear message instead of a raw `502`.
+no local clone, or git < 2.38), or `blocked` (conflict-free but blocked by
+branch protection / repository rules — required reviews or status checks, e.g.
+"Review required"). When the PR conflicts the client disables Merge and shows a
+banner listing the files plus a **Resolve with agent** button (the
+`resolve_conflicts` assist); when blocked it disables Merge and shows a rules
+warning. `/prs/{id}/merge` maps GitHub's HTTP 405 (not mergeable) to a `409` with
+a clear message instead of a raw `502`.
 
 ## WebSocket Messages
 
@@ -117,7 +135,7 @@ Inbound (client → server):
 | Type | Effect |
 |------|--------|
 | `list_github_prs` | Server replies with `github_pr_list` — all cached PRs for this backend, newest first |
-| `start_pr_assist` | `{pr_id, kind, file_path?, line?, comment_body?, project_name?, selected_worktree_path?}` — acks a `session_id` and streams the assist into it. `summary`/`explain` are read-only diff analysis; `fix` runs a **full-perms** agent session in the selected worktree to address `comment_body` (the agent edits but does not push) |
+| `start_pr_assist` | `{pr_id, kind, file_path?, line?, comment_body?, project_name?, selected_worktree_path?}` — acks a `session_id` and streams the assist into it. `summary`/`explain` are read-only diff analysis; `fix` and `resolve_conflicts` run a **full-perms** agent session in the local checkout. `fix` addresses `comment_body`; `resolve_conflicts` merges the base into the PR head and resolves conflicts (the optional `comment_body` carries the conflicting file list as a hint), then reports what it fixed / how / why and asks the human for permission before committing & pushing. `fix` edits the tree but never pushes |
 
 Outbound (server → all connected output clients), mirroring the Linear broadcasts:
 

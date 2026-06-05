@@ -1567,6 +1567,56 @@ class RestClient {
     }
   }
 
+  /// Fetch a PR's conversation: global (issue-level) comments merged with
+  /// review summaries, as a timeline. Returns `{pr_id, items, total}` where each
+  /// item is `{kind, author, author_avatar_url, body, created_at, url, state?}`.
+  Future<Map<String, dynamic>> getGithubPrConversation(String prId) async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url = _serverUrl!.http(
+      '/api/integrations/github/prs/$prId/conversation',
+    );
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.getUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      final response = await request.close();
+      final body = await response.transform(utf8.decoder).join();
+      if (response.statusCode != 200) {
+        throw Exception('Server returned ${response.statusCode}: $body');
+      }
+      return jsonDecode(body) as Map<String, dynamic>;
+    } finally {
+      client.close();
+    }
+  }
+
+  /// Post a global (issue-level) comment on a PR's conversation. Returns
+  /// `{pr_id, comment}` with the created comment.
+  Future<Map<String, dynamic>> postGithubPrConversation(
+    String prId,
+    String body,
+  ) async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url = _serverUrl!.http(
+      '/api/integrations/github/prs/$prId/conversation',
+    );
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.postUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      request.headers.contentType = io.ContentType.json;
+      request.add(utf8.encode(jsonEncode({'body': body})));
+      final response = await request.close();
+      final respBody = await response.transform(utf8.decoder).join();
+      if (response.statusCode != 200) {
+        throw Exception('Server returned ${response.statusCode}: $respBody');
+      }
+      return jsonDecode(respBody) as Map<String, dynamic>;
+    } finally {
+      client.close();
+    }
+  }
+
   /// Check a cached PR's merge-conflict status against its base branch.
   ///
   /// Returns `{"conflicted": bool?, "files": List<String>?, "reason": "..."}`.

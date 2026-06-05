@@ -184,13 +184,14 @@ All under `/api/integrations/github/`. See [GitHub Integration](github.md).
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | GET  | `/api/integrations/github/status`            | Yes | Token configured + validity preflight (returns `{configured, valid, login}`) |
-| POST | `/api/integrations/github/sync`              | Yes | Re-sync open PRs from GitHub. Optional `?role=for_me\|created` (default both). Returns `{synced}` |
+| POST | `/api/integrations/github/sync`              | Yes | Re-sync open PRs from GitHub. Optional `?role=for_me\|created` (default both). Returns `{synced, archived_pruned, configured}`. A worker with no token is a no-op (`synced:0, configured:false`), not an error |
 | GET  | `/api/integrations/github/prs`               | Yes | List cached PRs. Optional `?role=`, `?state=`, `?q=`. Returns `{prs, total}` |
 | GET  | `/api/integrations/github/prs/{id}`          | Yes | Single cached PR by local UUID |
 | GET  | `/api/integrations/github/prs/{id}/files`    | Yes | Live changed files (each with a per-file unified-diff `patch`). Returns `{pr_id, files, total}` |
 | GET  | `/api/integrations/github/prs/{id}/file`     | Yes | Full file content at the PR head (default) or base, for expanding diff context beyond the patch hunks. Query `?path=`, `?side=head|base`. Returns `{pr_id, path, side, ref, content}` |
 | GET  | `/api/integrations/github/prs/{id}/diff`     | Yes | Live whole-PR unified diff as raw text. Returns `{pr_id, diff}` |
 | GET  | `/api/integrations/github/prs/{id}/threads`  | Yes | Live inline review threads (path, line, side, resolved/outdated, comments). Returns `{pr_id, threads, total}` |
+| GET/POST | `/api/integrations/github/prs/{id}/conversation` | Yes | GET: global comments + review summaries as a timeline `{pr_id, items, total}`. POST `{body}`: add a global comment → `{pr_id, comment}` |
 | GET/PATCH | `/api/integrations/github/prs/{id}/draft` | Yes | Get / update the local pending review (verdict + summary body) |
 | POST | `/api/integrations/github/prs/{id}/draft/comments`         | Yes | Queue an inline comment `{path, line, side, body}` on the draft |
 | DELETE | `/api/integrations/github/prs/{id}/draft/comments/{index}` | Yes | Remove a queued inline comment |

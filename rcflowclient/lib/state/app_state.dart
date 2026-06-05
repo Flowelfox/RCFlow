@@ -899,8 +899,9 @@ class AppState extends ChangeNotifier implements PaneHost {
     // kinds so the session shows that project's badge. We do NOT fall back to
     // the pane's manually-selected project (that attaches an unrelated repo).
     final isFix = kind == 'fix';
+    final isWritable = isFix || kind == 'resolve_conflicts';
     final resolvedProject = projectName;
-    final worktreePath = isFix ? pane.pendingWorktreePath : null;
+    final worktreePath = isWritable ? pane.pendingWorktreePath : null;
     // The coding agent the worker should run (direct-tool mode needs it).
     final agent = defaultAgentForWorker(pr.workerId);
 
@@ -913,7 +914,7 @@ class AppState extends ChangeNotifier implements PaneHost {
       pr.id,
       kind,
       filePath: filePath,
-      commentBody: isFix ? commentBody : null,
+      commentBody: isWritable ? commentBody : null,
       line: isFix ? line : null,
       projectName: resolvedProject,
       selectedWorktreePath: worktreePath,

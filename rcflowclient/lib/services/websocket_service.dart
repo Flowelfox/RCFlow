@@ -461,6 +461,14 @@ class WebSocketService {
   Future<Map<String, dynamic>> getGithubPrConflicts(String prId) =>
       _rest.getGithubPrConflicts(prId);
 
+  Future<Map<String, dynamic>> getGithubPrConversation(String prId) =>
+      _rest.getGithubPrConversation(prId);
+
+  Future<Map<String, dynamic>> postGithubPrConversation(
+    String prId,
+    String body,
+  ) => _rest.postGithubPrConversation(prId, body);
+
   Future<Map<String, dynamic>> getGithubPrFile(
     String prId,
     String path, {

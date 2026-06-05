@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
+import 'package:markdown/markdown.dart' as md;
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -9,9 +12,11 @@ import '../../../state/app_state.dart';
 import '../../../state/pane_state.dart';
 import '../../../theme.dart';
 import '../../../theme/spacing.dart';
+import '../../utils/link_utils.dart';
 import '../collapsible_group_header.dart';
 import '../diff/diff_viewer.dart';
 import 'comment_thread.dart';
+import 'pr_status.dart';
 import 'review_action_bar.dart';
 
 /// Full-pane review view for a cached GitHub pull request.
@@ -50,6 +55,8 @@ class PrReviewPane extends StatelessWidget {
           appState: appState,
           mode: DiffViewMode.unified,
           onModeChanged: (_) {},
+          showConversation: false,
+          onToggleConversation: () {},
         ),
         Expanded(
           child: Center(
@@ -122,6 +129,14 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
   List<String>? _conflictFiles;
   String? _conflictReason;
 
+  /// Whether the conversation view (global comments + review summaries) is shown
+  /// in place of the diff. Fetched lazily the first time it's opened.
+  bool _showConversation = false;
+  List<Map<String, dynamic>> _conversation = [];
+  bool _loadingConversation = false;
+  bool _postingComment = false;
+  final TextEditingController _commentController = TextEditingController();
+
   /// The local review draft event ("APPROVE"|"REQUEST_CHANGES"|"COMMENT").
   String _draftEvent = 'COMMENT';
 
@@ -158,6 +173,12 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
   WebSocketService? get _ws {
     final worker = widget.appState.getWorker(widget.pr.workerId);
     return worker?.ws;
+  }
+
+  @override
+  void dispose() {
+    _commentController.dispose();
+    super.dispose();
   }
 
   @override
@@ -203,6 +224,9 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
       _conflicted = null;
       _conflictFiles = null;
       _conflictReason = null;
+      _showConversation = false;
+      _conversation = [];
+      _loadingConversation = false;
       _composerAnchor = null;
       _submittingComposer = false;
       _gutterDragging = false;
@@ -272,7 +296,11 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
 
   /// Refetch the PR's merge-conflict status (best-effort). Drives the conflict
   /// banner and the disabled state of the Merge button in the action bar.
-  Future<void> _refreshConflicts() async {
+  ///
+  /// GitHub computes mergeability asynchronously, so the first call often
+  /// returns `reason: computing`. Retry a few times (with backoff) so the banner
+  /// resolves to a real verdict instead of being stuck on "Checking…".
+  Future<void> _refreshConflicts({int attempt = 0}) async {
     final ws = _ws;
     if (ws == null) return;
     try {
@@ -284,6 +312,18 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
             ?.cast<String>();
         _conflictReason = result['reason'] as String?;
       });
+      if (_conflictReason == 'computing') {
+        if (attempt < 5) {
+          await Future<void>.delayed(Duration(seconds: 2 + attempt));
+          if (!mounted || _loadedPrId != widget.pr.id) return;
+          await _refreshConflicts(attempt: attempt + 1);
+        } else if (mounted && _loadedPrId == widget.pr.id) {
+          // Gave up waiting on GitHub — clear the transient banner rather than
+          // leave it stuck on "Checking…". A real conflict still surfaces if
+          // the merge is attempted (GitHub rejects it with a clear message).
+          setState(() => _conflictReason = null);
+        }
+      }
     } catch (_) {
       // Best-effort; leave conflict state as-is.
     }
@@ -374,6 +414,8 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
           mode: _mode,
           onModeChanged: (m) => setState(() => _mode = m),
           linkedProjectName: _linkedProjectName,
+          showConversation: _showConversation,
+          onToggleConversation: _toggleConversation,
         ),
         Expanded(child: _buildBody(context)),
       ],
@@ -398,6 +440,9 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
     }
     if (_error != null) {
       return _buildError(context);
+    }
+    if (_showConversation) {
+      return _buildConversation(context);
     }
     if (_files.isEmpty) {
       return Center(
@@ -456,6 +501,7 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
             conflicted: _conflicted,
             conflictFiles: _conflictFiles,
             conflictReason: _conflictReason,
+            onResolveConflicts: _resolveConflicts,
             onSubmitted: _onReviewSubmitted,
             onMerged: _onMerged,
             onRemoveDraftComment: _removeDraftComment,
@@ -481,6 +527,326 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
     _applyPrUpdate(result['pr'] as Map<String, dynamic>?);
     await _refreshThreads();
     await _refreshConflicts();
+  }
+
+  /// Toggle the conversation view; fetch it the first time it's opened.
+  void _toggleConversation() {
+    setState(() => _showConversation = !_showConversation);
+    if (_showConversation && _conversation.isEmpty && !_loadingConversation) {
+      _refreshConversation();
+    }
+  }
+
+  /// Fetch the PR's global comments + review summaries (best-effort).
+  Future<void> _refreshConversation() async {
+    final ws = _ws;
+    if (ws == null) return;
+    setState(() => _loadingConversation = true);
+    try {
+      final result = await ws.getGithubPrConversation(widget.pr.id);
+      if (!mounted || _loadedPrId != widget.pr.id) return;
+      setState(() {
+        _conversation = (result['items'] as List<dynamic>? ?? [])
+            .cast<Map<String, dynamic>>();
+        _loadingConversation = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _loadingConversation = false);
+    }
+  }
+
+  /// Post a new global comment to the PR conversation.
+  Future<void> _postComment() async {
+    final ws = _ws;
+    final text = _commentController.text.trim();
+    if (ws == null || text.isEmpty || _postingComment) return;
+    setState(() => _postingComment = true);
+    try {
+      await ws.postGithubPrConversation(widget.pr.id, text);
+      _commentController.clear();
+      await _refreshConversation();
+    } catch (e) {
+      widget.appState.showNotification(
+        level: NotificationLevel.error,
+        title: 'Failed to post comment',
+        body: '$e',
+      );
+    } finally {
+      if (mounted) setState(() => _postingComment = false);
+    }
+  }
+
+  /// Conversation view: the PR's global comments + review summaries, with a
+  /// composer to post a new global comment.
+  Widget _buildConversation(BuildContext context) {
+    final colors = context.appColors;
+    Widget list;
+    if (_loadingConversation && _conversation.isEmpty) {
+      list = Center(
+        child: SizedBox(
+          width: 20,
+          height: 20,
+          child: CircularProgressIndicator(
+            strokeWidth: 2,
+            color: colors.textMuted,
+          ),
+        ),
+      );
+    } else if (_conversation.isEmpty) {
+      list = Center(
+        child: Text(
+          'No conversation yet',
+          style: TextStyle(color: colors.textMuted, fontSize: 13),
+        ),
+      );
+    } else {
+      list = ListView.builder(
+        padding: const EdgeInsets.all(kSpace3),
+        itemCount: _conversation.length,
+        itemBuilder: (ctx, i) => _conversationItem(ctx, _conversation[i]),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Expanded(child: list),
+        _buildCommentComposer(context),
+      ],
+    );
+  }
+
+  Widget _conversationItem(BuildContext context, Map<String, dynamic> item) {
+    final colors = context.appColors;
+    final author = item['author'] as String? ?? '';
+    final body = item['body'] as String? ?? '';
+    final isReview = item['kind'] == 'review';
+    final state = item['state'] as String?;
+    final created = _fmtConversationDate(item['created_at'] as String?);
+
+    (String, Color)? verdict;
+    if (isReview) {
+      verdict = switch (state) {
+        'APPROVED' => ('approved', colors.successText),
+        'CHANGES_REQUESTED' => ('requested changes', colors.errorText),
+        'DISMISSED' => ('dismissed', colors.textMuted),
+        _ => ('reviewed', colors.textMuted),
+      };
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: kSpace2),
+      padding: const EdgeInsets.all(kSpace3),
+      decoration: BoxDecoration(
+        color: colors.bgElevated,
+        borderRadius: BorderRadius.circular(kRadiusSmall),
+        border: Border.all(color: colors.divider, width: 0.5),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                isReview ? Icons.rate_review_outlined : Icons.comment_outlined,
+                size: 13,
+                color: colors.textMuted,
+              ),
+              const SizedBox(width: 6),
+              Flexible(
+                child: Text(
+                  author,
+                  style: TextStyle(
+                    color: colors.textPrimary,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              if (verdict != null) ...[
+                const SizedBox(width: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                  decoration: BoxDecoration(
+                    color: verdict.$2.withAlpha(28),
+                    borderRadius: BorderRadius.circular(kRadiusSmall),
+                  ),
+                  child: Text(
+                    verdict.$1,
+                    style: TextStyle(
+                      color: verdict.$2,
+                      fontSize: 9,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+              // Date sits just after the author/verdict (not flung to the far
+              // edge), GitHub-style. Author (Flexible) absorbs any overflow.
+              if (created.isNotEmpty) ...[
+                const SizedBox(width: 8),
+                Text(
+                  created,
+                  style: TextStyle(color: colors.textMuted, fontSize: 10),
+                ),
+              ],
+            ],
+          ),
+          if (body.isNotEmpty) ...[
+            const SizedBox(height: kGapTight),
+            MarkdownBody(
+              data: body,
+              selectable: true,
+              shrinkWrap: true,
+              // GitHub renders comments as GFM: single newlines are line breaks
+              // and tables/strikethrough/task-lists are supported.
+              softLineBreak: true,
+              extensionSet: md.ExtensionSet.gitHubFlavored,
+              onTapLink: openLinkOnCtrlClick,
+              imageBuilder: _conversationImage,
+              styleSheet: MarkdownStyleSheet(
+                p: TextStyle(color: colors.textSecondary, fontSize: 12, height: 1.4),
+                code: TextStyle(
+                  color: colors.textPrimary,
+                  backgroundColor: Colors.black.withValues(alpha: 0.2),
+                  fontSize: 11.5,
+                  fontFamily: 'monospace',
+                ),
+                codeblockDecoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.25),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                codeblockPadding: const EdgeInsets.all(kSpace2),
+                a: TextStyle(color: colors.accentLight),
+                listBullet: TextStyle(color: colors.textSecondary, fontSize: 12),
+                blockquoteDecoration: BoxDecoration(
+                  color: colors.bgOverlay,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                tableBorder: TableBorder.all(color: colors.divider, width: 0.5),
+                tableHead: TextStyle(
+                  color: colors.textPrimary,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+                tableBody: TextStyle(color: colors.textSecondary, fontSize: 12),
+                tableCellsPadding: const EdgeInsets.symmetric(
+                  horizontal: kSpace2,
+                  vertical: kSpace1,
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// Render an inline markdown image, capped so a large image doesn't blast the
+  /// whole pane. Scales down to fit; never upscales past its natural size.
+  Widget _conversationImage(Uri uri, String? title, String? alt) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: kGapTight),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 480, maxHeight: 360),
+        child: Image.network(
+          uri.toString(),
+          fit: BoxFit.contain,
+          alignment: Alignment.centerLeft,
+          errorBuilder: (ctx, _, _) => Text(
+            alt?.isNotEmpty == true ? '🖼 $alt' : '🖼 (image failed to load)',
+            style: TextStyle(
+              color: ctx.appColors.textMuted,
+              fontSize: 11,
+              fontStyle: FontStyle.italic,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCommentComposer(BuildContext context) {
+    final colors = context.appColors;
+    return Container(
+      decoration: BoxDecoration(
+        color: colors.bgSurface,
+        border: Border(top: BorderSide(color: colors.divider)),
+      ),
+      padding: const EdgeInsets.all(kSpace3),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Expanded(
+            child: TextField(
+              controller: _commentController,
+              enabled: !_postingComment,
+              minLines: 1,
+              maxLines: 4,
+              style: TextStyle(color: colors.textPrimary, fontSize: 13),
+              decoration: InputDecoration(
+                hintText: 'Write a comment…',
+                isDense: true,
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: kSpace3,
+                  vertical: kSpace2,
+                ),
+                filled: true,
+                fillColor: colors.bgOverlay,
+                border: OutlineInputBorder(
+                  borderSide: BorderSide.none,
+                  borderRadius: BorderRadius.circular(kRadiusSmall),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: kSpace2),
+          FilledButton(
+            onPressed: _postingComment ? null : _postComment,
+            style: FilledButton.styleFrom(
+              backgroundColor: colors.accent,
+              disabledBackgroundColor: colors.bgElevated,
+              padding: const EdgeInsets.symmetric(
+                horizontal: kSpace3,
+                vertical: kSpace3,
+              ),
+            ),
+            child: _postingComment
+                ? const SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : const Text('Send', style: TextStyle(fontSize: 12)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Format an ISO-8601 timestamp as a short local `YYYY-MM-DD HH:MM`.
+  String _fmtConversationDate(String? iso) {
+    if (iso == null || iso.isEmpty) return '';
+    final dt = DateTime.tryParse(iso)?.toLocal();
+    if (dt == null) return '';
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${dt.year}-${two(dt.month)}-${two(dt.day)} ${two(dt.hour)}:${two(dt.minute)}';
+  }
+
+  /// Launch a writable agent session to resolve the PR's merge conflicts. The
+  /// known conflicting files are forwarded as a hint; the agent re-discovers
+  /// them via the merge and stops before committing/pushing (it reports back).
+  void _resolveConflicts() {
+    widget.appState.startPrAssist(
+      widget.paneId,
+      widget.pr,
+      'resolve_conflicts',
+      commentBody: (_conflictFiles ?? const []).join('\n'),
+      projectName: _linkedProjectName,
+    );
   }
 
   Future<void> _removeDraftComment(DraftComment comment) async {
@@ -1291,12 +1657,18 @@ class _PrReviewHeader extends StatelessWidget {
   /// sessions started from the header and shown as a small chip.
   final String? linkedProjectName;
 
+  /// Whether the conversation view is active (toggles the diff ↔ conversation).
+  final bool showConversation;
+  final VoidCallback onToggleConversation;
+
   const _PrReviewHeader({
     required this.paneId,
     required this.pr,
     required this.appState,
     required this.mode,
     required this.onModeChanged,
+    required this.showConversation,
+    required this.onToggleConversation,
     this.linkedProjectName,
   });
 
@@ -1365,6 +1737,8 @@ class _PrReviewHeader extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 6),
+            _branchChip(context, pr),
+            const SizedBox(width: 6),
             if (linkedProjectName != null) ...[
               _projectChip(context, linkedProjectName!),
               const SizedBox(width: 6),
@@ -1387,6 +1761,26 @@ class _PrReviewHeader extends StatelessWidget {
             const SizedBox(width: 6),
             _DiffModeToggle(mode: mode, onChanged: onModeChanged),
             const SizedBox(width: 6),
+            SizedBox(
+              width: 26,
+              height: 26,
+              child: IconButton(
+                padding: EdgeInsets.zero,
+                icon: Icon(
+                  showConversation
+                      ? Icons.forum
+                      : Icons.forum_outlined,
+                  color: showConversation
+                      ? context.appColors.accent
+                      : context.appColors.textMuted,
+                  size: 14,
+                ),
+                tooltip: showConversation
+                    ? 'Show diff'
+                    : 'Show conversation (comments)',
+                onPressed: onToggleConversation,
+              ),
+            ),
             SizedBox(
               width: 26,
               height: 26,
@@ -1650,14 +2044,75 @@ class _PrReviewHeader extends StatelessWidget {
     );
   }
 
+  /// Chip showing the PR's branch target as `head → base`. Each branch name is
+  /// individually tappable to copy it to the clipboard.
+  Widget _branchChip(BuildContext context, GithubPrInfo pr) {
+    final colors = context.appColors;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+      decoration: BoxDecoration(
+        color: colors.bgElevated,
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: colors.divider, width: 0.5),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _branchRef(context, pr.headRef),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 3),
+            child: Icon(
+              Icons.arrow_forward,
+              size: 10,
+              color: colors.textMuted,
+            ),
+          ),
+          _branchRef(context, pr.baseRef),
+        ],
+      ),
+    );
+  }
+
+  /// A single, click-to-copy branch name within the [_branchChip].
+  Widget _branchRef(BuildContext context, String ref) {
+    final colors = context.appColors;
+    return Tooltip(
+      message: 'Copy "$ref"',
+      waitDuration: const Duration(milliseconds: 400),
+      child: InkWell(
+        onTap: () => _copyBranch(ref),
+        borderRadius: BorderRadius.circular(3),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 140),
+          child: Text(
+            ref,
+            style: TextStyle(
+              color: colors.textSecondary,
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+              fontFamily: 'monospace',
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _copyBranch(String ref) {
+    if (ref.isEmpty) return;
+    Clipboard.setData(ClipboardData(text: ref));
+    appState.showNotification(
+      level: NotificationLevel.success,
+      title: 'Copied branch name',
+      body: ref,
+    );
+  }
+
   Widget _stateBadge(BuildContext context, GithubPrInfo pr) {
-    final (label, color) = pr.isMerged
-        ? ('Merged', const Color(0xFF8B5CF6))
-        : pr.state == 'closed'
-        ? ('Closed', const Color(0xFFEF4444))
-        : pr.draft
-        ? ('Draft', const Color(0xFF6B7280))
-        : ('Open', const Color(0xFF10B981));
+    final status = prStatusVisual(pr);
+    final color = status.color;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
@@ -1665,13 +2120,20 @@ class _PrReviewHeader extends StatelessWidget {
         borderRadius: BorderRadius.circular(6),
         border: Border.all(color: color.withAlpha(80), width: 0.5),
       ),
-      child: Text(
-        label,
-        style: TextStyle(
-          color: color,
-          fontSize: 10,
-          fontWeight: FontWeight.w600,
-        ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(status.icon, color: color, size: 11),
+          const SizedBox(width: 3),
+          Text(
+            status.label,
+            style: TextStyle(
+              color: color,
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
       ),
     );
   }
