@@ -194,6 +194,65 @@ class TestService:
         assert files[-1]["filename"] == "tail.py"
         await svc.aclose()
 
+    @pytest.mark.asyncio
+    async def test_list_issue_comments_paginates_and_normalises(self):
+        svc = GitHubService(token="x")
+        page1 = [
+            {
+                "id": i,
+                "user": {"login": "alice", "avatar_url": "a"},
+                "body": f"c{i}",
+                "created_at": "2026-06-01T00:00:00Z",
+                "html_url": "u",
+            }
+            for i in range(100)
+        ]
+        page2 = [{"id": 999, "user": {"login": "bob"}, "body": "last", "created_at": "x", "html_url": "u"}]
+
+        async def fake_rest(method, path, *, params=None, json=None):
+            return page1 if params["page"] == 1 else page2
+
+        svc._rest = AsyncMock(side_effect=fake_rest)  # type: ignore[method-assign]
+        out = await svc.list_issue_comments("acme", "web", 42)
+        assert len(out) == 101
+        assert out[0]["author"] == "alice" and out[0]["body"] == "c0"
+        assert out[-1]["author"] == "bob" and out[-1]["id"] == 999
+        await svc.aclose()
+
+    @pytest.mark.asyncio
+    async def test_list_reviews_normalises_state_and_body(self):
+        svc = GitHubService(token="x")
+        data = [
+            {
+                "id": 1,
+                "user": {"login": "alice"},
+                "state": "APPROVED",
+                "body": "lgtm",
+                "submitted_at": "2026-06-02T00:00:00Z",
+                "html_url": "u",
+            }
+        ]
+        svc._rest = AsyncMock(return_value=data)  # type: ignore[method-assign]
+        out = await svc.list_reviews("acme", "web", 42)
+        assert out[0]["state"] == "APPROVED"
+        assert out[0]["body"] == "lgtm"
+        assert out[0]["created_at"] == "2026-06-02T00:00:00Z"
+        await svc.aclose()
+
+    @pytest.mark.asyncio
+    async def test_create_issue_comment_posts_and_normalises(self):
+        svc = GitHubService(token="x")
+
+        async def fake_rest(method, path, *, params=None, json=None):
+            assert method == "POST" and path.endswith("/issues/42/comments")
+            assert json == {"body": "hello"}
+            return {"id": 7, "user": {"login": "me"}, "body": "hello", "created_at": "t", "html_url": "u"}
+
+        svc._rest = AsyncMock(side_effect=fake_rest)  # type: ignore[method-assign]
+        out = await svc.create_issue_comment("acme", "web", 42, "hello")
+        assert out["id"] == 7 and out["author"] == "me" and out["body"] == "hello"
+        await svc.aclose()
+
     def test_raise_for_status_401(self):
         resp = httpx.Response(401, request=httpx.Request("GET", "https://api.github.com/user"))
         with pytest.raises(GitHubServiceError) as exc:

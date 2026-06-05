@@ -11,6 +11,8 @@ GET    /prs/{id}                                   Single cached pull request
 GET    /prs/{id}/files                             Live changed files (per-file unified diff)
 GET    /prs/{id}/diff                              Live whole-PR unified diff (raw text)
 GET    /prs/{id}/threads                           Live inline review threads (GraphQL read)
+GET    /prs/{id}/conversation                      Global comments + review summaries (timeline)
+POST   /prs/{id}/conversation                      Post a global (issue-level) comment
 GET    /prs/{id}/draft                             Get the local pending review
 PATCH  /prs/{id}/draft                             Update the pending review verdict/body
 POST   /prs/{id}/draft/comments                    Queue an inline comment on the draft
@@ -528,6 +530,12 @@ class ReplyRequest(BaseModel):
     body: str
 
 
+class IssueCommentRequest(BaseModel):
+    """Post a general (issue-level) comment on a PR's conversation."""
+
+    body: str
+
+
 class ResolveThreadRequest(BaseModel):
     """Resolve or unresolve a review thread."""
 
@@ -562,6 +570,68 @@ async def get_github_pr_threads(pr_id: str, request: Request) -> dict[str, Any]:
     finally:
         await svc.aclose()
     return {"pr_id": str(pr.id), "threads": threads, "total": len(threads)}
+
+
+@router.get(
+    "/prs/{pr_id}/conversation",
+    summary="Get a pull request's conversation",
+    description=(
+        "Fetches the PR's general (issue-level) conversation live from GitHub — "
+        "the comments not anchored to a diff line, merged with submitted review "
+        "summaries (approve / request-changes / comment notes) — as a single "
+        "timeline sorted oldest-first. Each item is `{kind: comment|review, "
+        "author, author_avatar_url, body, created_at, url, state?}` (`state` only "
+        "on review items). Requires GITHUB_TOKEN."
+    ),
+)
+async def get_github_pr_conversation(pr_id: str, request: Request) -> dict[str, Any]:
+    """Return the PR's global comments + review summaries as one timeline."""
+    pr = await _load_pr(request, pr_id)
+    svc = _get_github_service(request)
+    try:
+        comments = await svc.list_issue_comments(pr.repo_owner, pr.repo_name, pr.number)
+        reviews = await svc.list_reviews(pr.repo_owner, pr.repo_name, pr.number)
+    except GitHubServiceError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    finally:
+        await svc.aclose()
+
+    items: list[dict[str, Any]] = [{**c, "kind": "comment", "state": None} for c in comments]
+    # Include review summaries that carry a verdict or a written note; skip empty
+    # "commented" reviews (those only exist to hold inline comments).
+    for r in reviews:
+        if r.get("body") or r.get("state") in ("APPROVED", "CHANGES_REQUESTED", "DISMISSED"):
+            items.append({**r, "kind": "review"})
+    # Oldest-first; items without a timestamp sort to the end.
+    items.sort(key=lambda i: i.get("created_at") or "")
+    return {"pr_id": str(pr.id), "items": items, "total": len(items)}
+
+
+@router.post(
+    "/prs/{pr_id}/conversation",
+    summary="Post a conversation comment on a pull request",
+    description=(
+        "Posts a general (issue-level) comment on the PR's conversation (not "
+        "anchored to a diff line). Returns the created comment. Requires "
+        "GITHUB_TOKEN."
+    ),
+)
+async def post_github_pr_conversation(
+    pr_id: str, body: IssueCommentRequest, request: Request
+) -> dict[str, Any]:
+    """Post a general comment on a PR's conversation and return it."""
+    text = body.body.strip()
+    if not text:
+        raise HTTPException(status_code=422, detail="Comment body must not be empty")
+    pr = await _load_pr(request, pr_id)
+    svc = _get_github_service(request)
+    try:
+        created = await svc.create_issue_comment(pr.repo_owner, pr.repo_name, pr.number, text)
+    except GitHubServiceError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    finally:
+        await svc.aclose()
+    return {"pr_id": str(pr.id), "comment": {**created, "kind": "comment", "state": None}}
 
 
 async def _load_draft(request: Request, pr: GitHubPRModel, *, create: bool) -> GitHubReviewDraftModel | None:

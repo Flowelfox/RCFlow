@@ -467,6 +467,83 @@ class GitHubService:
         nodes = (pr.get("reviewThreads") or {}).get("nodes", [])
         return [_parse_thread(n) for n in nodes]
 
+    async def list_issue_comments(self, owner: str, repo: str, number: int) -> list[dict[str, Any]]:
+        """List a PR's general (issue-level) conversation comments.
+
+        These are the "Conversation" tab comments not anchored to a diff line
+        (``GET /repos/{o}/{r}/issues/{n}/comments``), paginated. Returns
+        normalised dicts ``{id, author, author_avatar_url, body, created_at, url}``.
+        """
+        out: list[dict[str, Any]] = []
+        page = 1
+        while True:
+            batch = await self._rest(
+                "GET",
+                f"/repos/{owner}/{repo}/issues/{number}/comments",
+                params={"per_page": 100, "page": page},
+            )
+            if not batch:
+                break
+            for c in batch:
+                user = c.get("user") or {}
+                out.append(
+                    {
+                        "id": c.get("id"),
+                        "author": user.get("login", ""),
+                        "author_avatar_url": user.get("avatar_url"),
+                        "body": c.get("body", ""),
+                        "created_at": c.get("created_at"),
+                        "url": c.get("html_url", ""),
+                    }
+                )
+            if len(batch) < 100:
+                break
+            page += 1
+        return out
+
+    async def list_reviews(self, owner: str, repo: str, number: int) -> list[dict[str, Any]]:
+        """List a PR's submitted reviews (verdict + summary body).
+
+        ``GET /repos/{o}/{r}/pulls/{n}/reviews``. Returns normalised dicts
+        ``{id, author, author_avatar_url, state, body, created_at, url}`` where
+        ``state`` is APPROVED / CHANGES_REQUESTED / COMMENTED / DISMISSED.
+        """
+        data = await self._rest("GET", f"/repos/{owner}/{repo}/pulls/{number}/reviews")
+        out: list[dict[str, Any]] = []
+        for r in data or []:
+            user = r.get("user") or {}
+            out.append(
+                {
+                    "id": r.get("id"),
+                    "author": user.get("login", ""),
+                    "author_avatar_url": user.get("avatar_url"),
+                    "state": r.get("state", ""),
+                    "body": r.get("body") or "",
+                    "created_at": r.get("submitted_at"),
+                    "url": r.get("html_url", ""),
+                }
+            )
+        return out
+
+    async def create_issue_comment(self, owner: str, repo: str, number: int, body: str) -> dict[str, Any]:
+        """Post a general (issue-level) comment on a PR's conversation.
+
+        ``POST /repos/{o}/{r}/issues/{n}/comments``. Returns the created comment
+        normalised like :meth:`list_issue_comments` entries.
+        """
+        c = await self._rest(
+            "POST", f"/repos/{owner}/{repo}/issues/{number}/comments", json={"body": body}
+        )
+        user = c.get("user") or {}
+        return {
+            "id": c.get("id"),
+            "author": user.get("login", ""),
+            "author_avatar_url": user.get("avatar_url"),
+            "body": c.get("body", ""),
+            "created_at": c.get("created_at"),
+            "url": c.get("html_url", ""),
+        }
+
     async def create_review(
         self,
         owner: str,
