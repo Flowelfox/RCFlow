@@ -409,60 +409,125 @@ class _QuestionBlockState extends State<QuestionBlock> {
     );
   }
 
+  /// Answered Q→A pairs, sourced from the live selection map or — on history
+  /// replay — from the persisted newline-joined "question: answer" string in
+  /// [DisplayMessage.content].
+  List<MapEntry<String, String>> get _answerPairs {
+    final map = widget.message.selectedAnswers;
+    if (map != null && map.isNotEmpty) return map.entries.toList();
+
+    final content = widget.message.content;
+    if (content.trim().isEmpty) return [];
+    return content
+        .split('\n')
+        .where((l) => l.trim().isNotEmpty)
+        .map((l) {
+          final i = l.indexOf(': ');
+          if (i <= 0) return MapEntry('', l.trim());
+          return MapEntry(l.substring(0, i).trim(), l.substring(i + 2).trim());
+        })
+        .toList();
+  }
+
+  /// Collapsible tool-block-style summary: a "Question" header (check icon +
+  /// chevron) over a selectable body listing the answers.
   Widget _buildAnswered() {
-    final answers = widget.message.selectedAnswers ?? {};
+    final colors = context.appColors;
+    final pairs = _answerPairs;
+    final expanded = widget.message.expanded;
+    final hasBody = pairs.isNotEmpty;
 
     return Padding(
       padding: EdgeInsets.symmetric(vertical: kSpace1),
       child: Container(
         decoration: BoxDecoration(
-          color: context.appColors.toolBg,
+          color: colors.toolBg,
           borderRadius: BorderRadius.circular(kRadiusMedium),
-          border: Border.all(color: context.appColors.divider),
+          border: Border.all(color: colors.divider),
         ),
-        padding: EdgeInsets.symmetric(horizontal: kSpace3, vertical: 10),
-        child: Row(
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(
-              Icons.check_circle_outline_rounded,
-              color: context.appColors.successText,
-              size: 16,
-            ),
-            const SizedBox(width: kGapTight),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  for (final entry in answers.entries)
-                    Padding(
-                      padding: EdgeInsets.only(bottom: 2),
-                      child: Text.rich(
-                        TextSpan(
-                          children: [
-                            TextSpan(
-                              text: '${entry.key}: ',
-                              style: TextStyle(
-                                color: context.appColors.textMuted,
-                                fontSize: 12,
-                              ),
-                            ),
-                            TextSpan(
-                              text: entry.value,
-                              style: TextStyle(
-                                color: context.appColors.textPrimary,
-                                fontSize: 12,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ],
-                        ),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
+            GestureDetector(
+              onTap: hasBody
+                  ? () {
+                      widget.message.expanded = !widget.message.expanded;
+                      context.read<PaneState>().refresh();
+                    }
+                  : null,
+              child: Container(
+                color: Colors.transparent,
+                padding: EdgeInsets.symmetric(horizontal: kSpace3, vertical: 10),
+                child: Row(
+                  children: [
+                    if (hasBody) ...[
+                      Icon(
+                        expanded
+                            ? Icons.expand_less_rounded
+                            : Icons.expand_more_rounded,
+                        color: colors.toolAccent,
+                        size: 18,
+                      ),
+                      const SizedBox(width: kGapTight),
+                    ],
+                    Icon(
+                      Icons.check_circle_outline_rounded,
+                      color: colors.successText,
+                      size: 14,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Question',
+                      style: TextStyle(
+                        color: colors.toolAccent,
+                        fontSize: 13,
+                        fontFamily: 'monospace',
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
-                ],
+                  ],
+                ),
               ),
             ),
+            if (expanded && hasBody)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.fromLTRB(kSpace3, 0, kSpace3, 10),
+                child: SelectionArea(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      for (final entry in pairs)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: kSpace1),
+                          child: Text.rich(
+                            TextSpan(
+                              children: [
+                                if (entry.key.isNotEmpty)
+                                  TextSpan(
+                                    text: '${entry.key}: ',
+                                    style: TextStyle(
+                                      color: colors.textMuted,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                TextSpan(
+                                  text: entry.value,
+                                  style: TextStyle(
+                                    color: colors.textPrimary,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
           ],
         ),
       ),

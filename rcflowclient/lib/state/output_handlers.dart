@@ -520,6 +520,11 @@ void buildToolStartHistory(
   List<DisplayMessage> messages,
 ) {
   final metadata = msg['metadata'] as Map<String, dynamic>? ?? {};
+  // AskUserQuestion persists its resolution inline: `answered` + `answer`
+  // (a newline-joined "question: answer" string). Restore it so the replayed
+  // block renders as answered with the answers in its body, not an empty card.
+  final answered = metadata['answered'] == true;
+  final answerText = metadata['answer'] as String?;
   messages.add(
     DisplayMessage(
       type: DisplayMessageType.toolBlock,
@@ -527,7 +532,9 @@ void buildToolStartHistory(
       toolName: metadata['tool_name'] as String? ?? 'unknown',
       displayName: metadata['display_name'] as String?,
       toolInput: metadata['tool_input'] as Map<String, dynamic>?,
-      finished: false,
+      content: answered ? (answerText ?? '') : '',
+      finished: answered,
+      expanded: answered, // show the answers in the collapsible body by default
     ),
   );
 }

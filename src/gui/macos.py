@@ -28,6 +28,7 @@ import queue
 import signal
 import subprocess
 import sys
+import threading
 import time
 import tkinter as tk
 import traceback
@@ -67,6 +68,7 @@ from src.gui.updater import (
     resolve_current_version,
 )
 from src.paths import is_frozen
+from src.services.worker_service import get_controller
 
 # AppKit / Foundation imports — only available on macOS with PyObjC. Wrap
 # in a single try/except so the module still imports on other platforms
@@ -74,6 +76,7 @@ from src.paths import is_frozen
 # function below can use the symbols at module scope without re-importing.
 try:
     from AppKit import (  # ty:ignore[unresolved-import]
+        NSAlert,
         NSApplication,
         NSBezierPath,
         NSColor,
@@ -96,6 +99,7 @@ try:
 
     _APPKIT_AVAILABLE = True
 except ImportError:
+    NSAlert = None  # ty:ignore[invalid-assignment]
     NSApplication = None  # ty:ignore[invalid-assignment]
     NSBezierPath = None  # ty:ignore[invalid-assignment]
     NSColor = None  # ty:ignore[invalid-assignment]
@@ -114,6 +118,13 @@ except ImportError:
     _APPKIT_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
+
+# NSActivityOptions (Foundation) — used to hold a background activity assertion so
+# macOS does not App-Nap or sudden-terminate this menu-bar app while it manages
+# the worker.  Values from <Foundation/NSProcessInfo.h>.
+_NS_ACTIVITY_BACKGROUND = 0x000000FF
+_NS_ACTIVITY_SUDDEN_TERMINATION_DISABLED = 1 << 14
+_NS_ACTIVITY_AUTOMATIC_TERMINATION_DISABLED = 1 << 15
 
 # LaunchAgent plist for "Start with macOS" autostart
 _LAUNCHAGENT_LABEL = "com.rcflow.worker"
@@ -194,7 +205,24 @@ class RCFlowMacOSGUI:
     def __init__(self) -> None:
         self._log_buffer = LogBuffer()
         self._server = ServerManager(self._log_buffer)
+        # Shared worker-service controller (launchd-backed). When a service is
+        # installed, the GUI adopts and drives it through this controller — the
+        # same instance the CLI controls — instead of spawning its own child.
+        # ``ServerManager`` above remains the dev / no-service fallback.
+        self._service = get_controller()
+        # True while the GUI is tracking a service-owned worker (not a child).
+        self._service_adopted = False
+        # True only when *this* GUI session issued ``service.start()`` (vs.
+        # adopting a pre-existing one) — gates the quit-stops-adhoc rule.
+        self._gui_started_it = False
+        # Retained NSActivity token (prevents App Nap / sudden termination).
+        self._activity_token: object | None = None
+        # Background tailer that streams the service's log file into the GUI log
+        # pane when the worker runs as a service (no child stdout to read).
+        self._service_log_thread: threading.Thread | None = None
+        self._service_log_stop = threading.Event()
         self._quitting = False
+        self._keep_app_alive()
         # Thread-safe queue for UI callbacks posted from background threads.
         # Background threads must NEVER call self._root.after() directly —
         # doing so calls into the Tcl interpreter from a non-Tcl thread, which
@@ -804,7 +832,7 @@ class RCFlowMacOSGUI:
         time.  No-op while the server is running because both checkboxes are
         already disabled by the start path.
         """
-        if self._server.is_running():
+        if self._worker_running():
             return
         upnp_on = bool(self._upnp_var.get())
         natpmp_on = bool(self._natpmp_var.get())
@@ -848,13 +876,160 @@ class RCFlowMacOSGUI:
 
     # ── Server controls ───────────────────────────────────────────────────
 
-    def _on_toggle(self) -> None:
+    def _keep_app_alive(self) -> None:
+        """Stop macOS from napping or silently terminating this menu-bar app.
+
+        A background ``LSUIElement`` app is subject to **App Nap** and **Sudden
+        Termination**: on display-lock / idle / memory pressure macOS can suspend
+        or kill it without running any cleanup.  In the legacy GUI-spawned-child
+        model that killed the worker too (it followed its parent down via the
+        parent-death watchdog) — the "worker quit on auto-lock" report.  Holding a
+        background ``NSActivity`` assertion and opting out of sudden/automatic
+        termination keeps the app scheduled and alive while the screen is locked.
+        ``NSActivityBackground`` does **not** block system sleep, so a real sleep
+        still works normally (the app simply resumes on wake).
+        """
+        if NSProcessInfo is None:
+            return
+        with contextlib.suppress(Exception):
+            info = NSProcessInfo.processInfo()
+            info.disableSuddenTermination()
+            info.disableAutomaticTermination_("RCFlow worker is managed by this app")
+            options = (
+                _NS_ACTIVITY_BACKGROUND
+                | _NS_ACTIVITY_SUDDEN_TERMINATION_DISABLED
+                | _NS_ACTIVITY_AUTOMATIC_TERMINATION_DISABLED
+            )
+            # Retain the token on self — releasing it ends the activity.
+            self._activity_token = info.beginActivityWithOptions_reason_(options, "RCFlow worker running")
+
+    def _start_service_log_stream(self) -> None:
+        """Tail the service's stdout log into the GUI log pane (idempotent).
+
+        A service-owned worker is not our subprocess, so there is no child stdout
+        to read — the GUI log pane would stay empty.  Stream the launchd
+        ``StandardOutPath`` file instead so the user sees server output for an
+        adopted/managed worker too.
+        """
+        if self._service_log_thread is not None and self._service_log_thread.is_alive():
+            return
+        self._service_log_stop.clear()
+        self._service_log_thread = threading.Thread(target=self._stream_service_logs, daemon=True)
+        self._service_log_thread.start()
+
+    def _stop_service_log_stream(self) -> None:
+        self._service_log_stop.set()
+        self._service_log_thread = None
+
+    def _stream_service_logs(self) -> None:
+        from src.services.worker_service.config import worker_log_paths  # noqa: PLC0415
+
+        # Tail BOTH stdout and stderr: Python logging (uvicorn, src.*) writes to
+        # stderr, so stdout is usually empty — tailing only stdout showed nothing.
+        paths = list(worker_log_paths())
+        # Wait briefly for at least one file to appear (service may be starting).
+        for _ in range(50):
+            if self._service_log_stop.is_set():
+                return
+            if any(p.exists() for p in paths):
+                break
+            time.sleep(0.1)
+        handles = []
+        try:
+            for path in paths:
+                try:
+                    fh = path.open("r", encoding="utf-8", errors="replace")
+                except OSError:
+                    continue
+                # Backfill recent history, then follow.
+                for line in fh.readlines()[-200:]:
+                    self._log_buffer.append(line.rstrip("\n"))
+                fh.seek(0, 2)
+                handles.append(fh)
+            while not self._service_log_stop.is_set():
+                progressed = False
+                for fh in handles:
+                    line = fh.readline()
+                    if line:
+                        self._log_buffer.append(line.rstrip("\n"))
+                        progressed = True
+                if not progressed:
+                    time.sleep(0.3)
+        finally:
+            for fh in handles:
+                with contextlib.suppress(Exception):
+                    fh.close()
+
+    def _worker_running(self) -> bool:
+        """Return True if a worker is serving — our child OR an adopted service."""
         if self._server.is_running():
+            return True
+        if self._service_adopted:
+            return self._service.detect().running
+        return False
+
+    def _shutdown_worker(self) -> None:
+        """Reap a GUI-spawned worker child on exit — never stop a service.
+
+        Only a dev / no-service child (which cannot outlive the GUI anyway) is
+        reaped here.  An installed service is **never** stopped on a normal or
+        abrupt exit — it must survive the GUI; the only way to stop it on quit is
+        the explicit "Stop" choice in the quit prompt (:meth:`_on_tray_quit`).
+        """
+        with contextlib.suppress(Exception):
+            if self._service.detect().installed:
+                return
+        self._server.stop_sync()
+
+    def _on_toggle(self) -> None:
+        if self._worker_running():
             self._stop_server()
         else:
             self._start_server()
 
     def _start_server(self) -> None:
+        # Prefer the installed worker service: adopt a running one, or start it
+        # (CLI + GUI then drive the same instance). Fall back to a GUI-owned
+        # subprocess only when no service is installed (dev / unmanaged).
+        detected = self._service.detect()
+        if detected.running:
+            self._service_adopted = True
+            self._on_adopted_server()
+            return
+        if self._service.status().installed:
+            try:
+                self._service.start()
+            except Exception as exc:
+                self._set_status(f"Service start failed: {exc}", error=True)
+                return
+            self._service_adopted = True
+            self._gui_started_it = True
+            self._on_adopted_server()
+            self._set_status("Starting (service)...")
+            self._root.after(1500, self._update_tray_status)
+            return
+
+        # Installed (frozen) app with no service yet: register and run the worker
+        # as the launchd service so it survives the GUI and the CLI controls the
+        # same instance — instead of a GUI-owned child that dies on quit.  This is
+        # what makes the worker persistent and the quit prompt meaningful.  Dev
+        # (unfrozen) runs keep the lightweight child so they don't install a
+        # launchd agent on the developer's machine.
+        if is_frozen():
+            try:
+                self._service.install(enable=False)
+                self._service.start()
+            except Exception as exc:
+                logger.exception("Worker-service install/start failed; falling back to a child process")
+                self._set_status(f"Service start failed: {exc}", error=True)
+            else:
+                self._service_adopted = True
+                self._gui_started_it = True
+                self._on_adopted_server()
+                self._set_status("Starting (service)...")
+                self._root.after(1500, self._update_tray_status)
+                return
+
         host = self._ip_var.get().strip()
         port_str = self._port_var.get().strip()
 
@@ -890,6 +1065,19 @@ class RCFlowMacOSGUI:
 
     def _stop_server(self) -> None:
         self._set_status("Stopping...")
+        # A service-owned worker is stopped through the controller (launchctl
+        # bootout — final, no KeepAlive respawn). Only a GUI-spawned child goes
+        # through ServerManager.
+        if self._service_adopted or self._service.detect().running:
+            try:
+                self._service.stop()
+            except Exception as exc:
+                self._set_status(f"Service stop failed: {exc}", error=True)
+                return
+            self._service_adopted = False
+            self._gui_started_it = False
+            self._stop_service_log_stream()
+            return
         self._server.stop()
 
     def _on_adopted_server(self) -> None:
@@ -911,6 +1099,10 @@ class RCFlowMacOSGUI:
         protocol = "WSS" if self._wss_var.get() else "WS"
         self._set_status(f"Running ({protocol}) — recovered", sticky=True)
         self._update_tray_status()
+        # A service-owned worker has no child stdout — stream its log file so the
+        # GUI log pane is not empty.
+        if self._service_adopted:
+            self._start_service_log_stream()
 
     # ── Log display ───────────────────────────────────────────────────────
 
@@ -998,7 +1190,7 @@ class RCFlowMacOSGUI:
             pass
 
         self._drain_log_queue()
-        running = self._server.is_running()
+        running = self._worker_running()
 
         if running:
             protocol = "WSS" if self._wss_var.get() else "WS"
@@ -1016,6 +1208,10 @@ class RCFlowMacOSGUI:
             if self._toggle_btn.cget("text") == "Stop":
                 rc = self._server.exit_code
                 self._server.clear()
+                # The worker (child or adopted service) is gone — drop adoption.
+                self._service_adopted = False
+                self._gui_started_it = False
+                self._stop_service_log_stream()
                 self._ip_entry.configure(state="normal")
                 self._port_entry.configure(state="normal")
                 self._wss_check.configure(state="normal")
@@ -1427,7 +1623,10 @@ class RCFlowMacOSGUI:
         return img
 
     def _update_tray_status(self) -> None:
-        running = self._server.is_running()
+        # Use the combined check (GUI child OR adopted service) — matching the
+        # dashboard.  ``_server.is_running()`` alone is False for a service-owned
+        # worker, which left the tray menu showing "Stopped" while the worker ran.
+        running = self._worker_running()
         if self._ns_status_text is not None:
             with contextlib.suppress(Exception):
                 text = "RCFlow Worker: Running" if running else "RCFlow Worker: Stopped"
@@ -1537,9 +1736,70 @@ class RCFlowMacOSGUI:
         self._root.attributes("-topmost", True)
         self._root.after(300, lambda: self._root.attributes("-topmost", False))
 
+    def _ask_quit_decision(self) -> str:
+        """Ask whether to stop the worker on quit → ``'cancel'``/``'quit'``/``'stop'``.
+
+        Shown only when an installed worker service is running, since that worker
+        survives the GUI.  ``quit`` leaves it running in the background; ``stop``
+        stops it too; ``cancel`` aborts the quit.  Falls back to ``quit`` when
+        NSAlert is unavailable.
+        """
+        if NSAlert is None:
+            return "quit"
+        try:
+            # Bring the app forward first.  A menu-bar-only (LSUIElement) app does
+            # not auto-focus, so without activating, the alert can open *behind*
+            # other windows and look like "nothing happened" (the reported bug).
+            if NSApplication is not None:
+                with contextlib.suppress(Exception):
+                    NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
+            alert = NSAlert.alloc().init()
+            alert.setMessageText_("Quit RCFlow Worker?")
+            alert.setInformativeText_(
+                "The worker is running in the background and will keep serving "
+                "clients after you quit. Leave it running, or stop it too?"
+            )
+            # Buttons map to return codes 1000, 1001, 1002 in add order; the
+            # first button is the default (Return).
+            alert.addButtonWithTitle_("Quit")  # 1000 — leave worker running
+            alert.addButtonWithTitle_("Stop Worker & Quit")  # 1001
+            cancel_btn = alert.addButtonWithTitle_("Cancel")  # 1002
+            with contextlib.suppress(Exception):
+                cancel_btn.setKeyEquivalent_("\x1b")  # Escape → Cancel
+            with contextlib.suppress(Exception):
+                # Float the alert above everything (NSStatusWindowLevel = 25).
+                win = alert.window()
+                win.setLevel_(25)
+                win.makeKeyAndOrderFront_(None)
+            resp = int(alert.runModal())
+        except Exception:
+            logger.exception("Quit confirmation dialog failed — defaulting to leave-running")
+            return "quit"
+        if resp == 1001:
+            return "stop"
+        if resp == 1002:
+            return "cancel"
+        return "quit"
+
     def _on_tray_quit(self, icon: object = None, item: object = None) -> None:
         if self._quitting:
             return
+
+        # When an installed worker service is running it outlives the GUI, so ask
+        # whether to leave it running or stop it.  Gate on the live service probe
+        # (installed plist + a worker on the port) rather than the in-memory
+        # adoption flag, which may be stale/unset — that was why the prompt was
+        # skipped.  A dev/no-service child cannot outlive the GUI, so it skips the
+        # prompt and is reaped below.
+        st = self._service.detect()
+        service_running = st.installed and st.running
+        stop_service = False
+        if service_running:
+            decision = self._ask_quit_decision()
+            if decision == "cancel":
+                return  # abort quit; everything keeps running
+            stop_service = decision == "stop"
+
         self._quitting = True
 
         # Hide the window. Don't toggle activation policy here — switching to
@@ -1564,9 +1824,15 @@ class RCFlowMacOSGUI:
             self._ipc_server = None
         remove_ipc_file()
 
-        # Stop the server synchronously — blocks until the child process is
-        # dead so it cannot be orphaned when we destroy the Tk root next.
-        self._server.stop_sync()
+        if service_running:
+            if stop_service:
+                with contextlib.suppress(Exception):
+                    self._service.stop()
+            # else: leave the worker service running in the background.
+        else:
+            # Dev / no-service child: reap it so it is not orphaned when we
+            # destroy the Tk root.
+            self._shutdown_worker()
 
         self._root.after(0, self._root.destroy)
 
@@ -1598,7 +1864,7 @@ class RCFlowMacOSGUI:
             return  # _on_tray_quit already handled cleanup
         self._quitting = True
         remove_ipc_file()
-        self._server.stop_sync(timeout=5)
+        self._shutdown_worker()
 
     def run(self, *, minimized: bool = False) -> None:
         """Start the menu bar icon and CTk event loop.
@@ -1669,14 +1935,24 @@ class RCFlowMacOSGUI:
             logger.warning("Menu bar icon unavailable — keeping settings window visible")
             _t("tray unavailable — window visible")
 
-        # If a previous GUI crashed, the server subprocess it spawned may
-        # still be running (reparented to launchd).  Adopt it so the user
-        # can stop it from this new GUI instead of leaving it orphaned.
-        adopted_pid = self._server.adopt_if_running()
-        if adopted_pid is None:
+        # Reconcile with the worker service first: adopt a running one (started
+        # by the CLI, by launchd at login, or by a previous GUI) so the user
+        # controls the same instance.  If a service is installed but stopped,
+        # opening the app means "I want the worker" — so start it (this also
+        # covers re-opening after a "Stop Worker & Quit").  Only with no service
+        # installed do we fall back to the pidfile-orphan adoption / dev child.
+        detected = self._service.detect()
+        if detected.running:
+            self._service_adopted = True
+            self._root.after(0, self._on_adopted_server)
+        elif self._service.status().installed:
             self._root.after(0, self._start_server)
         else:
-            self._root.after(0, self._on_adopted_server)
+            adopted_pid = self._server.adopt_if_running()
+            if adopted_pid is None:
+                self._root.after(0, self._start_server)
+            else:
+                self._root.after(0, self._on_adopted_server)
 
         self._root.after(0, self._refresh_update_ui)
         if self._update_auto_var.get() and self._updater.current_version:
@@ -1822,6 +2098,16 @@ def run_gui_macos(*, minimized: bool = False) -> None:
     autostart LaunchAgent passes this flag so rebooting does not pop the
     window; user-initiated launches leave it False and the dashboard shows.
     """
+    # Capture *fatal* faults (SIGSEGV/SIGABRT/SIGBUS — e.g. a Cocoa re-entrancy
+    # null-deref) with a C-level traceback in the crash log.  A hard signal kills
+    # the process before any ``except`` runs, so the existing try/except around
+    # the mainloop cannot see it; faulthandler is the only way to get a stack.
+    with contextlib.suppress(Exception):
+        crash_fh = _get_crash_log_path().open("a", encoding="utf-8")
+        import faulthandler  # noqa: PLC0415
+
+        faulthandler.enable(file=crash_fh, all_threads=True)
+
     _trace_path = Path.home() / "Library" / "Logs" / "rcflow-worker-trace.log"
 
     def _trace(msg: str) -> None:

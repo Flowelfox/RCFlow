@@ -64,6 +64,35 @@ def get_version() -> str:
     return "0.0.0"
 
 
+def _git_short_hash() -> str | None:
+    """Return the short git commit hash, or ``None`` outside a git checkout."""
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "--short=7", "HEAD"],
+            cwd=str(PROJECT_ROOT),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return None
+    h = out.stdout.strip()
+    return h or None
+
+
+def dev_version(base: str) -> str:
+    """Append a ``-dev`` suffix (plus the git short hash) to mark a local build.
+
+    Release builds (``--release`` / ``RCFLOW_RELEASE=1``) use the bare pyproject
+    version; everything else — notably ``just bundle-*`` on a developer machine —
+    gets a clearly distinguishable version like ``0.43.0-dev.g1a2b3c`` so a local
+    build is never mistaken for a published release (in the filename, the app's
+    ``rcflow version`` output, and the macOS ``About`` panel).
+    """
+    h = _git_short_hash()
+    return f"{base}-dev.g{h}" if h else f"{base}-dev"
+
+
 def get_arch() -> str:
     """Get current machine architecture as a normalized string."""
     machine = platform.machine().lower()
@@ -210,10 +239,9 @@ def run_pyinstaller(target_platform: str, *, windowed: bool = False) -> Path:
         "src.database",
         "src.database.engine",
         "src.executors",
-        "src.executors.claude_code",
+        "src.executors.claude_code_sdk",
         "src.executors.codex",
         "src.logs",
-        "src.models",
         "src.database.models",
         "src.prompts",
         "src.prompts.builder",
@@ -235,7 +263,6 @@ def run_pyinstaller(target_platform: str, *, windowed: bool = False) -> Path:
     if target_platform == "windows":
         hidden_imports.extend(
             [
-                "src.tray",
                 "src.gui",
                 "src.gui.windows",
                 "src.gui.core",
@@ -306,14 +333,27 @@ def run_pyinstaller(target_platform: str, *, windowed: bool = False) -> Path:
         str(dist_dir),
         "--workpath",
         str(build_dir),
+        # Write the auto-generated rcflow.spec under build/ (gitignored) instead
+        # of the repo root, so a build doesn't dirty the working tree.
         "--specpath",
-        str(PROJECT_ROOT),
+        str(build_dir),
         "--noconfirm",
         "--clean",
     ]
 
     for imp in hidden_imports:
         cmd.extend(["--hidden-import", imp])
+
+    # Collect claude-agent-sdk fully — it lazily loads its _internal transport +
+    # control protocol that PyInstaller's static analysis would miss.  Do NOT
+    # collect-all `mcp`: walking its submodules imports `mcp.cli`, which hard
+    # sys.exit(1)s at import without the optional `typer` dep and aborts the
+    # build.  The mcp modules the SDK actually uses are pulled in by static
+    # analysis; pin the package roots as hidden imports as a safety net.
+    collect_all_pkgs = ["claude_agent_sdk"]
+    for pkg in collect_all_pkgs:
+        cmd.extend(["--collect-all", pkg])
+    cmd.extend(["--hidden-import", "mcp", "--hidden-import", "mcp.client.stdio"])
 
     for src_path, dest_path in datas:
         cmd.extend(["--add-data", f"{src_path}{os.pathsep}{dest_path}"])
@@ -676,9 +716,8 @@ def build_windows_installer(bundle_dir: Path, version: str, arch: str) -> Path |
         size_mb = output_path.stat().st_size / (1024 * 1024)
         print(f"Installer created: {output_path} ({size_mb:.1f} MB)")
         return output_path
-    else:
-        print(f"WARNING: Expected installer at {output_path} but it was not found.", file=sys.stderr)
-        return None
+    print(f"WARNING: Expected installer at {output_path} but it was not found.", file=sys.stderr)
+    return None
 
 
 def build_deb(bundle_dir: Path, version: str, arch: str) -> Path | None:
@@ -1116,9 +1155,8 @@ fi
         size_mb = deb_path.stat().st_size / (1024 * 1024)
         print(f"Package created: {deb_path} ({size_mb:.1f} MB)")
         return deb_path
-    else:
-        print(f"WARNING: Expected .deb at {deb_path} but it was not found.", file=sys.stderr)
-        return None
+    print(f"WARNING: Expected .deb at {deb_path} but it was not found.", file=sys.stderr)
+    return None
 
 
 def build_macos_pkg(bundle_dir: Path, version: str, arch: str) -> Path | None:
@@ -1483,13 +1521,19 @@ def build_macos_dmg(app_path: Path, version: str, arch: str) -> Path | None:
     _make_dmg_background(icns_src, bg_png)
 
     # ── Create a blank read-write DMG ────────────────────────────────
-    print(f"Creating DMG: {final_dmg.name}...")
+    # Size the volume from the actual .app footprint (plus headroom for the
+    # background image, HFS+ overhead, and future growth) rather than a fixed
+    # cap — the bundled app grows as dependencies are added and a hardcoded
+    # size silently overflows mid-copy ("No space left on device").
+    app_bytes = sum(f.stat().st_size for f in app_path.rglob("*") if f.is_file())
+    dmg_mb = max(400, int(app_bytes / (1024 * 1024) * 1.4) + 50)
+    print(f"Creating DMG: {final_dmg.name}... ({dmg_mb} MB volume for a {app_bytes // (1024 * 1024)} MB app)")
     subprocess.check_call(
         [
             "hdiutil",
             "create",
             "-size",
-            "400m",
+            f"{dmg_mb}m",
             "-fs",
             "HFS+",
             "-volname",
@@ -1500,6 +1544,11 @@ def build_macos_dmg(app_path: Path, version: str, arch: str) -> Path | None:
     )
 
     # ── Mount the DMG ────────────────────────────────────────────────
+    # Detach any stale "RCFlow Worker" volume first: otherwise this one mounts as
+    # "RCFlow Worker 1" and the AppleScript (which targets the volume by name)
+    # styles the wrong/old volume — the DMG ships with no window layout.
+    for stale in Path("/Volumes").glob("RCFlow Worker*"):
+        subprocess.run(["hdiutil", "detach", str(stale), "-force", "-quiet"], check=False, capture_output=True)
     result = subprocess.run(
         ["hdiutil", "attach", str(tmp_dmg), "-noautoopen", "-nobrowse"],
         capture_output=True,
@@ -1547,9 +1596,12 @@ def build_macos_dmg(app_path: Path, version: str, arch: str) -> Path | None:
             if has_background
             else "-- no custom background"
         )
+        # Target the *actual* mounted volume name (may be "RCFlow Worker 1" if a
+        # stale one lingered despite the detach above), not a hardcoded name.
+        vol_name = vol_path.name
         applescript = f"""
 tell application "Finder"
-    tell disk "RCFlow Worker"
+    tell disk "{vol_name}"
         open
         set current view of container window to icon view
         set toolbar visible of container window to false
@@ -1845,6 +1897,28 @@ def generate_checksums(artifacts: list[Path]) -> Path | None:
     return checksums_path
 
 
+def _macos_register_for_spotlight(app_path: Path) -> None:
+    """Register a freshly-installed .app with LaunchServices and Spotlight.
+
+    A bundle copied into place (vs. moved by Finder) is not always picked up by
+    LaunchServices/Spotlight right away, so it can be missing from Spotlight app
+    search and "Open With" until the next index pass.  ``lsregister -f`` forces
+    the LaunchServices registration and ``mdimport`` forces the Spotlight import
+    so the app is findable immediately (by name — e.g. "RCFlow Worker", "worker",
+    "rc").  Best-effort: both are cosmetic and never fail the install.
+
+    Note: this cannot help if the machine's Spotlight index is itself in an error
+    state — rebuild it with ``sudo mdutil -E /`` (or System Settings → Spotlight).
+    """
+    lsregister = (
+        "/System/Library/Frameworks/CoreServices.framework/Versions/A/"
+        "Frameworks/LaunchServices.framework/Support/lsregister"
+    )
+    if os.path.exists(lsregister):
+        subprocess.run([lsregister, "-f", str(app_path)], check=False, capture_output=True)
+    subprocess.run(["mdimport", str(app_path)], check=False, capture_output=True)
+
+
 def run_install(bundle_dir: Path, installer_path: Path | None, target_platform: str) -> None:
     """Run the platform-appropriate installer after a successful build."""
     if target_platform == "linux":
@@ -1864,6 +1938,14 @@ def run_install(bundle_dir: Path, installer_path: Path | None, target_platform: 
         if dest.exists():
             shutil.rmtree(dest)
         shutil.copytree(app_path, dest)
+        # Register the launchd worker service so every install path (DMG, .pkg,
+        # get-worker.sh, and this dev shortcut) converges on the identical,
+        # crash-only-KeepAlive registration. The bundled binary's `install`
+        # command writes the canonical plist and enables autostart.
+        worker_bin = dest / "Contents" / "MacOS" / "rcflow"
+        print(f"Registering worker service via {worker_bin} install --enable...")
+        subprocess.run([str(worker_bin), "install", "--enable"], check=False)
+        _macos_register_for_spotlight(dest)
     elif target_platform == "windows":
         if installer_path:
             print(f"Launching {installer_path.name}...")
@@ -1908,6 +1990,11 @@ def main() -> None:
         action="store_true",
         help="Sign artifacts after building (requires platform-specific env vars)",
     )
+    parser.add_argument(
+        "--release",
+        action="store_true",
+        help="Build with the exact pyproject version (no '-dev' suffix). Also enabled by RCFLOW_RELEASE=1.",
+    )
     args = parser.parse_args()
 
     # --install implies --installer
@@ -1915,7 +2002,8 @@ def main() -> None:
         args.installer = True
 
     target_platform = args.platform or detect_platform()
-    version = get_version()
+    is_release = args.release or os.environ.get("RCFLOW_RELEASE", "") not in ("", "0", "false", "False")
+    version = get_version() if is_release else dev_version(get_version())
     arch = get_arch()
 
     print(f"Building RCFlow {version} for {target_platform}-{arch}")

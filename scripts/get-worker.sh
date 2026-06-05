@@ -401,46 +401,17 @@ JSONEOF
             ;;
     esac
 
-    # Setup LaunchAgent — runs the in-bundle binary so libpython resolves.
+    # Setup LaunchAgent — delegate to the canonical installer in the in-bundle
+    # binary so this curl-install matches the DMG/.pkg and `rcflow install`
+    # exactly (crash-only KeepAlive; CLI + GUI control the same registration).
+    # Running the in-bundle binary also ensures libpython resolves from
+    # Contents/Frameworks.
     if [ "$setup_service" = true ]; then
-        info "Setting up launchd LaunchAgent..."
-        mkdir -p "$HOME/Library/LaunchAgents"
-
-        cat > "$agent_plist" <<PLISTEOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key>
-  <string>${service_label}</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>${rcflow_bin}</string>
-    <string>run</string>
-  </array>
-  <key>WorkingDirectory</key>
-  <string>${macos_dir}</string>
-  <key>RunAtLoad</key>
-  <true/>
-  <key>KeepAlive</key>
-  <true/>
-  <key>ProcessType</key>
-  <string>Background</string>
-  <key>StandardOutPath</key>
-  <string>${data_dir}/logs/service-stdout.log</string>
-  <key>StandardErrorPath</key>
-  <string>${data_dir}/logs/service-stderr.log</string>
-</dict>
-</plist>
-PLISTEOF
-
-        chmod 644 "$agent_plist"
-        launchctl load -w "$agent_plist"
-
-        if launchctl list "$service_label" > /dev/null 2>&1; then
+        info "Registering launchd LaunchAgent via rcflow install..."
+        if (cd "$macos_dir" && ./rcflow install --enable); then
             ok "LaunchAgent installed and running"
         else
-            warn "Service registration may have failed. Check: launchctl list ${service_label}"
+            warn "Service registration may have failed. Check: launchctl print gui/$(id -u)/${service_label}"
         fi
     fi
 

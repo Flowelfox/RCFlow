@@ -1,5 +1,5 @@
 ---
-updated: 2026-05-10
+updated: 2026-06-02
 ---
 
 # Executors
@@ -14,6 +14,41 @@ Per-executor implementation details for the long-running coding agents (Claude C
 ---
 
 ## Claude Code Executor
+
+> **Agent SDK (default since the SDK migration).** `claude_code` now drives Claude
+> Code through the **Python Agent SDK** (`claude-agent-sdk`) via
+> `ClaudeCodeSdkExecutor` (`src/executors/claude_code_sdk.py`), which spawns the
+> **managed** `claude` binary (`ClaudeAgentOptions.cli_path`) and yields typed
+> messages. The executor's converter (`sdk_message_to_events`) adapts those back
+> into the legacy stream-json event dicts, so `_relay_claude_code_stream` and all
+> its diff/monitor/cwd/artifact handling are **unchanged**. The decisive win:
+> permissions and **AskUserQuestion** are resolved in-process by the SDK
+> `can_use_tool` callback (`ClaudeCodeAgent._make_can_use_tool`) *before* a tool
+> runs — so AskUserQuestion is genuinely interactive (the widget is shown, the
+> user's selection is returned as the tool's answer via `updated_input.answers`,
+> and the model continues in the same turn). The relay no longer gates questions
+> or permissions; it just records the question's `tool_use_id` to drop the
+> resolved tool_use / tool_result from the chat (the widget shows the answer).
+> `permission_mode="default"` is used (the callback is skipped under
+> `bypassPermissions`). Plan mode (`EnterPlanMode` / `ExitPlanMode`) is gated the
+> same way — through `can_use_tool` (approve → allow; plan-review feedback →
+> deny-with-message so the model revises) — and the relay's legacy plan-mode
+> blocking is skipped for the SDK executor. The legacy raw-CLI executor below is
+> retained as a one-env rollback: set `RCFLOW_CC_EXECUTOR=legacy`. **`Monitor`
+> under the SDK:** the SDK delivers a watch as a "task" — `MONITOR_START` on the
+> tool_use (in-turn), and the **terminal** as a `TaskNotificationMessage`
+> (`status`, `tool_use_id`) *between turns*. The executor uses a single persistent
+> `receive_messages()` reader → queue (so turn streaming and the between-turn
+> drain share one consumer), and `sdk_message_to_events` maps the
+> `TaskNotificationMessage` into a synthesised monitor-terminal `tool_result` →
+> `_process_monitor_event` → `MONITOR_END` (the card clears; no relay changes).
+> The drain yields only monitor `tool_result`s, so the model's per-event wake
+> narration ("Monitor event — no action needed") is suppressed. **Caveat
+> (inherent CC behavior):** under the SDK each Monitor event *wakes the model* (an
+> extra turn + tokens per event) — RCFlow can't change that.
+>
+> The remainder of this section describes the **legacy** raw-CLI executor
+> (`RCFLOW_CC_EXECUTOR=legacy`).
 
 The `claude_code` executor manages a Claude Code CLI subprocess with bidirectional stream-json communication. It enables delegating complex coding tasks to Claude Code while streaming output back to the client in real time.
 

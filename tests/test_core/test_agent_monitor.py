@@ -88,6 +88,7 @@ def _make_session(tmp_path: Path) -> MagicMock:
     session.subprocess_working_directory = str(tmp_path)
     session._pending_snapshots = []
     session._active_monitors = {}
+    session._pending_bg_tasks = 0
     session.permission_manager = None
     session.subprocess_current_tool = None
     session.subprocess_started_at = None
@@ -479,6 +480,32 @@ class TestDrainMonitorEvents:
 
         assert call_count["n"] == 1
         assert session._active_monitors == {}
+
+    @pytest.mark.asyncio
+    async def test_drain_streams_continuation_for_background_task(self, tmp_path: Path) -> None:
+        """A pending native background command keeps the drain alive and streams
+        the full continuation (``include_assistant=True``), stopping once it clears.
+        """
+        session = _make_session(tmp_path)
+        session.status = SessionStatus.ACTIVE
+        session._active_monitors = {}
+        session._pending_bg_tasks = 1
+
+        async def fake_relay(s, _stream):
+            # The background-command terminal + the model's continuation were
+            # relayed; the terminal handler cleared the pending count.
+            s._pending_bg_tasks = 0
+
+        executor = MagicMock()
+        executor.is_running = True
+        executor.read_more_events = MagicMock(return_value=MagicMock())
+
+        mixin = _make_mixin()
+        with patch.object(mixin, "_relay_claude_code_stream", side_effect=fake_relay):
+            await mixin._drain_monitor_events(session, executor)
+
+        executor.read_more_events.assert_called_with(include_assistant=True)
+        assert session._pending_bg_tasks == 0
 
     @pytest.mark.asyncio
     async def test_drain_stops_on_process_exit_and_terminates_leftovers(self, tmp_path: Path) -> None:

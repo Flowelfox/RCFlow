@@ -116,7 +116,7 @@ bundle-linux-client:
     fi
     (cd rcflowclient && flutter build linux --release)
     mkdir -p dist
-    CLIENT_VERSION=$(grep '^version:' rcflowclient/pubspec.yaml | sed 's/version: //' | sed 's/+.*//')
+    CLIENT_VERSION=$(grep '^version:' rcflowclient/pubspec.yaml | sed 's/version: //' | sed 's/+.*//')-dev$(git rev-parse --short=7 HEAD 2>/dev/null | sed 's/^/.g/')
     PKG_NAME="rcflow-v${CLIENT_VERSION}-linux-client-amd64"
     DEB_ROOT=$(mktemp -d)
     trap "rm -rf '$DEB_ROOT'" EXIT
@@ -153,7 +153,7 @@ bundle-linux-client:
 bundle-linux-client-install: bundle-linux-client
     #!/usr/bin/env bash
     set -euo pipefail
-    CLIENT_VERSION=$(grep '^version:' rcflowclient/pubspec.yaml | sed 's/version: //' | sed 's/+.*//')
+    CLIENT_VERSION=$(grep '^version:' rcflowclient/pubspec.yaml | sed 's/version: //' | sed 's/+.*//')-dev$(git rev-parse --short=7 HEAD 2>/dev/null | sed 's/^/.g/')
     sudo dpkg -i "dist/rcflow-v${CLIENT_VERSION}-linux-client-amd64.deb"
     echo "Installed rcflow-client to /opt/rcflowclient"
 
@@ -164,24 +164,22 @@ bundle-macos-client:
     set -euo pipefail
     (cd rcflowclient && flutter build macos --release)
     mkdir -p dist
-    CLIENT_VERSION=$(grep '^version:' rcflowclient/pubspec.yaml | sed 's/version: //' | sed 's/+.*//')
+    CLIENT_VERSION=$(grep '^version:' rcflowclient/pubspec.yaml | sed 's/version: //' | sed 's/+.*//')-dev$(git rev-parse --short=7 HEAD 2>/dev/null | sed 's/^/.g/')
     CLIENT_ARCH=$(uname -m | sed 's/x86_64/amd64/')
-    DMG_NAME="rcflow-v${CLIENT_VERSION}-macos-client-${CLIENT_ARCH}"
+    DMG_PATH="dist/rcflow-v${CLIENT_VERSION}-macos-client-${CLIENT_ARCH}.dmg"
     APP_PATH="rcflowclient/build/macos/Build/Products/Release/RCFlow.app"
-    STAGE=$(mktemp -d)
-    cp -R "$APP_PATH" "$STAGE/"
-    ln -s /Applications "$STAGE/Applications"
-    hdiutil create -srcfolder "$STAGE" -volname "RCFlow Client" -fs HFS+ -format UDZO \
-      -o "dist/${DMG_NAME}.dmg"
-    rm -rf "$STAGE"
-    printf 'Built dist/%s.dmg\n' "$DMG_NAME"
+    # Styled DMG (background + drag-to-Applications layout). --extra bundle pulls
+    # in Pillow for the background image; the icon layout applies without it too.
+    uv run --extra bundle python scripts/bundle_macos_client.py \
+      --styled-dmg --app "$APP_PATH" --out "$DMG_PATH" --volname "RCFlow Client"
+    printf 'Built %s\n' "$DMG_PATH"
 
 # Build and install macOS Flutter client (must be on macOS)
 [macos]
 bundle-macos-client-install: bundle-macos-client
     #!/usr/bin/env bash
     set -euo pipefail
-    CLIENT_VERSION=$(grep '^version:' rcflowclient/pubspec.yaml | sed 's/version: //' | sed 's/+.*//')
+    CLIENT_VERSION=$(grep '^version:' rcflowclient/pubspec.yaml | sed 's/version: //' | sed 's/+.*//')-dev$(git rev-parse --short=7 HEAD 2>/dev/null | sed 's/^/.g/')
     CLIENT_ARCH=$(uname -m | sed 's/x86_64/amd64/')
     DMG="dist/rcflow-v${CLIENT_VERSION}-macos-client-${CLIENT_ARCH}.dmg"
     MOUNT=$(hdiutil attach "$DMG" -nobrowse | awk '/\/Volumes\//{print $NF}')
@@ -195,12 +193,12 @@ bundle-macos-client-install: bundle-macos-client
 [windows]
 bundle-windows-client:
     Set-Location rcflowclient; flutter build windows --release
-    $appVersion = ((Get-Content rcflowclient/pubspec.yaml | Select-String '^version:').Line -replace 'version: ', '' -replace '\+.*', ''); $bundleDir = (Resolve-Path 'rcflowclient\build\windows\x64\runner\Release').Path; $outputFilename = "rcflow-v${appVersion}-windows-client-amd64"; if (-not (Test-Path dist)) { New-Item -ItemType Directory -Path dist | Out-Null }; iscc scripts\inno_setup_client.iss "/DBundleDir=$bundleDir" "/DAppVersion=$appVersion" "/DArch=amd64" "/DOutputDir=dist" "/DOutputFilename=$outputFilename"
+    $appVersion = ((Get-Content rcflowclient/pubspec.yaml | Select-String '^version:').Line -replace 'version: ', '' -replace '\+.*', ''); $gh = (git rev-parse --short=7 HEAD 2>$null); $appVersion = "$appVersion-dev" + $(if ($gh) { ".g$gh" } else { "" }); $bundleDir = (Resolve-Path 'rcflowclient\build\windows\x64\runner\Release').Path; $outputFilename = "rcflow-v${appVersion}-windows-client-amd64"; if (-not (Test-Path dist)) { New-Item -ItemType Directory -Path dist | Out-Null }; iscc scripts\inno_setup_client.iss "/DBundleDir=$bundleDir" "/DAppVersion=$appVersion" "/DArch=amd64" "/DOutputDir=dist" "/DOutputFilename=$outputFilename"
 
 # Build and install Windows Flutter client (must be on Windows)
 [windows]
 bundle-windows-client-install: bundle-windows-client
-    $appVersion = ((Get-Content rcflowclient/pubspec.yaml | Select-String '^version:').Line -replace 'version: ', '' -replace '\+.*', ''); $installer = "dist\rcflow-v${appVersion}-windows-client-amd64.exe"; Start-Process -FilePath $installer -Wait
+    $appVersion = ((Get-Content rcflowclient/pubspec.yaml | Select-String '^version:').Line -replace 'version: ', '' -replace '\+.*', ''); $gh = (git rev-parse --short=7 HEAD 2>$null); $appVersion = "$appVersion-dev" + $(if ($gh) { ".g$gh" } else { "" }); $installer = "dist\rcflow-v${appVersion}-windows-client-amd64.exe"; Start-Process -FilePath $installer -Wait
 
 # Build Windows worker installer (setup.exe, must be on Windows)
 [windows]

@@ -65,7 +65,6 @@ class PaneMessageStore {
 
   // Dynamic streaming.
   Timer? _streamingTimer;
-  String? _activeToolName;
 
   /// The list that streaming content should be appended to: either the active
   /// tool sub-group's children, or the top-level message list.
@@ -228,7 +227,36 @@ class PaneMessageStore {
     String? displayName,
   }) {
     finalizeStream();
-    _activeToolName = name;
+    // AskUserQuestion renders at the top level rather than inside the agent
+    // tool-group: the group collapses when the turn ends, which would otherwise
+    // bury the (still-relevant) answered question behind a tool-count chip.
+    // Close any open group so subsequent tools start a fresh group after the
+    // question, preserving chronological order.
+    if (name == 'AskUserQuestion') {
+      if (_inAgentMode) {
+        _closeAgentToolGroup();
+        // Drop the group if the question was its first tool — an empty closed
+        // group would otherwise render as a stray "0 tools" header.
+        if (_messages.isNotEmpty &&
+            _messages.last.type == DisplayMessageType.agentGroup &&
+            (_messages.last.children?.isEmpty ?? true)) {
+          _messages.removeLast();
+        }
+      }
+      _messages.add(
+        DisplayMessage(
+          type: DisplayMessageType.toolBlock,
+          sessionId: _sessionId,
+          toolName: name,
+          displayName: displayName,
+          toolInput: input,
+        ),
+      );
+      // The question is finished via answerQuestion (or the session-end
+      // sweep), never by finalizeStream (which skips isQuestion blocks).
+      _scheduleNotify();
+      return;
+    }
     if (_inAgentMode) {
       _ensureAgentToolGroup();
     }
@@ -312,16 +340,18 @@ class PaneMessageStore {
 
     final target = _streamTarget;
     if (target != null) {
-      if (_activeToolName != null &&
-          target.type == DisplayMessageType.toolBlock &&
-          !target.isQuestion) {
+      // Finish any open tool/output block (questions excepted — they are
+      // resolved via answerQuestion / the session-end sweep). A standalone
+      // TOOL_OUTPUT, e.g. a native background command's between-turns completion
+      // notice, creates an orphan 'output' toolBlock via appendToolOutput; it
+      // must be closed here too, otherwise that block spins forever.
+      if (target.type == DisplayMessageType.toolBlock && !target.isQuestion) {
         target.finished = true;
       } else if (target.type == DisplayMessageType.assistant) {
         target.finished = true;
       }
     }
 
-    _activeToolName = null;
     _notify();
   }
 
@@ -698,6 +728,15 @@ class PaneMessageStore {
             builder(msg, sessionId, target[toolGroupIdx!].children!);
           }
           _reconstructTodosFromHistory(msg);
+        } else if (type == 'tool_start' &&
+            (msg['metadata'] as Map<String, dynamic>?)?['tool_name'] ==
+                'AskUserQuestion') {
+          // Questions render at the top level (see startToolBlock); lift them
+          // out of the agent group on replay too. Close the group so order is
+          // preserved and a fresh group opens for any later tools.
+          closeToolGroup();
+          final builder = historyBuilderRegistry[type];
+          if (builder != null) builder(msg, sessionId, target);
         } else if (type == 'tool_start' || type == 'tool_output') {
           ensureToolGroup();
           final builder = historyBuilderRegistry[type];

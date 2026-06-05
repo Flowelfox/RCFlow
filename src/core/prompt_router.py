@@ -49,7 +49,7 @@ from src.database.models import Session as SessionModel
 from src.database.models import Task as TaskModel
 from src.database.models import TaskSession as TaskSessionModel
 from src.executors.base import BaseExecutor, ExecutionChunk
-from src.executors.claude_code import ClaudeCodeExecutor
+from src.executors.claude_code_sdk import ClaudeCodeSdkExecutor
 from src.executors.codex import CodexExecutor
 from src.executors.http import HttpExecutor
 from src.executors.opencode import OpenCodeExecutor
@@ -364,9 +364,16 @@ class PromptRouter:
         """Resolve permission."""
         self._lifecycle.resolve_permission(session_id, request_id, decision, scope, path_prefix)
 
-    async def send_interactive_response(self, session_id: str, text: str, *, accepted: bool = True) -> None:
+    async def send_interactive_response(
+        self,
+        session_id: str,
+        text: str,
+        *,
+        accepted: bool = True,
+        answers: dict[str, str] | None = None,
+    ) -> None:
         """Send interactive response."""
-        await self._lifecycle.send_interactive_response(session_id, text, accepted=accepted)
+        await self._lifecycle.send_interactive_response(session_id, text, accepted=accepted, answers=answers)
 
     async def pause_session(self, session_id: str) -> ActiveSession:
         """Pause session."""
@@ -433,7 +440,7 @@ class PromptRouter:
                 resolved = self._tool_manager.get_binary_path("claude_code")
                 if resolved:
                     binary_path = resolved
-            return ClaudeCodeExecutor(
+            return ClaudeCodeSdkExecutor(
                 binary_path=binary_path,
                 extra_env=self._build_claude_code_extra_env(),
                 config_overrides=self._get_managed_config_overrides("claude_code"),
@@ -1019,7 +1026,7 @@ class PromptRouter:
             )
             self.schedule_pending_drain(session)
 
-    async def _fire_pending_wakeup(self, session_id: str, wake) -> None:  # type: ignore[no-untyped-def]
+    async def _fire_pending_wakeup(self, session_id: str, wake) -> None:
         """Handle a pending wake fired by the :class:`WakeupScheduler`.
 
         Marks the wake fired in the store, then routes the prompt
@@ -1168,6 +1175,17 @@ class PromptRouter:
             if queued_id is not None:
                 data["queued_id"] = queued_id
             return data
+
+        # Lazily reconstruct a crash-reloaded Claude Code session so this follow-up
+        # resumes the prior conversation.  A hard restart rebuilds the session
+        # (status ACTIVE) but not the executor, and restore_session rejects an
+        # already-ACTIVE session — so reattach here on first use.
+        if (
+            session.claude_code_executor is None
+            and session.metadata.get("restart_interrupted")
+            and session.metadata.get("claude_code_session_id")
+        ):
+            self._claude.reattach_executor(session)
 
         # If session has an active Claude Code executor, forward message directly
         if session.claude_code_executor is not None:

@@ -171,18 +171,20 @@ async def ws_input_text(
                         {"type": "error", "content": "Missing session_id", "code": "MISSING_SESSION_ID"}
                     )
                     continue
-                # Extract answer text from the message
+                # Extract the structured answers map (preferred) and a flat text
+                # fallback.  The structured map is returned to Claude Code as the
+                # AskUserQuestion tool answer.
+                answers = message.get("answers")
+                answers_map = {str(k): str(v) for k, v in answers.items()} if isinstance(answers, dict) else None
                 answer_text = message.get("text", "")
-                if not answer_text:
-                    answers = message.get("answers")
-                    if isinstance(answers, dict):
-                        answer_text = "\n".join(f"{k}: {v}" for k, v in answers.items())
-                if not answer_text:
+                if not answer_text and answers_map:
+                    answer_text = "\n".join(f"{k}: {v}" for k, v in answers_map.items())
+                if not answer_text and not answers_map:
                     await websocket.send_json({"type": "error", "content": "Empty answer", "code": "EMPTY_ANSWER"})
                     continue
-                # Send directly to Claude Code stdin (mid-turn interactive response)
+                # Resolve the pending AskUserQuestion gate (the can_use_tool callback).
                 try:
-                    await prompt_router.send_interactive_response(qa_session_id, answer_text)
+                    await prompt_router.send_interactive_response(qa_session_id, answer_text, answers=answers_map)
                 except (ValueError, RuntimeError) as e:
                     await websocket.send_json(
                         {"type": "error", "content": str(e), "code": "INTERACTIVE_RESPONSE_ERROR"}

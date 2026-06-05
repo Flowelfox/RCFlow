@@ -359,46 +359,17 @@ if [[ ":$PATH:" != *":${BIN_DIR}:"* ]]; then
     warn "  source ~/.zshrc"
 fi
 
+PLIST_PATH="$HOME/Library/LaunchAgents/${SERVICE_LABEL}.plist"
 if $SETUP_SERVICE; then
-    info "Setting up launchd LaunchAgent..."
-    mkdir -p "$HOME/Library/LaunchAgents"
-    PLIST_PATH="$HOME/Library/LaunchAgents/${SERVICE_LABEL}.plist"
-
-    cat > "$PLIST_PATH" <<PLISTEOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key>
-  <string>${SERVICE_LABEL}</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>${INSTALL_PREFIX}/rcflow</string>
-    <string>run</string>
-  </array>
-  <key>WorkingDirectory</key>
-  <string>${INSTALL_PREFIX}</string>
-  <key>RunAtLoad</key>
-  <true/>
-  <key>KeepAlive</key>
-  <true/>
-  <key>ProcessType</key>
-  <string>Background</string>
-  <key>StandardOutPath</key>
-  <string>${INSTALL_PREFIX}/logs/service-stdout.log</string>
-  <key>StandardErrorPath</key>
-  <string>${INSTALL_PREFIX}/logs/service-stderr.log</string>
-</dict>
-</plist>
-PLISTEOF
-
-    chmod 644 "$PLIST_PATH"
-    launchctl load -w "$PLIST_PATH"
-
-    if launchctl list "$SERVICE_LABEL" >/dev/null 2>&1; then
+    info "Registering launchd LaunchAgent via rcflow install..."
+    # Delegate to the canonical installer in the binary so every install path
+    # (this script, the .pkg, get-worker.sh, and `just bundle-macos-worker-install`)
+    # writes the identical plist — crash-only KeepAlive so an explicit stop is
+    # never undone — and the CLI/GUI all control the same registration.
+    if "${INSTALL_PREFIX}/rcflow" install --enable; then
         ok "LaunchAgent installed and running"
     else
-        warn "Service registration may have failed. Check: launchctl list ${SERVICE_LABEL}"
+        warn "Service registration may have failed. Check: launchctl print gui/$(id -u)/${SERVICE_LABEL}"
     fi
 fi
 
@@ -415,15 +386,15 @@ echo "  Binary symlink:     ${BIN_DIR}/rcflow"
 echo ""
 if $SETUP_SERVICE; then
     echo "  Service commands:"
-    echo "    launchctl list ${SERVICE_LABEL}"
-    echo "    launchctl unload ${PLIST_PATH} && launchctl load -w ${PLIST_PATH}"
-    echo "    launchctl unload ${PLIST_PATH}"
+    echo "    ${BIN_DIR}/rcflow status"
+    echo "    ${BIN_DIR}/rcflow restart"
+    echo "    ${BIN_DIR}/rcflow stop"
     echo ""
 fi
 echo "  Edit configuration:"
 echo "    nano ${INSTALL_PREFIX}/settings.json"
 if $SETUP_SERVICE; then
-    echo "    launchctl unload ${PLIST_PATH} && launchctl load -w ${PLIST_PATH}"
+    echo "    ${BIN_DIR}/rcflow restart   # after editing settings"
 else
     echo "    ${BIN_DIR}/rcflow run"
 fi

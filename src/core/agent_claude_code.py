@@ -23,6 +23,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from claude_agent_sdk import PermissionResultAllow, PermissionResultDeny
+
 from src.core.agent_auth import agent_configuration_issue
 from src.core.agents import MAX_TOOL_OUTPUT_CHARS, truncate_tool_output
 from src.core.buffer import MessageType
@@ -42,7 +44,7 @@ from src.core.permissions import (
     get_scope_options,
 )
 from src.core.session import ActivityState, MonitorState, SessionStatus, SessionType
-from src.executors.claude_code import ClaudeCodeExecutor
+from src.executors.claude_code_sdk import ClaudeCodeSdkExecutor
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -319,7 +321,7 @@ class ClaudeCodeAgent:
         tool_call.tool_input["working_directory"] = str(working_path)
 
         executor = self._r._get_executor(tool_def.executor, tool_def)
-        assert isinstance(executor, ClaudeCodeExecutor)  # noqa: S101
+        assert isinstance(executor, ClaudeCodeSdkExecutor)  # noqa: S101
 
         session.claude_code_executor = executor
         session.session_type = SessionType.LONG_RUNNING
@@ -332,6 +334,10 @@ class ClaudeCodeAgent:
                 effective_config[k] = v
         if effective_config.get("default_permission_mode") == "interactive":
             session.permission_manager = PermissionManager()
+
+        # Install the can_use_tool callback that resolves AskUserQuestion
+        # (interactive widget) and permission prompts in-process.
+        executor.set_can_use_tool(self._make_can_use_tool(session))
 
         # Stamp caveman mode so the badge system reflects the tool's current state.
         if self._r._tool_settings and self._r._tool_settings.is_caveman_active("claude_code"):
@@ -372,6 +378,184 @@ class ClaudeCodeAgent:
         )
 
         return f"Claude Code session started in {working_path}"
+
+    def build_session_executor(
+        self,
+        tool_def: ToolDefinition,
+        session: ActiveSession,
+        session_id: str,
+    ) -> ClaudeCodeSdkExecutor:
+        """Reconstruct the Agent-SDK executor for *session* (resume / restore).
+
+        Wires the ``can_use_tool`` callback and pre-sets the tool def +
+        parameters so a follow-up turn can resume.
+        """
+        binary_path = tool_def.get_claude_code_config().binary_path
+        if self._r._tool_manager:
+            resolved = self._r._tool_manager.get_binary_path("claude_code")
+            if resolved:
+                binary_path = resolved
+        executor = ClaudeCodeSdkExecutor(
+            binary_path=binary_path,
+            session_id=session_id,
+            extra_env=self._build_claude_code_extra_env(),
+            config_overrides=self._r._get_managed_config_overrides("claude_code"),
+        )
+        executor.set_can_use_tool(self._make_can_use_tool(session))
+        executor._tool_def = tool_def
+        executor._last_parameters = session.metadata.get("claude_code_parameters", {})
+        return executor
+
+    def reattach_executor(self, session: ActiveSession) -> bool:
+        """Reconstruct a reloaded Claude Code session's executor for resume.
+
+        Shared by ``restore_session`` and the lazy crash-resume path
+        (``handle_prompt``): if *session* carries Claude Code resume metadata and
+        has no live executor, rebuild it (with ``resume=session_id`` on the next
+        turn) and re-arm any saved permission rules.  Returns ``True`` when an
+        executor was attached.
+        """
+        if session.claude_code_executor is not None:
+            return True
+        cc_session_id = session.metadata.get("claude_code_session_id")
+        cc_tool_name = session.metadata.get("claude_code_tool_name")
+        if not (cc_session_id and cc_tool_name):
+            return False
+        tool_def = self._r._tool_registry.get(cc_tool_name)
+        if tool_def is None or tool_def.executor != "claude_code":
+            return False
+        session.claude_code_executor = self.build_session_executor(tool_def, session, cc_session_id)
+        session.session_type = SessionType.LONG_RUNNING
+        saved_rules = session.metadata.get("permission_rules")
+        if saved_rules:
+            pm = PermissionManager()
+            pm.restore_rules(saved_rules)
+            session.permission_manager = pm
+        return True
+
+    def _make_can_use_tool(self, session: ActiveSession):
+        """Build the SDK ``can_use_tool`` callback bound to *session*.
+
+        Fires in-process before Claude Code runs a tool.  AskUserQuestion is
+        resolved by surfacing the widget and waiting for the user's selection,
+        which is returned as the tool's answer (``updated_input.answers``) so the
+        model continues in the same turn.  Other tools are gated by the session's
+        :class:`PermissionManager` when interactive permissions are enabled, and
+        auto-allowed otherwise.
+        """
+
+        async def can_use_tool(
+            tool_name: str,
+            input_data: dict[str, Any],
+            context: object,  # claude_agent_sdk.ToolPermissionContext
+        ) -> PermissionResultAllow | PermissionResultDeny:
+            if tool_name == "AskUserQuestion":
+                return await self._handle_ask_user_question(session, input_data)
+            if tool_name == "EnterPlanMode":
+                return await self._handle_enter_plan_mode(session)
+            if tool_name == "ExitPlanMode":
+                return await self._handle_exit_plan_mode(session, input_data)
+            decision = await self._handle_permission_check(session, tool_name, input_data)
+            if decision == PermissionDecision.DENY:
+                return PermissionResultDeny(message="Denied by user.")
+            return PermissionResultAllow()
+
+        return can_use_tool
+
+    async def _handle_enter_plan_mode(self, session: ActiveSession) -> PermissionResultAllow | PermissionResultDeny:
+        """Gate EnterPlanMode on the user's approval (SDK ``can_use_tool`` path)."""
+        session._plan_mode_event = asyncio.Event()
+        session._plan_mode_approved = False
+        session.set_activity(ActivityState.AWAITING_PERMISSION)
+        session.buffer.push_text(MessageType.PLAN_MODE_ASK, {"session_id": session.id})
+        try:
+            await asyncio.wait_for(session._plan_mode_event.wait(), timeout=_PLAN_MODE_TIMEOUT)
+        except TimeoutError:
+            session._plan_mode_event = None
+            return PermissionResultDeny(message="Plan mode timed out.", interrupt=True)
+        session._plan_mode_event = None
+        session.set_activity(ActivityState.RUNNING_SUBPROCESS)
+        if not session._plan_mode_approved:
+            return PermissionResultDeny(message="Plan mode denied.", interrupt=True)
+        return PermissionResultAllow()
+
+    async def _handle_exit_plan_mode(
+        self, session: ActiveSession, tool_input: dict[str, Any]
+    ) -> PermissionResultAllow | PermissionResultDeny:
+        """Gate ExitPlanMode on plan review: approve → allow; feedback → deny+revise."""
+        session._plan_review_event = asyncio.Event()
+        session._plan_review_approved = False
+        session._plan_review_feedback = None
+        session.set_activity(ActivityState.AWAITING_PERMISSION)
+        session.buffer.push_text(
+            MessageType.PLAN_REVIEW_ASK,
+            {"session_id": session.id, "plan_input": tool_input},
+        )
+        try:
+            await asyncio.wait_for(session._plan_review_event.wait(), timeout=_PLAN_REVIEW_TIMEOUT)
+        except TimeoutError:
+            session._plan_review_event = None
+            return PermissionResultDeny(message="Plan review timed out.", interrupt=True)
+        session._plan_review_event = None
+        session.set_activity(ActivityState.RUNNING_SUBPROCESS)
+        feedback = session._plan_review_feedback or ""
+        session._plan_review_feedback = None
+        if session._plan_review_approved:
+            return PermissionResultAllow()
+        # Not approved — the feedback becomes the tool denial so the model revises.
+        return PermissionResultDeny(message=feedback or "Plan revision requested.")
+
+    async def _handle_ask_user_question(
+        self,
+        session: ActiveSession,
+        tool_input: dict[str, Any],
+    ) -> PermissionResultAllow | PermissionResultDeny:
+        """Surface the question widget, wait for the answer, return it to CC."""
+        session.buffer.push_text(
+            MessageType.TOOL_START,
+            {
+                "session_id": session.id,
+                "tool_name": "AskUserQuestion",
+                "tool_input": tool_input,
+            },
+        )
+        session._question_event = asyncio.Event()
+        session._question_answers = None
+        session.set_activity(ActivityState.AWAITING_PERMISSION)
+        try:
+            await asyncio.wait_for(session._question_event.wait(), timeout=_QUESTION_TIMEOUT)
+        except TimeoutError:
+            session._question_event = None
+            session._question_answers = None
+            session.buffer.push_text(
+                MessageType.ERROR,
+                {
+                    "session_id": session.id,
+                    "content": "Question timed out.",
+                    "code": "QUESTION_TIMEOUT",
+                },
+            )
+            return PermissionResultDeny(message="Question timed out.", interrupt=True)
+
+        answers = session._question_answers or {}
+        session._question_event = None
+        session._question_answers = None
+        session.set_activity(ActivityState.RUNNING_SUBPROCESS)
+
+        # Persist the answer on the buffered TOOL_START so history replay shows
+        # the question resolved.
+        answer_text = "\n".join(f"{k}: {v}" for k, v in answers.items())
+        for msg in reversed(session.buffer.text_history):
+            if (
+                msg.message_type == MessageType.TOOL_START
+                and msg.data.get("tool_name") == "AskUserQuestion"
+                and "answered" not in msg.data
+            ):
+                msg.data["answered"] = True
+                msg.data["answer"] = answer_text
+                break
+
+        return PermissionResultAllow(updated_input={"questions": tool_input.get("questions", []), "answers": answers})
 
     async def _handle_permission_check(
         self,
@@ -512,20 +696,9 @@ class ClaudeCodeAgent:
                         tool_name = block.get("name", "unknown")
                         tool_input = block.get("input", {})
 
-                        # Permission check for interactive sessions
-                        if session.permission_manager is not None:
-                            decision = await self._handle_permission_check(session, tool_name, tool_input)
-                            if decision == PermissionDecision.DENY:
-                                session.buffer.push_text(
-                                    MessageType.TOOL_START,
-                                    {
-                                        "session_id": session.id,
-                                        "tool_name": tool_name,
-                                        "tool_input": tool_input,
-                                        "permission_denied": True,
-                                    },
-                                )
-                                continue
+                        # Permissions + AskUserQuestion are resolved in-process by
+                        # the SDK ``can_use_tool`` callback (see _make_can_use_tool)
+                        # before the tool runs — the relay no longer gates here.
 
                         if tool_name == "TodoWrite":
                             todos = tool_input.get("todos", [])
@@ -537,87 +710,12 @@ class ClaudeCodeAgent:
                                     "todos": todos,
                                 },
                             )
-                        elif tool_name == "EnterPlanMode":
-                            session._plan_mode_event = asyncio.Event()
-                            session._plan_mode_approved = False
-                            session.set_activity(ActivityState.AWAITING_PERMISSION)
-                            session.buffer.push_text(
-                                MessageType.PLAN_MODE_ASK,
-                                {"session_id": session.id},
-                            )
-                            # Block stream reading until the user approves or denies.
-                            # While we wait, Claude Code's stdout pipe fills and it
-                            # cannot advance further, effectively gating the session.
-                            try:
-                                await asyncio.wait_for(
-                                    session._plan_mode_event.wait(),
-                                    timeout=_PLAN_MODE_TIMEOUT,
-                                )
-                            except TimeoutError:
-                                session.buffer.push_text(
-                                    MessageType.ERROR,
-                                    {
-                                        "session_id": session.id,
-                                        "content": "Plan mode timed out. The session was stopped.",
-                                        "code": "PLAN_MODE_DENIED",
-                                    },
-                                )
-                                await self._end_claude_code_session(session)
-                                return
-                            session._plan_mode_event = None
-                            session.set_activity(ActivityState.RUNNING_SUBPROCESS)
-                            if not session._plan_mode_approved:
-                                # User denied plan mode — terminate cleanly.
-                                session.buffer.push_text(
-                                    MessageType.AGENT_GROUP_END,
-                                    {"session_id": session.id},
-                                )
-                                session.buffer.push_text(
-                                    MessageType.ERROR,
-                                    {
-                                        "session_id": session.id,
-                                        "content": "Plan mode denied. The session was stopped.",
-                                        "code": "PLAN_MODE_DENIED",
-                                    },
-                                )
-                                await self._end_claude_code_session(session)
-                                return
-                        elif tool_name == "ExitPlanMode":
-                            session._plan_review_event = asyncio.Event()
-                            session._plan_review_approved = False
-                            session._plan_review_feedback = None
-                            session.set_activity(ActivityState.AWAITING_PERMISSION)
-                            session.buffer.push_text(
-                                MessageType.PLAN_REVIEW_ASK,
-                                {"session_id": session.id, "plan_input": tool_input},
-                            )
-                            # Block stream reading until the user approves or provides
-                            # feedback. Claude Code is waiting for stdin after ExitPlanMode,
-                            # so the pipe is also effectively gated.
-                            try:
-                                await asyncio.wait_for(
-                                    session._plan_review_event.wait(),
-                                    timeout=_PLAN_REVIEW_TIMEOUT,
-                                )
-                            except TimeoutError:
-                                session.buffer.push_text(
-                                    MessageType.ERROR,
-                                    {
-                                        "session_id": session.id,
-                                        "content": "Plan review timed out. The session was stopped.",
-                                        "code": "PLAN_REVIEW_TIMEOUT",
-                                    },
-                                )
-                                await self._end_claude_code_session(session)
-                                return
-                            session._plan_review_event = None
-                            session.set_activity(ActivityState.RUNNING_SUBPROCESS)
-                            response_text = session._plan_review_feedback or ""
-                            session._plan_review_feedback = None
-                            # Forward user's response to Claude Code stdin:
-                            # approval text → CC proceeds; feedback → CC revises the plan.
-                            if session.claude_code_executor is not None and session.claude_code_executor.is_running:
-                                await session.claude_code_executor.send_input(response_text)
+                        elif tool_name in ("EnterPlanMode", "ExitPlanMode"):
+                            # Plan mode is gated in-process by can_use_tool before the tool
+                            # runs (it pushes PLAN_MODE_ASK / PLAN_REVIEW_ASK and resolves
+                            # approve / deny / feedback).  The relay must not re-gate or
+                            # display these tool_use blocks.
+                            pass
                         elif tool_name == "ScheduleWakeup":
                             # Persist the wake, arm the scheduler, push
                             # WAKEUP_SCHEDULED.  The wake never blocks the
@@ -659,52 +757,12 @@ class ClaudeCodeAgent:
                                 # ``_process_tool_result``, so the snapshot stack
                                 # remains 1:1 with non-monitor tool calls.
                         elif tool_name == "AskUserQuestion":
-                            # Render the question in the client and gate the
-                            # relay until the user submits an answer.  Without
-                            # this block the relay would keep reading Claude
-                            # Code's stdout, which auto-cancels the question
-                            # (the assistant then "sees" a refusal and moves
-                            # on without ever giving the user a chance to
-                            # answer).  Mirrors the EnterPlanMode / ExitPlanMode
-                            # gating pattern.
-                            session.buffer.push_text(
-                                MessageType.TOOL_START,
-                                {
-                                    "session_id": session.id,
-                                    "tool_name": tool_name,
-                                    "tool_input": tool_input,
-                                },
-                            )
-                            session._question_event = asyncio.Event()
-                            session._question_response = None
-                            session.set_activity(ActivityState.AWAITING_PERMISSION)
-                            try:
-                                await asyncio.wait_for(
-                                    session._question_event.wait(),
-                                    timeout=_QUESTION_TIMEOUT,
-                                )
-                            except TimeoutError:
-                                session._question_event = None
-                                session._question_response = None
-                                session.buffer.push_text(
-                                    MessageType.ERROR,
-                                    {
-                                        "session_id": session.id,
-                                        "content": "Question timed out. The session was stopped.",
-                                        "code": "QUESTION_TIMEOUT",
-                                    },
-                                )
-                                await self._end_claude_code_session(session)
-                                return
-                            response_text = session._question_response or ""
-                            session._question_event = None
-                            session._question_response = None
-                            session.set_activity(ActivityState.RUNNING_SUBPROCESS)
-                            # Forward the user's answer to Claude Code's stdin
-                            # as a new user turn.  Claude Code resumes its
-                            # turn with the answer as context.
-                            if session.claude_code_executor is not None and session.claude_code_executor.is_running:
-                                await session.claude_code_executor.send_input(response_text)
+                            # The SDK ``can_use_tool`` callback already surfaced the
+                            # widget and resolved the answer before the tool ran.
+                            # Record the id so the resolved tool_result is dropped
+                            # from the display (the widget shows the answer); push
+                            # no TOOL_START / snapshot sentinel here.
+                            session._question_tool_use_id = block.get("id") or ""
                         else:
                             session.buffer.push_text(
                                 MessageType.TOOL_START,
@@ -714,6 +772,13 @@ class ClaudeCodeAgent:
                                     "tool_input": tool_input,
                                 },
                             )
+                            # A Claude Code native background command (``Bash`` with
+                            # ``run_in_background``) finishes between turns and wakes
+                            # the model.  Count it so the between-turns drain stays
+                            # alive to stream the completion + continuation instead of
+                            # leaving them buffered until the next user message.
+                            if tool_name == "Bash" and tool_input.get("run_in_background"):
+                                session._pending_bg_tasks += 1
                             # Snapshot file before Edit/Write so we can compute
                             # a diff once the tool_result arrives.
                             if tool_name in ("Edit", "Write") and isinstance(tool_input.get("file_path"), str):
@@ -783,6 +848,20 @@ class ClaudeCodeAgent:
                         tool_use_id = block.get("tool_use_id") or ""
                         if tool_use_id and tool_use_id in session._active_monitors:
                             await self._process_monitor_event(session, tool_use_id, block)
+                        elif tool_use_id and tool_use_id == session._question_tool_use_id:
+                            # Resolved AskUserQuestion — the widget already shows
+                            # the answer; drop the synthetic result from the chat.
+                            session._question_tool_use_id = None
+                        elif block.get("task_notification"):
+                            # A Claude Code native background command finished (not an
+                            # RCFlow Monitor — its id isn't tracked).  Clear the pending
+                            # count so the drain can stop, and relabel the output (it is
+                            # not a "Monitor").
+                            session._pending_bg_tasks = max(0, session._pending_bg_tasks - 1)
+                            verb = block.get("task_verb", "exited")
+                            summary = block.get("task_summary", "")
+                            content = f"Background task {verb}: {summary}" if summary else f"Background task {verb}"
+                            await self._process_tool_result(session, content, bool(block.get("is_error", False)))
                         else:
                             await self._process_tool_result(
                                 session,
@@ -1141,6 +1220,9 @@ class ClaudeCodeAgent:
         Called from session-end / interrupt / pause hooks so persistent or
         in-flight monitors do not look perpetually alive in the UI.
         """
+        # A terminated/paused session must not keep the between-turns drain alive
+        # waiting on a background command that will never report now.
+        session._pending_bg_tasks = 0
         if not session._active_monitors:
             return
         live = list(session._active_monitors.items())
@@ -1205,7 +1287,7 @@ class ClaudeCodeAgent:
     async def _stream_claude_code_events(
         self,
         session: ActiveSession,
-        executor: ClaudeCodeExecutor,
+        executor: ClaudeCodeSdkExecutor,
         tool_def: ToolDefinition,
         tool_call: ToolCallRequest,
     ) -> None:
@@ -1341,7 +1423,7 @@ class ClaudeCodeAgent:
     async def _drain_monitor_events(
         self,
         session: ActiveSession,
-        executor: ClaudeCodeExecutor,
+        executor: ClaudeCodeSdkExecutor,
     ) -> None:
         """Keep reading Claude Code stdout while ``Monitor`` watches are alive.
 
@@ -1365,11 +1447,18 @@ class ClaudeCodeAgent:
             SessionStatus.FAILED,
             SessionStatus.PAUSED,
         )
-        while session._active_monitors and executor.is_running:
+        while (session._active_monitors or session._pending_bg_tasks > 0) and executor.is_running:
             if session.status in terminal_statuses:
                 return
             try:
-                await self._relay_claude_code_stream(session, executor.read_more_events())
+                # While a Claude Code native background command is pending, stream
+                # the FULL continuation (the model's woken response), not just the
+                # Monitor-style user/tool_result events — otherwise it buffers in
+                # the queue until the next user message.
+                include_assistant = session._pending_bg_tasks > 0
+                await self._relay_claude_code_stream(
+                    session, executor.read_more_events(include_assistant=include_assistant)
+                )
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -1497,7 +1586,7 @@ class ClaudeCodeAgent:
     async def _restart_claude_code_with_prompt(
         self,
         session: ActiveSession,
-        executor: ClaudeCodeExecutor,
+        executor: ClaudeCodeSdkExecutor,
         prompt: str,
     ) -> None:
         """Restart Claude Code process and stream events for a follow-up."""

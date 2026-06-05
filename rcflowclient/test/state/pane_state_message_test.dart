@@ -331,6 +331,61 @@ void main() {
 
       expect(pane.messages.first.children!.last.finished, isTrue);
     });
+
+    test('AskUserQuestion renders at top level, not inside the agent group', () {
+      final pane = _pane();
+      pane.startAgentGroup('claude_code', null);
+      pane.startToolBlock('bash', {'command': 'ls'});
+      pane.startToolBlock('AskUserQuestion', {
+        'questions': [
+          {'question': 'Which option?'}
+        ],
+      });
+
+      // Group (with the bash child) + the question as a sibling top-level block.
+      expect(pane.messages.length, 2);
+      final group = pane.messages[0];
+      expect(group.type, DisplayMessageType.agentGroup);
+      expect(group.children!.length, 1);
+      expect(group.children!.single.toolName, 'bash');
+      // The open group is closed so later tools order after the question.
+      expect(group.finished, isTrue);
+
+      final question = pane.messages[1];
+      expect(question.type, DisplayMessageType.toolBlock);
+      expect(question.isQuestion, isTrue);
+      expect(question.finished, isFalse);
+    });
+
+    test('AskUserQuestion outside an agent group is a top-level block', () {
+      final pane = _pane();
+      pane.startToolBlock('AskUserQuestion', {
+        'questions': [
+          {'question': 'Pick one'}
+        ],
+      });
+
+      expect(pane.messages.length, 1);
+      expect(pane.messages.single.isQuestion, isTrue);
+      expect(pane.messages.single.finished, isFalse);
+    });
+
+    test('a tool after a question starts a fresh group following it', () {
+      final pane = _pane();
+      pane.startAgentGroup('claude_code', null);
+      pane.startToolBlock('AskUserQuestion', {
+        'questions': [
+          {'question': 'Q?'}
+        ],
+      });
+      pane.startToolBlock('bash', {'command': 'echo hi'});
+
+      // The empty leading group is dropped: [question, new group(bash)].
+      expect(pane.messages.length, 2);
+      expect(pane.messages[0].isQuestion, isTrue);
+      expect(pane.messages[1].type, DisplayMessageType.agentGroup);
+      expect(pane.messages[1].children!.single.toolName, 'bash');
+    });
   });
 
   // ---------------------------------------------------------------------------

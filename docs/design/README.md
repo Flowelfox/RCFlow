@@ -69,6 +69,7 @@ This file is the **index**. Detailed sections live in sibling files (`./architec
 | ORM                  | SQLAlchemy 2.0 (async)        |
 | Database             | SQLite (default) or PostgreSQL |
 | LLM                  | Anthropic Messages API, AWS Bedrock, or OpenAI Chat Completions API |
+| Claude Code agent    | claude-agent-sdk (drives the managed `claude` binary; `can_use_tool` powers interactive AskUserQuestion + permissions) |
 | Prompt Templates     | Jinja2                        |
 | Linting / Formatting | Ruff                          |
 | Type Checking        | ty                            |

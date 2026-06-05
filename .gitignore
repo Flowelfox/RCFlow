@@ -126,3 +126,27 @@ docs/plans/
 data/
 .claude/
 model_cache.json
+
+# Local SDK-migration spike scratch (not for commit)
+/spike_sdk.py
+/spike2_sdk.py
+
+/spike3_executor.py
+
+/spike4_relay.py
+
+/e2e_ws_client.py
+
+/e2e_followup.py
+
+/e2e_cancel.py
+
+/e2e_plan.py
+
+/e2e_resume.py
+
+/e2e_monitor.py
+
+# PyInstaller auto-generated spec (regenerated each build under build/)
+/rcflow.spec
+*.spec

@@ -32,7 +32,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from src.core.permissions import PermissionManager
-    from src.executors.claude_code import ClaudeCodeExecutor
+    from src.executors.claude_code_sdk import ClaudeCodeSdkExecutor
     from src.executors.codex import CodexExecutor
     from src.executors.opencode import OpenCodeExecutor
 
@@ -106,7 +106,7 @@ class ActiveSession:
         self.metadata: dict[str, Any] = {}
         self.paused_at: datetime | None = None
         # Claude Code mode: when set, subsequent messages bypass the outer LLM
-        self.claude_code_executor: ClaudeCodeExecutor | None = None
+        self.claude_code_executor: ClaudeCodeSdkExecutor | None = None
         self._claude_code_stream_task: asyncio.Task[None] | None = None
         # Codex CLI mode: same pattern as Claude Code but with one-shot processes
         self.codex_executor: CodexExecutor | None = None
@@ -129,12 +129,16 @@ class ActiveSession:
         self._plan_review_approved: bool = False
         # The text the user sent in response to the plan review (approval text or feedback).
         self._plan_review_feedback: str | None = None
-        # AskUserQuestion gate — set when an AskUserQuestion tool_use is intercepted.
-        # The relay blocks here until the user submits an answer (or the timeout
-        # expires).  Without this gate, Claude Code auto-cancels the question and
-        # the assistant proceeds as if the user had refused to answer.
+        # AskUserQuestion gate.  Under the Agent SDK the ``can_use_tool`` callback
+        # pushes the question widget and blocks on ``_question_event`` until the
+        # user submits; ``send_interactive_response`` stores the structured
+        # ``_question_answers`` and sets the event, and the callback returns them
+        # to Claude Code as the tool's answer (so the model continues in the same
+        # turn).  ``_question_tool_use_id`` lets the relay drop the resolved
+        # tool_use / tool_result from the display (the widget already shows it).
         self._question_event: asyncio.Event | None = None
-        self._question_response: str | None = None
+        self._question_answers: dict[str, str] | None = None
+        self._question_tool_use_id: str | None = None
         # Token usage accumulators (running totals across all turns).  Stored on
         # a composed object; the historical flat attributes are re-exposed via
         # delegating properties below.
@@ -169,6 +173,13 @@ class ActiveSession:
         # Persists across turns — a monitor may keep emitting events while the
         # outer assistant continues other work.  Cleared by session-end hooks.
         self._active_monitors: dict[str, MonitorState] = {}
+        # Count of Claude Code *native* background commands (``Bash`` with
+        # ``run_in_background``) whose completion is still pending.  Unlike an
+        # RCFlow Monitor these register nothing in ``_active_monitors``; the count
+        # keeps the between-turns drain alive so the task's completion *and the
+        # model's continuation* stream live instead of buffering until the next
+        # user message.
+        self._pending_bg_tasks: int = 0
         # Fenced code blocks extracted from the latest user prompt on the
         # LLM-mediated path. Consumed by ``PromptRouter._execute_tool`` when an
         # agent tool is invoked so verbatim code blocks always reach the
@@ -448,6 +459,22 @@ class ActiveSession:
         if self.status == SessionStatus.PAUSED:
             return True
         return self._activity_state != ActivityState.IDLE
+
+    @property
+    def claude_code_relay_active(self) -> bool:
+        """Whether a Claude Code relay task is live and draining the SDK stream.
+
+        Mid-turn, the relay consumes the executor's message queue, so injecting
+        a follow-up via ``send_input`` reaches the model and streams back through
+        that relay.  When no relay is active (process gone, or connected-but-idle
+        between turns), a ``send_input`` would instead land in the queue and be
+        mis-consumed by the next turn — callers must route through a fresh prompt.
+        """
+        return (
+            self.claude_code_executor is not None
+            and self._claude_code_stream_task is not None
+            and not self._claude_code_stream_task.done()
+        )
 
     def pending_snapshot(self) -> list[dict[str, Any]]:
         """Return the current queue as a list of snapshot dicts (for ``session_update``)."""

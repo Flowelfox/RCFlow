@@ -716,7 +716,7 @@ class LinuxGUI(RCFlowDashboard):
         self._adopted_external_worker = False
         # Drop the wrapper so future starts use the real is_running.
         with contextlib.suppress(AttributeError):
-            del self._server.is_running  # type: ignore[attr-defined]
+            del self._server.is_running
         self._set_status("Stopped (systemctl)", sticky=True)
 
     # ── Token resolution (override) ──────────────────────────────────────

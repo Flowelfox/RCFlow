@@ -24,12 +24,10 @@ from sqlalchemy import select
 from src.core.buffer import MessageType
 from src.core.permissions import (
     PermissionDecision,
-    PermissionManager,
     PermissionScope,
 )
 from src.core.session import ActiveSession, ActivityState, SessionStatus, SessionType
 from src.database.models import TaskSession as TaskSessionModel
-from src.executors.claude_code import ClaudeCodeExecutor
 from src.executors.codex import CodexExecutor
 from src.executors.opencode import OpenCodeExecutor
 
@@ -37,6 +35,25 @@ if TYPE_CHECKING:
     from src.core.prompt_router import PromptRouter
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_answer_text(text: str) -> dict[str, str]:
+    """Parse a newline-joined ``"question: answer"`` string into a dict.
+
+    Fallback for AskUserQuestion answers that arrive only as flattened text
+    (the structured ``answers`` map is preferred when available).
+    """
+    answers: dict[str, str] = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        key, sep, value = line.partition(": ")
+        if sep:
+            answers[key.strip()] = value.strip()
+        else:
+            answers[line] = line
+    return answers
 
 
 class SessionLifecycle:
@@ -218,10 +235,11 @@ class SessionLifecycle:
             session._plan_review_feedback = None
             session._plan_review_event.set()
 
-        # Release any pending AskUserQuestion gate so the relay can exit
-        # cleanly instead of timing out an hour later.
+        # Release any pending AskUserQuestion gate so the callback unblocks
+        # (with no answer) instead of timing out an hour later.
         if session._question_event is not None and not session._question_event.is_set():
-            session._question_response = None
+            session._question_answers = None
+            session._question_tool_use_id = None
             session._question_event.set()
 
         # Clear subprocess tracking fields and broadcast null status
@@ -391,7 +409,14 @@ class SessionLifecycle:
                 msg.data["accepted"] = accepted
                 break
 
-    async def send_interactive_response(self, session_id: str, text: str, *, accepted: bool = True) -> None:
+    async def send_interactive_response(
+        self,
+        session_id: str,
+        text: str,
+        *,
+        accepted: bool = True,
+        answers: dict[str, str] | None = None,
+    ) -> None:
         """Send an interactive response directly to Claude Code's stdin.
 
         Used for answering AskUserQuestion prompts, plan mode approval, plan
@@ -446,32 +471,28 @@ class SessionLifecycle:
             return
 
         # If the session is blocked awaiting an AskUserQuestion answer, resolve
-        # that gate.  The relay forwards ``text`` to Claude Code's stdin after
-        # the event fires, so we do NOT write to stdin here.
+        # that gate.  The ``can_use_tool`` callback reads ``_question_answers`` and
+        # returns them to Claude Code as the tool's answer (so the model continues
+        # in the same turn) and annotates the buffered TOOL_START for replay.
         if session._question_event is not None and not session._question_event.is_set():
-            session._question_response = text
-            # Persist the answer in the buffer so history replay marks the
-            # question widget as resolved.  The most-recent unresolved
-            # AskUserQuestion TOOL_START is the target.
-            for msg in reversed(session.buffer.text_history):
-                if (
-                    msg.message_type == MessageType.TOOL_START
-                    and msg.data.get("tool_name") == "AskUserQuestion"
-                    and "answered" not in msg.data
-                ):
-                    msg.data["answered"] = True
-                    msg.data["answer"] = text
-                    break
+            # Prefer the structured answers map; fall back to parsing the flat
+            # "question: answer" text the WS handler builds.
+            session._question_answers = answers or _parse_answer_text(text)
             session._question_event.set()
             return
 
         executor = session.claude_code_executor
-        if executor is not None and executor.is_running:
-            # Mid-turn: just send to stdin; the original relay task handles the rest
+        if executor is not None and executor.is_running and session.claude_code_relay_active:
+            # Mid-turn: a relay task is actively draining the stream, so the
+            # injected text reaches the model and its response streams back
+            # through that relay.
             await executor.send_input(text)
             return
 
-        # Fallback: process is gone — treat as a regular follow-up prompt
+        # No active relay (process gone, or connected-but-idle between turns):
+        # deliver as a fresh turn so a relay is spawned to stream the
+        # continuation.  A bare send_input here would land in the SDK message
+        # queue and be mis-consumed by the next turn.
         await self._r.handle_prompt(text, session_id)
 
     async def pause_session(self, session_id: str) -> ActiveSession:
@@ -558,10 +579,11 @@ class SessionLifecycle:
             session._plan_review_feedback = None
             session._plan_review_event.set()
 
-        # Release any pending AskUserQuestion gate so the relay can exit
-        # cleanly instead of timing out an hour later.
+        # Release any pending AskUserQuestion gate so the callback unblocks
+        # (with no answer) instead of timing out an hour later.
         if session._question_event is not None and not session._question_event.is_set():
-            session._question_response = None
+            session._question_answers = None
+            session._question_tool_use_id = None
             session._question_event.set()
 
         # Clear subprocess tracking fields and broadcast null status
@@ -736,23 +758,9 @@ class SessionLifecycle:
             if cc_session_id and cc_tool_name:
                 tool_def = self._r._tool_registry.get(cc_tool_name)
                 if tool_def is not None and tool_def.executor == "claude_code":
-                    binary_path = "claude"
-                    config = tool_def.get_claude_code_config()
-                    binary_path = config.binary_path
-                    if self._r._tool_manager:
-                        resolved = self._r._tool_manager.get_binary_path("claude_code")
-                        if resolved:
-                            binary_path = resolved
-                    executor = ClaudeCodeExecutor(
-                        binary_path=binary_path,
-                        session_id=cc_session_id,
-                        extra_env=self._r._build_claude_code_extra_env(),
-                        config_overrides=self._r._get_managed_config_overrides("claude_code"),
+                    session.claude_code_executor = self._r._claude.build_session_executor(
+                        tool_def, session, cc_session_id
                     )
-                    executor._tool_def = tool_def
-                    cc_params = session.metadata.get("claude_code_parameters", {})
-                    executor._last_parameters = cc_params
-                    session.claude_code_executor = executor
 
         # Reconstruct the Codex executor if this session had one before pause.
         if session.codex_executor is None:
@@ -831,40 +839,9 @@ class SessionLifecycle:
         async with self._r._db_session_factory() as db:
             session = await self._r._session_manager.restore_session(session_id, db)
 
-        # If this was a Claude Code session, set up executor for lazy restart
-        cc_session_id = session.metadata.get("claude_code_session_id")
-        cc_tool_name = session.metadata.get("claude_code_tool_name")
-        if cc_session_id and cc_tool_name:
-            tool_def = self._r._tool_registry.get(cc_tool_name)
-            if tool_def is not None and tool_def.executor == "claude_code":
-                binary_path = "claude"
-                config = tool_def.get_claude_code_config()
-                binary_path = config.binary_path
-                if self._r._tool_manager:
-                    resolved = self._r._tool_manager.get_binary_path("claude_code")
-                    if resolved:
-                        binary_path = resolved
-
-                executor = ClaudeCodeExecutor(
-                    binary_path=binary_path,
-                    session_id=cc_session_id,
-                    extra_env=self._r._build_claude_code_extra_env(),
-                    config_overrides=self._r._get_managed_config_overrides("claude_code"),
-                )
-                # Pre-set the tool_def and last_parameters so restart_with_prompt works
-                executor._tool_def = tool_def
-                cc_params = session.metadata.get("claude_code_parameters", {})
-                executor._last_parameters = cc_params
-
-                session.claude_code_executor = executor
-                session.session_type = SessionType.LONG_RUNNING
-
-        # Restore permission rules if they were saved
-        saved_rules = session.metadata.get("permission_rules")
-        if saved_rules:
-            pm = PermissionManager()
-            pm.restore_rules(saved_rules)
-            session.permission_manager = pm
+        # If this was a Claude Code session, reconstruct the executor (and any
+        # saved permission rules) for lazy restart on the next user message.
+        self._r._claude.reattach_executor(session)
 
         # If this was a Codex session, set up executor for lazy restart
         codex_thread_id = session.metadata.get("codex_thread_id")

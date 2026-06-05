@@ -923,268 +923,6 @@ async def test_pause_session_resolves_pending_plan_mode_event(
 
 
 @pytest.mark.asyncio
-async def test_relay_enter_plan_mode_blocks_and_resumes_on_approve(
-    session_manager: SessionManager,
-) -> None:
-    """EnterPlanMode in the stream blocks until the user approves, then continues."""
-    router = _make_router(session_manager)
-
-    session = session_manager.create_session(SessionType.LONG_RUNNING)
-    session.set_active()
-
-    enter_plan_event = json.dumps(
-        {
-            "type": "assistant",
-            "message": {
-                "content": [{"type": "tool_use", "name": "EnterPlanMode", "input": {}}],
-            },
-        }
-    )
-    result_event = json.dumps({"type": "result", "result": "Plan complete."})
-    stream = _async_stream_chunks(
-        [
-            ExecutionChunk(content=enter_plan_event, stream="stdout"),
-            ExecutionChunk(content=result_event, stream="stdout"),
-        ]
-    )
-
-    # Run relay concurrently with an approval sent after a short delay
-    async def _approve_after_yield() -> None:
-        # Yield control so the relay can start and hit the gate
-        await asyncio.sleep(0)
-        await asyncio.sleep(0)
-        await router.send_interactive_response(session.id, "yes")
-
-    await asyncio.gather(
-        router._relay_claude_code_stream(session, stream),
-        _approve_after_yield(),
-    )
-
-    # Session should still be active (not ended by denial)
-    assert True  # relay ended normally
-
-    # PLAN_MODE_ASK should be in the buffer, marked accepted
-    plan_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.PLAN_MODE_ASK]
-    assert len(plan_msgs) == 1
-    assert plan_msgs[0].data.get("accepted") is True
-
-
-@pytest.mark.asyncio
-async def test_relay_enter_plan_mode_denied_ends_session(
-    session_manager: SessionManager,
-) -> None:
-    """Denying plan mode ends the session with PLAN_MODE_DENIED error."""
-    router = _make_router(session_manager)
-    router._claude._end_claude_code_session = AsyncMock()  # type: ignore[method-assign]
-
-    session = session_manager.create_session(SessionType.LONG_RUNNING)
-    session.set_active()
-
-    # Executor mock so _end_claude_code_session doesn't fail
-    mock_executor = AsyncMock()
-    mock_executor.stop_process = AsyncMock()
-    session.claude_code_executor = mock_executor
-
-    enter_plan_event = json.dumps(
-        {
-            "type": "assistant",
-            "message": {
-                "content": [{"type": "tool_use", "name": "EnterPlanMode", "input": {}}],
-            },
-        }
-    )
-    # The result event should NOT be reached after a denial
-    result_event = json.dumps({"type": "result", "result": "Should not reach."})
-    stream = _async_stream_chunks(
-        [
-            ExecutionChunk(content=enter_plan_event, stream="stdout"),
-            ExecutionChunk(content=result_event, stream="stdout"),
-        ]
-    )
-
-    async def _deny_after_yield() -> None:
-        await asyncio.sleep(0)
-        await asyncio.sleep(0)
-        await router.send_interactive_response(session.id, "no")
-
-    await asyncio.gather(
-        router._relay_claude_code_stream(session, stream),
-        _deny_after_yield(),
-    )
-
-    # PLAN_MODE_ASK must be in the buffer, marked denied
-    plan_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.PLAN_MODE_ASK]
-    assert len(plan_msgs) == 1
-    assert plan_msgs[0].data.get("accepted") is False
-
-    # An ERROR message with PLAN_MODE_DENIED code should be present
-    error_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.ERROR]
-    assert any(m.data.get("code") == "PLAN_MODE_DENIED" for m in error_msgs)
-
-    # _end_claude_code_session should have been called
-    router._claude._end_claude_code_session.assert_awaited_once_with(session)  # type: ignore[attr-defined]
-
-
-@pytest.mark.asyncio
-async def test_relay_exit_plan_mode_blocks_until_approval(
-    session_manager: SessionManager,
-) -> None:
-    """ExitPlanMode relay blocks the stream until the user provides a response."""
-    router = _make_router(session_manager)
-
-    session = session_manager.create_session(SessionType.LONG_RUNNING)
-    session.set_active()
-
-    # Mock executor so send_input doesn't fail
-    mock_executor = AsyncMock()
-    mock_executor.is_running = True
-    mock_executor.send_input = AsyncMock()
-    session.claude_code_executor = mock_executor
-
-    exit_plan_event = json.dumps(
-        {
-            "type": "assistant",
-            "message": {
-                "content": [
-                    {
-                        "type": "tool_use",
-                        "name": "ExitPlanMode",
-                        "input": {"plan": "1. Do X\n2. Do Y"},
-                    }
-                ],
-            },
-        }
-    )
-    result_event = json.dumps({"type": "result", "result": "Plan ready."})
-    stream = _async_stream_chunks(
-        [
-            ExecutionChunk(content=exit_plan_event, stream="stdout"),
-            ExecutionChunk(content=result_event, stream="stdout"),
-        ]
-    )
-
-    relay_done = False
-
-    async def _track_relay() -> None:
-        nonlocal relay_done
-        await router._relay_claude_code_stream(session, stream)
-        relay_done = True
-
-    async def _approve_after_yield() -> None:
-        # Yield control so the relay can hit the gate
-        await asyncio.sleep(0)
-        await asyncio.sleep(0)
-        # At this point the relay should be blocked — confirm it hasn't finished
-        assert not relay_done, "Relay must not complete before approval is given"
-        await router.send_interactive_response(session.id, "Looks good, proceed.", accepted=True)
-
-    await asyncio.gather(_track_relay(), _approve_after_yield())
-
-    # PLAN_REVIEW_ASK should be in the buffer, marked accepted
-    plan_review_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.PLAN_REVIEW_ASK]
-    assert len(plan_review_msgs) == 1
-    assert plan_review_msgs[0].data["plan_input"] == {"plan": "1. Do X\n2. Do Y"}
-    assert plan_review_msgs[0].data["session_id"] == session.id
-    assert plan_review_msgs[0].data.get("accepted") is True
-
-
-@pytest.mark.asyncio
-async def test_relay_exit_plan_mode_approve_sends_to_stdin(
-    session_manager: SessionManager,
-) -> None:
-    """Approving the plan review sends the approval text to Claude Code stdin."""
-    router = _make_router(session_manager)
-
-    session = session_manager.create_session(SessionType.LONG_RUNNING)
-    session.set_active()
-
-    mock_executor = AsyncMock()
-    mock_executor.is_running = True
-    mock_executor.send_input = AsyncMock()
-    session.claude_code_executor = mock_executor
-
-    exit_plan_event = json.dumps(
-        {
-            "type": "assistant",
-            "message": {
-                "content": [{"type": "tool_use", "name": "ExitPlanMode", "input": {"plan": "Step 1"}}],
-            },
-        }
-    )
-    result_event = json.dumps({"type": "result", "result": "Done."})
-    stream = _async_stream_chunks(
-        [
-            ExecutionChunk(content=exit_plan_event, stream="stdout"),
-            ExecutionChunk(content=result_event, stream="stdout"),
-        ]
-    )
-
-    approval_text = "Looks good, proceed with the plan."
-
-    async def _approve() -> None:
-        await asyncio.sleep(0)
-        await asyncio.sleep(0)
-        await router.send_interactive_response(session.id, approval_text, accepted=True)
-
-    await asyncio.gather(router._relay_claude_code_stream(session, stream), _approve())
-
-    # The approval text must have been forwarded to Claude Code's stdin
-    mock_executor.send_input.assert_awaited_once_with(approval_text)
-
-    # Buffer message must be marked accepted
-    plan_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.PLAN_REVIEW_ASK]
-    assert plan_msgs[0].data.get("accepted") is True
-
-
-@pytest.mark.asyncio
-async def test_relay_exit_plan_mode_reject_sends_feedback_to_stdin(
-    session_manager: SessionManager,
-) -> None:
-    """Rejecting the plan review sends feedback text to Claude Code stdin for revision."""
-    router = _make_router(session_manager)
-
-    session = session_manager.create_session(SessionType.LONG_RUNNING)
-    session.set_active()
-
-    mock_executor = AsyncMock()
-    mock_executor.is_running = True
-    mock_executor.send_input = AsyncMock()
-    session.claude_code_executor = mock_executor
-
-    exit_plan_event = json.dumps(
-        {
-            "type": "assistant",
-            "message": {
-                "content": [{"type": "tool_use", "name": "ExitPlanMode", "input": {"plan": "Step 1"}}],
-            },
-        }
-    )
-    result_event = json.dumps({"type": "result", "result": "Done."})
-    stream = _async_stream_chunks(
-        [
-            ExecutionChunk(content=exit_plan_event, stream="stdout"),
-            ExecutionChunk(content=result_event, stream="stdout"),
-        ]
-    )
-
-    feedback = "Please also add error handling in step 1."
-
-    async def _reject() -> None:
-        await asyncio.sleep(0)
-        await asyncio.sleep(0)
-        await router.send_interactive_response(session.id, feedback, accepted=False)
-
-    await asyncio.gather(router._relay_claude_code_stream(session, stream), _reject())
-
-    # Feedback must have been forwarded to Claude Code's stdin
-    mock_executor.send_input.assert_awaited_once_with(feedback)
-
-    # Buffer message must be marked rejected
-    plan_msgs = [m for m in session.buffer.text_history if m.message_type == MessageType.PLAN_REVIEW_ASK]
-    assert plan_msgs[0].data.get("accepted") is False
-
-
-@pytest.mark.asyncio
 async def test_send_interactive_response_resolves_plan_review_approved(
     session_manager: SessionManager,
 ) -> None:
@@ -1282,45 +1020,30 @@ async def test_pause_session_resolves_pending_plan_review_event(
 
 
 @pytest.mark.asyncio
-async def test_send_interactive_response_resolves_question_event(
+async def test_send_interactive_response_resolves_question_gate_structured(
     session_manager: SessionManager,
 ) -> None:
-    """send_interactive_response stores the answer and signals a pending question gate."""
+    """A structured answers map is stored and the question gate is signalled."""
     router = _make_router(session_manager)
     session = session_manager.create_session(SessionType.LONG_RUNNING)
     session.set_active()
 
     session._question_event = asyncio.Event()
-    session._question_response = None
-    session.buffer.push_text(
-        MessageType.TOOL_START,
-        {
-            "session_id": session.id,
-            "tool_name": "AskUserQuestion",
-            "tool_input": {"questions": [{"question": "Which option?"}]},
-        },
-    )
+    session._question_answers = None
 
-    await router.send_interactive_response(session.id, "Which option?: Option A")
+    await router.send_interactive_response(session.id, "Which option?: Option A", answers={"Which option?": "Option A"})
 
-    assert session._question_response == "Which option?: Option A"
+    # The callback (not send_interactive_response) returns the answers to CC;
+    # here we just verify the gate is resolved with the structured map.
+    assert session._question_answers == {"Which option?": "Option A"}
     assert session._question_event.is_set()
-
-    question_msgs = [
-        m
-        for m in session.buffer.text_history
-        if m.message_type == MessageType.TOOL_START and m.data.get("tool_name") == "AskUserQuestion"
-    ]
-    assert len(question_msgs) == 1
-    assert question_msgs[0].data.get("answered") is True
-    assert question_msgs[0].data.get("answer") == "Which option?: Option A"
 
 
 @pytest.mark.asyncio
-async def test_send_interactive_response_question_takes_precedence_over_stdin(
+async def test_send_interactive_response_question_parses_flat_text(
     session_manager: SessionManager,
 ) -> None:
-    """When a question gate is pending, the answer resolves the gate instead of being written to stdin."""
+    """With no structured map, the flat 'q: a' text is parsed; no stdin write."""
     router = _make_router(session_manager)
     session = session_manager.create_session(SessionType.LONG_RUNNING)
     session.set_active()
@@ -1332,14 +1055,62 @@ async def test_send_interactive_response_question_takes_precedence_over_stdin(
 
     session._question_event = asyncio.Event()
 
-    await router.send_interactive_response(session.id, "answer text")
+    await router.send_interactive_response(session.id, "Which option?: Option A")
 
-    # The relay (not send_interactive_response) is the one that forwards the
-    # answer to Claude Code's stdin once the gate releases, so no direct
-    # stdin write should happen here.
     executor.send_input.assert_not_awaited()
     assert session._question_event.is_set()
-    assert session._question_response == "answer text"
+    assert session._question_answers == {"Which option?": "Option A"}
+
+
+@pytest.mark.asyncio
+async def test_free_text_response_mid_turn_uses_send_input(
+    session_manager: SessionManager,
+) -> None:
+    """A free-text interactive response injects via send_input only while a relay is live."""
+    router = _make_router(session_manager)
+    session = session_manager.create_session(SessionType.LONG_RUNNING)
+    session.set_active()
+
+    executor = MagicMock()
+    executor.is_running = True
+    executor.send_input = AsyncMock()
+    session.claude_code_executor = executor
+    # A live (not-done) relay task means the stream is being drained.
+    task = MagicMock()
+    task.done.return_value = False
+    session._claude_code_stream_task = task  # type: ignore[assignment]
+    router.handle_prompt = AsyncMock()  # type: ignore[method-assign]
+
+    await router.send_interactive_response(session.id, "hello")
+
+    executor.send_input.assert_awaited_once_with("hello")
+    router.handle_prompt.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_free_text_response_idle_routes_to_handle_prompt(
+    session_manager: SessionManager,
+) -> None:
+    """Connected-but-idle (no live relay): route as a fresh prompt, not send_input.
+
+    A bare send_input here would land in the SDK queue and be mis-consumed by the
+    next turn; handle_prompt spawns a relay to stream the continuation instead.
+    """
+    router = _make_router(session_manager)
+    session = session_manager.create_session(SessionType.LONG_RUNNING)
+    session.set_active()
+
+    executor = MagicMock()
+    executor.is_running = True  # connected between turns
+    executor.send_input = AsyncMock()
+    session.claude_code_executor = executor
+    session._claude_code_stream_task = None  # no relay draining
+    router.handle_prompt = AsyncMock()  # type: ignore[method-assign]
+
+    await router.send_interactive_response(session.id, "hello")
+
+    executor.send_input.assert_not_awaited()
+    router.handle_prompt.assert_awaited_once_with("hello", session.id)
 
 
 @pytest.mark.asyncio
