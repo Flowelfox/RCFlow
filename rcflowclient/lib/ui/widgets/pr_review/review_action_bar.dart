@@ -91,11 +91,11 @@ class _ReviewActionBarState extends State<ReviewActionBar> {
     if (mounted) setState(() {});
   }
 
-  /// A review can be submitted only when it carries something: an
-  /// approve/request-changes verdict, a non-empty summary, or queued comments.
-  /// A bare "Comment" review with no body and no inline comments is empty.
+  /// A review can be submitted only when GitHub will accept it: an Approve
+  /// needs nothing, but Request-changes and Comment require a summary body or at
+  /// least one inline comment (GitHub returns 422 otherwise).
   bool get _canSubmit =>
-      _verdict != ReviewVerdict.comment ||
+      _verdict == ReviewVerdict.approve ||
       _summaryController.text.trim().isNotEmpty ||
       widget.draftComments.isNotEmpty;
 

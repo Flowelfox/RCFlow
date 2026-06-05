@@ -8,11 +8,18 @@ class NotificationToast extends StatelessWidget {
   final VoidCallback onDismiss;
   final bool compact;
 
+  /// Called when the cursor enters / leaves the toast — used to pause the
+  /// auto-dismiss countdown while the user reads or selects the text.
+  final VoidCallback? onMouseEnter;
+  final VoidCallback? onMouseExit;
+
   const NotificationToast({
     super.key,
     required this.notification,
     required this.onDismiss,
     this.compact = false,
+    this.onMouseEnter,
+    this.onMouseExit,
   });
 
   @override
@@ -43,96 +50,102 @@ class NotificationToast extends StatelessWidget {
 
     return Semantics(
       liveRegion: true,
-      child: Material(
-        color: Colors.transparent,
-        child: Container(
-          width: compact ? null : 360,
-          decoration: BoxDecoration(
-            color: bgColor,
-            borderRadius: BorderRadius.circular(compact ? 8 : 10),
-            border: Border(left: BorderSide(color: accentColor, width: 3)),
-            boxShadow: compact
-                ? null
-                : [
-                    BoxShadow(
-                      color: Colors.black.withAlpha(60),
-                      blurRadius: 12,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
-          ),
-          child: InkWell(
-            borderRadius: BorderRadius.circular(compact ? 8 : 10),
-            onTap: notification.onAction != null
-                ? () {
-                    notification.onAction!();
-                    onDismiss();
-                  }
-                : null,
-            child: Padding(
-              padding: EdgeInsets.symmetric(
-                horizontal: compact ? 8 : 12,
-                vertical: compact ? 6 : 10,
-              ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.only(top: 1),
-                    child: Icon(
-                      icon,
-                      color: accentColor,
-                      size: compact ? 14 : 18,
-                    ),
-                  ),
-                  SizedBox(width: compact ? 6 : 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          notification.title,
-                          style: TextStyle(
-                            color: colors.textPrimary,
-                            fontSize: compact ? 11 : 13,
-                            fontWeight: FontWeight.w600,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        if (notification.body != null) ...[
-                          const SizedBox(height: 1),
-                          Text(
-                            notification.body!,
-                            style: TextStyle(
-                              color: colors.textSecondary,
-                              fontSize: compact ? 10 : 12,
-                            ),
-                            maxLines: compact ? 1 : 2,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 2),
-                  SizedBox(
-                    width: compact ? 18 : 24,
-                    height: compact ? 18 : 24,
-                    child: IconButton(
-                      padding: EdgeInsets.zero,
-                      iconSize: compact ? 12 : 16,
-                      icon: Icon(Icons.close, color: colors.textMuted),
-                      tooltip: 'Dismiss notification',
-                      onPressed: onDismiss,
-                      constraints: BoxConstraints(
-                        maxWidth: compact ? 18 : 24,
-                        maxHeight: compact ? 18 : 24,
+      child: MouseRegion(
+        onEnter: (_) => onMouseEnter?.call(),
+        onExit: (_) => onMouseExit?.call(),
+        child: Material(
+          color: Colors.transparent,
+          child: Container(
+            width: compact ? null : 360,
+            decoration: BoxDecoration(
+              color: bgColor,
+              borderRadius: BorderRadius.circular(compact ? 8 : 10),
+              border: Border(left: BorderSide(color: accentColor, width: 3)),
+              boxShadow: compact
+                  ? null
+                  : [
+                      BoxShadow(
+                        color: Colors.black.withAlpha(60),
+                        blurRadius: 12,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+            ),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(compact ? 8 : 10),
+              onTap: notification.onAction != null
+                  ? () {
+                      notification.onAction!();
+                      onDismiss();
+                    }
+                  : null,
+              child: Padding(
+                padding: EdgeInsets.symmetric(
+                  horizontal: compact ? 8 : 12,
+                  vertical: compact ? 6 : 10,
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.only(top: 1),
+                      child: Icon(
+                        icon,
+                        color: accentColor,
+                        size: compact ? 14 : 18,
                       ),
                     ),
-                  ),
-                ],
+                    SizedBox(width: compact ? 6 : 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            notification.title,
+                            style: TextStyle(
+                              color: colors.textPrimary,
+                              fontSize: compact ? 11 : 13,
+                              fontWeight: FontWeight.w600,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          if (notification.body != null) ...[
+                            const SizedBox(height: 1),
+                            // Selectable so the user can copy error text. Full
+                            // text (no ellipsis) in non-compact so nothing is
+                            // hidden; hovering pauses auto-dismiss while reading.
+                            SelectableText(
+                              notification.body!,
+                              style: TextStyle(
+                                color: colors.textSecondary,
+                                fontSize: compact ? 10 : 12,
+                              ),
+                              maxLines: compact ? 1 : null,
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 2),
+                    SizedBox(
+                      width: compact ? 18 : 24,
+                      height: compact ? 18 : 24,
+                      child: IconButton(
+                        padding: EdgeInsets.zero,
+                        iconSize: compact ? 12 : 16,
+                        icon: Icon(Icons.close, color: colors.textMuted),
+                        tooltip: 'Dismiss notification',
+                        onPressed: onDismiss,
+                        constraints: BoxConstraints(
+                          maxWidth: compact ? 18 : 24,
+                          maxHeight: compact ? 18 : 24,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
