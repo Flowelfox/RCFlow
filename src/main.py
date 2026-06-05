@@ -332,7 +332,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     # GitHub startup sync (non-blocking background task)
     if settings.GITHUB_SYNC_ON_STARTUP and settings.GITHUB_TOKEN:
-        from src.api.integrations.github import _pr_to_dict, _upsert_prs  # noqa: PLC0415
+        from src.api.integrations.github import _persist_synced_prs, _pr_to_dict  # noqa: PLC0415
         from src.services.github_service import GitHubService as _GitHubService  # noqa: PLC0415
         from src.services.github_service import GitHubServiceError as _GitHubServiceError  # noqa: PLC0415
 
@@ -344,10 +344,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
                     for r in ("for_me", "created"):
                         parsed.extend(await svc.list_pull_requests(r, repo=repo))
                 async with db_session_factory() as db:
-                    upserted = await _upsert_prs(db, settings.RCFLOW_BACKEND_ID, parsed)
+                    upserted, deleted_ids = await _persist_synced_prs(
+                        db, settings.RCFLOW_BACKEND_ID, parsed
+                    )
                 for row in upserted:
                     session_manager.broadcast_github_pr_update(_pr_to_dict(row))
-                logger.info("GitHub startup sync: %d PRs", len(upserted))
+                for pr_id in deleted_ids:
+                    session_manager.broadcast_github_pr_deleted(pr_id)
+                logger.info(
+                    "GitHub startup sync: %d PRs, %d archived-repo PRs pruned",
+                    len(upserted),
+                    len(deleted_ids),
+                )
             except _GitHubServiceError as exc:
                 logger.warning("GitHub startup sync failed: %s", exc)
             except Exception as exc:

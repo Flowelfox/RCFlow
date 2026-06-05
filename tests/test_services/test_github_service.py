@@ -62,6 +62,20 @@ class TestParsers:
         assert p["author"] == "alice"
         assert p["additions"] == 12
 
+    def test_parse_pull_archived_defaults_false(self):
+        assert _parse_pull(_PULL)["archived"] is False
+
+    def test_parse_pull_status_defaults_none(self):
+        p = _parse_pull(_PULL)
+        assert p["review_decision"] is None and p["merge_status"] is None
+
+    def test_parse_pull_archived_from_base_repo(self):
+        archived = {
+            **_PULL,
+            "base": {"ref": "main", "repo": {"name": "web", "owner": {"login": "acme"}, "archived": True}},
+        }
+        assert _parse_pull(archived)["archived"] is True
+
     def test_parse_pull_merged_overrides_state(self):
         merged = {**_PULL, "state": "closed", "merged": True}
         assert _parse_pull(merged)["state"] == "merged"
@@ -134,10 +148,16 @@ class TestService:
             raise AssertionError(f"unexpected path {path}")
 
         svc._rest = AsyncMock(side_effect=fake_rest)  # type: ignore[method-assign]
+        # list_pull_requests enriches each PR with a GraphQL status fetch.
+        svc._gql = AsyncMock(  # type: ignore[method-assign]
+            return_value={"repository": {"pullRequest": {"reviewDecision": "APPROVED", "mergeable": "MERGEABLE"}}}
+        )
         prs = await svc.list_pull_requests("for_me")
         assert len(prs) == 1
         assert prs[0]["role"] == "for_me"
         assert prs[0]["number"] == 42
+        assert prs[0]["review_decision"] == "APPROVED"
+        assert prs[0]["merge_status"] == "MERGEABLE"
         await svc.aclose()
 
     @pytest.mark.asyncio
@@ -145,6 +165,18 @@ class TestService:
         svc = GitHubService(token="x")
         with pytest.raises(GitHubServiceError):
             await svc.list_pull_requests("bogus")
+        await svc.aclose()
+
+    @pytest.mark.asyncio
+    async def test_get_pr_status_extracts_decision_and_mergeable(self):
+        svc = GitHubService(token="x")
+        svc._gql = AsyncMock(  # type: ignore[method-assign]
+            return_value={
+                "repository": {"pullRequest": {"reviewDecision": "REVIEW_REQUIRED", "mergeable": "CONFLICTING"}}
+            }
+        )
+        out = await svc.get_pr_status("acme", "web", 42)
+        assert out == {"review_decision": "REVIEW_REQUIRED", "merge_status": "CONFLICTING"}
         await svc.aclose()
 
     @pytest.mark.asyncio

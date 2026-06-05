@@ -41,6 +41,10 @@ class GitHubPR(Base):
     body: Mapped[str | None] = mapped_column(Text)
     state: Mapped[str] = mapped_column(String(20), nullable=False)  # open|closed|merged
     draft: Mapped[bool] = mapped_column(default=False, nullable=False)
+    # GraphQL reviewDecision: APPROVED | CHANGES_REQUESTED | REVIEW_REQUIRED | null.
+    review_decision: Mapped[str | None] = mapped_column(String(20))
+    # GraphQL mergeable: MERGEABLE | CONFLICTING | UNKNOWN | null.
+    merge_status: Mapped[str | None] = mapped_column(String(20))
     author: Mapped[str] = mapped_column(String(255), nullable=False)
     author_avatar_url: Mapped[str | None] = mapped_column(Text)
     url: Mapped[str] = mapped_column(Text, nullable=False)  # html_url

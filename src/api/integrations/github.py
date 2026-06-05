@@ -44,7 +44,7 @@ from src.services.github_service import GitHubService, GitHubServiceError, evalu
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +75,8 @@ def _pr_to_dict(pr: GitHubPRModel) -> dict[str, Any]:
         "body": pr.body,
         "state": pr.state,
         "draft": pr.draft,
+        "review_decision": pr.review_decision,
+        "merge_status": pr.merge_status,
         "author": pr.author,
         "author_avatar_url": pr.author_avatar_url,
         "url": pr.url,
@@ -123,6 +125,8 @@ async def _upsert_prs(
         "body",
         "state",
         "draft",
+        "review_decision",
+        "merge_status",
         "author",
         "author_avatar_url",
         "url",
@@ -164,6 +168,38 @@ async def _upsert_prs(
     for r in results:
         await db.refresh(r)
     return results
+
+
+async def _persist_synced_prs(
+    db: AsyncSession,
+    backend_id: str,
+    parsed: list[dict[str, Any]],
+) -> tuple[list[GitHubPRModel], list[str]]:
+    """Upsert fetched PRs, skipping (and pruning) archived-repo PRs.
+
+    PRs whose repository is archived are read-only — they can't be reviewed or
+    merged — so they are never cached, and any previously-cached rows for those
+    repos are deleted. Returns ``(upserted_rows, deleted_pr_ids)``; callers
+    broadcast the updates/deletions.
+    """
+    archived_repos = {(p["repo_owner"], p["repo_name"]) for p in parsed if p.get("archived")}
+    fresh = [p for p in parsed if not p.get("archived")]
+
+    upserted = await _upsert_prs(db, backend_id, fresh)
+
+    deleted_ids: list[str] = []
+    if archived_repos:
+        conds = [
+            and_(GitHubPRModel.repo_owner == owner, GitHubPRModel.repo_name == name)
+            for owner, name in archived_repos
+        ]
+        stmt = select(GitHubPRModel).where(GitHubPRModel.backend_id == backend_id, or_(*conds))
+        for row in (await db.execute(stmt)).scalars().all():
+            deleted_ids.append(str(row.id))
+            await db.delete(row)
+        await db.commit()
+
+    return upserted, deleted_ids
 
 
 # ---------------------------------------------------------------------------
@@ -228,7 +264,9 @@ async def github_status(request: Request) -> dict[str, Any]:
         "Fetches open pull requests from GitHub and updates the local cache. "
         "By default syncs both the 'for me' (review-requested) and 'created' "
         "(authored) buckets; pass ?role= to sync just one. Scoped to "
-        "GITHUB_DEFAULT_REPO when set. Requires GITHUB_TOKEN."
+        "GITHUB_DEFAULT_REPO when set. A worker with no GITHUB_TOKEN is a no-op "
+        "(returns synced=0, configured=false) rather than an error, so a client "
+        "can sweep every connected worker without special-casing token-less ones."
     ),
 )
 async def sync_github_prs(
@@ -239,6 +277,11 @@ async def sync_github_prs(
     settings = request.app.state.settings
     session_manager = request.app.state.session_manager
     db_factory = request.app.state.db_session_factory
+
+    # No token configured on this worker → no-op so a multi-worker sync sweep
+    # doesn't fail on token-less workers (the PR tab syncs every worker).
+    if not settings.GITHUB_TOKEN:
+        return {"synced": 0, "archived_pruned": 0, "configured": False}
 
     roles = (role,) if role else _DEFAULT_SYNC_ROLES
     repo = settings.GITHUB_DEFAULT_REPO or None
@@ -254,13 +297,19 @@ async def sync_github_prs(
         await svc.aclose()
 
     async with db_factory() as db:
-        upserted = await _upsert_prs(db, settings.RCFLOW_BACKEND_ID, parsed)
+        upserted, deleted_ids = await _persist_synced_prs(db, settings.RCFLOW_BACKEND_ID, parsed)
 
     for row in upserted:
         session_manager.broadcast_github_pr_update(_pr_to_dict(row))
+    for pr_id in deleted_ids:
+        session_manager.broadcast_github_pr_deleted(pr_id)
 
-    logger.info("GitHub sync complete: %d PRs upserted", len(upserted))
-    return {"synced": len(upserted)}
+    logger.info(
+        "GitHub sync complete: %d PRs upserted, %d archived-repo PRs pruned",
+        len(upserted),
+        len(deleted_ids),
+    )
+    return {"synced": len(upserted), "archived_pruned": len(deleted_ids), "configured": True}
 
 
 @router.get(

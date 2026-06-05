@@ -110,6 +110,14 @@ def _parse_pull(pr: dict[str, Any]) -> dict[str, Any]:
         "base_ref": base.get("ref", ""),
         "head_ref": head.get("ref", ""),
         "head_sha": head.get("sha", ""),
+        # True when the PR's repository is archived (read-only) — such PRs can't
+        # be reviewed/merged, so the sync filters them out.
+        "archived": bool(base_repo.get("archived", False)),
+        # reviewDecision / mergeable come from GraphQL (not REST); the sync
+        # enriches them via get_pr_status. Defaulted here so every parsed dict
+        # carries the keys (callers that don't enrich just get None).
+        "review_decision": None,
+        "merge_status": None,
         "additions": pr.get("additions", 0),
         "deletions": pr.get("deletions", 0),
         "changed_files": pr.get("changed_files", 0),
@@ -162,6 +170,17 @@ query Threads($owner: String!, $repo: String!, $number: Int!) {
           }
         }
       }
+    }
+  }
+}
+"""
+
+_PR_STATUS_QUERY = """
+query PrStatus($owner: String!, $repo: String!, $number: Int!) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      reviewDecision
+      mergeable
     }
   }
 }
@@ -373,6 +392,10 @@ class GitHubService:
                 continue
             full = await self.get_pull_request(owner, name, number)
             full["role"] = role
+            # Enrich with reviewDecision + mergeable (GraphQL only) so the cached
+            # list can show an Approved / Review-required / Can't-merge status.
+            status = await self.get_pr_status(owner, name, number)
+            full.update(status)
             prs.append(full)
         logger.info("Fetched %d GitHub PRs for role=%s", len(prs), role)
         return prs
@@ -381,6 +404,18 @@ class GitHubService:
         """Fetch a single pull request's full detail (normalised)."""
         pr = await self._rest("GET", f"/repos/{owner}/{repo}/pulls/{number}")
         return _parse_pull(pr)
+
+    async def get_pr_status(self, owner: str, repo: str, number: int) -> dict[str, Any]:
+        """Fetch a PR's review decision + mergeability via GraphQL.
+
+        Returns ``{"review_decision": str|None, "merge_status": str|None}`` where
+        ``review_decision`` is APPROVED / CHANGES_REQUESTED / REVIEW_REQUIRED and
+        ``merge_status`` is MERGEABLE / CONFLICTING / UNKNOWN (GitHub computes
+        the latter asynchronously, so UNKNOWN is common right after a push).
+        """
+        data = await self._gql(_PR_STATUS_QUERY, {"owner": owner, "repo": repo, "number": number})
+        pr = ((data.get("repository") or {}).get("pullRequest")) or {}
+        return {"review_decision": pr.get("reviewDecision"), "merge_status": pr.get("mergeable")}
 
     async def list_pr_files(self, owner: str, repo: str, number: int) -> list[dict[str, Any]]:
         """List the changed files of a pull request (paginated).
