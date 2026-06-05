@@ -221,55 +221,38 @@ install_macos() {
     fi
     ok "Mounted at ${DMG_MOUNT}"
 
-    # Find the .app inside the DMG
+    # Find the .app inside the DMG.  PyInstaller's windowed macOS build is a
+    # self-contained .app bundle: the executable lives in Contents/MacOS/ while
+    # its runtime libraries (libpython3.12.dylib, extension modules) live in
+    # Contents/Frameworks/.  The bootloader only finds those libraries when the
+    # binary runs from inside this layout — copying the executable out of
+    # Contents/MacOS leaves it unable to load libpython and it dies on startup
+    # (the "_internal/libpython3.12.dylib (no such file)" error).  So we install
+    # the whole .app bundle intact and run the binary in place.
     app_path="$(find "$DMG_MOUNT" -maxdepth 1 -name '*.app' -print -quit 2>/dev/null)"
     if [ -z "$app_path" ]; then
         fatal "No .app bundle found in DMG."
     fi
-
-    macos_dir="${app_path}/Contents/MacOS"
-    if [ ! -f "${macos_dir}/rcflow" ]; then
-        fatal "rcflow binary not found in ${macos_dir}"
+    if [ ! -f "${app_path}/Contents/MacOS/rcflow" ]; then
+        fatal "rcflow binary not found in ${app_path}/Contents/MacOS"
     fi
 
-    # Copy Contents/MacOS/* to a writable temp dir (DMG is read-only)
-    bundle_dir="${TMPDIR_CREATED}/bundle"
-    mkdir -p "$bundle_dir"
-    cp -R "${macos_dir}/"* "$bundle_dir/"
-    chmod +x "$bundle_dir/rcflow"
-
-    # Check if install.sh is bundled inside the .app
-    if [ -f "${bundle_dir}/install.sh" ]; then
-        chmod +x "${bundle_dir}/install.sh"
-
-        install_args=""
-        if [ -n "${INSTALL_DIR:-}" ]; then
-            install_args="--prefix ${INSTALL_DIR}"
-        fi
-        if [ ! -t 0 ]; then
-            install_args="${install_args} --unattended"
-        fi
-
-        info "Running installer..."
-        # shellcheck disable=SC2086
-        "${bundle_dir}/install.sh" $install_args "$@"
-    else
-        # No bundled install.sh — perform inline install
-        install_macos_inline "$bundle_dir" "$version" "$@"
-    fi
+    install_macos_app "$app_path" "$version" "$@"
 
     # Unmount DMG
     hdiutil detach "$DMG_MOUNT" -quiet 2>/dev/null || true
     DMG_MOUNT=""
 }
 
-install_macos_inline() {
-    bundle_dir="$1"
+install_macos_app() {
+    src_app="$1"
     version="$2"
     shift 2
 
-    # Parse passthrough arguments
-    install_prefix="${INSTALL_DIR:-$HOME/.local/lib/rcflow}"
+    # The .app is installed whole (Contents/Frameworks must stay beside the
+    # executable).  Default to a per-user Applications directory so no sudo is
+    # required — the LaunchAgent we register is user-level anyway.
+    app_dir="${INSTALL_DIR:-$HOME/Applications}"
     bin_dir="$HOME/.local/bin"
     rcflow_port="53890"
     service_label="com.rcflow.server"
@@ -278,7 +261,8 @@ install_macos_inline() {
 
     while [ $# -gt 0 ]; do
         case "$1" in
-            --prefix)      install_prefix="$2"; shift 2 ;;
+            --prefix)      app_dir="$2"; shift 2 ;;
+            --app-dir)     app_dir="$2"; shift 2 ;;
             --bin-dir)     bin_dir="$2"; shift 2 ;;
             --port)        rcflow_port="$2"; shift 2 ;;
             --no-service)  setup_service=false; shift ;;
@@ -292,22 +276,29 @@ install_macos_inline() {
         unattended=true
     fi
 
+    app_name="$(basename "$src_app")"
+    dest_app="${app_dir}/${app_name}"
+
+    # Frozen macOS builds resolve config + data from a FIXED location, not the
+    # install directory — the .app bundle itself is treated as read-only.  See
+    # src/paths.py get_data_dir(): ~/Library/Application Support/rcflow.  The
+    # settings.json and SQLite database live here and survive app re-installs.
+    data_dir="$HOME/Library/Application Support/rcflow"
+    settings_path="${data_dir}/settings.json"
+
     # Check for existing installation
     upgrading=false
-    if [ -d "$install_prefix" ] && [ -f "$install_prefix/rcflow" ]; then
-        existing_version="unknown"
-        if [ -f "$install_prefix/VERSION" ]; then
-            existing_version="$(tr -d '[:space:]' < "$install_prefix/VERSION")"
-        fi
-        warn "Existing installation detected: v${existing_version} at ${install_prefix}"
+    if [ -f "${dest_app}/Contents/MacOS/rcflow" ]; then
+        warn "Existing installation detected at ${dest_app}"
         info "Upgrading to v${version}. Data and configuration will be preserved."
         upgrading=true
     fi
 
     if [ "$upgrading" = false ] && [ "$unattended" = false ]; then
-        printf "${CYAN}Install directory${NC} [${install_prefix}]: "
+        printf "${CYAN}Install directory${NC} [${app_dir}]: "
         read -r input
-        install_prefix="${input:-$install_prefix}"
+        app_dir="${input:-$app_dir}"
+        dest_app="${app_dir}/${app_name}"
 
         printf "${CYAN}Binary symlink directory${NC} [${bin_dir}]: "
         read -r input
@@ -318,50 +309,45 @@ install_macos_inline() {
         rcflow_port="${input:-$rcflow_port}"
     fi
 
-    info "Installing to ${install_prefix}..."
-    mkdir -p "$install_prefix"
+    macos_dir="${dest_app}/Contents/MacOS"
+    rcflow_bin="${macos_dir}/rcflow"
+    agent_plist="$HOME/Library/LaunchAgents/${service_label}.plist"
 
-    # Copy files
-    cp -f "$bundle_dir/rcflow" "$install_prefix/rcflow"
-    chmod 755 "$install_prefix/rcflow"
-
-    if [ -d "$bundle_dir/_internal" ]; then
-        rm -rf "$install_prefix/_internal"
-        cp -R "$bundle_dir/_internal" "$install_prefix/_internal"
+    # Stop any running LaunchAgent before replacing the bundle on disk.
+    if [ -f "$agent_plist" ]; then
+        launchctl unload "$agent_plist" > /dev/null 2>&1 || true
     fi
 
-    for sub in tools migrations templates; do
-        if [ -d "$bundle_dir/$sub" ]; then
-            rm -rf "$install_prefix/$sub"
-            cp -R "$bundle_dir/$sub" "$install_prefix/$sub"
-        fi
-    done
+    info "Installing ${app_name} to ${app_dir}..."
+    mkdir -p "$app_dir"
+    rm -rf "$dest_app"
+    cp -R "$src_app" "$dest_app"
+    chmod 755 "$rcflow_bin"
 
-    for f in alembic.ini VERSION LICENSE; do
-        if [ -f "$bundle_dir/$f" ]; then
-            cp -f "$bundle_dir/$f" "$install_prefix/$f"
-        fi
-    done
+    # Strip the Gatekeeper quarantine flag so an unsigned download can launch.
+    xattr -dr com.apple.quarantine "$dest_app" 2>/dev/null || true
+    ok "Application installed at ${dest_app}"
 
-    ok "Files installed"
+    # Create the user data directories the server writes to at runtime.
+    mkdir -p "$data_dir/data" "$data_dir/logs" "$data_dir/certs"
 
-    # Create data directories
-    mkdir -p "$install_prefix/data" "$install_prefix/logs" "$install_prefix/certs"
-
-    # Create settings.json if needed
-    if [ ! -f "$install_prefix/settings.json" ]; then
+    # Create settings.json if needed.  DATABASE_URL must be an ABSOLUTE path —
+    # the binary's built-in default is relative to the process CWD.  TOOLS_DIR
+    # is intentionally omitted so the binary uses its bundled tool definitions
+    # in Contents/MacOS/tools.
+    if [ ! -f "$settings_path" ]; then
         info "Creating default configuration..."
 
         api_key="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))' 2>/dev/null \
             || openssl rand -base64 32 2>/dev/null \
             || head -c 32 /dev/urandom | base64 | tr -d '/+=' | head -c 32)"
 
-        cat > "$install_prefix/settings.json" <<JSONEOF
+        cat > "$settings_path" <<JSONEOF
 {
   "RCFLOW_HOST": "0.0.0.0",
   "RCFLOW_PORT": "${rcflow_port}",
   "RCFLOW_API_KEY": "${api_key}",
-  "DATABASE_URL": "sqlite+aiosqlite:///${install_prefix}/data/rcflow.db",
+  "DATABASE_URL": "sqlite+aiosqlite:///${data_dir}/data/rcflow.db",
   "LLM_PROVIDER": "none",
   "ANTHROPIC_API_KEY": "",
   "ANTHROPIC_MODEL": "claude-sonnet-4-6",
@@ -372,7 +358,6 @@ install_macos_inline() {
   "TTS_PROVIDER": "none",
   "TTS_API_KEY": "",
   "PROJECTS_DIR": "~/Projects",
-  "TOOLS_DIR": "${install_prefix}/tools",
   "TOOL_AUTO_UPDATE": "true",
   "TOOL_UPDATE_INTERVAL_HOURS": "6",
   "WSS_ENABLED": "true",
@@ -380,28 +365,29 @@ install_macos_inline() {
 }
 JSONEOF
 
-        chmod 600 "$install_prefix/settings.json"
+        chmod 600 "$settings_path"
         ok "Configuration created with generated API key"
         printf "\n"
         printf "  ${YELLOW}API Key: ${api_key}${NC}\n"
         printf "  ${YELLOW}Save this key — you'll need it to connect clients.${NC}\n"
-        printf "  ${YELLOW}Config file: ${install_prefix}/settings.json${NC}\n"
+        printf "  ${YELLOW}Config file: ${settings_path}${NC}\n"
         printf "\n"
     else
-        ok "Existing configuration preserved at ${install_prefix}/settings.json"
+        ok "Existing configuration preserved at ${settings_path}"
     fi
 
-    # Run database migrations
+    # Run database migrations — run the binary IN PLACE so its libraries
+    # resolve from Contents/Frameworks.
     info "Running database migrations..."
-    if (cd "$install_prefix" && ./rcflow migrate); then
+    if (cd "$macos_dir" && ./rcflow migrate); then
         ok "Database migrations complete"
     else
-        warn "Migration failed. You can retry with: cd ${install_prefix} && ./rcflow migrate"
+        warn "Migration failed. You can retry with: cd \"${macos_dir}\" && ./rcflow migrate"
     fi
 
-    # Create symlink
+    # Create symlink to the in-bundle binary
     mkdir -p "$bin_dir"
-    ln -sfn "$install_prefix/rcflow" "$bin_dir/rcflow"
+    ln -sfn "$rcflow_bin" "$bin_dir/rcflow"
     ok "Symlink installed at ${bin_dir}/rcflow"
 
     # Check PATH
@@ -415,12 +401,14 @@ JSONEOF
             ;;
     esac
 
-    # Setup LaunchAgent — delegate to the canonical installer in the binary so
-    # this curl-install matches the DMG/.pkg and `rcflow install` exactly
-    # (crash-only KeepAlive; CLI + GUI control the same registration).
+    # Setup LaunchAgent — delegate to the canonical installer in the in-bundle
+    # binary so this curl-install matches the DMG/.pkg and `rcflow install`
+    # exactly (crash-only KeepAlive; CLI + GUI control the same registration).
+    # Running the in-bundle binary also ensures libpython resolves from
+    # Contents/Frameworks.
     if [ "$setup_service" = true ]; then
         info "Registering launchd LaunchAgent via rcflow install..."
-        if "${install_prefix}/rcflow" install --enable; then
+        if (cd "$macos_dir" && ./rcflow install --enable); then
             ok "LaunchAgent installed and running"
         else
             warn "Service registration may have failed. Check: launchctl print gui/$(id -u)/${service_label}"
@@ -433,14 +421,14 @@ JSONEOF
     printf "${GREEN}║         Installation complete!           ║${NC}\n"
     printf "${GREEN}╚══════════════════════════════════════════╝${NC}\n"
     printf "\n"
-    printf "  Install directory:  ${install_prefix}\n"
-    printf "  Configuration:      ${install_prefix}/settings.json\n"
-    printf "  Data directory:     ${install_prefix}/data\n"
+    printf "  Application:        ${dest_app}\n"
+    printf "  Configuration:      ${settings_path}\n"
+    printf "  Data directory:     ${data_dir}/data\n"
     printf "  Binary symlink:     ${bin_dir}/rcflow\n"
     printf "\n"
     if [ "$upgrading" = false ]; then
         printf "  ${YELLOW}IMPORTANT: Configure an LLM provider before using the server.${NC}\n"
-        printf "  ${YELLOW}Set provider credentials in ${install_prefix}/settings.json${NC}\n"
+        printf "  ${YELLOW}Set provider credentials in ${settings_path}${NC}\n"
         printf "  ${YELLOW}or from the client UI (Worker settings).${NC}\n"
         printf "\n"
     fi
@@ -467,10 +455,12 @@ main() {
     # Read the configured host:port from the installed settings.json
     bind_host="0.0.0.0"
     bind_port="53890"
-    if [ -n "${INSTALL_DIR:-}" ]; then
+    if [ "$platform" = "macos" ]; then
+        # Frozen macOS builds keep config under ~/Library/Application Support
+        # regardless of where the .app bundle is installed (see src/paths.py).
+        settings_path="$HOME/Library/Application Support/rcflow/settings.json"
+    elif [ -n "${INSTALL_DIR:-}" ]; then
         settings_path="${INSTALL_DIR}/settings.json"
-    elif [ "$platform" = "macos" ]; then
-        settings_path="$HOME/.local/lib/rcflow/settings.json"
     else
         settings_path="/opt/rcflow/settings.json"
     fi
