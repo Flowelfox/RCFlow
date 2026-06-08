@@ -13,6 +13,9 @@ class GithubPrInfo {
   String? reviewDecision;
   // GitHub mergeable: MERGEABLE | CONFLICTING | UNKNOWN | null.
   String? mergeStatus;
+  // Local checkout this worker maps the repo to (null = no clone on this worker).
+  String? projectName;
+  String? projectPath;
   final String author;
   final String? authorAvatarUrl;
   final String url;
@@ -42,6 +45,8 @@ class GithubPrInfo {
     required this.draft,
     this.reviewDecision,
     this.mergeStatus,
+    this.projectName,
+    this.projectPath,
     required this.author,
     this.authorAvatarUrl,
     required this.url,
@@ -77,6 +82,8 @@ class GithubPrInfo {
       draft: json['draft'] as bool? ?? false,
       reviewDecision: json['review_decision'] as String?,
       mergeStatus: json['merge_status'] as String?,
+      projectName: json['project_name'] as String?,
+      projectPath: json['project_path'] as String?,
       author: json['author'] as String? ?? '',
       authorAvatarUrl: json['author_avatar_url'] as String?,
       url: json['url'] as String? ?? '',
@@ -109,6 +116,8 @@ class GithubPrInfo {
     bool? draft,
     String? reviewDecision,
     String? mergeStatus,
+    String? projectName,
+    String? projectPath,
     int? additions,
     int? deletions,
     int? changedFiles,
@@ -130,6 +139,8 @@ class GithubPrInfo {
       draft: draft ?? this.draft,
       reviewDecision: reviewDecision ?? this.reviewDecision,
       mergeStatus: mergeStatus ?? this.mergeStatus,
+      projectName: projectName ?? this.projectName,
+      projectPath: projectPath ?? this.projectPath,
       author: author,
       authorAvatarUrl: authorAvatarUrl,
       url: url,

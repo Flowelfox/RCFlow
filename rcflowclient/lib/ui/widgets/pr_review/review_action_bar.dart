@@ -260,66 +260,95 @@ class _ReviewActionBarState extends State<ReviewActionBar> {
               widget.conflictReason == 'computing' ||
               widget.conflictReason == 'blocked')
             _buildConflictBanner(context),
-          Row(
-            children: [
-              Expanded(child: _buildVerdictPicker(context)),
-              const SizedBox(width: kGapRelaxed),
-              _buildMergeButton(context),
-            ],
-          ),
-          const SizedBox(height: kGapTight),
           if (widget.draftComments.isNotEmpty) _buildQueuedComments(context),
-          TextField(
-            controller: _summaryController,
-            enabled: !busy,
-            minLines: 2,
-            maxLines: 5,
-            style: TextStyle(color: colors.textPrimary, fontSize: 13),
-            decoration: InputDecoration(
-              hintText: 'Review summary (optional)…',
-              isDense: true,
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: kSpace3,
-                vertical: kSpace2,
-              ),
-              filled: true,
-              fillColor: colors.bgOverlay,
-              border: OutlineInputBorder(
-                borderSide: BorderSide.none,
-                borderRadius: BorderRadius.circular(kRadiusSmall),
-              ),
-            ),
-          ),
-          const SizedBox(height: kGapTight),
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton.icon(
-              onPressed: (busy || !_canSubmit) ? null : _submit,
-              icon: _submitting
-                  ? const SizedBox(
-                      width: 14,
-                      height: 14,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.white,
+          // Chat-style: a tall summary field on the left, action buttons docked
+          // on the right (~30%). IntrinsicHeight lets the button block stretch to
+          // the (taller) text field's height; the buttons distribute top/bottom.
+          IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(
+                  flex: 7,
+                  child: TextField(
+                    controller: _summaryController,
+                    enabled: !busy,
+                    minLines: 4,
+                    maxLines: 8,
+                    style: TextStyle(color: colors.textPrimary, fontSize: 13),
+                    decoration: InputDecoration(
+                      hintText: 'Review summary (optional)…',
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: kSpace3,
+                        vertical: kSpace2,
                       ),
-                    )
-                  : const Icon(Icons.rate_review_outlined, size: 16),
-              label: Text(
-                'Submit review'
-                '${widget.draftComments.isNotEmpty ? ' (${widget.draftComments.length})' : ''}',
-              ),
-              style: FilledButton.styleFrom(
-                backgroundColor: colors.accent,
-                disabledBackgroundColor: colors.bgElevated,
-                padding: const EdgeInsets.symmetric(vertical: kSpace3),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(kRadiusSmall),
+                      filled: true,
+                      fillColor: colors.bgOverlay,
+                      border: OutlineInputBorder(
+                        borderSide: BorderSide.none,
+                        borderRadius: BorderRadius.circular(kRadiusSmall),
+                      ),
+                    ),
+                  ),
                 ),
-              ),
+                const SizedBox(width: kGapRelaxed),
+                Expanded(
+                  flex: 3,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      _buildVerdictPicker(context),
+                      const SizedBox(height: kGapTight),
+                      Row(
+                        children: [
+                          Expanded(child: _buildSubmitButton(context, busy)),
+                          const SizedBox(width: kGapTight),
+                          _buildMergeButton(context),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildSubmitButton(BuildContext context, bool busy) {
+    final colors = context.appColors;
+    return FilledButton.icon(
+      onPressed: (busy || !_canSubmit) ? null : _submit,
+      icon: _submitting
+          ? const SizedBox(
+              width: 14,
+              height: 14,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: Colors.white,
+              ),
+            )
+          : const Icon(Icons.rate_review_outlined, size: 16),
+      label: Text(
+        'Submit'
+        '${widget.draftComments.isNotEmpty ? ' (${widget.draftComments.length})' : ''}',
+        style: const TextStyle(fontSize: 12),
+        overflow: TextOverflow.ellipsis,
+      ),
+      style: FilledButton.styleFrom(
+        backgroundColor: colors.accent,
+        disabledBackgroundColor: colors.bgElevated,
+        padding: const EdgeInsets.symmetric(
+          horizontal: kSpace2,
+          vertical: kSpace2,
+        ),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(kRadiusSmall),
+        ),
       ),
     );
   }
@@ -329,22 +358,26 @@ class _ReviewActionBarState extends State<ReviewActionBar> {
       segments: const [
         ButtonSegment(
           value: ReviewVerdict.approve,
-          label: Text('Approve', style: TextStyle(fontSize: 12)),
-          icon: Icon(Icons.check_circle_outline, size: 14),
+          icon: Icon(Icons.check_circle_outline, size: 16),
+          tooltip: 'Approve',
         ),
         ButtonSegment(
           value: ReviewVerdict.requestChanges,
-          label: Text('Request changes', style: TextStyle(fontSize: 12)),
-          icon: Icon(Icons.error_outline, size: 14),
+          icon: Icon(Icons.error_outline, size: 16),
+          tooltip: 'Request changes',
         ),
         ButtonSegment(
           value: ReviewVerdict.comment,
-          label: Text('Comment', style: TextStyle(fontSize: 12)),
-          icon: Icon(Icons.chat_bubble_outline, size: 14),
+          icon: Icon(Icons.chat_bubble_outline, size: 16),
+          tooltip: 'Comment',
         ),
       ],
       selected: {_verdict},
       showSelectedIcon: false,
+      style: ButtonStyle(
+        visualDensity: VisualDensity.compact,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
       onSelectionChanged: (_submitting || _merging)
           ? null
           : (s) => setState(() => _verdict = s.first),

@@ -5,6 +5,7 @@ import 'package:flutter/widgets.dart';
 import 'dart:math';
 
 import '../models/artifact_info.dart';
+import '../models/deduped_pr.dart';
 import '../models/github_pr_info.dart';
 import '../models/linear_issue_info.dart';
 import 'clipboard_paste_controller.dart';
@@ -577,11 +578,41 @@ class AppState extends ChangeNotifier implements PaneHost {
   /// All GitHub PRs sorted by updatedAt descending.
   List<GithubPrInfo> get githubPrs => _githubPrStore.all();
 
+  /// GitHub PRs deduplicated across workers: rows with the same GitHub node id
+  /// (from currently-connected workers) collapse into one [DedupedPr] carrying
+  /// each backing worker as a source. Sorted by recency.
+  List<DedupedPr> get dedupedGithubPrs {
+    final groups = <String, List<GithubPrInfo>>{};
+    for (final pr in githubPrs) {
+      final worker = getWorker(pr.workerId);
+      if (worker == null || !worker.isConnected) continue; // online sources only
+      final key = pr.githubId.isNotEmpty ? pr.githubId : pr.id;
+      (groups[key] ??= []).add(pr);
+    }
+    final result = groups.entries.map((e) {
+      final list = [...e.value]
+        ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+      return DedupedPr(e.key, list);
+    }).toList();
+    result.sort(
+      (a, b) => b.canonical.updatedAt.compareTo(a.canonical.updatedAt),
+    );
+    return result;
+  }
+
   /// GitHub PRs grouped by workerId (for sidebar display).
   Map<String, List<GithubPrInfo>> get githubPrsByWorker =>
       _githubPrStore.byWorker(_registry.configs);
 
   GithubPrInfo? getGithubPr(String prId) => _githubPrStore.get(prId);
+
+  /// The deduplicated group containing the PR row [prId] (any source), or null.
+  DedupedPr? dedupedGithubPrFor(String prId) {
+    for (final d in dedupedGithubPrs) {
+      if (d.sources.any((s) => s.id == prId)) return d;
+    }
+    return null;
+  }
 
   void _handleGithubPrList(List<dynamic> list, String workerId) {
     _githubPrStore.replaceWorker(workerId, _workerName(workerId), list);
@@ -885,6 +916,7 @@ class AppState extends ChangeNotifier implements PaneHost {
     String? commentBody,
     int? line,
     String? projectName,
+    String? projectPath,
   }) {
     final pane = _panes[paneId];
     if (pane == null) return;
@@ -908,6 +940,14 @@ class AppState extends ChangeNotifier implements PaneHost {
     closeGithubPrView(paneId);
     pane.startNewChat();
     pane.setTargetWorker(pr.workerId);
+    // Show the PR's resolved project on the chip immediately so it matches the
+    // checkout the session actually opens in (the session is created with this
+    // exact path on the backend), instead of leaving the pane's stale project.
+    if (projectPath != null) {
+      pane.syncProjectFromSession(projectPath);
+    } else if (resolvedProject != null) {
+      pane.setSelectedProject(resolvedProject);
+    }
     pane.pendingAck = true;
 
     worker.ws.startPrAssist(
@@ -917,6 +957,7 @@ class AppState extends ChangeNotifier implements PaneHost {
       commentBody: isWritable ? commentBody : null,
       line: isFix ? line : null,
       projectName: resolvedProject,
+      projectPath: projectPath,
       selectedWorktreePath: worktreePath,
       agent: agent,
     );

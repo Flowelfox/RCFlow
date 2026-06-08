@@ -73,8 +73,10 @@ All under `/api/integrations/github/`, `X-API-Key` required. See [HTTP API](http
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET  | `/status`          | Token configured + validity preflight (`{configured, valid, login}`) |
-| POST | `/sync`            | Re-sync open PRs (`?role=for_me\|created`, default both) → `{synced, archived_pruned, configured}`. No token → no-op (`synced:0, configured:false`), not an error. Each PR is enriched via GraphQL with `review_decision` + `merge_status` for a per-PR status badge |
+| GET  | `/status`          | Token configured + validity preflight for the saved token (`{configured, valid, login, scopes}`) |
+| POST | `/status/check`    | Validate an unsaved token `{token}` → same shape as `/status` (settings live preview) |
+| GET/PUT | `/repo-defaults` | This worker's default-action repos; PUT `{owner, repo, is_default}` sets/clears (cross-worker action routing) |
+| POST | `/sync`            | Re-sync PRs — the 50 most-recently-updated across all states (open/merged/closed) per `?role=for_me\|created` (default both), so the client can filter by state → `{synced, archived_pruned, configured}`. No token → no-op (`synced:0, configured:false`), not an error. Each PR is enriched via GraphQL with `review_decision` + `merge_status` for a per-PR status badge |
 | GET  | `/prs`             | List cached PRs (`?role=`, `?state=`, `?q=`) → `{prs, total}` |
 | GET  | `/prs/{id}`        | Single cached PR by local UUID |
 | GET  | `/prs/{id}/files`  | Live changed files, each with a per-file unified-diff `patch` |
@@ -99,7 +101,17 @@ Inline review threads (line-anchored) are separate from the **conversation**:
 `/prs/{id}/conversation` returns the PR's general issue-level comments merged
 with submitted review summaries (approve / request-changes / comment notes) as a
 single oldest-first timeline; POST adds a general comment. The client shows this
-behind a conversation toggle in the PR header, with a composer to post.
+in a resizable, collapsible panel docked beneath the diff, with a composer to post.
+
+**Cross-worker dedup.** PRs are cached per worker (`backend_id`), so pointing
+several workers at one account caches the same PR once per worker. The client
+deduplicates by `github_id`: one tile, with a "Worker / Project" badge per
+backing worker. Each sync stamps `project_name`/`project_path` (the local
+checkout that worker maps the repo to) so the client knows which workers can run
+writable actions locally. Writable actions (resolve-conflicts / fix) route to a
+worker via per-worker `/repo-defaults` flags: 1 default → use it, 0 → ask, ≥2 →
+clear all + ask. `/sync?force=` bypasses the 60s auto-sync recency throttle
+(manual refresh forces; auto skips when synced `<60s` ago).
 
 Read = GraphQL (threads); writes = REST (review, reply, merge); thread
 resolution = GraphQL mutation. The pending review is held locally in
@@ -135,7 +147,7 @@ Inbound (client → server):
 | Type | Effect |
 |------|--------|
 | `list_github_prs` | Server replies with `github_pr_list` — all cached PRs for this backend, newest first |
-| `start_pr_assist` | `{pr_id, kind, file_path?, line?, comment_body?, project_name?, selected_worktree_path?}` — acks a `session_id` and streams the assist into it. `summary`/`explain` are read-only diff analysis; `fix` and `resolve_conflicts` run a **full-perms** agent session in the local checkout. `fix` addresses `comment_body`; `resolve_conflicts` merges the base into the PR head and resolves conflicts (the optional `comment_body` carries the conflicting file list as a hint), then reports what it fixed / how / why and asks the human for permission before committing & pushing. `fix` edits the tree but never pushes |
+| `start_pr_assist` | `{pr_id, kind, file_path?, line?, comment_body?, project_name?, project_path?, selected_worktree_path?}` — `project_path` (the PR's git-remote-resolved checkout) is applied directly so the session opens in the same project as the PR, not a same-named folder found by name. — acks a `session_id` and streams the assist into it. `summary`/`explain` are read-only diff analysis; `fix` and `resolve_conflicts` run a **full-perms** agent session in the local checkout. `fix` addresses `comment_body`; `resolve_conflicts` merges the base into the PR head and resolves conflicts (the optional `comment_body` carries the conflicting file list as a hint), then reports what it fixed / how / why and asks the human for permission before committing & pushing. `fix` edits the tree but never pushes |
 
 Outbound (server → all connected output clients), mirroring the Linear broadcasts:
 

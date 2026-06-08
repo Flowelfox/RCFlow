@@ -6,6 +6,7 @@ import '../../services/websocket_service.dart';
 import '../../services/worker_connection.dart';
 import '../../theme.dart';
 import '../widgets/custom_title_bar.dart';
+import '../widgets/pr_review/github_repo_defaults_list.dart';
 import '../widgets/pr_review/github_scope_checklist.dart';
 import '../../theme/spacing.dart';
 
@@ -2396,7 +2397,11 @@ class ServerConfigContentState extends State<ServerConfigContent> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               secretField,
-              GithubScopeChecklist(ws: widget.ws),
+              GithubScopeChecklist(
+                ws: widget.ws,
+                tokenController: _textControllers[opt.key],
+              ),
+              GithubRepoDefaultsList(ws: widget.ws),
             ],
           );
         }

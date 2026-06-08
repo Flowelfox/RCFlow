@@ -1478,12 +1478,15 @@ class RestClient {
   ///
   /// When [role] is given (`for_me` or `created`), only that subset is synced.
   /// Returns `{"synced": int}`.
-  Future<Map<String, dynamic>> syncGithubPrs({String? role}) async {
+  Future<Map<String, dynamic>> syncGithubPrs({
+    String? role,
+    bool force = false,
+  }) async {
     if (_serverUrl == null) throw StateError('Not connected');
-    final url = _serverUrl!.http(
-      '/api/integrations/github/sync',
-      role != null ? {'role': role} : null,
-    );
+    final url = _serverUrl!.http('/api/integrations/github/sync', {
+      'role': ?role,
+      if (force) 'force': 'true',
+    });
     final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
     try {
       final request = await client.postUrl(url);
@@ -1510,6 +1513,78 @@ class RestClient {
     try {
       final request = await client.getUrl(url);
       request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      final response = await request.close();
+      final body = await response.transform(utf8.decoder).join();
+      if (response.statusCode != 200) {
+        throw Exception('Server returned ${response.statusCode}: $body');
+      }
+      return jsonDecode(body) as Map<String, dynamic>;
+    } finally {
+      client.close();
+    }
+  }
+
+  /// List the repos this worker is the default action target for.
+  /// Returns `{"defaults": [{"owner","repo"}, ...]}`.
+  Future<Map<String, dynamic>> getGithubRepoDefaults() async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url = _serverUrl!.http('/api/integrations/github/repo-defaults');
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.getUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      final response = await request.close();
+      final body = await response.transform(utf8.decoder).join();
+      if (response.statusCode != 200) {
+        throw Exception('Server returned ${response.statusCode}: $body');
+      }
+      return jsonDecode(body) as Map<String, dynamic>;
+    } finally {
+      client.close();
+    }
+  }
+
+  /// Set or clear this worker's default flag for [owner]/[repo].
+  Future<Map<String, dynamic>> setGithubRepoDefault(
+    String owner,
+    String repo,
+    bool isDefault,
+  ) async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url = _serverUrl!.http('/api/integrations/github/repo-defaults');
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.putUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      request.headers.contentType = io.ContentType.json;
+      request.add(
+        utf8.encode(
+          jsonEncode({'owner': owner, 'repo': repo, 'is_default': isDefault}),
+        ),
+      );
+      final response = await request.close();
+      final body = await response.transform(utf8.decoder).join();
+      if (response.statusCode != 200) {
+        throw Exception('Server returned ${response.statusCode}: $body');
+      }
+      return jsonDecode(body) as Map<String, dynamic>;
+    } finally {
+      client.close();
+    }
+  }
+
+  /// Validate an unsaved GitHub token's scopes (settings live preview). Returns
+  /// the same shape as [fetchGithubStatus] (`valid`, `login`, `fine_grained`,
+  /// `scopes`, optional `error`) for the supplied [token].
+  Future<Map<String, dynamic>> checkGithubToken(String token) async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url = _serverUrl!.http('/api/integrations/github/status/check');
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.postUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      request.headers.contentType = io.ContentType.json;
+      request.add(utf8.encode(jsonEncode({'token': token})));
       final response = await request.close();
       final body = await response.transform(utf8.decoder).join();
       if (response.statusCode != 200) {

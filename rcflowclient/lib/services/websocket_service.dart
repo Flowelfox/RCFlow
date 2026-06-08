@@ -87,6 +87,7 @@ class WebSocketService {
     String? commentBody,
     int? line,
     String? projectName,
+    String? projectPath,
     String? selectedWorktreePath,
     String? agent,
   }) {
@@ -98,6 +99,7 @@ class WebSocketService {
       'comment_body': ?commentBody,
       'line': ?line,
       'project_name': ?projectName,
+      'project_path': ?projectPath,
       'selected_worktree_path': ?selectedWorktreePath,
       'agent': ?agent,
     };
@@ -447,10 +449,22 @@ class WebSocketService {
 
   /// Trigger a server-side sync of open pull requests from GitHub. The backend
   /// broadcasts `github_pr_update` for each synced PR. Returns `{"synced": int}`.
-  Future<Map<String, dynamic>> syncGithubPrs({String? role}) =>
-      _rest.syncGithubPrs(role: role);
+  Future<Map<String, dynamic>> syncGithubPrs({String? role, bool force = false}) =>
+      _rest.syncGithubPrs(role: role, force: force);
 
   Future<Map<String, dynamic>> fetchGithubStatus() => _rest.fetchGithubStatus();
+
+  Future<Map<String, dynamic>> checkGithubToken(String token) =>
+      _rest.checkGithubToken(token);
+
+  Future<Map<String, dynamic>> getGithubRepoDefaults() =>
+      _rest.getGithubRepoDefaults();
+
+  Future<Map<String, dynamic>> setGithubRepoDefault(
+    String owner,
+    String repo,
+    bool isDefault,
+  ) => _rest.setGithubRepoDefault(owner, repo, isDefault);
 
   Future<Map<String, dynamic>> getGithubPrFiles(String prId) =>
       _rest.getGithubPrFiles(prId);

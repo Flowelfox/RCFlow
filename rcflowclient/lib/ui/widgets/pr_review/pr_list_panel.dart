@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../models/app_notification.dart';
-import '../../../models/github_pr_info.dart';
+import '../../../models/deduped_pr.dart';
 import '../../../state/app_state.dart';
 import '../../../theme.dart';
 import '../../../theme/spacing.dart';
@@ -32,6 +32,10 @@ class _PrListPanelState extends State<PrListPanel>
 
   /// True while a sync request is in flight (disables the refresh button).
   bool _syncing = false;
+
+  /// Selected PR states to show (any combination). Defaults to open only; an
+  /// empty set means "no state filter" (show all).
+  final Set<String> _states = {'open'};
 
   @override
   void initState() {
@@ -70,7 +74,8 @@ class _PrListPanelState extends State<PrListPanel>
       // backend, or one without a GitHub token) must not abort the whole sweep.
       for (final w in workers) {
         try {
-          final result = await w!.ws.syncGithubPrs();
+          // Manual refresh → force, bypassing the 60s auto-sync throttle.
+          final result = await w!.ws.syncGithubPrs(force: true);
           total += (result['synced'] as int?) ?? 0;
           // Refresh the cached list explicitly in case a broadcast was missed.
           w.ws.listGithubPrs();
@@ -99,29 +104,36 @@ class _PrListPanelState extends State<PrListPanel>
   /// Distinct repo slugs present in the store, sorted alphabetically.
   List<String> _repoOptions(AppState state) {
     final slugs = <String>{
-      for (final p in state.githubPrs)
-        if (p.repoSlug.isNotEmpty && p.repoSlug != '/') p.repoSlug,
+      for (final d in state.dedupedGithubPrs)
+        if (d.canonical.repoSlug.isNotEmpty && d.canonical.repoSlug != '/')
+          d.canonical.repoSlug,
     };
     final list = slugs.toList()..sort();
     return list;
   }
 
-  List<GithubPrInfo> _filterPrs(List<GithubPrInfo> prs) {
+  List<DedupedPr> _filterPrs(List<DedupedPr> prs) {
     var result = prs;
+    // State filter (open/merged/closed); empty selection = show all.
+    if (_states.isNotEmpty) {
+      result = result
+          .where((d) => _states.contains(d.canonical.state))
+          .toList();
+    }
     if (_hiddenRepos.isNotEmpty) {
-      result = result.where((p) => !_hiddenRepos.contains(p.repoSlug)).toList();
+      result = result
+          .where((d) => !_hiddenRepos.contains(d.canonical.repoSlug))
+          .toList();
     }
     if (_searchQuery.isEmpty) return result;
     final q = _searchQuery.toLowerCase();
-    return result
-        .where(
-          (p) =>
-              p.title.toLowerCase().contains(q) ||
-              p.repoSlug.toLowerCase().contains(q) ||
-              p.number.toString().contains(q) ||
-              p.author.toLowerCase().contains(q),
-        )
-        .toList();
+    return result.where((d) {
+      final p = d.canonical;
+      return p.title.toLowerCase().contains(q) ||
+          p.repoSlug.toLowerCase().contains(q) ||
+          p.number.toString().contains(q) ||
+          p.author.toLowerCase().contains(q);
+    }).toList();
   }
 
   @override
@@ -135,6 +147,7 @@ class _PrListPanelState extends State<PrListPanel>
         return Column(
           children: [
             _buildSearchBar(context, state),
+            _buildStateFilter(context),
             if (repoOptions.isNotEmpty) _buildRepoFilter(context, repoOptions),
             SizedBox(
               height: 32,
@@ -213,7 +226,9 @@ class _PrListPanelState extends State<PrListPanel>
                     maxHeight: 30,
                   ),
                   suffixIcon: _searchQuery.isNotEmpty
-                      ? GestureDetector(
+                      ? MouseRegion(
+                          cursor: SystemMouseCursors.click,
+                          child: GestureDetector(
                           onTap: () {
                             _searchController.clear();
                             setState(() => _searchQuery = '');
@@ -226,6 +241,7 @@ class _PrListPanelState extends State<PrListPanel>
                               size: 14,
                             ),
                           ),
+                        ),
                         )
                       : null,
                   suffixIconConstraints: const BoxConstraints(
@@ -283,6 +299,60 @@ class _PrListPanelState extends State<PrListPanel>
                       onPressed: () => _syncPrs(state),
                     ),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Multi-select state filter chips (any combination of open / merged /
+  /// closed). Tapping toggles a state; an empty selection shows all.
+  Widget _buildStateFilter(BuildContext context) {
+    final colors = context.appColors;
+    Widget chip(String value, String label, Color color) {
+      final on = _states.contains(value);
+      return Padding(
+        padding: const EdgeInsets.only(right: 6),
+        child: MouseRegion(
+          cursor: SystemMouseCursors.click,
+          child: GestureDetector(
+            onTap: () => setState(() {
+              if (!_states.remove(value)) _states.add(value);
+            }),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: on ? color.withAlpha(30) : colors.bgElevated,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: on ? color.withAlpha(120) : colors.divider,
+                  width: 0.5,
+                ),
+              ),
+              child: Text(
+                label,
+                style: TextStyle(
+                  color: on ? color : colors.textMuted,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(10, 0, 10, 4),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            chip('open', 'Open', const Color(0xFF10B981)),
+            chip('merged', 'Merged', const Color(0xFF8B5CF6)),
+            chip('closed', 'Closed', const Color(0xFFEF4444)),
           ],
         ),
       ),
@@ -493,7 +563,9 @@ class _PrListPanelState extends State<PrListPanel>
 
   Widget _buildRoleList(BuildContext context, AppState state, String role) {
     final prs = _filterPrs(
-      state.githubPrs.where((p) => p.role == role).toList(),
+      state.dedupedGithubPrs
+          .where((d) => d.sources.any((s) => s.role == role))
+          .toList(),
     );
 
     if (prs.isEmpty) {
@@ -503,8 +575,8 @@ class _PrListPanelState extends State<PrListPanel>
     return ListView(
       padding: const EdgeInsets.symmetric(vertical: kSpace1),
       children: [
-        for (final pr in prs)
-          PrTile(pr: pr, state: state, onSelected: widget.onPrSelected),
+        for (final d in prs)
+          PrTile(pr: d, state: state, onSelected: widget.onPrSelected),
       ],
     );
   }

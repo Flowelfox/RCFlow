@@ -223,6 +223,8 @@ CREATE TABLE github_prs (
     draft BOOLEAN NOT NULL DEFAULT FALSE,
     review_decision VARCHAR(20),             -- APPROVED|CHANGES_REQUESTED|REVIEW_REQUIRED|null (GraphQL)
     merge_status VARCHAR(20),                -- MERGEABLE|CONFLICTING|UNKNOWN|null (GraphQL mergeable)
+    project_name VARCHAR(255),               -- local checkout this worker maps the repo to (null = none)
+    project_path TEXT,                       -- absolute path of that checkout
     author VARCHAR(255) NOT NULL,
     author_avatar_url TEXT,
     url TEXT NOT NULL,                       -- html_url
@@ -242,6 +244,23 @@ CREATE TABLE github_prs (
 CREATE INDEX ix_github_prs_backend_id ON github_prs(backend_id);
 CREATE INDEX ix_github_prs_role ON github_prs(role);
 CREATE INDEX ix_github_prs_state ON github_prs(state);
+```
+
+### `github_repo_defaults` table
+
+Marks that *this* worker is the default action target for a repository. When
+several workers back the same PR, the client tallies these across workers to
+route writable actions (resolve-conflicts / fix); presence of a row = default.
+
+```sql
+CREATE TABLE github_repo_defaults (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    backend_id VARCHAR(36) NOT NULL,
+    repo_owner VARCHAR(255) NOT NULL,
+    repo_name VARCHAR(255) NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE(backend_id, repo_owner, repo_name)
+);
 ```
 
 ### `github_review_drafts` table

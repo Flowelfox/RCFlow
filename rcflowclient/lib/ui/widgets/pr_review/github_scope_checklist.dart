@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../../services/websocket_service.dart';
@@ -16,7 +18,12 @@ class GithubScopeChecklist extends StatefulWidget {
   /// The host worker's WebSocket service used to reach the status endpoint.
   final WebSocketService ws;
 
-  const GithubScopeChecklist({super.key, required this.ws});
+  /// The GITHUB_TOKEN field's controller. When provided, the checklist validates
+  /// the *typed* token live (debounced) so scopes update before saving; when the
+  /// field is empty it falls back to the worker's saved token.
+  final TextEditingController? tokenController;
+
+  const GithubScopeChecklist({super.key, required this.ws, this.tokenController});
 
   @override
   State<GithubScopeChecklist> createState() => _GithubScopeChecklistState();
@@ -26,21 +33,40 @@ class _GithubScopeChecklistState extends State<GithubScopeChecklist> {
   bool _loading = false;
   String? _error;
   Map<String, dynamic>? _status;
+  Timer? _debounce;
 
   @override
   void initState() {
     super.initState();
+    widget.tokenController?.addListener(_onTokenChanged);
     _check();
   }
 
+  @override
+  void dispose() {
+    widget.tokenController?.removeListener(_onTokenChanged);
+    _debounce?.cancel();
+    super.dispose();
+  }
+
+  /// Re-check shortly after the user stops typing a new token.
+  void _onTokenChanged() {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 600), _check);
+  }
+
   Future<void> _check() async {
-    if (_loading) return;
+    if (!mounted) return;
     setState(() {
       _loading = true;
       _error = null;
     });
     try {
-      final result = await widget.ws.fetchGithubStatus();
+      // Validate the typed token when present; otherwise the saved one.
+      final typed = widget.tokenController?.text.trim() ?? '';
+      final result = typed.isNotEmpty
+          ? await widget.ws.checkGithubToken(typed)
+          : await widget.ws.fetchGithubStatus();
       if (!mounted) return;
       setState(() {
         _status = result;

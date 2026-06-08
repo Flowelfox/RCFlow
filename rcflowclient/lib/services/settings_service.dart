@@ -55,6 +55,7 @@ class SettingsService {
   static const _tasksGroupByWorkerKey = 'rcflow_tasks_group_by_worker';
   static const _workersGroupByProjectKey = 'rcflow_workers_group_by_project';
   static const _prFileListModeKey = 'rcflow_pr_file_list_mode';
+  static const _prConversationCollapsedKey = 'rcflow_pr_conversation_collapsed';
   static const _artifactsGroupByProjectKey =
       'rcflow_artifacts_group_by_project';
   static const _artifactsExpandedWorkersKey =
@@ -289,6 +290,13 @@ class SettingsService {
   String get prFileListMode => _prefs.getString(_prFileListModeKey) ?? 'flat';
   set prFileListMode(String value) =>
       _prefs.setString(_prFileListModeKey, value);
+
+  /// Whether the PR review conversation panel is collapsed; new PR panes open
+  /// with this state preserved.
+  bool get prConversationCollapsed =>
+      _prefs.getBool(_prConversationCollapsedKey) ?? false;
+  set prConversationCollapsed(bool value) =>
+      _prefs.setBool(_prConversationCollapsedKey, value);
 
   bool get compactMode => _prefs.getBool(_compactModeKey) ?? false;
   set compactMode(bool value) => _prefs.setBool(_compactModeKey, value);

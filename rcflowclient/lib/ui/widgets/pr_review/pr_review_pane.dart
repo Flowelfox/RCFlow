@@ -16,6 +16,7 @@ import '../../utils/link_utils.dart';
 import '../collapsible_group_header.dart';
 import '../diff/diff_viewer.dart';
 import 'comment_thread.dart';
+import 'pr_action_router.dart';
 import 'pr_status.dart';
 import 'review_action_bar.dart';
 
@@ -55,8 +56,6 @@ class PrReviewPane extends StatelessWidget {
           appState: appState,
           mode: DiffViewMode.unified,
           onModeChanged: (_) {},
-          showConversation: false,
-          onToggleConversation: () {},
         ),
         Expanded(
           child: Center(
@@ -111,6 +110,11 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
   /// the project badge.
   String? _linkedProjectName;
 
+  /// The linked project's absolute path (resolved by the PR's git remote).
+  /// Passed to assist sessions so they open in this exact checkout rather than
+  /// re-resolving by folder name (which can hit a different same-named project).
+  String? _linkedProjectPath;
+
   /// The current GitHub user's login (from the integration status), used to
   /// decide which review comments the user is allowed to delete. Null until the
   /// status check completes (or if it omits a login).
@@ -129,9 +133,11 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
   List<String>? _conflictFiles;
   String? _conflictReason;
 
-  /// Whether the conversation view (global comments + review summaries) is shown
-  /// in place of the diff. Fetched lazily the first time it's opened.
-  bool _showConversation = false;
+  /// The conversation (global comments + review summaries) is docked beneath the
+  /// diff. [_conversationCollapsed] hides it to a single bar; [_conversationHeight]
+  /// is the resizable expanded height. Fetched with the rest of the PR.
+  bool _conversationCollapsed = false;
+  double _conversationHeight = 260;
   List<Map<String, dynamic>> _conversation = [];
   bool _loadingConversation = false;
   bool _postingComment = false;
@@ -190,6 +196,7 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
       (m) => m.name == saved,
       orElse: () => FileListMode.flat,
     );
+    _conversationCollapsed = widget.appState.settings.prConversationCollapsed;
     _load();
   }
 
@@ -224,13 +231,13 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
       _conflicted = null;
       _conflictFiles = null;
       _conflictReason = null;
-      _showConversation = false;
       _conversation = [];
-      _loadingConversation = false;
+      _loadingConversation = true; // fetch kicks off below — show a spinner, not "none yet"
       _composerAnchor = null;
       _submittingComposer = false;
       _gutterDragging = false;
       _linkedProjectName = null;
+      _linkedProjectPath = null;
       _currentUserLogin = null;
       _fileContentCache.clear();
       _fetchingFileContent.clear();
@@ -281,17 +288,24 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
     try {
       final project = await worker.ws.getGithubPrProject(widget.pr.id);
       if (mounted && _loadedPrId == widget.pr.id) {
-        setState(() => _linkedProjectName = project['project_name'] as String?);
+        setState(() {
+          _linkedProjectName = project['project_name'] as String?;
+          _linkedProjectPath = project['project_path'] as String?;
+        });
       }
     } catch (_) {
       // Best-effort; leave [_linkedProjectName] null.
     }
 
-    // Threads and the draft are best-effort; a failure here shouldn't blank
-    // out the diff the user already has.
-    await _refreshThreads();
-    await _refreshDraft();
-    await _refreshConflicts();
+    // Threads, draft, conflicts and conversation are best-effort and independent
+    // — fetch them concurrently so a slow one (e.g. the conflict check retrying
+    // while GitHub computes mergeability) doesn't delay the others.
+    await Future.wait([
+      _refreshThreads(),
+      _refreshDraft(),
+      _refreshConflicts(),
+      _refreshConversation(),
+    ]);
   }
 
   /// Refetch the PR's merge-conflict status (best-effort). Drives the conflict
@@ -303,6 +317,9 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
   Future<void> _refreshConflicts({int attempt = 0}) async {
     final ws = _ws;
     if (ws == null) return;
+    // Mergeability only matters for open PRs; merged/closed never merge and
+    // their mergeable state is null, which would otherwise spin "computing".
+    if (widget.pr.state != 'open') return;
     try {
       final result = await ws.getGithubPrConflicts(widget.pr.id);
       if (!mounted || _loadedPrId != widget.pr.id) return;
@@ -414,8 +431,7 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
           mode: _mode,
           onModeChanged: (m) => setState(() => _mode = m),
           linkedProjectName: _linkedProjectName,
-          showConversation: _showConversation,
-          onToggleConversation: _toggleConversation,
+          linkedProjectPath: _linkedProjectPath,
         ),
         Expanded(child: _buildBody(context)),
       ],
@@ -441,21 +457,22 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
     if (_error != null) {
       return _buildError(context);
     }
-    if (_showConversation) {
-      return _buildConversation(context);
-    }
+
+    final ws = _ws;
+    // Center content (right of the file list): the selected file's diff stacked
+    // above the docked conversation panel; "No changed files" when empty.
+    final Widget diffArea;
     if (_files.isEmpty) {
-      return Center(
+      diffArea = Center(
         child: Text(
           'No changed files',
           style: TextStyle(color: context.appColors.textMuted, fontSize: 13),
         ),
       );
+    } else {
+      final selected = _files[_selectedIndex.clamp(0, _files.length - 1)];
+      diffArea = _buildDiffArea(context, selected, selected['patch'] as String?);
     }
-
-    final selected = _files[_selectedIndex.clamp(0, _files.length - 1)];
-    final patch = selected['patch'] as String?;
-    final ws = _ws;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -487,7 +504,15 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
                   ),
                 ),
               ),
-              Expanded(child: _buildDiffArea(context, selected, patch)),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Expanded(child: diffArea),
+                    _buildConversationDock(context),
+                  ],
+                ),
+              ),
             ],
           ),
         ),
@@ -529,12 +554,11 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
     await _refreshConflicts();
   }
 
-  /// Toggle the conversation view; fetch it the first time it's opened.
-  void _toggleConversation() {
-    setState(() => _showConversation = !_showConversation);
-    if (_showConversation && _conversation.isEmpty && !_loadingConversation) {
-      _refreshConversation();
-    }
+  /// Collapse/expand the docked conversation panel; persisted so new PR panes
+  /// reopen in the same state (like the file-list view mode).
+  void _toggleConversationCollapse() {
+    setState(() => _conversationCollapsed = !_conversationCollapsed);
+    widget.appState.settings.prConversationCollapsed = _conversationCollapsed;
   }
 
   /// Fetch the PR's global comments + review summaries (best-effort).
@@ -578,40 +602,128 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
 
   /// Conversation view: the PR's global comments + review summaries, with a
   /// composer to post a new global comment.
-  Widget _buildConversation(BuildContext context) {
+  /// The conversation docked beneath the diff: a header bar (always shown, with
+  /// a collapse toggle + refresh) over the timeline + composer. When collapsed,
+  /// only the header bar remains so the diff gets the full height.
+  Widget _buildConversationDock(BuildContext context) {
     final colors = context.appColors;
-    Widget list;
+    return Container(
+      decoration: BoxDecoration(
+        color: colors.bgSurface,
+        border: Border(top: BorderSide(color: colors.divider)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (!_conversationCollapsed) _buildConversationResizeHandle(context),
+          _buildConversationHeader(context),
+          if (!_conversationCollapsed)
+            SizedBox(
+              height: _conversationHeight,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Expanded(child: _buildConversationList(context)),
+                  _buildCommentComposer(context),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildConversationResizeHandle(BuildContext context) {
+    return MouseRegion(
+      cursor: SystemMouseCursors.resizeRow,
+      child: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        // Drag up → taller panel (negative dy increases height).
+        onVerticalDragUpdate: (d) => setState(() {
+          _conversationHeight = (_conversationHeight - d.delta.dy).clamp(120.0, 640.0);
+        }),
+        child: SizedBox(
+          height: 6,
+          child: Center(
+            child: Container(height: 1, color: context.appColors.divider),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildConversationHeader(BuildContext context) {
+    final colors = context.appColors;
+    final count = _conversation.length;
+    return InkWell(
+      onTap: _toggleConversationCollapse,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: kSpace3, vertical: kSpace2),
+        child: Row(
+          children: [
+            Icon(
+              _conversationCollapsed ? Icons.expand_less : Icons.expand_more,
+              size: 16,
+              color: colors.textMuted,
+            ),
+            const SizedBox(width: 6),
+            Icon(Icons.forum_outlined, size: 13, color: colors.textMuted),
+            const SizedBox(width: 6),
+            Text(
+              count > 0 ? 'Conversation ($count)' : 'Conversation',
+              style: TextStyle(
+                color: colors.textSecondary,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const Spacer(),
+            if (_loadingConversation)
+              SizedBox(
+                width: 13,
+                height: 13,
+                child: CircularProgressIndicator(strokeWidth: 1.5, color: colors.textMuted),
+              )
+            else
+              IconButton(
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+                iconSize: 15,
+                splashRadius: 14,
+                tooltip: 'Refresh conversation',
+                icon: Icon(Icons.refresh, color: colors.textMuted),
+                onPressed: _refreshConversation,
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildConversationList(BuildContext context) {
+    final colors = context.appColors;
     if (_loadingConversation && _conversation.isEmpty) {
-      list = Center(
+      return Center(
         child: SizedBox(
           width: 20,
           height: 20,
-          child: CircularProgressIndicator(
-            strokeWidth: 2,
-            color: colors.textMuted,
-          ),
+          child: CircularProgressIndicator(strokeWidth: 2, color: colors.textMuted),
         ),
       );
-    } else if (_conversation.isEmpty) {
-      list = Center(
+    }
+    if (_conversation.isEmpty) {
+      return Center(
         child: Text(
           'No conversation yet',
           style: TextStyle(color: colors.textMuted, fontSize: 13),
         ),
       );
-    } else {
-      list = ListView.builder(
-        padding: const EdgeInsets.all(kSpace3),
-        itemCount: _conversation.length,
-        itemBuilder: (ctx, i) => _conversationItem(ctx, _conversation[i]),
-      );
     }
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Expanded(child: list),
-        _buildCommentComposer(context),
-      ],
+    return ListView.builder(
+      padding: const EdgeInsets.all(kSpace3),
+      itemCount: _conversation.length,
+      itemBuilder: (ctx, i) => _conversationItem(ctx, _conversation[i]),
     );
   }
 
@@ -839,13 +951,26 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
   /// Launch a writable agent session to resolve the PR's merge conflicts. The
   /// known conflicting files are forwarded as a hint; the agent re-discovers
   /// them via the merge and stops before committing/pushing (it reports back).
-  void _resolveConflicts() {
+  ///
+  /// When the PR is backed by several workers that each have a local clone,
+  /// route to the right one (default / picker) before starting the session.
+  Future<void> _resolveConflicts() async {
+    var target = widget.pr;
+    final dpr = widget.appState.dedupedGithubPrFor(widget.pr.id);
+    if (dpr != null && dpr.cloneSources.length > 1) {
+      final chosen = await resolvePrActionWorker(context, widget.appState, dpr);
+      if (chosen == null) return; // cancelled
+      target = chosen;
+    } else if (dpr != null && dpr.cloneSources.length == 1) {
+      target = dpr.cloneSources.first;
+    }
     widget.appState.startPrAssist(
       widget.paneId,
-      widget.pr,
+      target,
       'resolve_conflicts',
       commentBody: (_conflictFiles ?? const []).join('\n'),
-      projectName: _linkedProjectName,
+      projectName: target.projectName ?? _linkedProjectName,
+      projectPath: target.projectPath ?? _linkedProjectPath,
     );
   }
 
@@ -1036,6 +1161,7 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
       'fix',
       commentBody: buffer.toString().trim(),
       projectName: _linkedProjectName,
+      projectPath: _linkedProjectPath,
     );
   }
 
@@ -1389,6 +1515,7 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
                     'explain',
                     filePath: filename,
                     projectName: _linkedProjectName,
+                    projectPath: _linkedProjectPath,
                   ),
                 ),
             ],
@@ -1452,6 +1579,7 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
                               filePath: t.path,
                               line: t.line,
                               projectName: _linkedProjectName,
+                              projectPath: _linkedProjectPath,
                               commentBody: t.comments.isNotEmpty
                                   ? t.comments.first.body
                                   : '',
@@ -1657,9 +1785,9 @@ class _PrReviewHeader extends StatelessWidget {
   /// sessions started from the header and shown as a small chip.
   final String? linkedProjectName;
 
-  /// Whether the conversation view is active (toggles the diff ↔ conversation).
-  final bool showConversation;
-  final VoidCallback onToggleConversation;
+  /// The linked project's resolved absolute path — forwarded so the assist
+  /// session opens in the exact checkout the PR maps to.
+  final String? linkedProjectPath;
 
   const _PrReviewHeader({
     required this.paneId,
@@ -1667,9 +1795,8 @@ class _PrReviewHeader extends StatelessWidget {
     required this.appState,
     required this.mode,
     required this.onModeChanged,
-    required this.showConversation,
-    required this.onToggleConversation,
     this.linkedProjectName,
+    this.linkedProjectPath,
   });
 
   @override
@@ -1739,6 +1866,7 @@ class _PrReviewHeader extends StatelessWidget {
             const SizedBox(width: 6),
             _branchChip(context, pr),
             const SizedBox(width: 6),
+            ..._sourceBadges(context, pr),
             if (linkedProjectName != null) ...[
               _projectChip(context, linkedProjectName!),
               const SizedBox(width: 6),
@@ -1767,26 +1895,6 @@ class _PrReviewHeader extends StatelessWidget {
               child: IconButton(
                 padding: EdgeInsets.zero,
                 icon: Icon(
-                  showConversation
-                      ? Icons.forum
-                      : Icons.forum_outlined,
-                  color: showConversation
-                      ? context.appColors.accent
-                      : context.appColors.textMuted,
-                  size: 14,
-                ),
-                tooltip: showConversation
-                    ? 'Show diff'
-                    : 'Show conversation (comments)',
-                onPressed: onToggleConversation,
-              ),
-            ),
-            SizedBox(
-              width: 26,
-              height: 26,
-              child: IconButton(
-                padding: EdgeInsets.zero,
-                icon: Icon(
                   Icons.auto_awesome,
                   color: context.appColors.textMuted,
                   size: 14,
@@ -1797,6 +1905,7 @@ class _PrReviewHeader extends StatelessWidget {
                   pr,
                   'summary',
                   projectName: linkedProjectName,
+                  projectPath: linkedProjectPath,
                 ),
               ),
             ),
@@ -2073,6 +2182,44 @@ class _PrReviewHeader extends StatelessWidget {
     );
   }
 
+  /// When this PR is backed by more than one connected worker, a chip per
+  /// source ("Worker / Project") shown on the header line next to the branches.
+  List<Widget> _sourceBadges(BuildContext context, GithubPrInfo pr) {
+    final dpr = appState.dedupedGithubPrFor(pr.id);
+    if (dpr == null || !dpr.hasMultipleSources) return const [];
+    final colors = context.appColors;
+    return [
+      for (final s in dpr.sources)
+        Padding(
+          padding: const EdgeInsets.only(right: 6),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+            decoration: BoxDecoration(
+              color: colors.bgElevated,
+              borderRadius: BorderRadius.circular(4),
+              border: Border.all(color: colors.divider, width: 0.5),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.dns_outlined, size: 11, color: colors.textMuted),
+                const SizedBox(width: 3),
+                Text(
+                  '${s.workerName.isNotEmpty ? s.workerName : 'Worker'} / '
+                  '${(s.projectName ?? '').isNotEmpty ? s.projectName : '—'}',
+                  style: TextStyle(
+                    color: colors.textMuted,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+    ];
+  }
+
   /// A single, click-to-copy branch name within the [_branchChip].
   Widget _branchRef(BuildContext context, String ref) {
     final colors = context.appColors;
@@ -2166,7 +2313,9 @@ class _DiffModeToggle extends StatelessWidget {
 
   Widget _segment(BuildContext context, DiffViewMode value, String label) {
     final selected = mode == value;
-    return GestureDetector(
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
       onTap: () => onChanged(value),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -2186,6 +2335,7 @@ class _DiffModeToggle extends StatelessWidget {
             fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
           ),
         ),
+      ),
       ),
     );
   }

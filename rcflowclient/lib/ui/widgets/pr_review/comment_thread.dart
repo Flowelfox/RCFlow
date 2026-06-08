@@ -390,7 +390,9 @@ class _CommentThreadState extends State<CommentThread> {
                 ),
               ),
               const SizedBox(width: kGapTight),
-              Expanded(child: _timeLabel(context, c.createdAt)),
+              // Not Expanded: keep the hover area (and its tooltip) tight to the
+              // time text instead of spanning the whole row.
+              Flexible(child: _timeLabel(context, c.createdAt)),
             ],
           ),
           const SizedBox(height: 2),

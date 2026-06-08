@@ -183,8 +183,10 @@ All under `/api/integrations/github/`. See [GitHub Integration](github.md).
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| GET  | `/api/integrations/github/status`            | Yes | Token configured + validity preflight (returns `{configured, valid, login}`) |
-| POST | `/api/integrations/github/sync`              | Yes | Re-sync open PRs from GitHub. Optional `?role=for_me\|created` (default both). Returns `{synced, archived_pruned, configured}`. A worker with no token is a no-op (`synced:0, configured:false`), not an error |
+| GET  | `/api/integrations/github/status`            | Yes | Token configured + validity preflight for the saved token (returns `{configured, valid, login, scopes}`) |
+| POST | `/api/integrations/github/status/check`      | Yes | Validate an unsaved token `{token}` → same shape as `/status` (settings live scope preview) |
+| GET/PUT | `/api/integrations/github/repo-defaults`  | Yes | GET this worker's default-action repos; PUT `{owner, repo, is_default}` sets/clears. Used for cross-worker PR action routing |
+| POST | `/api/integrations/github/sync`              | Yes | Re-sync PRs from GitHub — 50 most-recently-updated across all states (open/merged/closed). Optional `?role=for_me\|created` (default both). Returns `{synced, archived_pruned, configured}`. A worker with no token is a no-op (`synced:0, configured:false`), not an error |
 | GET  | `/api/integrations/github/prs`               | Yes | List cached PRs. Optional `?role=`, `?state=`, `?q=`. Returns `{prs, total}` |
 | GET  | `/api/integrations/github/prs/{id}`          | Yes | Single cached PR by local UUID |
 | GET  | `/api/integrations/github/prs/{id}/files`    | Yes | Live changed files (each with a per-file unified-diff `patch`). Returns `{pr_id, files, total}` |

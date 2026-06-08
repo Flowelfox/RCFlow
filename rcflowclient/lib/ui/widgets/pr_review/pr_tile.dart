@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../models/deduped_pr.dart';
 import '../../../models/github_pr_info.dart';
 import '../../../state/app_state.dart';
 import '../../../theme.dart';
@@ -7,9 +8,11 @@ import '../session_panel/github_pr_drag_data.dart';
 import '../session_panel/helpers.dart';
 import 'pr_status.dart';
 
-/// Sidebar tile for a single cached GitHub pull request.
+/// Sidebar tile for a single (deduplicated) GitHub pull request. When several
+/// connected workers back the same PR, [pr] carries them all as sources and the
+/// tile shows a "Worker / Project" badge per source.
 class PrTile extends StatelessWidget {
-  final GithubPrInfo pr;
+  final DedupedPr pr;
   final AppState state;
   final VoidCallback? onSelected;
 
@@ -20,12 +23,19 @@ class PrTile extends StatelessWidget {
     this.onSelected,
   });
 
+  /// The displayed PR row (freshest source).
+  GithubPrInfo get c => pr.canonical;
+
+  /// The source to open/act on by default: prefer a worker that has the repo
+  /// cloned (so conflicts/diff resolve locally), else the freshest.
+  GithubPrInfo get _primary =>
+      pr.cloneSources.isNotEmpty ? pr.cloneSources.first : c;
+
   @override
   Widget build(BuildContext context) {
     final isViewed = _isPrViewed();
     final isActive = _isPrActive();
-    final status = prStatusVisual(pr);
-    final badgeLabel = status.label;
+    final status = prStatusVisual(c);
     final badgeColor = status.color;
 
     final tile = Container(
@@ -36,9 +46,7 @@ class PrTile extends StatelessWidget {
             ? context.appColors.accent.withAlpha(12)
             : null,
         border: isActive
-            ? Border(
-                left: BorderSide(color: context.appColors.accent, width: 3),
-              )
+            ? Border(left: BorderSide(color: context.appColors.accent, width: 3))
             : isViewed
             ? Border(
                 left: BorderSide(
@@ -65,13 +73,10 @@ class PrTile extends StatelessWidget {
               decoration: BoxDecoration(
                 color: context.appColors.bgElevated,
                 borderRadius: BorderRadius.circular(4),
-                border: Border.all(
-                  color: context.appColors.divider,
-                  width: 0.5,
-                ),
+                border: Border.all(color: context.appColors.divider, width: 0.5),
               ),
               child: Text(
-                '#${pr.number}',
+                '#${c.number}',
                 style: TextStyle(
                   color: context.appColors.textMuted,
                   fontSize: 10,
@@ -83,7 +88,7 @@ class PrTile extends StatelessWidget {
             const SizedBox(width: 6),
             Expanded(
               child: Text(
-                pr.title,
+                c.title,
                 style: TextStyle(
                   color: isActive
                       ? context.appColors.accentLight
@@ -98,19 +103,19 @@ class PrTile extends StatelessWidget {
           ],
         ),
         subtitle: Text(
-          _subtitle(badgeLabel),
+          _subtitle(status.label),
           style: TextStyle(color: context.appColors.textMuted, fontSize: 10),
         ),
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
-              '+${pr.additions}',
+              '+${c.additions}',
               style: const TextStyle(color: Color(0xFF56D364), fontSize: 10),
             ),
             const SizedBox(width: 4),
             Text(
-              '-${pr.deletions}',
+              '-${c.deletions}',
               style: const TextStyle(color: Color(0xFFF85149), fontSize: 10),
             ),
           ],
@@ -119,7 +124,7 @@ class PrTile extends StatelessWidget {
         visualDensity: const VisualDensity(vertical: -4),
         contentPadding: const EdgeInsets.only(left: 16, right: 8),
         onTap: () {
-          state.openGithubPrInPane(pr.id);
+          state.openGithubPrInPane(_primary.id);
           onSelected?.call();
         },
       ),
@@ -128,9 +133,9 @@ class PrTile extends StatelessWidget {
     // Drag a PR onto a pane to open/split it there (mirrors session/task drag).
     return Draggable<GithubPrDragData>(
       data: GithubPrDragData(
-        prId: pr.id,
-        workerId: pr.workerId,
-        label: pr.title,
+        prId: _primary.id,
+        workerId: _primary.workerId,
+        label: c.title,
       ),
       feedback: Material(
         color: Colors.transparent,
@@ -154,7 +159,7 @@ class PrTile extends StatelessWidget {
               Icon(status.icon, color: badgeColor, size: 14),
               const SizedBox(width: 6),
               Text(
-                '#${pr.number}',
+                '#${c.number}',
                 style: TextStyle(
                   color: context.appColors.textMuted,
                   fontSize: 11,
@@ -166,7 +171,7 @@ class PrTile extends StatelessWidget {
               ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 180),
                 child: Text(
-                  pr.title,
+                  c.title,
                   style: TextStyle(
                     color: context.appColors.textPrimary,
                     fontSize: 12,
@@ -188,22 +193,23 @@ class PrTile extends StatelessWidget {
 
   bool _isPrViewed() {
     for (final pane in state.panes.values) {
-      if (pane.githubPrId == pr.id) return true;
+      if (pr.sources.any((s) => pane.githubPrId == s.id)) return true;
     }
     return false;
   }
 
   bool _isPrActive() {
     if (state.hasNoPanes) return false;
-    return state.activePane.githubPrId == pr.id;
+    final active = state.activePane.githubPrId;
+    return active != null && pr.sources.any((s) => s.id == active);
   }
 
   String _subtitle(String badgeLabel) {
-    final local = pr.updatedAt.toLocal();
+    final local = c.updatedAt.toLocal();
     final time =
         '${monthAbbr(local.month)} ${local.day}, '
         '${local.hour.toString().padLeft(2, '0')}:'
         '${local.minute.toString().padLeft(2, '0')}';
-    return '${pr.repoSlug} · $badgeLabel · $time';
+    return '${c.repoSlug} · $badgeLabel · $time';
   }
 }
