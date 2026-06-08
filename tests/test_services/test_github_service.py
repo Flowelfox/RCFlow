@@ -161,6 +161,38 @@ class TestService:
         await svc.aclose()
 
     @pytest.mark.asyncio
+    async def test_list_pull_requests_merged_is_light(self):
+        # Merged/closed are listed from the search items only — no per-PR detail
+        # or GraphQL status fetch.
+        svc = GitHubService(token="x")
+
+        async def fake_rest(method, path, *, params=None, json=None):
+            assert path == "/search/issues"
+            assert "is:merged" in params["q"]
+            return {
+                "items": [
+                    {
+                        "node_id": "PR_x",
+                        "repository_url": "https://api.github.com/repos/acme/web",
+                        "number": 7,
+                        "title": "Old PR",
+                        "user": {"login": "bob"},
+                        "html_url": "u",
+                    }
+                ]
+            }
+
+        svc._rest = AsyncMock(side_effect=fake_rest)  # type: ignore[method-assign]
+        svc._gql = AsyncMock(side_effect=AssertionError("should not enrich"))  # type: ignore[method-assign]
+        prs = await svc.list_pull_requests("created", state="merged")
+        assert len(prs) == 1
+        assert prs[0]["state"] == "merged"
+        assert prs[0]["number"] == 7
+        assert prs[0]["additions"] == 0
+        assert prs[0]["review_decision"] is None
+        await svc.aclose()
+
+    @pytest.mark.asyncio
     async def test_list_pull_requests_unknown_role(self):
         svc = GitHubService(token="x")
         with pytest.raises(GitHubServiceError):

@@ -76,7 +76,7 @@ All under `/api/integrations/github/`, `X-API-Key` required. See [HTTP API](http
 | GET  | `/status`          | Token configured + validity preflight for the saved token (`{configured, valid, login, scopes}`) |
 | POST | `/status/check`    | Validate an unsaved token `{token}` → same shape as `/status` (settings live preview) |
 | GET/PUT | `/repo-defaults` | This worker's default-action repos; PUT `{owner, repo, is_default}` sets/clears (cross-worker action routing) |
-| POST | `/sync`            | Re-sync PRs — the 50 most-recently-updated across all states (open/merged/closed) per `?role=for_me\|created` (default both), so the client can filter by state → `{synced, archived_pruned, configured}`. No token → no-op (`synced:0, configured:false`), not an error. Each PR is enriched via GraphQL with `review_decision` + `merge_status` for a per-PR status badge |
+| POST | `/sync`            | Re-sync PRs for `?state=open` (default) / `closed` / `merged`, `?role=for_me\|created` (default both) → `{synced, archived_pruned, configured}`. **Open** PRs are fully enriched (detail + GraphQL review/mergeable status); **merged/closed** are listed lightly (no per-PR detail/status) and only fetched on demand when the client filters for them, keeping refresh fast. No token → no-op. `?force=` bypasses the 60s throttle |
 | GET  | `/prs`             | List cached PRs (`?role=`, `?state=`, `?q=`) → `{prs, total}` |
 | GET  | `/prs/{id}`        | Single cached PR by local UUID |
 | GET  | `/prs/{id}/files`  | Live changed files, each with a per-file unified-diff `patch` |

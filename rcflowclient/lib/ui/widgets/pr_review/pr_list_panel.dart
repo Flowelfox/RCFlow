@@ -66,6 +66,13 @@ class _PrListPanelState extends State<PrListPanel>
       );
       return;
     }
+    // Only fetch the states the user is actually viewing (empty = all). Keeps
+    // refresh cheap — open is fully enriched, merged/closed are listed lightly
+    // and only when their filter chip is on.
+    final states = _states.isEmpty
+        ? const ['open', 'merged', 'closed']
+        : _states.toList();
+
     setState(() => _syncing = true);
     try {
       var total = 0;
@@ -73,15 +80,21 @@ class _PrListPanelState extends State<PrListPanel>
       // Sync each worker independently — one worker erroring (e.g. an older
       // backend, or one without a GitHub token) must not abort the whole sweep.
       for (final w in workers) {
-        try {
-          // Manual refresh → force, bypassing the 60s auto-sync throttle.
-          final result = await w!.ws.syncGithubPrs(force: true);
-          total += (result['synced'] as int?) ?? 0;
-          // Refresh the cached list explicitly in case a broadcast was missed.
-          w.ws.listGithubPrs();
-        } catch (_) {
-          failed++;
+        var workerFailed = false;
+        for (final st in states) {
+          try {
+            // Manual refresh → force, bypassing the 60s auto-sync throttle.
+            final result = await w!.ws.syncGithubPrs(state: st, force: true);
+            total += (result['synced'] as int?) ?? 0;
+          } catch (_) {
+            workerFailed = true;
+          }
         }
+        // Refresh the cached list once per worker (broadcast may be missed).
+        try {
+          w!.ws.listGithubPrs();
+        } catch (_) {}
+        if (workerFailed) failed++;
       }
       if (failed == workers.length) {
         state.showNotification(
@@ -98,6 +111,20 @@ class _PrListPanelState extends State<PrListPanel>
       }
     } finally {
       if (mounted) setState(() => _syncing = false);
+    }
+  }
+
+  /// Fetch a single PR state across all connected workers (on-demand when a
+  /// filter chip is enabled). Best-effort, quiet.
+  Future<void> _syncState(AppState state, String prState) async {
+    final workers = state.workerConfigs
+        .map((c) => state.getWorker(c.id))
+        .where((w) => w != null && w.isConnected);
+    for (final w in workers) {
+      try {
+        await w!.ws.syncGithubPrs(state: prState, force: true);
+        w.ws.listGithubPrs();
+      } catch (_) {}
     }
   }
 
@@ -316,9 +343,13 @@ class _PrListPanelState extends State<PrListPanel>
         child: MouseRegion(
           cursor: SystemMouseCursors.click,
           child: GestureDetector(
-            onTap: () => setState(() {
-              if (!_states.remove(value)) _states.add(value);
-            }),
+            onTap: () {
+              final added = !_states.remove(value);
+              if (added) _states.add(value);
+              setState(() {});
+              // Enabling a state fetches it on demand (it may not be cached yet).
+              if (added) _syncState(context.read<AppState>(), value);
+            },
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
               decoration: BoxDecoration(

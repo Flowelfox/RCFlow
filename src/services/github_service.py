@@ -234,6 +234,46 @@ def _parse_thread(node: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _parse_search_item(item: dict[str, Any], role: str, state: str) -> dict[str, Any]:
+    """Light PR row from a /search/issues item — no per-PR detail/status fetch.
+
+    Used for merged/closed listings (fetched on demand), which only need the
+    basics for the list; additions/deletions/base/head and review/mergeable
+    status are left empty (irrelevant for done PRs), keeping the refresh fast.
+    """
+    user = item.get("user") or {}
+    owner, name, _ = _repo_ref_from_search_item(item)
+    return {
+        "github_id": item.get("node_id", ""),
+        "repo_owner": owner,
+        "repo_name": name,
+        "number": item["number"],
+        "title": item.get("title", ""),
+        "body": item.get("body"),
+        "state": state,  # we queried a single state
+        "draft": bool(item.get("draft", False)),
+        "author": user.get("login", ""),
+        "author_avatar_url": user.get("avatar_url"),
+        "url": item.get("html_url", ""),
+        "base_ref": "",
+        "head_ref": "",
+        "head_sha": "",
+        "archived": False,
+        "review_decision": None,
+        "merge_status": None,
+        "project_name": None,
+        "project_path": None,
+        "additions": 0,
+        "deletions": 0,
+        "changed_files": 0,
+        "mergeable": None,
+        "mergeable_state": None,
+        "created_at": _parse_dt(item.get("created_at")),
+        "updated_at": _parse_dt(item.get("updated_at")),
+        "role": role,
+    }
+
+
 def _repo_ref_from_search_item(item: dict[str, Any]) -> tuple[str, str, int]:
     """Extract (owner, repo, number) from a /search/issues PR item.
 
@@ -369,21 +409,25 @@ class GitHubService:
         user = resp.json()
         return {"login": user.get("login"), "scopes": scopes, "fine_grained": fine_grained}
 
-    async def list_pull_requests(self, role: str, repo: str | None = None) -> list[dict[str, Any]]:
+    async def list_pull_requests(
+        self, role: str, repo: str | None = None, state: str = "open"
+    ) -> list[dict[str, Any]]:
         """List pull requests for a listing bucket (most-recently-updated first).
 
         ``role`` is ``"for_me"`` (review-requested) or ``"created"`` (authored).
-        Returns the 50 most recently updated PRs across **all** states (open,
-        merged, closed) so the client can filter by state; the per-PR detail
-        fetch fills additions/deletions/base/head. Optionally scoped to a single
-        ``owner/name`` ``repo``.
+        ``state`` is ``open`` (default), ``closed`` or ``merged`` — the default
+        sync fetches only open PRs (cheap); merged/closed are fetched on demand
+        when the client filters for them. Each PR's detail fills additions/
+        deletions/base/head; the GraphQL review/mergeable status is fetched only
+        for **open** PRs (it's meaningless for closed/merged), keeping the common
+        refresh fast. Optionally scoped to a single ``owner/name`` ``repo``.
         """
         qualifier = PR_ROLE_QUALIFIERS.get(role)
         if qualifier is None:
             raise GitHubServiceError(f"Unknown PR role: {role!r}")
-        # All states (no is:open) so merged/closed PRs are cached for filtering;
-        # sorted by recency and capped at 50 to bound history.
-        query = f"is:pr {qualifier}"
+        if state not in ("open", "closed", "merged"):
+            raise GitHubServiceError(f"Unknown PR state: {state!r}")
+        query = f"is:pr is:{state} {qualifier}"
         if repo:
             query += f" repo:{repo}"
 
@@ -395,14 +439,16 @@ class GitHubService:
             owner, name, number = _repo_ref_from_search_item(item)
             if not owner or not name:
                 continue
+            if state != "open":
+                # Merged/closed: list lightly (no per-PR detail/status) so the
+                # on-demand fetch stays cheap.
+                prs.append(_parse_search_item(item, role, state))
+                continue
             full = await self.get_pull_request(owner, name, number)
             full["role"] = role
-            # Enrich with reviewDecision + mergeable (GraphQL only) so the cached
-            # list can show an Approved / Review-required / Can't-merge status.
-            status = await self.get_pr_status(owner, name, number)
-            full.update(status)
+            full.update(await self.get_pr_status(owner, name, number))
             prs.append(full)
-        logger.info("Fetched %d GitHub PRs for role=%s", len(prs), role)
+        logger.info("Fetched %d GitHub PRs for role=%s state=%s", len(prs), role, state)
         return prs
 
     async def get_pull_request(self, owner: str, repo: str, number: int) -> dict[str, Any]:

@@ -449,8 +449,11 @@ class WebSocketService {
 
   /// Trigger a server-side sync of open pull requests from GitHub. The backend
   /// broadcasts `github_pr_update` for each synced PR. Returns `{"synced": int}`.
-  Future<Map<String, dynamic>> syncGithubPrs({String? role, bool force = false}) =>
-      _rest.syncGithubPrs(role: role, force: force);
+  Future<Map<String, dynamic>> syncGithubPrs({
+    String? role,
+    String? state,
+    bool force = false,
+  }) => _rest.syncGithubPrs(role: role, state: state, force: force);
 
   Future<Map<String, dynamic>> fetchGithubStatus() => _rest.fetchGithubStatus();
 

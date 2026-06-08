@@ -399,6 +399,7 @@ async def set_repo_default(request: Request, body: RepoDefaultRequest) -> dict[s
 async def sync_github_prs(
     request: Request,
     role: str | None = Query(None, description="Limit sync to a single bucket: for_me or created"),
+    state: str = Query("open", description="PR state to fetch: open (default), closed or merged"),
     force: bool = Query(False, description="Bypass the 60s recency throttle (manual refresh)"),
 ) -> dict[str, Any]:
     """Trigger a sync of GitHub pull requests from the API."""
@@ -434,7 +435,7 @@ async def sync_github_prs(
     parsed: list[dict[str, Any]] = []
     try:
         for r in roles:
-            parsed.extend(await svc.list_pull_requests(r, repo=repo))
+            parsed.extend(await svc.list_pull_requests(r, repo=repo, state=state))
     except GitHubServiceError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     finally:

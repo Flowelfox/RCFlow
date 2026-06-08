@@ -1480,11 +1480,13 @@ class RestClient {
   /// Returns `{"synced": int}`.
   Future<Map<String, dynamic>> syncGithubPrs({
     String? role,
+    String? state,
     bool force = false,
   }) async {
     if (_serverUrl == null) throw StateError('Not connected');
     final url = _serverUrl!.http('/api/integrations/github/sync', {
       'role': ?role,
+      'state': ?state,
       if (force) 'force': 'true',
     });
     final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
