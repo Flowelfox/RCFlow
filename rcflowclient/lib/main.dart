@@ -91,17 +91,37 @@ void _migrateToWorkers(SettingsService settings) {
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  final settings = SettingsService();
+  await settings.init();
+
   if (_isDesktop) {
     await windowManager.ensureInitialized();
 
+    final saved = settings.windowBounds;
     final windowOptions = WindowOptions(
       minimumSize: Size(800, 500),
+      size: saved != null ? Size(saved['width']!, saved['height']!) : null,
       title: 'RCFlow',
       titleBarStyle: TitleBarStyle.hidden,
       windowButtonVisibility: Platform.isMacOS,
     );
 
     windowManager.waitUntilReadyToShow(windowOptions, () async {
+      // Restore the last window placement / state.
+      if (settings.windowFullScreen) {
+        await windowManager.setFullScreen(true);
+      } else if (settings.windowMaximized) {
+        await windowManager.maximize();
+      } else if (saved != null) {
+        await windowManager.setBounds(
+          Rect.fromLTWH(
+            saved['x']!,
+            saved['y']!,
+            saved['width']!,
+            saved['height']!,
+          ),
+        );
+      }
       await windowManager.show();
       await windowManager.focus();
     });
@@ -111,9 +131,6 @@ void main() async {
 
   // Register badge renderers once at startup.
   _registerBadges(BadgeRegistry.instance);
-
-  final settings = SettingsService();
-  await settings.init();
 
   // Persist the running version (strip build number after '+') so
   // UpdateService can compare it against the latest release without an

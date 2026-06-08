@@ -56,6 +56,10 @@ class SettingsService {
   static const _workersGroupByProjectKey = 'rcflow_workers_group_by_project';
   static const _prFileListModeKey = 'rcflow_pr_file_list_mode';
   static const _prConversationCollapsedKey = 'rcflow_pr_conversation_collapsed';
+  static const _sidebarFractionKey = 'rcflow_sidebar_fraction';
+  static const _windowBoundsKey = 'rcflow_window_bounds';
+  static const _windowMaximizedKey = 'rcflow_window_maximized';
+  static const _windowFullScreenKey = 'rcflow_window_fullscreen';
   static const _artifactsGroupByProjectKey =
       'rcflow_artifacts_group_by_project';
   static const _artifactsExpandedWorkersKey =
@@ -297,6 +301,51 @@ class SettingsService {
       _prefs.getBool(_prConversationCollapsedKey) ?? false;
   set prConversationCollapsed(bool value) =>
       _prefs.setBool(_prConversationCollapsedKey, value);
+
+  // ── Desktop window + layout persistence ───────────────────────────────────
+
+  /// Left sidebar width as a fraction of the window width (null = default).
+  double? get sidebarFraction => _prefs.getDouble(_sidebarFractionKey);
+  set sidebarFraction(double? value) {
+    if (value == null) {
+      _prefs.remove(_sidebarFractionKey);
+    } else {
+      _prefs.setDouble(_sidebarFractionKey, value);
+    }
+  }
+
+  /// Last window bounds as `{x, y, width, height}` (null = none saved).
+  Map<String, double>? get windowBounds {
+    final raw = _prefs.getString(_windowBoundsKey);
+    if (raw == null) return null;
+    try {
+      final m = jsonDecode(raw) as Map<String, dynamic>;
+      return {
+        'x': (m['x'] as num).toDouble(),
+        'y': (m['y'] as num).toDouble(),
+        'width': (m['width'] as num).toDouble(),
+        'height': (m['height'] as num).toDouble(),
+      };
+    } catch (_) {
+      return null;
+    }
+  }
+
+  set windowBounds(Map<String, double>? value) {
+    if (value == null) {
+      _prefs.remove(_windowBoundsKey);
+    } else {
+      _prefs.setString(_windowBoundsKey, jsonEncode(value));
+    }
+  }
+
+  bool get windowMaximized => _prefs.getBool(_windowMaximizedKey) ?? false;
+  set windowMaximized(bool value) =>
+      _prefs.setBool(_windowMaximizedKey, value);
+
+  bool get windowFullScreen => _prefs.getBool(_windowFullScreenKey) ?? false;
+  set windowFullScreen(bool value) =>
+      _prefs.setBool(_windowFullScreenKey, value);
 
   bool get compactMode => _prefs.getBool(_compactModeKey) ?? false;
   set compactMode(bool value) => _prefs.setBool(_compactModeKey, value);
