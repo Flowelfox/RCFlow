@@ -7,7 +7,7 @@ REMOTE="/mnt/c/Users/Flowelfox/Projects/RCFlow/"
 SOURCE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/"
 
 rsync -avz --progress "$@" \
-  --exclude='.git/' \
+  --exclude='.git' \
   --exclude='.venv/' \
   --exclude='__pycache__/' \
   --exclude='*.pyc' \
