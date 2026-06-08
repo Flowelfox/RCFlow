@@ -7,6 +7,7 @@ deletion broadcasts.
 
 from __future__ import annotations
 
+import subprocess
 import uuid
 from datetime import UTC, datetime
 
@@ -50,6 +51,8 @@ def _parsed(owner: str, name: str, number: int, *, archived: bool = False) -> di
         "draft": False,
         "review_decision": None,
         "merge_status": None,
+        "project_name": None,
+        "project_path": None,
         "author": "alice",
         "author_avatar_url": None,
         "url": f"https://github.com/{owner}/{name}/pull/{number}",
@@ -109,3 +112,26 @@ async def test_persist_prunes_previously_cached_archived(db_session):
     # Only the fresh non-archived PR remains.
     rows = (await db_session.execute(select(GitHubPRModel))).scalars().all()
     assert [r.repo_name for r in rows] == ["web"]
+
+
+def _git(cwd, *args):
+    subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True)
+
+
+@pytest.mark.asyncio
+async def test_persist_stamps_local_project(db_session, tmp_path):
+    # A local clone of acme/web under a projects dir.
+    projects = tmp_path / "Projects"
+    clone = projects / "web"
+    clone.mkdir(parents=True)
+    _git(clone, "init", "-q")
+    _git(clone, "remote", "add", "origin", "https://github.com/acme/web.git")
+
+    parsed = [_parsed("acme", "web", 1), _parsed("acme", "other", 2)]
+    upserted, _ = await _persist_synced_prs(db_session, _BACKEND_ID, parsed, [projects])
+
+    by_repo = {r.repo_name: r for r in upserted}
+    assert by_repo["web"].project_name == "web"
+    assert by_repo["web"].project_path == str(clone)
+    # No local clone for acme/other → project stays null.
+    assert by_repo["other"].project_name is None

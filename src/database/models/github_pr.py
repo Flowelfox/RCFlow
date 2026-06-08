@@ -45,6 +45,11 @@ class GitHubPR(Base):
     review_decision: Mapped[str | None] = mapped_column(String(20))
     # GraphQL mergeable: MERGEABLE | CONFLICTING | UNKNOWN | null.
     merge_status: Mapped[str | None] = mapped_column(String(20))
+    # The local checkout this worker maps the PR's repo to (by git remote), or
+    # null when this worker has no clone. Drives the "Worker/Project" badge and
+    # clone-gating for writable actions.
+    project_name: Mapped[str | None] = mapped_column(String(255))
+    project_path: Mapped[str | None] = mapped_column(Text)
     author: Mapped[str] = mapped_column(String(255), nullable=False)
     author_avatar_url: Mapped[str | None] = mapped_column(Text)
     url: Mapped[str] = mapped_column(Text, nullable=False)  # html_url

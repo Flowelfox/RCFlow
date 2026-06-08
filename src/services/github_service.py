@@ -118,6 +118,9 @@ def _parse_pull(pr: dict[str, Any]) -> dict[str, Any]:
         # carries the keys (callers that don't enrich just get None).
         "review_decision": None,
         "merge_status": None,
+        # Filled by the sync from a memoized local-repo lookup (per worker).
+        "project_name": None,
+        "project_path": None,
         "additions": pr.get("additions", 0),
         "deletions": pr.get("deletions", 0),
         "changed_files": pr.get("changed_files", 0),

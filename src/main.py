@@ -345,7 +345,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
                         parsed.extend(await svc.list_pull_requests(r, repo=repo))
                 async with db_session_factory() as db:
                     upserted, deleted_ids = await _persist_synced_prs(
-                        db, settings.RCFLOW_BACKEND_ID, parsed
+                        db, settings.RCFLOW_BACKEND_ID, parsed, list(settings.projects_dirs)
                     )
                 for row in upserted:
                     session_manager.broadcast_github_pr_update(_pr_to_dict(row))

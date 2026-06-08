@@ -5,6 +5,9 @@ All endpoints are under /api/integrations/github/ and require X-API-Key authenti
 Endpoints
 ---------
 GET    /status                                    Token configured + validity preflight
+POST   /status/check                              Validate an unsaved token's scopes (settings preview)
+GET    /repo-defaults                             Repos this worker is the default action target for
+PUT    /repo-defaults                             Set/clear this worker's default for a repo
 POST   /sync                                      Re-sync pull requests from GitHub
 GET    /prs                                        List cached pull requests
 GET    /prs/{id}                                   Single cached pull request
@@ -39,14 +42,17 @@ from pydantic import BaseModel
 
 from src.api.deps import verify_http_api_key
 from src.database.models import GitHubPR as GitHubPRModel
+from src.database.models import GitHubRepoDefault as GitHubRepoDefaultModel
 from src.database.models import GitHubReviewDraft as GitHubReviewDraftModel
 from src.services import git_ops
 from src.services.github_service import GitHubService, GitHubServiceError, evaluate_scopes
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from sqlalchemy.ext.asyncio import AsyncSession
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, func, or_, select
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +85,8 @@ def _pr_to_dict(pr: GitHubPRModel) -> dict[str, Any]:
         "draft": pr.draft,
         "review_decision": pr.review_decision,
         "merge_status": pr.merge_status,
+        "project_name": pr.project_name,
+        "project_path": pr.project_path,
         "author": pr.author,
         "author_avatar_url": pr.author_avatar_url,
         "url": pr.url,
@@ -129,6 +137,8 @@ async def _upsert_prs(
         "draft",
         "review_decision",
         "merge_status",
+        "project_name",
+        "project_path",
         "author",
         "author_avatar_url",
         "url",
@@ -176,16 +186,31 @@ async def _persist_synced_prs(
     db: AsyncSession,
     backend_id: str,
     parsed: list[dict[str, Any]],
+    projects_dirs: list[Path] | None = None,
 ) -> tuple[list[GitHubPRModel], list[str]]:
     """Upsert fetched PRs, skipping (and pruning) archived-repo PRs.
 
     PRs whose repository is archived are read-only — they can't be reviewed or
     merged — so they are never cached, and any previously-cached rows for those
-    repos are deleted. Returns ``(upserted_rows, deleted_pr_ids)``; callers
-    broadcast the updates/deletions.
+    repos are deleted. Each kept PR is stamped with the local checkout this
+    worker maps its repo to (``project_name``/``project_path``, memoized per
+    repo) so the client can show the worker/project badge and route writable
+    actions. Returns ``(upserted_rows, deleted_pr_ids)``; callers broadcast the
+    updates/deletions.
     """
     archived_repos = {(p["repo_owner"], p["repo_name"]) for p in parsed if p.get("archived")}
     fresh = [p for p in parsed if not p.get("archived")]
+
+    # Resolve the local checkout per repo once (filesystem scan is not free).
+    if projects_dirs:
+        repo_project: dict[tuple[str, str], Path | None] = {}
+        for p in fresh:
+            key = (p["repo_owner"], p["repo_name"])
+            if key not in repo_project:
+                repo_project[key] = await git_ops.find_local_repo(projects_dirs, *key)
+            match = repo_project[key]
+            p["project_name"] = match.name if match else None
+            p["project_path"] = str(match) if match else None
 
     upserted = await _upsert_prs(db, backend_id, fresh)
 
@@ -209,29 +234,19 @@ async def _persist_synced_prs(
 # ---------------------------------------------------------------------------
 
 
-@router.get(
-    "/status",
-    summary="GitHub integration status",
-    description=(
-        "Reports whether a GitHub token is configured and, if so, validates it "
-        "against the GitHub API and returns the authenticated user's login. Used "
-        "by the client to decide whether to surface the PR-review UI."
-    ),
-)
-async def github_status(request: Request) -> dict[str, Any]:
-    """Return GitHub token configuration, validity, and a scope checklist.
+async def _build_token_status(token: str | None) -> dict[str, Any]:
+    """Validate ``token`` against GitHub and build the status + scope checklist.
 
     ``scopes`` lists every scope the PR-review feature needs with a per-scope
     ``satisfied`` flag (checked against the token's granted scopes). For
     fine-grained tokens scopes are not enumerable, so ``fine_grained`` is True
     and ``satisfied`` is null (validity is confirmed by the live API check).
     """
-    settings = request.app.state.settings
     base_scopes = evaluate_scopes([])  # required list with satisfied=False as the unconfigured shape
-    if not settings.GITHUB_TOKEN:
+    if not token:
         return {"configured": False, "valid": False, "login": None, "fine_grained": False, "scopes": base_scopes}
 
-    svc = GitHubService(token=settings.GITHUB_TOKEN)
+    svc = GitHubService(token=token)
     try:
         info = await svc.token_info()
     except GitHubServiceError as exc:
@@ -259,6 +274,114 @@ async def github_status(request: Request) -> dict[str, Any]:
     }
 
 
+@router.get(
+    "/status",
+    summary="GitHub integration status",
+    description=(
+        "Reports whether a GitHub token is configured and, if so, validates it "
+        "against the GitHub API and returns the authenticated user's login. Used "
+        "by the client to decide whether to surface the PR-review UI."
+    ),
+)
+async def github_status(request: Request) -> dict[str, Any]:
+    """Return token configuration, validity, and scope checklist for the saved token.
+
+    Uses the worker's saved ``GITHUB_TOKEN``.
+    """
+    return await _build_token_status(request.app.state.settings.GITHUB_TOKEN)
+
+
+class CheckTokenRequest(BaseModel):
+    """Validate an unsaved GitHub token's scopes (settings live preview)."""
+
+    token: str = ""
+
+
+@router.post(
+    "/status/check",
+    summary="Check an unsaved GitHub token's access",
+    description=(
+        "Validates a supplied (not-yet-saved) GitHub token against the API and "
+        "returns the same shape as GET /status, so the settings UI can show the "
+        "token's validity and scope checklist live as it's typed, before saving."
+    ),
+)
+async def check_github_token(body: CheckTokenRequest) -> dict[str, Any]:
+    """Validate an arbitrary token and return its status + scope checklist."""
+    return await _build_token_status(body.token.strip() or None)
+
+
+class RepoDefaultRequest(BaseModel):
+    """Set or clear this worker as the default action target for a repo."""
+
+    owner: str
+    repo: str
+    is_default: bool
+
+
+@router.get(
+    "/repo-defaults",
+    summary="List this worker's default repositories",
+    description=(
+        "Returns the repositories this worker is the default action target for "
+        "(owner/repo pairs). The client tallies these across workers to route "
+        "writable PR actions when several workers back the same PR."
+    ),
+)
+async def list_repo_defaults(request: Request) -> dict[str, Any]:
+    """Return the owner/repo pairs this worker is the default for."""
+    settings = request.app.state.settings
+    db_factory = request.app.state.db_session_factory
+    async with db_factory() as db:
+        rows = (
+            await db.execute(
+                select(GitHubRepoDefaultModel).where(
+                    GitHubRepoDefaultModel.backend_id == settings.RCFLOW_BACKEND_ID
+                )
+            )
+        ).scalars().all()
+    return {"defaults": [{"owner": r.repo_owner, "repo": r.repo_name} for r in rows]}
+
+
+@router.put(
+    "/repo-defaults",
+    summary="Set or clear this worker's default for a repository",
+    description=(
+        "Marks this worker as the default action target for owner/repo (is_default "
+        "true) or removes the mark (false). The client writes 'true' to the chosen "
+        "worker and 'false' to its siblings so exactly one worker is the default."
+    ),
+)
+async def set_repo_default(request: Request, body: RepoDefaultRequest) -> dict[str, Any]:
+    """Set/clear this worker's default flag for a repository."""
+    settings = request.app.state.settings
+    db_factory = request.app.state.db_session_factory
+    owner = body.owner.strip()
+    repo = body.repo.strip()
+    if not owner or not repo:
+        raise HTTPException(status_code=422, detail="owner and repo are required")
+    async with db_factory() as db:
+        stmt = select(GitHubRepoDefaultModel).where(
+            GitHubRepoDefaultModel.backend_id == settings.RCFLOW_BACKEND_ID,
+            GitHubRepoDefaultModel.repo_owner == owner,
+            GitHubRepoDefaultModel.repo_name == repo,
+        )
+        existing = (await db.execute(stmt)).scalar_one_or_none()
+        if body.is_default and existing is None:
+            db.add(
+                GitHubRepoDefaultModel(
+                    id=uuid.uuid4(),
+                    backend_id=settings.RCFLOW_BACKEND_ID,
+                    repo_owner=owner,
+                    repo_name=repo,
+                )
+            )
+        elif not body.is_default and existing is not None:
+            await db.delete(existing)
+        await db.commit()
+    return {"owner": owner, "repo": repo, "is_default": body.is_default}
+
+
 @router.post(
     "/sync",
     summary="Sync GitHub pull requests",
@@ -268,12 +391,15 @@ async def github_status(request: Request) -> dict[str, Any]:
         "(authored) buckets; pass ?role= to sync just one. Scoped to "
         "GITHUB_DEFAULT_REPO when set. A worker with no GITHUB_TOKEN is a no-op "
         "(returns synced=0, configured=false) rather than an error, so a client "
-        "can sweep every connected worker without special-casing token-less ones."
+        "can sweep every connected worker without special-casing token-less ones. "
+        "Unless force=true, an auto-sync is skipped (returns skipped=true) when "
+        "this worker synced less than 60s ago, to avoid redundant refetches."
     ),
 )
 async def sync_github_prs(
     request: Request,
     role: str | None = Query(None, description="Limit sync to a single bucket: for_me or created"),
+    force: bool = Query(False, description="Bypass the 60s recency throttle (manual refresh)"),
 ) -> dict[str, Any]:
     """Trigger a sync of GitHub pull requests from the API."""
     settings = request.app.state.settings
@@ -284,6 +410,22 @@ async def sync_github_prs(
     # doesn't fail on token-less workers (the PR tab syncs every worker).
     if not settings.GITHUB_TOKEN:
         return {"synced": 0, "archived_pruned": 0, "configured": False}
+
+    # Throttle automatic syncs: skip if we refreshed within the last 60s.
+    if not force:
+        async with db_factory() as db:
+            latest = (
+                await db.execute(
+                    select(func.max(GitHubPRModel.synced_at)).where(
+                        GitHubPRModel.backend_id == settings.RCFLOW_BACKEND_ID
+                    )
+                )
+            ).scalar_one_or_none()
+        if latest is not None:
+            if latest.tzinfo is None:
+                latest = latest.replace(tzinfo=UTC)
+            if (datetime.now(UTC) - latest).total_seconds() < 60:
+                return {"synced": 0, "archived_pruned": 0, "configured": True, "skipped": True}
 
     roles = (role,) if role else _DEFAULT_SYNC_ROLES
     repo = settings.GITHUB_DEFAULT_REPO or None
@@ -299,7 +441,9 @@ async def sync_github_prs(
         await svc.aclose()
 
     async with db_factory() as db:
-        upserted, deleted_ids = await _persist_synced_prs(db, settings.RCFLOW_BACKEND_ID, parsed)
+        upserted, deleted_ids = await _persist_synced_prs(
+            db, settings.RCFLOW_BACKEND_ID, parsed, list(settings.projects_dirs)
+        )
 
     for row in upserted:
         session_manager.broadcast_github_pr_update(_pr_to_dict(row))
