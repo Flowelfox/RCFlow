@@ -766,6 +766,38 @@ class PromptRouter:
             if self._session_manager:
                 self._session_manager.broadcast_session_update(session)
 
+    def _apply_project_path(self, session: ActiveSession, project_path: str) -> None:
+        """Apply an already-resolved project directory path directly.
+
+        Used when the caller has resolved the project itself (e.g. a PR-assist
+        session, where the project is matched by the PR's git remote) so the
+        session lands in *exactly* that checkout — avoiding the by-name
+        re-resolution in :meth:`_apply_project_name`, which can pick a different
+        same-named folder. The path is validated to live under a configured
+        projects directory before being applied.
+        """
+        resolved = Path(project_path).resolve()
+        dirs = self._settings.projects_dirs if self._settings else []
+        under_projects = any(
+            resolved == base.resolve() or base.resolve() in resolved.parents for base in dirs
+        )
+        if not resolved.is_dir() or not under_projects:
+            self._push_project_error(
+                session,
+                f"Project path is not under a configured projects directory: {project_path}",
+            )
+            return
+        if not os.access(resolved, os.R_OK | os.X_OK):
+            self._push_project_error(session, f"Permission denied accessing project at {resolved}.")
+            return
+
+        abs_path = str(resolved)
+        if abs_path != session.main_project_path:
+            session.main_project_path = abs_path
+            session.project_name_error = None
+            if self._session_manager:
+                self._session_manager.broadcast_session_update(session)
+
     def _push_project_error(self, session: ActiveSession, message: str) -> None:
         """Push a project validation error to the session buffer and broadcast it."""
         session.project_name_error = message
@@ -899,6 +931,7 @@ class PromptRouter:
         purpose: str,
         read_only: bool = True,
         project_name: str | None = None,
+        project_path: str | None = None,
     ) -> str:
         """Create a one-shot session for on-demand PR-review AI assistance.
 
@@ -910,7 +943,11 @@ class PromptRouter:
         task (same pattern as :meth:`prepare_plan_session`).
         """
         session = self._session_manager.create_session(SessionType.ONE_SHOT)
-        if project_name:
+        # A resolved path (from the PR's git-remote match) wins over a by-name
+        # lookup so the assist opens in the same checkout the PR maps to.
+        if project_path:
+            self._apply_project_path(session, project_path)
+        elif project_name:
             self._apply_project_name(session, project_name)
         session.metadata["session_purpose"] = purpose
 
@@ -1119,6 +1156,7 @@ class PromptRouter:
         session_id: str | None = None,
         attachments: list[ResolvedAttachment] | None = None,
         project_name: str | None = None,
+        project_path: str | None = None,
         selected_worktree_path: str | None = None,
         task_id: str | None = None,
         display_text: str | None = None,
@@ -1160,9 +1198,13 @@ class PromptRouter:
         if task_id and "primary_task_id" not in session.metadata:
             session.metadata["primary_task_id"] = task_id
 
-        # Resolve and validate the project_name from the client picker BEFORE the
-        # DB row write, so the initial INSERT already contains main_project_path.
-        if project_name:
+        # Resolve and validate the project BEFORE the DB row write, so the initial
+        # INSERT already contains main_project_path. A resolved path (from a PR's
+        # git-remote match) wins over a by-name lookup so the session lands in the
+        # exact checkout the PR maps to.
+        if project_path:
+            self._apply_project_path(session, project_path)
+        elif project_name:
             self._apply_project_name(session, project_name)
 
         # Apply the pre-selected worktree path (sent by the client before the first

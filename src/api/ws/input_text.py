@@ -459,6 +459,10 @@ async def ws_input_text(
                 assist_line = message.get("line")
                 # fix runs in (and edits) the worktree the client selected.
                 assist_project = message.get("project_name") or None
+                # Resolved project path (from the PR's git-remote match) — applied
+                # directly so the session opens in the same checkout as the PR,
+                # avoiding by-name re-resolution picking a different same-named dir.
+                assist_project_path = message.get("project_path") or None
                 assist_worktree = message.get("selected_worktree_path") or None
                 # The coding agent to run (claude_code/codex/opencode); required
                 # in direct-tool mode where the prompt must name a #tool.
@@ -486,6 +490,7 @@ async def ws_input_text(
                         purpose=f"pr_{assist_kind}",
                         read_only=not is_writable,
                         project_name=assist_project,
+                        project_path=assist_project_path,
                     )
                     await websocket.send_json(
                         {
@@ -500,6 +505,7 @@ async def ws_input_text(
                             assist_prompt,
                             assist_session_id,
                             project_name=assist_project if is_writable else None,
+                            project_path=assist_project_path if is_writable else None,
                             selected_worktree_path=assist_worktree if is_writable else None,
                             # The agent badge selects the tool directly — no
                             # #tool parsing of the prompt text (so "#123" in the
