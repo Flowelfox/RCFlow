@@ -376,8 +376,18 @@ class PromptRouter:
         await self._lifecycle.send_interactive_response(session_id, text, accepted=accepted, answers=answers)
 
     async def pause_session(self, session_id: str) -> ActiveSession:
-        """Pause session."""
-        return await self._lifecycle.pause_session(session_id)
+        """Pause session.
+
+        Claude Code style: if the user queued follow-up messages while the turn
+        was running, pausing interrupts the current turn and then delivers those
+        queued messages immediately (rather than leaving them until a manual
+        resume). With no queued messages, the session simply pauses.
+        """
+        session = await self._lifecycle.pause_session(session_id)
+        if session.pending_user_messages:
+            # resume_session reconstructs the executors and drains the queue.
+            session = await self._lifecycle.resume_session(session_id)
+        return session
 
     async def interrupt_subprocess(self, session_id: str) -> ActiveSession:
         """Interrupt subprocess."""
