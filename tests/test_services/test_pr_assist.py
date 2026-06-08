@@ -13,6 +13,7 @@ from src.services.pr_assist import (
     _explain_prompt,
     _fix_prompt,
     _resolve_conflicts_prompt,
+    _review_prompt,
     _summary_prompt,
     _truncate,
     build_pr_assist_prompt,
@@ -74,9 +75,24 @@ def test_resolve_conflicts_prompt_without_file_hint():
     assert "conflict" in p.lower() and "pre-check found" not in p
 
 
+def test_review_prompt_reports_then_asks_before_acting():
+    p = _review_prompt(_PR(), "@@ -1 +1 @@\n-a\n+b")
+    assert "#42" in p and "acme/web" in p
+    # Structured report: findings table + severity + recommended action + verdict.
+    assert "findings table" in p.lower()
+    assert "Severity" in p and "Recommended action" in p
+    assert "Approve" in p and "Request changes" in p
+    # Asks before doing anything, warns about authorship, uses gh on approval.
+    assert "authored" in p.lower()
+    assert "gh" in p and "approv" in p.lower()
+    assert "```diff" in p and "+b" in p
+
+
 def test_kind_sets():
     assert "fix" in PR_ASSIST_KINDS and "fix" not in READ_ONLY_KINDS
     assert "resolve_conflicts" in PR_ASSIST_KINDS and "resolve_conflicts" not in READ_ONLY_KINDS
+    # review is writable now (runs in a checkout to post via gh on approval).
+    assert "review" in PR_ASSIST_KINDS and "review" not in READ_ONLY_KINDS
     assert set(READ_ONLY_KINDS) == {"summary", "explain"}
 
 

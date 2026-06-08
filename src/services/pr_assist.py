@@ -28,11 +28,14 @@ if TYPE_CHECKING:
 # Cap diff/patch text fed to the model so a huge PR cannot blow the context.
 MAX_DIFF_CHARS = 40_000
 
-# summary/explain are read-only (analyse the diff). fix and resolve_conflicts
-# are writable: the agent edits a local checkout (a review comment for fix; the
-# merge conflicts for resolve_conflicts).
-PR_ASSIST_KINDS = ("summary", "explain", "fix", "resolve_conflicts")
+# summary/explain are read-only (analyse the diff). review/fix/resolve_conflicts
+# are writable: they run a full-perms agent session in a local checkout. review
+# inspects the code, presents a report, and (only on the human's approval) posts
+# the review on GitHub via the gh CLI.
+PR_ASSIST_KINDS = ("summary", "explain", "review", "fix", "resolve_conflicts")
 READ_ONLY_KINDS = ("summary", "explain")
+# Kinds that fetch the PR diff from GitHub to seed the prompt (need a token).
+DIFF_KINDS = ("summary", "explain", "review")
 
 
 def _truncate(text: str, limit: int = MAX_DIFF_CHARS) -> str:
@@ -53,6 +56,41 @@ def _summary_prompt(pr: GitHubPRModel, diff: str) -> str:
         "3. Risks, edge cases, or things the reviewer should look at closely.\n\n"
         "This is read-only review assistance — do NOT attempt to edit, run, or "
         "modify anything; just analyse the diff.\n\n"
+        f"```diff\n{_truncate(diff)}\n```"
+    )
+
+
+def _review_prompt(pr: GitHubPRModel, diff: str) -> str:
+    return (
+        f"You are an AI code reviewer for GitHub pull request "
+        f'#{pr.number} "{pr.title}" in {pr.repo_owner}/{pr.repo_name} '
+        f"(base `{pr.base_ref}` ← head `{pr.head_ref}`, author @{pr.author}). You "
+        "are working in a local checkout of this repository.\n\n"
+        f"Pull request description:\n{pr.body or '(none)'}\n\n"
+        "Review the change (the unified diff is below; you MAY read files in the "
+        "checkout for context) and produce a **readable, mid-sized Markdown "
+        "report** — thorough but not exhausting, easy for a human to skim:\n\n"
+        "1. A short **summary** of the change and whether it meets its goal.\n"
+        "2. A **findings table** with these columns:\n"
+        "   `| Severity | Location | Issue | Recommended action |`\n"
+        "   - **Severity**: Critical / High / Medium / Low / Nit.\n"
+        "   - **Location**: `file:Lstart-Lend` (or `general`).\n"
+        "   - **Issue**: one concise sentence.\n"
+        "   - **Recommended action**: the concrete reviewer action, e.g. "
+        '`Inline comment on src/foo.py:42-45: "<suggested comment text>"` or '
+        '`Include in the global comment: "<text>"`.\n'
+        "3. **Recommended review action** — exactly one of **Approve**, "
+        "**Comment**, or **Request changes**, with a one-line rationale.\n\n"
+        "Present the full report to the user and DO NOT take any GitHub action "
+        "yet. Then explicitly ASK: \"Apply the recommended review actions on "
+        "GitHub?\" and wait for a clear yes/no.\n\n"
+        "⚠️ Warning to include in the report: any GitHub actions (inline "
+        "comments, the global comment, submitting the review) are performed with "
+        "the configured GitHub account — they will appear authored by **you**, "
+        "the user.\n\n"
+        "Only if the user approves: apply the recommended actions with the `gh` "
+        "CLI — post the inline comments and the global comment, then submit the "
+        "review with the recommended verdict. If the user declines, do nothing.\n\n"
         f"```diff\n{_truncate(diff)}\n```"
     )
 
@@ -146,7 +184,7 @@ async def build_pr_assist_prompt(
     """
     if kind not in PR_ASSIST_KINDS:
         raise ValueError(f"Unknown assist kind: {kind!r}")
-    if kind in READ_ONLY_KINDS and not settings.GITHUB_TOKEN:
+    if kind in DIFF_KINDS and not settings.GITHUB_TOKEN:
         raise ValueError("GitHub token is not configured.")
 
     try:
@@ -179,6 +217,9 @@ async def build_pr_assist_prompt(
             if kind == "summary":
                 diff = await svc.get_pr_diff(pr.repo_owner, pr.repo_name, pr.number)
                 prompt = _summary_prompt(pr, diff)
+            elif kind == "review":
+                diff = await svc.get_pr_diff(pr.repo_owner, pr.repo_name, pr.number)
+                prompt = _review_prompt(pr, diff)
             else:  # explain
                 if not file_path:
                     raise ValueError("file_path is required for the explain assist")

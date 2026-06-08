@@ -480,9 +480,9 @@ async def ws_input_text(
                         line=assist_line,
                         comment_body=assist_comment,
                     )
-                    # fix and resolve_conflicts are writable (they edit a local
-                    # checkout); summary/explain are read-only.
-                    is_writable = assist_kind in ("fix", "resolve_conflicts")
+                    # review/fix/resolve_conflicts run a full-perms session in a
+                    # local checkout; summary/explain are read-only.
+                    is_writable = assist_kind in ("review", "fix", "resolve_conflicts")
                     # Attach the linked project to every assist session (so the
                     # session shows the project badge); the worktree is only used
                     # by writable sessions.

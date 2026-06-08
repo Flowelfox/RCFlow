@@ -56,6 +56,7 @@ class PrReviewPane extends StatelessWidget {
           appState: appState,
           mode: DiffViewMode.unified,
           onModeChanged: (_) {},
+          onAiReview: () {},
         ),
         Expanded(
           child: Center(
@@ -443,6 +444,7 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
           linkedProjectName: _linkedProjectName,
           linkedProjectPath: _linkedProjectPath,
           sourceProjectNames: _sourceProjectName,
+          onAiReview: _aiReview,
         ),
         Expanded(child: _buildBody(context)),
       ],
@@ -1027,6 +1029,51 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
       target,
       'resolve_conflicts',
       commentBody: (_conflictFiles ?? const []).join('\n'),
+      projectName: nameFor(target) ?? _linkedProjectName,
+      projectPath: pathFor(target) ?? _linkedProjectPath,
+    );
+  }
+
+  /// Start an AI code review on a worker that has the repo cloned (so it can read
+  /// context and, on approval, post the review via gh). Routes via default/picker
+  /// when several clone-holders back the PR.
+  Future<void> _aiReview() async {
+    final dpr = widget.appState.dedupedGithubPrFor(widget.pr.id);
+    final sources = dpr?.sources ?? [widget.pr];
+    String? pathFor(GithubPrInfo s) => _sourceProjectPath[s.id] ?? s.projectPath;
+    String? nameFor(GithubPrInfo s) => _sourceProjectName[s.id] ?? s.projectName;
+
+    final clones = sources
+        .where((s) => (pathFor(s) ?? '').isNotEmpty)
+        .toList();
+    if (clones.isEmpty) {
+      widget.appState.showNotification(
+        level: NotificationLevel.warning,
+        title: 'No local clone',
+        body: 'AI review runs in a local checkout — no connected worker has this '
+            'repository cloned.',
+      );
+      return;
+    }
+
+    GithubPrInfo target;
+    if (clones.length == 1) {
+      target = clones.first;
+    } else {
+      final chosen = await resolvePrActionWorker(
+        context,
+        widget.appState,
+        dpr!,
+        clones,
+        {for (final s in clones) s.id: nameFor(s)},
+      );
+      if (chosen == null) return;
+      target = chosen;
+    }
+    widget.appState.startPrAssist(
+      widget.paneId,
+      target,
+      'review',
       projectName: nameFor(target) ?? _linkedProjectName,
       projectPath: pathFor(target) ?? _linkedProjectPath,
     );
@@ -1851,6 +1898,9 @@ class _PrReviewHeader extends StatelessWidget {
   /// worker/project badges reflect each worker's actual clone.
   final Map<String, String?> sourceProjectNames;
 
+  /// Start an AI review of the PR (routed to a clone-holding worker).
+  final VoidCallback onAiReview;
+
   const _PrReviewHeader({
     required this.paneId,
     required this.pr,
@@ -1860,6 +1910,7 @@ class _PrReviewHeader extends StatelessWidget {
     this.linkedProjectName,
     this.linkedProjectPath,
     this.sourceProjectNames = const {},
+    required this.onAiReview,
   });
 
   @override
@@ -1954,18 +2005,12 @@ class _PrReviewHeader extends StatelessWidget {
               child: IconButton(
                 padding: EdgeInsets.zero,
                 icon: Icon(
-                  Icons.auto_awesome,
+                  Icons.rate_review,
                   color: context.appColors.textMuted,
                   size: 14,
                 ),
-                tooltip: 'Summarise this PR (AI assist)',
-                onPressed: () => appState.startPrAssist(
-                  paneId,
-                  pr,
-                  'summary',
-                  projectName: linkedProjectName,
-                  projectPath: linkedProjectPath,
-                ),
+                tooltip: 'AI review this PR',
+                onPressed: onAiReview,
               ),
             ),
             SizedBox(
