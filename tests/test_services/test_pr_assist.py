@@ -92,6 +92,7 @@ def test_review_prompt_uses_wt_worktree_and_gh_no_embedded_diff():
     assert "findings table" in p.lower()
     assert "Approve" in p and "Request changes" in p
     assert "authored" in p.lower() and "approv" in p.lower()
+    assert "Assisted by AI, approved by human" in p
 
 
 def test_kind_sets():

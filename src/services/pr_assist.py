@@ -147,6 +147,11 @@ def _review_prompt(pr: GitHubPRModel, existing_comments: str = "") -> str:
         "⚠️ Include this warning in the report: any GitHub actions (inline "
         "comments, the global comment, submitting the review) are performed with "
         "the configured GitHub account — they appear authored by **you**.\n\n"
+        "By default, append this annotation on its own line at the bottom of every "
+        "comment you post to GitHub (each inline comment, the global comment, and "
+        'the review body): "ℹ Assisted by AI, approved by human". Note this '  # noqa: RUF001
+        "default near the bottom of the report; if the user asks to exclude it, "
+        "omit it.\n\n"
         "Only if the user approves: apply the recommended actions with `gh` — post "
         "the inline comments and the global comment, then submit the review with "
         "the recommended verdict. If the user declines, do nothing."
