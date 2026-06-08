@@ -75,17 +75,23 @@ def test_resolve_conflicts_prompt_without_file_hint():
     assert "conflict" in p.lower() and "pre-check found" not in p
 
 
-def test_review_prompt_reports_then_asks_before_acting():
-    p = _review_prompt(_PR(), "@@ -1 +1 @@\n-a\n+b")
+def test_review_prompt_uses_wt_worktree_and_gh_no_embedded_diff():
+    p = _review_prompt(_PR(), "- Inline foo.py:10:\n    @alice: nit")
     assert "#42" in p and "acme/web" in p
-    # Structured report: findings table + severity + recommended action + verdict.
+    # Worktree via the wt CLI, pull latest, gh for context, local-git fallback.
+    assert "`wt`" in p and "worktree" in p.lower()
+    assert "git pull" in p or "fetch origin" in p
+    assert "gh pr" in p and "warning" in p.lower()
+    assert "git diff" in p
+    # Description quoted verbatim in a fenced block; existing comments included;
+    # the (possibly huge) diff is NOT embedded.
+    assert "verbatim" in p.lower() and "```" in p
+    assert "Inline foo.py:10" in p
+    assert "```diff" not in p
+    # Structured report + ask + authorship warning.
     assert "findings table" in p.lower()
-    assert "Severity" in p and "Recommended action" in p
     assert "Approve" in p and "Request changes" in p
-    # Asks before doing anything, warns about authorship, uses gh on approval.
-    assert "authored" in p.lower()
-    assert "gh" in p and "approv" in p.lower()
-    assert "```diff" in p and "+b" in p
+    assert "authored" in p.lower() and "approv" in p.lower()
 
 
 def test_kind_sets():
