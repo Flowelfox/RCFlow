@@ -21,8 +21,9 @@ Future<GithubPrInfo?> resolvePrActionWorker(
   BuildContext context,
   AppState appState,
   DedupedPr dpr,
+  List<GithubPrInfo> clones,
+  Map<String, String?> projectNames,
 ) async {
-  final clones = dpr.cloneSources;
   if (clones.isEmpty) return null;
   if (clones.length == 1) return clones.first;
 
@@ -68,14 +69,14 @@ Future<GithubPrInfo?> resolvePrActionWorker(
   }
 
   if (!context.mounted) return null;
-  return _showWorkerPicker(context, appState, dpr, clones, owner, repo);
+  return _showWorkerPicker(context, appState, clones, projectNames, owner, repo);
 }
 
 Future<GithubPrInfo?> _showWorkerPicker(
   BuildContext context,
   AppState appState,
-  DedupedPr dpr,
   List<GithubPrInfo> clones,
+  Map<String, String?> projectNames,
   String owner,
   String repo,
 ) async {
@@ -121,7 +122,7 @@ Future<GithubPrInfo?> _showWorkerPicker(
                         Expanded(
                           child: Text(
                             '${s.workerName.isNotEmpty ? s.workerName : 'Worker'} / '
-                            '${(s.projectName ?? '').isNotEmpty ? s.projectName : '—'}',
+                            '${(projectNames[s.id] ?? s.projectName ?? '').isNotEmpty ? (projectNames[s.id] ?? s.projectName) : '—'}',
                             style: TextStyle(
                               color: colors.textPrimary,
                               fontSize: 13,

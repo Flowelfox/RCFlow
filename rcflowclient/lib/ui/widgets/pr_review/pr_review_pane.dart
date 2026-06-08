@@ -115,6 +115,13 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
   /// re-resolving by folder name (which can hit a different same-named project).
   String? _linkedProjectPath;
 
+  /// Per-source (worker) live project resolution, keyed by the source's local
+  /// PR id. Fetched on open from each backing worker's `/project` endpoint so
+  /// badges and action routing reflect each worker's *current* clone, not a
+  /// possibly-stale cached column.
+  final Map<String, String?> _sourceProjectName = {};
+  final Map<String, String?> _sourceProjectPath = {};
+
   /// The current GitHub user's login (from the integration status), used to
   /// decide which review comments the user is allowed to delete. Null until the
   /// status check completes (or if it omits a login).
@@ -238,6 +245,8 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
       _gutterDragging = false;
       _linkedProjectName = null;
       _linkedProjectPath = null;
+      _sourceProjectName.clear();
+      _sourceProjectPath.clear();
       _currentUserLogin = null;
       _fileContentCache.clear();
       _fetchingFileContent.clear();
@@ -305,6 +314,7 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
       _refreshDraft(),
       _refreshConflicts(),
       _refreshConversation(),
+      _refreshSourceProjects(),
     ]);
   }
 
@@ -432,6 +442,7 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
           onModeChanged: (m) => setState(() => _mode = m),
           linkedProjectName: _linkedProjectName,
           linkedProjectPath: _linkedProjectPath,
+          sourceProjectNames: _sourceProjectName,
         ),
         Expanded(child: _buildBody(context)),
       ],
@@ -559,6 +570,28 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
   void _toggleConversationCollapse() {
     setState(() => _conversationCollapsed = !_conversationCollapsed);
     widget.appState.settings.prConversationCollapsed = _conversationCollapsed;
+  }
+
+  /// Resolve each backing worker's local project for this PR live (best-effort),
+  /// so the header badges and action routing reflect each worker's current
+  /// clone rather than a possibly-stale cached column.
+  Future<void> _refreshSourceProjects() async {
+    final dpr = widget.appState.dedupedGithubPrFor(widget.pr.id);
+    final sources = dpr?.sources ?? [widget.pr];
+    await Future.wait(
+      sources.map((s) async {
+        final ws = widget.appState.getWorker(s.workerId)?.ws;
+        if (ws == null) return;
+        try {
+          final res = await ws.getGithubPrProject(s.id);
+          _sourceProjectName[s.id] = res['project_name'] as String?;
+          _sourceProjectPath[s.id] = res['project_path'] as String?;
+        } catch (_) {
+          // Best-effort; fall back to the cached column.
+        }
+      }),
+    );
+    if (mounted && _loadedPrId == widget.pr.id) setState(() {});
   }
 
   /// Fetch the PR's global comments + review summaries (best-effort).
@@ -955,22 +988,47 @@ class _PrReviewBodyState extends State<_PrReviewBody> {
   /// When the PR is backed by several workers that each have a local clone,
   /// route to the right one (default / picker) before starting the session.
   Future<void> _resolveConflicts() async {
-    var target = widget.pr;
     final dpr = widget.appState.dedupedGithubPrFor(widget.pr.id);
-    if (dpr != null && dpr.cloneSources.length > 1) {
-      final chosen = await resolvePrActionWorker(context, widget.appState, dpr);
+    final sources = dpr?.sources ?? [widget.pr];
+    // Live per-source project (falls back to the cached column).
+    String? pathFor(GithubPrInfo s) => _sourceProjectPath[s.id] ?? s.projectPath;
+    String? nameFor(GithubPrInfo s) => _sourceProjectName[s.id] ?? s.projectName;
+
+    final clones = sources
+        .where((s) => (pathFor(s) ?? '').isNotEmpty)
+        .toList();
+
+    if (clones.isEmpty) {
+      widget.appState.showNotification(
+        level: NotificationLevel.warning,
+        title: 'No local clone',
+        body: 'No connected worker has this repository cloned, so the agent '
+            'cannot resolve the conflicts locally.',
+      );
+      return;
+    }
+
+    GithubPrInfo target;
+    if (clones.length == 1) {
+      target = clones.first;
+    } else {
+      final chosen = await resolvePrActionWorker(
+        context,
+        widget.appState,
+        dpr!,
+        clones,
+        {for (final s in clones) s.id: nameFor(s)},
+      );
       if (chosen == null) return; // cancelled
       target = chosen;
-    } else if (dpr != null && dpr.cloneSources.length == 1) {
-      target = dpr.cloneSources.first;
     }
     widget.appState.startPrAssist(
       widget.paneId,
       target,
       'resolve_conflicts',
       commentBody: (_conflictFiles ?? const []).join('\n'),
-      projectName: target.projectName ?? _linkedProjectName,
-      projectPath: target.projectPath ?? _linkedProjectPath,
+      projectName: nameFor(target) ?? _linkedProjectName,
+      projectPath: pathFor(target) ?? _linkedProjectPath,
     );
   }
 
@@ -1789,6 +1847,10 @@ class _PrReviewHeader extends StatelessWidget {
   /// session opens in the exact checkout the PR maps to.
   final String? linkedProjectPath;
 
+  /// Live per-source project names (source PR id → project name), so the
+  /// worker/project badges reflect each worker's actual clone.
+  final Map<String, String?> sourceProjectNames;
+
   const _PrReviewHeader({
     required this.paneId,
     required this.pr,
@@ -1797,6 +1859,7 @@ class _PrReviewHeader extends StatelessWidget {
     required this.onModeChanged,
     this.linkedProjectName,
     this.linkedProjectPath,
+    this.sourceProjectNames = const {},
   });
 
   @override
@@ -1867,10 +1930,6 @@ class _PrReviewHeader extends StatelessWidget {
             _branchChip(context, pr),
             const SizedBox(width: 6),
             ..._sourceBadges(context, pr),
-            if (linkedProjectName != null) ...[
-              _projectChip(context, linkedProjectName!),
-              const SizedBox(width: 6),
-            ],
           ],
           Expanded(
             child: Text(
@@ -2122,37 +2181,6 @@ class _PrReviewHeader extends StatelessWidget {
     }
   }
 
-  /// Small muted chip showing the PR's auto-linked local project so the user
-  /// can see which folder assist sessions started from here will run against.
-  Widget _projectChip(BuildContext context, String name) {
-    final colors = context.appColors;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-      decoration: BoxDecoration(
-        color: colors.bgElevated,
-        borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: colors.divider, width: 0.5),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.folder_outlined, size: 11, color: colors.textMuted),
-          const SizedBox(width: 3),
-          Text(
-            name,
-            style: TextStyle(
-              color: colors.textMuted,
-              fontSize: 10,
-              fontWeight: FontWeight.w500,
-            ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ],
-      ),
-    );
-  }
-
   /// Chip showing the PR's branch target as `head → base`. Each branch name is
   /// individually tappable to copy it to the clipboard.
   Widget _branchChip(BuildContext context, GithubPrInfo pr) {
@@ -2182,14 +2210,15 @@ class _PrReviewHeader extends StatelessWidget {
     );
   }
 
-  /// When this PR is backed by more than one connected worker, a chip per
-  /// source ("Worker / Project") shown on the header line next to the branches.
+  /// A chip per backing worker ("Worker / Project") shown on the header line
+  /// next to the branches — replaces the standalone project chip and, when the
+  /// PR is backed by several workers, lists each one.
   List<Widget> _sourceBadges(BuildContext context, GithubPrInfo pr) {
     final dpr = appState.dedupedGithubPrFor(pr.id);
-    if (dpr == null || !dpr.hasMultipleSources) return const [];
+    final sources = dpr?.sources ?? [pr];
     final colors = context.appColors;
     return [
-      for (final s in dpr.sources)
+      for (final s in sources)
         Padding(
           padding: const EdgeInsets.only(right: 6),
           child: Container(
@@ -2206,7 +2235,7 @@ class _PrReviewHeader extends StatelessWidget {
                 const SizedBox(width: 3),
                 Text(
                   '${s.workerName.isNotEmpty ? s.workerName : 'Worker'} / '
-                  '${(s.projectName ?? '').isNotEmpty ? s.projectName : '—'}',
+                  '${(sourceProjectNames[s.id] ?? s.projectName ?? '').isNotEmpty ? (sourceProjectNames[s.id] ?? s.projectName) : '—'}',
                   style: TextStyle(
                     color: colors.textMuted,
                     fontSize: 10,
@@ -2229,19 +2258,16 @@ class _PrReviewHeader extends StatelessWidget {
       child: InkWell(
         onTap: () => _copyBranch(ref),
         borderRadius: BorderRadius.circular(3),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 140),
-          child: Text(
-            ref,
-            style: TextStyle(
-              color: colors.textSecondary,
-              fontSize: 10,
-              fontWeight: FontWeight.w600,
-              fontFamily: 'monospace',
-            ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
+        child: Text(
+          ref,
+          style: TextStyle(
+            color: colors.textSecondary,
+            fontSize: 10,
+            fontWeight: FontWeight.w600,
+            fontFamily: 'monospace',
           ),
+          maxLines: 1,
+          softWrap: false,
         ),
       ),
     );
