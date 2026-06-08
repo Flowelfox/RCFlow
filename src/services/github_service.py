@@ -367,18 +367,20 @@ class GitHubService:
         return {"login": user.get("login"), "scopes": scopes, "fine_grained": fine_grained}
 
     async def list_pull_requests(self, role: str, repo: str | None = None) -> list[dict[str, Any]]:
-        """List open pull requests for a listing bucket.
+        """List pull requests for a listing bucket (most-recently-updated first).
 
         ``role`` is ``"for_me"`` (review-requested) or ``"created"`` (authored).
-        Searches via ``/search/issues`` then fetches each PR's detail so the
-        cache holds complete metadata (additions/deletions/base/head). PR review
-        lists are small, so the per-PR detail fetch is acceptable for the MVP.
-        Optionally scoped to a single ``owner/name`` ``repo``.
+        Returns the 50 most recently updated PRs across **all** states (open,
+        merged, closed) so the client can filter by state; the per-PR detail
+        fetch fills additions/deletions/base/head. Optionally scoped to a single
+        ``owner/name`` ``repo``.
         """
         qualifier = PR_ROLE_QUALIFIERS.get(role)
         if qualifier is None:
             raise GitHubServiceError(f"Unknown PR role: {role!r}")
-        query = f"is:pr is:open {qualifier}"
+        # All states (no is:open) so merged/closed PRs are cached for filtering;
+        # sorted by recency and capped at 50 to bound history.
+        query = f"is:pr {qualifier}"
         if repo:
             query += f" repo:{repo}"
 
