@@ -13,6 +13,7 @@ and note which component is affected where it matters.
 ## [Unreleased]
 
 ### Added
+- **Right-click a pull request in the sidebar** — a context menu with "AI review" and "Open on GitHub" (Client)
 - **AI review a pull request** — the PR header's AI button is now "AI review this PR": it starts an agent (on the selected or default worker that has the repo cloned) that produces a readable Markdown report — findings with severity levels, a table of recommended reviewer actions (e.g. inline comment on lines X–Y, include in the global comment), and one overall recommendation (Approve / Comment / Request changes). Nothing is posted automatically: it shows the report and asks before applying, and warns that any GitHub actions are made as you (Backend + Client)
 - **Remember window and layout between restarts** — the desktop app now restores its last window size, position, and maximized/full-screen state, and the sidebar width, when you reopen it (Client)
 - **The same pull request is shown once across workers** — if several workers point at the same GitHub account, a PR that previously appeared once per worker now shows as a single entry with a "Worker / Project" badge for each worker that backs it. When you resolve conflicts or run an agent on such a PR, RCFlow picks the right worker automatically (the one with the repo cloned), or asks which to use when there's a genuine choice — with a "remember for this repo" option you can manage per worker in GitHub settings (Backend + Client)

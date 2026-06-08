@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
+import '../../../models/app_notification.dart';
 import '../../../models/deduped_pr.dart';
 import '../../../models/github_pr_info.dart';
 import '../../../state/app_state.dart';
 import '../../../theme.dart';
 import '../session_panel/github_pr_drag_data.dart';
 import '../session_panel/helpers.dart';
+import 'pr_action_router.dart';
 import 'pr_status.dart';
 
 /// Sidebar tile for a single (deduplicated) GitHub pull request. When several
@@ -131,7 +134,7 @@ class PrTile extends StatelessWidget {
     );
 
     // Drag a PR onto a pane to open/split it there (mirrors session/task drag).
-    return Draggable<GithubPrDragData>(
+    final draggable = Draggable<GithubPrDragData>(
       data: GithubPrDragData(
         prId: _primary.id,
         workerId: _primary.workerId,
@@ -189,6 +192,93 @@ class PrTile extends StatelessWidget {
       childWhenDragging: Opacity(opacity: 0.4, child: tile),
       child: tile,
     );
+
+    // Right-click → context menu (AI review / Open on GitHub).
+    return GestureDetector(
+      onSecondaryTapUp: (d) => _showContextMenu(context, d.globalPosition),
+      child: draggable,
+    );
+  }
+
+  Future<void> _showContextMenu(BuildContext context, Offset pos) async {
+    final colors = context.appColors;
+    final selected = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(pos.dx, pos.dy, pos.dx, pos.dy),
+      color: colors.bgElevated,
+      items: [
+        PopupMenuItem(
+          value: 'review',
+          child: Row(
+            children: [
+              Icon(Icons.rate_review, size: 16, color: colors.textMuted),
+              const SizedBox(width: 8),
+              const Text('AI review'),
+            ],
+          ),
+        ),
+        PopupMenuItem(
+          value: 'github',
+          child: Row(
+            children: [
+              Icon(Icons.open_in_new, size: 16, color: colors.textMuted),
+              const SizedBox(width: 8),
+              const Text('Open on GitHub'),
+            ],
+          ),
+        ),
+      ],
+    );
+    if (selected == 'review') {
+      if (context.mounted) await _aiReview(context);
+    } else if (selected == 'github') {
+      await _openOnGithub();
+    }
+  }
+
+  /// AI review from the sidebar — route to a clone-holding worker (default /
+  /// picker) and start the review on the active (or a new) chat pane.
+  Future<void> _aiReview(BuildContext context) async {
+    final clones = pr.cloneSources;
+    if (clones.isEmpty) {
+      state.showNotification(
+        level: NotificationLevel.warning,
+        title: 'No local clone',
+        body: 'AI review runs in a local checkout — no connected worker has this '
+            'repository cloned.',
+      );
+      return;
+    }
+    GithubPrInfo target;
+    if (clones.length == 1) {
+      target = clones.first;
+    } else {
+      final chosen = await resolvePrActionWorker(
+        context,
+        state,
+        pr,
+        clones,
+        {for (final s in clones) s.id: s.projectName},
+      );
+      if (chosen == null) return;
+      target = chosen;
+    }
+    final paneId = state.ensureChatPane().paneId;
+    state.startPrAssist(
+      paneId,
+      target,
+      'review',
+      projectName: target.projectName,
+      projectPath: target.projectPath,
+    );
+  }
+
+  Future<void> _openOnGithub() async {
+    final uri = Uri.tryParse(c.url);
+    if (uri == null) return;
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
   }
 
   bool _isPrViewed() {
