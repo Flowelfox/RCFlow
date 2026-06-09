@@ -61,7 +61,8 @@ enum WsOutputType {
   sessionList,
   sessionUpdate,
   sessionReorder,
-  draftUpdate;
+  draftUpdate,
+  workerUsage;
 
   /// Parse a raw JSON type string. Returns null for unknown types so callers
   /// can handle the unknown-type path explicitly without try/catch.
@@ -114,6 +115,7 @@ enum WsOutputType {
       'session_update' => WsOutputType.sessionUpdate,
       'session_reorder' => WsOutputType.sessionReorder,
       'draft_update' => WsOutputType.draftUpdate,
+      'worker_usage' => WsOutputType.workerUsage,
       _ => null,
     };
   }

@@ -227,6 +227,66 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     telemetry_task = asyncio.create_task(_run_telemetry_loop())
 
+    # Account-level subscription usage poll (5h / 7d quota) — reads the worker's
+    # Claude subscription OAuth token and broadcasts the quota windows to clients.
+    # Subscription-auth only; reports unavailable (no-op) for API-key workers.
+    async def _run_usage_poll_loop() -> None:
+        from src.services.usage_service import (  # noqa: PLC0415
+            UsageService,
+            UsageServiceError,
+            read_oauth_token,
+        )
+
+        interval = max(15, settings.ACCOUNT_USAGE_POLL_INTERVAL_SECONDS)
+        max_backoff = 900.0  # cap transient-failure backoff at 15 minutes
+        backoff = interval
+        while True:
+            # Default to the steady cadence; only deviate when the server tells
+            # us to (Retry-After) or repeated failures warrant backing off, so
+            # we never hammer the endpoint or trip its rate limit.
+            delay = float(interval)
+            try:
+                token = read_oauth_token()
+                if token:
+                    async with UsageService(token) as svc:
+                        windows = await svc.fetch_usage()
+                    session_manager.set_worker_usage(windows, available=True)
+                else:
+                    session_manager.set_worker_usage(None, available=False)
+                backoff = interval  # success → reset backoff
+            except UsageServiceError as exc:
+                if exc.status_code == 429:
+                    # Rate limited: honour Retry-After, else exponential backoff.
+                    delay = max(exc.retry_after or 0.0, backoff)
+                    backoff = min(backoff * 2, max_backoff)
+                    logger.warning("Account usage rate-limited; backing off %.0fs", delay)
+                elif exc.status_code in (401, 403):
+                    # Expected, transient: Claude Code rotates the access token
+                    # periodically, and a poll can land in the brief window
+                    # before the refreshed token is written.  Re-reading the
+                    # credentials file next cycle fixes it, so retry at the
+                    # normal cadence (no backoff) and keep it out of WARN noise.
+                    delay = float(interval)
+                    backoff = interval
+                    logger.debug(
+                        "Account usage auth not ready (HTTP %s); retrying in %.0fs",
+                        exc.status_code,
+                        delay,
+                    )
+                else:
+                    delay = backoff
+                    backoff = min(backoff * 2, max_backoff)
+                    logger.warning("Account usage poll failed: %s (retry in %.0fs)", exc, delay)
+            except Exception:
+                delay = backoff
+                backoff = min(backoff * 2, max_backoff)
+                logger.exception("Account usage poll failed (non-fatal)")
+            await asyncio.sleep(delay)
+
+    usage_task: asyncio.Task[None] | None = None
+    if settings.ACCOUNT_USAGE_ENABLED:
+        usage_task = asyncio.create_task(_run_usage_poll_loop())
+
     # Incremental session flush — persists title, conversation_history and
     # new buffer messages for ACTIVE sessions on a periodic tick so an
     # ungraceful crash / SIGKILL doesn't lose un-archived state.  Graceful
@@ -373,6 +433,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     reaper_task.cancel()
     if flush_task is not None:
         flush_task.cancel()
+    if usage_task is not None:
+        usage_task.cancel()
     logger.info("Shutting down RCFlow server")
     await terminal_manager.close_all()
     await prompt_router.cancel_pending_tasks()

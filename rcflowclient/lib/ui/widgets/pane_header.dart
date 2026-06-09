@@ -85,6 +85,7 @@ class PaneHeader extends StatelessWidget {
             ),
           ),
           if (pane.todos.isNotEmpty) _buildTodoBadge(context, pane),
+          if (sessionId != null) _buildQuotaBadge(context, appState, sessionId),
           if (sessionId != null) _buildTokenBadge(context, appState, sessionId),
           SizedBox(
             width: 24,
@@ -159,6 +160,92 @@ class PaneHeader extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  /// Account-level subscription quota chip (5h / 7d "used %"), shown left of the
+  /// token badge. Hidden when the owning worker has no quota data (API-key
+  /// worker, or before the first poll).
+  Widget _buildQuotaBadge(
+    BuildContext context,
+    AppState appState,
+    String sessionId,
+  ) {
+    final usage = appState.workerForSession(sessionId)?.accountUsage;
+    if (usage == null || !usage.hasData) return const SizedBox.shrink();
+
+    final five = usage.fiveHour;
+    final seven = usage.sevenDay;
+    final maxPct = [
+      five?.utilization ?? 0,
+      seven?.utilization ?? 0,
+    ].reduce((a, b) => a > b ? a : b);
+    final color = _usageColor(context, maxPct / 100);
+
+    final label =
+        '${_fmtPct(five?.utilization)} / ${_fmtPct(seven?.utilization)}';
+
+    final tooltipLines = <String>[
+      '5-hour: ${_fmtPct(five?.utilization)}${_fmtReset(five?.resetsAt)}',
+      '7-day: ${_fmtPct(seven?.utilization)}${_fmtReset(seven?.resetsAt)}',
+    ];
+    final sonnet = usage.sevenDaySonnet;
+    final opus = usage.sevenDayOpus;
+    if (sonnet != null) {
+      tooltipLines.add('Sonnet 7d: ${_fmtPct(sonnet.utilization)}');
+    }
+    if (opus != null) {
+      tooltipLines.add('Opus 7d: ${_fmtPct(opus.utilization)}');
+    }
+
+    return Tooltip(
+      message: tooltipLines.join('\n'),
+      preferBelow: false,
+      child: Container(
+        margin: const EdgeInsets.only(right: kSpace1),
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        decoration: BoxDecoration(
+          color: color.withAlpha(25),
+          borderRadius: BorderRadius.circular(4),
+          border: Border.all(color: color.withAlpha(60), width: 0.5),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.donut_small, size: 11, color: color),
+            const SizedBox(width: 3),
+            Text(
+              label,
+              style: TextStyle(
+                color: color,
+                fontSize: 10,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Format a 0–100 utilization as a whole-percent string ("45%"); "—" if null.
+  static String _fmtPct(double? pct) =>
+      pct == null ? '—' : '${pct.round()}%';
+
+  /// " · resets HH:MM" (today) or " · resets Mon D HH:MM" in local time; ""
+  /// when no reset time is known.
+  static String _fmtReset(DateTime? resetsAt) {
+    if (resetsAt == null) return '';
+    final t = resetsAt.toLocal();
+    final hm =
+        '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+    final now = DateTime.now();
+    final sameDay = t.year == now.year && t.month == now.month && t.day == now.day;
+    if (sameDay) return ' · resets $hm';
+    const months = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    ];
+    return ' · resets ${months[t.month - 1]} ${t.day} $hm';
   }
 
   Widget _buildTokenBadge(

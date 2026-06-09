@@ -1,5 +1,5 @@
 ---
-updated: 2026-06-04
+updated: 2026-06-08
 ---
 
 # WebSocket API
@@ -725,6 +725,35 @@ The server computes sparse integer `sort_order` values (gaps of 1000) and re-nor
 ```
 
 When grouping by project is enabled, the client uses separate `ReorderableListView` widgets per project group, making cross-project drag structurally impossible. Reordering is disabled when search filters, status filters, or multi-select mode are active.
+
+## Worker Usage (account subscription quota)
+
+A background poller reads the worker's Claude subscription quota (the rolling
+5-hour and 7-day windows) and broadcasts it to all connected `/ws/output/text`
+clients as a `worker_usage` message. The latest snapshot is replayed to each
+newly-subscribed client so the quota chip appears immediately rather than after a
+full poll interval. The same snapshot is available on demand via
+[`GET /api/worker/usage`](http-api.md).
+
+```json
+{
+  "type": "worker_usage",
+  "backend_id": "uuid",
+  "available": true,
+  "five_hour": {"utilization": 6.0, "resets_at": "2026-06-08T21:50:00+00:00"},
+  "seven_day": {"utilization": 45.0, "resets_at": "2026-06-10T07:59:59+00:00"},
+  "seven_day_opus": null,
+  "seven_day_sonnet": {"utilization": 0.0, "resets_at": null}
+}
+```
+
+`utilization` is the window's used percentage (0–100); `resets_at` is ISO-8601
+(may be `null`). `available` is `false` (and the windows are omitted) for API-key
+workers, which have no subscription quota, or before the first successful poll —
+the client hides the quota chip in that case. Per-model windows
+(`seven_day_opus` / `seven_day_sonnet`) are surfaced only when the upstream
+endpoint reports them. The client shows the chip left of the per-session token
+badge in the pane header, attributed to the session's owning worker.
 
 ## Task Messages
 

@@ -13,6 +13,7 @@ and note which component is affected where it matters.
 ## [Unreleased]
 
 ### Added
+- **See your Claude subscription usage at a glance** — each session header now shows a small chip with your account's 5-hour and 7-day usage (used %), next to the token counter. Hover it for the exact percentages, when each window resets, and per-model usage when available. Shown only for workers signed in with a Claude subscription (Backend + Client)
 - **Right-click a pull request in the sidebar** — a context menu with "AI review" and "Open on GitHub" (Client)
 - **AI review a pull request** — the PR header's AI button is now "AI review this PR": it starts an agent (on the selected or default worker that has the repo cloned) that produces a readable Markdown report — findings with severity levels, a table of recommended reviewer actions (e.g. inline comment on lines X–Y, include in the global comment), and one overall recommendation (Approve / Comment / Request changes). Nothing is posted automatically: it shows the report and asks before applying, and warns that any GitHub actions are made as you (Backend + Client)
 - **Remember window and layout between restarts** — the desktop app now restores its last window size, position, and maximized/full-screen state, and the sidebar width, when you reopen it (Client)

@@ -8,6 +8,7 @@ import '../models/legacy_badge_adapter.dart';
 import '../models/scheduled_wake.dart';
 import '../models/session_info.dart';
 import '../models/worker_config.dart';
+import '../models/worker_usage.dart';
 import '../models/ws_message_type.dart';
 import 'settings_service.dart';
 import 'terminal_service.dart';
@@ -65,6 +66,11 @@ class WorkerConnection extends ChangeNotifier {
   /// Token limits from server config (0 = unlimited).
   int inputTokenLimit = 0;
   int outputTokenLimit = 0;
+
+  /// Latest account-level subscription usage (5h / 7d quota) for this worker,
+  /// from ``worker_usage`` broadcasts. ``unavailable`` until the first poll
+  /// arrives, or permanently for API-key workers (chip stays hidden).
+  WorkerUsage accountUsage = WorkerUsage.unavailable;
 
   /// Per-scope generation counter for the dynamic model catalog. Each
   /// time credentials change for a scope (API key save, login completion,
@@ -360,6 +366,10 @@ class WorkerConnection extends ChangeNotifier {
         return;
       case WsOutputType.sessionReorder:
         _handleSessionReorder(msg);
+        return;
+      case WsOutputType.workerUsage:
+        accountUsage = WorkerUsage.fromJson(msg);
+        notifyListeners();
         return;
       // Everything else (including task/artifact/app-level) forwarded upstream.
       default:

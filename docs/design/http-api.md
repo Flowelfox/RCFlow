@@ -1,5 +1,5 @@
 ---
-updated: 2026-06-05
+updated: 2026-06-08
 ---
 
 # HTTP API
@@ -42,6 +42,7 @@ REST endpoints. All except `/api/health` require `X-API-Key` header (same key as
 |--------|--------------|------|-------------|
 | GET    | `/api/health`| No   | Health check — returns `{"status": "ok"}` |
 | GET    | `/api/info`  | Yes  | Server metadata — `{"os", "backend_id", "active_sessions", "version", "supports_attachments", "attachment_capabilities", "upnp", "natpmp"}`. `upnp` reports the LAN-router IGD mapping; `natpmp` reports the VPN-gateway (RFC 6886) mapping. Each has `{enabled, status, ...}` with status one of `disabled`, `discovering`, `mapped`, `failed`, `closing`. |
+| GET    | `/api/worker/usage` | Yes | Cached account-level Claude subscription quota — `{"available", "five_hour"?, "seven_day"?, "seven_day_opus"?, "seven_day_sonnet"?}`. Each window is `{utilization (0–100), resets_at (ISO-8601\|null)}`. `available` is `false` (windows omitted) for API-key workers or before the first poll. Same snapshot pushed live as `worker_usage` over `/ws/output/text`. |
 
 ## Config
 
