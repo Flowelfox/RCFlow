@@ -56,6 +56,7 @@ class SettingsService {
   static const _workersGroupByProjectKey = 'rcflow_workers_group_by_project';
   static const _prFileListModeKey = 'rcflow_pr_file_list_mode';
   static const _prConversationCollapsedKey = 'rcflow_pr_conversation_collapsed';
+  static const _prHiddenReposKey = 'rcflow_pr_hidden_repos';
   static const _sidebarFractionKey = 'rcflow_sidebar_fraction';
   static const _windowBoundsKey = 'rcflow_window_bounds';
   static const _windowMaximizedKey = 'rcflow_window_maximized';
@@ -301,6 +302,13 @@ class SettingsService {
       _prefs.getBool(_prConversationCollapsedKey) ?? false;
   set prConversationCollapsed(bool value) =>
       _prefs.setBool(_prConversationCollapsedKey, value);
+
+  /// Repo slugs ("owner/name") the user has un-checked in the Pull Requests
+  /// repo filter. Persisted so the selection survives a client restart.
+  List<String> get prHiddenRepos =>
+      _prefs.getStringList(_prHiddenReposKey) ?? const [];
+  set prHiddenRepos(List<String> value) =>
+      _prefs.setStringList(_prHiddenReposKey, value);
 
   // ── Desktop window + layout persistence ───────────────────────────────────
 

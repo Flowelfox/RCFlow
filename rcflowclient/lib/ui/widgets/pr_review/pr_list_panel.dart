@@ -42,6 +42,13 @@ class _PrListPanelState extends State<PrListPanel>
     super.initState();
     _roleTabController = TabController(length: 3, vsync: this);
     _roleTabController.addListener(_onTabChanged);
+    // Restore the persisted repo-filter selection (un-checked repos).
+    _hiddenRepos.addAll(context.read<AppState>().settings.prHiddenRepos);
+  }
+
+  /// Persist the repo-filter selection so it survives a client restart.
+  void _persistHiddenRepos() {
+    context.read<AppState>().settings.prHiddenRepos = _hiddenRepos.toList();
   }
 
   /// Index of the "All" tab.
@@ -215,9 +222,9 @@ class _PrListPanelState extends State<PrListPanel>
     return Consumer<AppState>(
       builder: (context, state, _) {
         final repoOptions = _repoOptions(state);
-        // Drop hidden entries for repos that are no longer present so a repo
-        // re-appearing later defaults back to visible.
-        _hiddenRepos.removeWhere((slug) => !repoOptions.contains(slug));
+        // Hidden-repo selections are persisted across restarts, so we keep them
+        // even when a repo is temporarily absent (e.g. PRs not yet synced) —
+        // the choice is restored when the repo reappears.
         return Column(
           children: [
             _buildSearchBar(context, state),
@@ -480,6 +487,7 @@ class _PrListPanelState extends State<PrListPanel>
                           _hiddenRepos.addAll(repoOptions);
                         }
                       });
+                      _persistHiddenRepos();
                       setMenuState(() {});
                     }
 
@@ -491,6 +499,7 @@ class _PrListPanelState extends State<PrListPanel>
                           _hiddenRepos.add(slug);
                         }
                       });
+                      _persistHiddenRepos();
                       setMenuState(() {});
                     }
 
