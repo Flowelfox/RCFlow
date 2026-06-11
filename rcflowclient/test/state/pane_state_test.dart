@@ -683,8 +683,9 @@ void main() {
 
       expect(
         pane.selectedToolMention,
-        'claude_code',
-        reason: 'agent chip must reflect the session agentType after switch',
+        'ClaudeCode',
+        reason: 'agent chip must reflect the session agentType (mapped to its '
+            'display/mention name) after switch',
       );
     });
 
@@ -698,7 +699,7 @@ void main() {
       );
 
       pane.switchSession('s1');
-      expect(pane.selectedToolMention, 'claude_code');
+      expect(pane.selectedToolMention, 'ClaudeCode');
 
       pane.switchSession('s2');
       expect(
@@ -719,13 +720,13 @@ void main() {
       );
 
       pane.switchSession('s1');
-      expect(pane.selectedToolMention, 'claude_code');
+      expect(pane.selectedToolMention, 'ClaudeCode');
 
       pane.switchSession('s2');
-      expect(pane.selectedToolMention, 'codex');
+      expect(pane.selectedToolMention, 'Codex');
 
       pane.switchSession('s3');
-      expect(pane.selectedToolMention, 'claude_code');
+      expect(pane.selectedToolMention, 'ClaudeCode');
     });
 
     test('restores agent chip for a completed session with agentType', () {
@@ -740,7 +741,7 @@ void main() {
 
       expect(
         pane.selectedToolMention,
-        'claude_code',
+        'ClaudeCode',
         reason: 'chip must be restored even for ended sessions',
       );
     });

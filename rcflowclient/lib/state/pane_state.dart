@@ -884,11 +884,15 @@ class PaneState extends ChangeNotifier {
     _projectNameError = null;
 
     // Restore the agent chip from the session's known agent type so that
-    // switching to an existing session (e.g. after reconnect) shows which
-    // agent drove that session without requiring the user to re-select it.
-    // Store the raw internal name (e.g. "claude_code") — display-name mapping
-    // is handled by the input area and badge composer independently.
-    _selectedToolMention = session?.agentType;
+    // switching to an existing session (e.g. after reconnect, or a session
+    // created from a PR) shows which agent drove that session without requiring
+    // the user to re-select it. Store the mention/display form (e.g.
+    // "ClaudeCode", not the raw "claude_code") to match every other code path
+    // that sets this field — the tool chip renders the value verbatim.
+    final sessionAgent = session?.agentType;
+    _selectedToolMention = sessionAgent == null
+        ? null
+        : (kAgentMentionNames[sessionAgent] ?? sessionAgent);
 
     notifyListeners();
 
