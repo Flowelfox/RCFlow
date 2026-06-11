@@ -1373,7 +1373,15 @@ class PaneState extends ChangeNotifier {
     String name,
     Map<String, dynamic>? input, {
     String? displayName,
-  }) => _msg.startToolBlock(name, input, displayName: displayName);
+    bool answered = false,
+    String? answer,
+  }) => _msg.startToolBlock(
+    name,
+    input,
+    displayName: displayName,
+    answered: answered,
+    answer: answer,
+  );
 
   /// Append output text to the current tool block.
   void appendToolOutput(String text, {bool isError = false}) =>
