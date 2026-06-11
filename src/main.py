@@ -240,13 +240,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         interval = max(15, settings.ACCOUNT_USAGE_POLL_INTERVAL_SECONDS)
         max_backoff = 900.0  # cap transient-failure backoff at 15 minutes
         backoff = interval
+        # RCFlow-managed workers store the Claude subscription token in the
+        # managed Claude Code config dir (not ~/.claude); search it first.
+        try:
+            managed_cc_dir = tool_settings.get_config_dir("claude_code")
+        except Exception:
+            managed_cc_dir = None
+        config_dirs = [managed_cc_dir] if managed_cc_dir is not None else None
         while True:
             # Default to the steady cadence; only deviate when the server tells
             # us to (Retry-After) or repeated failures warrant backing off, so
             # we never hammer the endpoint or trip its rate limit.
             delay = float(interval)
             try:
-                token = read_oauth_token()
+                token = read_oauth_token(config_dirs)
                 if token:
                     async with UsageService(token) as svc:
                         windows = await svc.fetch_usage()

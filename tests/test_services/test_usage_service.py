@@ -72,7 +72,39 @@ def test_read_oauth_token_present(tmp_path, monkeypatch):
 
 def test_read_oauth_token_missing_file(tmp_path, monkeypatch):
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "absent"))
+    monkeypatch.setenv("HOME", str(tmp_path / "nohome"))
     assert read_oauth_token() is None
+
+
+def test_read_oauth_token_from_managed_dir(tmp_path, monkeypatch):
+    # Token lives only in RCFlow's managed config dir (not env, not ~/.claude).
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    managed = tmp_path / "managed"
+    managed.mkdir()
+    (managed / ".credentials.json").write_text(
+        json.dumps({"claudeAiOauth": {"accessToken": "managed-tok"}}), encoding="utf-8"
+    )
+    assert read_oauth_token([managed]) == "managed-tok"
+
+
+def test_read_oauth_token_managed_takes_precedence(tmp_path, monkeypatch):
+    # Both managed dir and ~/.claude have a token; managed wins (searched first).
+    home = tmp_path / "home"
+    (home / ".claude").mkdir(parents=True)
+    (home / ".claude" / ".credentials.json").write_text(
+        json.dumps({"claudeAiOauth": {"accessToken": "home-tok"}}), encoding="utf-8"
+    )
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    managed = tmp_path / "managed"
+    managed.mkdir()
+    (managed / ".credentials.json").write_text(
+        json.dumps({"claudeAiOauth": {"accessToken": "managed-tok"}}), encoding="utf-8"
+    )
+    assert read_oauth_token([managed]) == "managed-tok"
+    # Falls back to ~/.claude when no managed dir is given.
+    assert read_oauth_token() == "home-tok"
 
 
 def test_read_oauth_token_api_key_worker(tmp_path, monkeypatch):
@@ -81,6 +113,7 @@ def test_read_oauth_token_api_key_worker(tmp_path, monkeypatch):
     config.mkdir()
     (config / ".credentials.json").write_text(json.dumps({"other": 1}), encoding="utf-8")
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config))
+    monkeypatch.setenv("HOME", str(tmp_path / "nohome"))  # no ~/.claude fallback
     assert read_oauth_token() is None
 
 
@@ -89,6 +122,7 @@ def test_read_oauth_token_malformed_json(tmp_path, monkeypatch):
     config.mkdir()
     (config / ".credentials.json").write_text("{not json", encoding="utf-8")
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config))
+    monkeypatch.setenv("HOME", str(tmp_path / "nohome"))  # no ~/.claude fallback
     assert read_oauth_token() is None
 
 

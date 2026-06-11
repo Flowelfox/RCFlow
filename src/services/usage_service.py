@@ -34,9 +34,12 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 logger = logging.getLogger(__name__)
 
@@ -75,22 +78,35 @@ class UsageServiceError(Exception):
         self.retry_after = retry_after
 
 
-def _credentials_path() -> Path:
-    """Path to Claude Code's credentials file, honouring ``CLAUDE_CONFIG_DIR``."""
-    config_dir = os.environ.get("CLAUDE_CONFIG_DIR") or "~/.claude"
-    return Path(config_dir).expanduser() / ".credentials.json"
+def _candidate_config_dirs(extra: Iterable[Path] | None) -> list[Path]:
+    """Config dirs to search for credentials, in priority order, de-duplicated.
 
-
-def read_oauth_token() -> str | None:
-    """Return the current subscription OAuth access token, or ``None``.
-
-    Reads ``claudeAiOauth.accessToken`` from Claude Code's credentials file
-    (``CLAUDE_CONFIG_DIR`` or ``~/.claude``).  Returns ``None`` — never raises —
-    when the file is missing, unreadable, malformed, or the worker is on API-key
-    auth (no subscription token).  Re-read every poll so token refreshes written
-    by Claude Code are picked up automatically.
+    ``extra`` first (e.g. RCFlow's *managed* Claude Code config dir, where a
+    managed worker actually stores the subscription token — it is **not** in
+    ``~/.claude``), then ``CLAUDE_CONFIG_DIR`` from the environment, then the
+    default ``~/.claude`` used by an externally-installed Claude Code.
     """
-    path = _credentials_path()
+    seen: list[Path] = []
+
+    def add(value: str | Path) -> None:
+        try:
+            resolved = Path(value).expanduser()
+        except (OSError, ValueError):
+            return
+        if resolved not in seen:
+            seen.append(resolved)
+
+    for d in extra or ():
+        add(d)
+    env = os.environ.get("CLAUDE_CONFIG_DIR")
+    if env:
+        add(env)
+    add("~/.claude")
+    return seen
+
+
+def _read_token_from(path: Path) -> str | None:
+    """Read ``claudeAiOauth.accessToken`` from one credentials file, or None."""
     try:
         raw = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
@@ -101,6 +117,24 @@ def read_oauth_token() -> str | None:
         return None
     token = data.get("claudeAiOauth", {}).get("accessToken")
     return token if isinstance(token, str) and token else None
+
+
+def read_oauth_token(config_dirs: Iterable[Path] | None = None) -> str | None:
+    """Return the current subscription OAuth access token, or ``None``.
+
+    Searches each candidate config dir (see :func:`_candidate_config_dirs`) for a
+    ``.credentials.json`` carrying ``claudeAiOauth.accessToken`` and returns the
+    first one found. ``config_dirs`` should include RCFlow's managed Claude Code
+    config dir so managed workers (which keep the token there, not in
+    ``~/.claude``) are covered. Returns ``None`` — never raises — when no
+    candidate has a token (e.g. API-key auth). Re-read every poll so token
+    refreshes written by Claude Code are picked up automatically.
+    """
+    for directory in _candidate_config_dirs(config_dirs):
+        token = _read_token_from(directory / ".credentials.json")
+        if token:
+            return token
+    return None
 
 
 def _parse_retry_after(value: str | None) -> float | None:
