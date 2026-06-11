@@ -26,6 +26,7 @@ class _OutputDisplayState extends State<OutputDisplay> {
   String _tip = getRandomTip();
   int _lastRevision = 0;
   int _lastMessageCount = 0;
+  String? _lastSessionId;
   Timer? _loadMoreDebounce;
 
   /// True when auto-scroll is active (user is at/near the bottom).
@@ -133,6 +134,23 @@ class _OutputDisplayState extends State<OutputDisplay> {
         Consumer<PaneState>(
           builder: (context, pane, _) {
             final msgs = pane.messages;
+
+            // On opening/switching to a session, always start pinned to the
+            // newest message: reset the stuck flag (it may have been cleared by
+            // scrolling up in the previous session) and snap to the bottom so a
+            // stale scroll offset from the prior session can't show a jump.
+            if (pane.sessionId != _lastSessionId) {
+              _lastSessionId = pane.sessionId;
+              _isStuck = true;
+              _hasUnseenMessages = false;
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (_scrollController.hasClients) {
+                  _scrollController.jumpTo(
+                    _scrollController.position.minScrollExtent,
+                  );
+                }
+              });
+            }
 
             final rev = pane.revision;
             final contentChanged = rev != _lastRevision;
