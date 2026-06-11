@@ -36,6 +36,9 @@ GITHUB_API_VERSION = "2022-11-28"
 PR_ROLE_QUALIFIERS: dict[str, str] = {
     "for_me": "review-requested:@me",
     "created": "author:@me",
+    # "all" applies no @me qualifier — every PR regardless of the current user.
+    # It MUST be repo-scoped (see list_pull_requests) so the search stays bounded.
+    "all": "",
 }
 
 # Classic-PAT scopes the PR-review feature needs, in display order. ``alt`` is a
@@ -409,9 +412,7 @@ class GitHubService:
         user = resp.json()
         return {"login": user.get("login"), "scopes": scopes, "fine_grained": fine_grained}
 
-    async def list_pull_requests(
-        self, role: str, repo: str | None = None, state: str = "open"
-    ) -> list[dict[str, Any]]:
+    async def list_pull_requests(self, role: str, repo: str | None = None, state: str = "open") -> list[dict[str, Any]]:
         """List pull requests for a listing bucket (most-recently-updated first).
 
         ``role`` is ``"for_me"`` (review-requested) or ``"created"`` (authored).
@@ -427,7 +428,11 @@ class GitHubService:
             raise GitHubServiceError(f"Unknown PR role: {role!r}")
         if state not in ("open", "closed", "merged"):
             raise GitHubServiceError(f"Unknown PR state: {state!r}")
-        query = f"is:pr is:{state} {qualifier}"
+        # The "all" bucket has no @me qualifier, so without a repo it would search
+        # every PR on GitHub — require a repo scope to keep it bounded.
+        if not qualifier and not repo:
+            raise GitHubServiceError("the 'all' PR role requires a repo scope")
+        query = f"is:pr is:{state} {qualifier}".strip()
         if repo:
             query += f" repo:{repo}"
 
@@ -582,9 +587,7 @@ class GitHubService:
         ``POST /repos/{o}/{r}/issues/{n}/comments``. Returns the created comment
         normalised like :meth:`list_issue_comments` entries.
         """
-        c = await self._rest(
-            "POST", f"/repos/{owner}/{repo}/issues/{number}/comments", json={"body": body}
-        )
+        c = await self._rest("POST", f"/repos/{owner}/{repo}/issues/{number}/comments", json={"body": body})
         user = c.get("user") or {}
         return {
             "id": c.get("id"),

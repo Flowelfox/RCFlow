@@ -40,11 +40,49 @@ class _PrListPanelState extends State<PrListPanel>
   @override
   void initState() {
     super.initState();
-    _roleTabController = TabController(length: 2, vsync: this);
+    _roleTabController = TabController(length: 3, vsync: this);
+    _roleTabController.addListener(_onTabChanged);
+  }
+
+  /// Index of the "All" tab.
+  static const _allTabIndex = 2;
+  bool get _isAllTab => _roleTabController.index == _allTabIndex;
+
+  /// When the user lands on the "All" tab, fetch every PR (any author) in the
+  /// repos already cached for each worker — the cheap For me / Owned syncs don't
+  /// cover PRs the current user isn't attached to.
+  void _onTabChanged() {
+    if (_roleTabController.indexIsChanging) return;
+    setState(() {}); // refresh refresh-button target / chip behaviour
+    if (_isAllTab && mounted) {
+      _syncAll(context.read<AppState>());
+    }
+  }
+
+  /// Sync the "all" bucket (every PR, any author) for the active states across
+  /// all connected workers. Best-effort, quiet.
+  Future<void> _syncAll(AppState state) async {
+    final workers = state.workerConfigs
+        .map((c) => state.getWorker(c.id))
+        .where((w) => w != null && w.isConnected);
+    final states = _states.isEmpty
+        ? const ['open', 'merged', 'closed']
+        : _states.toList();
+    for (final w in workers) {
+      for (final st in states) {
+        try {
+          await w!.ws.syncGithubPrs(role: 'all', state: st, force: true);
+        } catch (_) {}
+      }
+      try {
+        w!.ws.listGithubPrs();
+      } catch (_) {}
+    }
   }
 
   @override
   void dispose() {
+    _roleTabController.removeListener(_onTabChanged);
     _roleTabController.dispose();
     _searchController.dispose();
     super.dispose();
@@ -84,7 +122,12 @@ class _PrListPanelState extends State<PrListPanel>
         for (final st in states) {
           try {
             // Manual refresh → force, bypassing the 60s auto-sync throttle.
-            final result = await w!.ws.syncGithubPrs(state: st, force: true);
+            // On the All tab, refresh the all-bucket (every author) too.
+            final result = await w!.ws.syncGithubPrs(
+              role: _isAllTab ? 'all' : null,
+              state: st,
+              force: true,
+            );
             total += (result['synced'] as int?) ?? 0;
           } catch (_) {
             workerFailed = true;
@@ -122,7 +165,11 @@ class _PrListPanelState extends State<PrListPanel>
         .where((w) => w != null && w.isConnected);
     for (final w in workers) {
       try {
-        await w!.ws.syncGithubPrs(state: prState, force: true);
+        await w!.ws.syncGithubPrs(
+          role: _isAllTab ? 'all' : null,
+          state: prState,
+          force: true,
+        );
         w.ws.listGithubPrs();
       } catch (_) {}
     }
@@ -197,6 +244,7 @@ class _PrListPanelState extends State<PrListPanel>
                 tabs: const [
                   Tab(text: 'For me'),
                   Tab(text: 'Owned'),
+                  Tab(text: 'All'),
                 ],
               ),
             ),
@@ -207,6 +255,7 @@ class _PrListPanelState extends State<PrListPanel>
                 children: [
                   _buildRoleList(context, state, 'for_me'),
                   _buildRoleList(context, state, 'created'),
+                  _buildRoleList(context, state, 'all'),
                 ],
               ),
             ),
@@ -593,11 +642,13 @@ class _PrListPanelState extends State<PrListPanel>
   }
 
   Widget _buildRoleList(BuildContext context, AppState state, String role) {
-    final prs = _filterPrs(
-      state.dedupedGithubPrs
-          .where((d) => d.sources.any((s) => s.role == role))
-          .toList(),
-    );
+    // The "All" tab is not filtered by the current user — show every cached PR.
+    final source = role == 'all'
+        ? state.dedupedGithubPrs.toList()
+        : state.dedupedGithubPrs
+              .where((d) => d.sources.any((s) => s.role == role))
+              .toList();
+    final prs = _filterPrs(source);
 
     if (prs.isEmpty) {
       return _buildEmptyState(context, role);
@@ -631,7 +682,9 @@ class _PrListPanelState extends State<PrListPanel>
                   ? 'No pull requests match your search'
                   : role == 'for_me'
                   ? 'No pull requests for you to review'
-                  : 'No pull requests you created',
+                  : role == 'created'
+                  ? 'No pull requests you created'
+                  : 'No pull requests in your repos yet — refresh to load them',
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: context.appColors.textSecondary,

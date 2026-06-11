@@ -13,6 +13,7 @@ and note which component is affected where it matters.
 ## [Unreleased]
 
 ### Added
+- **"All" tab in Pull Requests** — alongside "For me" and "Owned", a new All tab lists every pull request (any author) in the repositories you already work in, so you can browse all open / merged / closed PRs without them being tied to your account (Backend + Client)
 - **Install the `rcflow` terminal command from the worker app** — the worker's settings panel now has an "Install CLI" button and a green/grey indicator showing whether the `rcflow` command is set up. This matters most after installing via the macOS .dmg, which previously left no way to run `rcflow` in a terminal; one click wires it up (and tells you if you still need to add it to your PATH) (Backend)
 - **See your Claude subscription usage at a glance** — each session header now shows a small chip with your account's 5-hour and 7-day usage (used %), next to the token counter. Hover it for the exact percentages, when each window resets, and per-model usage when available. Shown only for workers signed in with a Claude subscription (Backend + Client)
 - **Right-click a pull request in the sidebar** — a context menu with "AI review" and "Open on GitHub" (Client)

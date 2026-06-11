@@ -1,5 +1,5 @@
 ---
-updated: 2026-06-05
+updated: 2026-06-11
 ---
 
 # GitHub Integration — PR Reviews
@@ -76,7 +76,7 @@ All under `/api/integrations/github/`, `X-API-Key` required. See [HTTP API](http
 | GET  | `/status`          | Token configured + validity preflight for the saved token (`{configured, valid, login, scopes}`) |
 | POST | `/status/check`    | Validate an unsaved token `{token}` → same shape as `/status` (settings live preview) |
 | GET/PUT | `/repo-defaults` | This worker's default-action repos; PUT `{owner, repo, is_default}` sets/clears (cross-worker action routing) |
-| POST | `/sync`            | Re-sync PRs for `?state=open` (default) / `closed` / `merged`, `?role=for_me\|created` (default both) → `{synced, archived_pruned, configured}`. **Open** PRs are fully enriched (detail + GraphQL review/mergeable status); **merged/closed** are listed lightly (no per-PR detail/status) and only fetched on demand when the client filters for them, keeping refresh fast. No token → no-op. `?force=` bypasses the 60s throttle |
+| POST | `/sync`            | Re-sync PRs for `?state=open` (default) / `closed` / `merged`, `?role=for_me\|created\|all` (default both for_me+created). `all` = every PR regardless of author, scoped to the repos already cached for this worker (plus `GITHUB_DEFAULT_REPO`) and capped, so the `is:pr` search stays bounded → `{synced, archived_pruned, configured}`. **Open** PRs are fully enriched (detail + GraphQL review/mergeable status); **merged/closed** are listed lightly (no per-PR detail/status) and only fetched on demand when the client filters for them, keeping refresh fast. No token → no-op. `?force=` bypasses the 60s throttle |
 | GET  | `/prs`             | List cached PRs (`?role=`, `?state=`, `?q=`) → `{prs, total}` |
 | GET  | `/prs/{id}`        | Single cached PR by local UUID |
 | GET  | `/prs/{id}/files`  | Live changed files, each with a per-file unified-diff `patch` |
@@ -112,6 +112,15 @@ writable actions locally. Writable actions (resolve-conflicts / fix) route to a
 worker via per-worker `/repo-defaults` flags: 1 default → use it, 0 → ask, ≥2 →
 clear all + ask. `/sync?force=` bypasses the 60s auto-sync recency throttle
 (manual refresh forces; auto skips when synced `<60s` ago).
+
+**Listing buckets (tabs).** Each cached PR stores a single `role`: `for_me`
+(review-requested), `created` (authored), or `all` (every PR, any author). The
+client shows three tabs — For me / Owned / All. "For me" and "Owned" filter by
+`role`; **"All" ignores role and shows every cached PR**. The `all` sync is
+opt-in (triggered when the user opens the All tab or refreshes there), never at
+startup, and is repo-scoped to keep it bounded. To avoid the All bucket clobbering
+the other tabs, an `all` upsert never downgrades a row already tagged
+`for_me`/`created` (the All tab shows it anyway).
 
 Read = GraphQL (threads); writes = REST (review, reply, merge); thread
 resolution = GraphQL mutation. The pending review is held locally in

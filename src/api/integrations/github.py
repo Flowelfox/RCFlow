@@ -162,6 +162,11 @@ async def _upsert_prs(
 
         if existing:
             for field in _fields:
+                # Don't let an "all"-bucket sync downgrade a PR that's already
+                # tagged for_me/created — those drive the For me / Owned tabs,
+                # while the All tab ignores role and shows everything anyway.
+                if field == "role" and data["role"] == "all" and existing.role in ("for_me", "created"):
+                    continue
                 setattr(existing, field, data[field])
             existing.synced_at = now
             results.append(existing)
@@ -217,8 +222,7 @@ async def _persist_synced_prs(
     deleted_ids: list[str] = []
     if archived_repos:
         conds = [
-            and_(GitHubPRModel.repo_owner == owner, GitHubPRModel.repo_name == name)
-            for owner, name in archived_repos
+            and_(GitHubPRModel.repo_owner == owner, GitHubPRModel.repo_name == name) for owner, name in archived_repos
         ]
         stmt = select(GitHubPRModel).where(GitHubPRModel.backend_id == backend_id, or_(*conds))
         for row in (await db.execute(stmt)).scalars().all():
@@ -227,6 +231,21 @@ async def _persist_synced_prs(
         await db.commit()
 
     return upserted, deleted_ids
+
+
+async def _cached_repo_slugs(db: AsyncSession, backend_id: str) -> list[str]:
+    """Distinct ``owner/name`` repo slugs already cached for this worker.
+
+    Used to bound the "all" bucket: it fetches every PR (any author) in the
+    repos the user already works in, rather than searching all of GitHub.
+    """
+    stmt = (
+        select(GitHubPRModel.repo_owner, GitHubPRModel.repo_name)
+        .where(GitHubPRModel.backend_id == backend_id)
+        .distinct()
+    )
+    rows = (await db.execute(stmt)).all()
+    return [f"{owner}/{name}" for owner, name in rows if owner and name]
 
 
 # ---------------------------------------------------------------------------
@@ -334,12 +353,16 @@ async def list_repo_defaults(request: Request) -> dict[str, Any]:
     db_factory = request.app.state.db_session_factory
     async with db_factory() as db:
         rows = (
-            await db.execute(
-                select(GitHubRepoDefaultModel).where(
-                    GitHubRepoDefaultModel.backend_id == settings.RCFLOW_BACKEND_ID
+            (
+                await db.execute(
+                    select(GitHubRepoDefaultModel).where(
+                        GitHubRepoDefaultModel.backend_id == settings.RCFLOW_BACKEND_ID
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
     return {"defaults": [{"owner": r.repo_owner, "repo": r.repo_name} for r in rows]}
 
 
@@ -398,7 +421,12 @@ async def set_repo_default(request: Request, body: RepoDefaultRequest) -> dict[s
 )
 async def sync_github_prs(
     request: Request,
-    role: str | None = Query(None, description="Limit sync to a single bucket: for_me or created"),
+    role: str | None = Query(
+        None,
+        description="Limit sync to a single bucket: for_me, created, or all "
+        "(every PR regardless of author, scoped to the repos already cached for "
+        "this worker plus GITHUB_DEFAULT_REPO)",
+    ),
     state: str = Query("open", description="PR state to fetch: open (default), closed or merged"),
     force: bool = Query(False, description="Bypass the 60s recency throttle (manual refresh)"),
 ) -> dict[str, Any]:
@@ -429,13 +457,27 @@ async def sync_github_prs(
                 return {"synced": 0, "archived_pruned": 0, "configured": True, "skipped": True}
 
     roles = (role,) if role else _DEFAULT_SYNC_ROLES
-    repo = settings.GITHUB_DEFAULT_REPO or None
+    default_repo = settings.GITHUB_DEFAULT_REPO or None
+
+    # The "all" bucket (every PR, any author) is scoped to the repos already
+    # cached for this worker plus the default repo, capped, so it stays bounded.
+    all_repos: list[str] = []
+    if "all" in roles:
+        async with db_factory() as db:
+            all_repos = await _cached_repo_slugs(db, settings.RCFLOW_BACKEND_ID)
+        if default_repo and default_repo not in all_repos:
+            all_repos.append(default_repo)
+        all_repos = all_repos[:25]
 
     svc = _get_github_service(request)
     parsed: list[dict[str, Any]] = []
     try:
         for r in roles:
-            parsed.extend(await svc.list_pull_requests(r, repo=repo, state=state))
+            if r == "all":
+                for rp in all_repos:
+                    parsed.extend(await svc.list_pull_requests("all", repo=rp, state=state))
+            else:
+                parsed.extend(await svc.list_pull_requests(r, repo=default_repo, state=state))
     except GitHubServiceError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     finally:
@@ -761,9 +803,7 @@ async def get_github_pr_conversation(pr_id: str, request: Request) -> dict[str, 
         "GITHUB_TOKEN."
     ),
 )
-async def post_github_pr_conversation(
-    pr_id: str, body: IssueCommentRequest, request: Request
-) -> dict[str, Any]:
+async def post_github_pr_conversation(pr_id: str, body: IssueCommentRequest, request: Request) -> dict[str, Any]:
     """Post a general comment on a PR's conversation and return it."""
     text = body.body.strip()
     if not text:

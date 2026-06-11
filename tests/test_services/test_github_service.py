@@ -125,7 +125,18 @@ class TestParsers:
 
 class TestService:
     def test_role_qualifiers(self):
-        assert PR_ROLE_QUALIFIERS == {"for_me": "review-requested:@me", "created": "author:@me"}
+        assert PR_ROLE_QUALIFIERS == {
+            "for_me": "review-requested:@me",
+            "created": "author:@me",
+            "all": "",
+        }
+
+    @pytest.mark.asyncio
+    async def test_all_role_requires_repo_scope(self):
+        svc = GitHubService(token="x")
+        with pytest.raises(GitHubServiceError, match="repo scope"):
+            await svc.list_pull_requests("all")
+        await svc.aclose()
 
     @pytest.mark.asyncio
     async def test_test_token(self):
