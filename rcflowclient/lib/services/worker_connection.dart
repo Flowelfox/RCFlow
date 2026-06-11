@@ -416,6 +416,18 @@ class WorkerConnection extends ChangeNotifier {
           existing.scheduledWakes.isNotEmpty) {
         parsed = parsed.copyWith(scheduledWakes: existing.scheduledWakes);
       }
+      // A bulk list refresh must never resurrect a session the client already
+      // knows is terminal (e.g. one the user just ended) back to a running
+      // state — the list can race an in-flight server-side archive, which is
+      // what made ending a session feel like it needed two clicks. An explicit
+      // restore arrives as a single session_update (handled elsewhere), not a
+      // list, so this only blocks stale resurrection.
+      const terminalStatuses = {'completed', 'failed', 'cancelled'};
+      if (existing != null &&
+          terminalStatuses.contains(existing.status) &&
+          !terminalStatuses.contains(parsed.status)) {
+        parsed = parsed.copyWith(status: existing.status);
+      }
       // Server worker badge carries backend_id as label. Replace with the
       // user-configured worker name — same replacement that session_update
       // applies. Archived sessions never receive a session_update, so this

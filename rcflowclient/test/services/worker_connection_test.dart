@@ -320,6 +320,20 @@ void main() {
       expect(count, 1);
     });
 
+    test('does not resurrect a locally-terminal session to active', () async {
+      // Session is locally cancelled (e.g. the user just ended it).
+      ws.injectOutput(_sessionList([_sessionJson('s1', status: 'cancelled')]));
+      await Future.microtask(() {});
+      expect(conn.sessions.first.status, 'cancelled');
+
+      // A racing list refresh still reports it active (server archive in
+      // flight) — it must NOT flip back to active (that caused the two-click
+      // end bug).
+      ws.injectOutput(_sessionList([_sessionJson('s1', status: 'active')]));
+      await Future.microtask(() {});
+      expect(conn.sessions.first.status, 'cancelled');
+    });
+
     test('sorts by sort_order ascending then createdAt desc', () async {
       // s2 has lower sort_order so should come first
       ws.injectOutput(
