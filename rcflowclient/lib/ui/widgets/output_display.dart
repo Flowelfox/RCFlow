@@ -34,9 +34,6 @@ class _OutputDisplayState extends State<OutputDisplay> {
   /// True when new content arrived while the user was unstuck.
   bool _hasUnseenMessages = false;
 
-  /// Guards against re-sticking during load-more scroll restoration.
-  bool _restoringScroll = false;
-
   @override
   void initState() {
     super.initState();
@@ -52,10 +49,11 @@ class _OutputDisplayState extends State<OutputDisplay> {
 
   void _onScroll() {
     if (!_scrollController.hasClients) return;
-    if (_restoringScroll) return;
     final pos = _scrollController.position;
 
-    final atBottom = pos.pixels >= pos.maxScrollExtent - 80;
+    // Bottom-anchored list (reverse: true) → the newest message lives at
+    // offset 0, and older history extends toward maxScrollExtent.
+    final atBottom = pos.pixels <= pos.minScrollExtent + 80;
 
     if (atBottom && !_isStuck) {
       setState(() {
@@ -66,32 +64,18 @@ class _OutputDisplayState extends State<OutputDisplay> {
       setState(() => _isStuck = false);
     }
 
-    // Scroll-to-top: trigger loading older messages
-    if (pos.pixels <= 50) {
+    // Near the far (oldest) end: load older messages. Because older history is
+    // inserted beyond the current viewport (not above it), no scroll-position
+    // restoration is needed — the visible messages stay put.
+    if (pos.pixels >= pos.maxScrollExtent - 50) {
       _loadMoreDebounce?.cancel();
       _loadMoreDebounce = Timer(const Duration(milliseconds: 200), () {
         final pane = context.read<PaneState>();
         if (pane.hasMoreMessages && !pane.loadingMore) {
-          _loadMoreMessages(pane);
+          pane.loadOlderMessages();
         }
       });
     }
-  }
-
-  Future<void> _loadMoreMessages(PaneState pane) async {
-    if (!_scrollController.hasClients) return;
-    final oldMaxExtent = _scrollController.position.maxScrollExtent;
-    final oldPixels = _scrollController.position.pixels;
-
-    await pane.loadOlderMessages();
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_scrollController.hasClients) return;
-      final newMaxExtent = _scrollController.position.maxScrollExtent;
-      _restoringScroll = true;
-      _scrollController.jumpTo(oldPixels + (newMaxExtent - oldMaxExtent));
-      _restoringScroll = false;
-    });
   }
 
   void _scrollToBottom({bool animate = false}) {
@@ -102,14 +86,16 @@ class _OutputDisplayState extends State<OutputDisplay> {
         _hasUnseenMessages = false;
       });
     }
+    // Bottom == offset 0 in a reversed list.
+    final target = _scrollController.position.minScrollExtent;
     if (animate) {
       _scrollController.animateTo(
-        _scrollController.position.maxScrollExtent,
+        target,
         duration: const Duration(milliseconds: 250),
         curve: Curves.easeOut,
       );
     } else {
-      _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
+      _scrollController.jumpTo(target);
     }
   }
 
@@ -314,12 +300,17 @@ class _OutputDisplayState extends State<OutputDisplay> {
               // so the rawMarkdown for the copy action is unambiguous.
               // The previous outer SelectionScope had no idea which
               // message a selection came from and copied plain text only.
+              // Bottom-anchored: reverse the list so a session opens already at
+              // the newest message (offset 0) with no scroll animation. Index 0
+              // is the newest message; the load-more / "beginning of session"
+              // footer sits at the far (oldest) end.
               ListView.builder(
                 controller: _scrollController,
+                reverse: true,
                 padding: const EdgeInsets.fromLTRB(kSpace4, kSpace2, kSpace4, kSpace4),
                 itemCount: msgs.length + 1,
                 itemBuilder: (context, index) {
-                  if (index == 0) {
+                  if (index == msgs.length) {
                     if (hasMore) {
                       return _buildLoadMoreIndicator(
                         loading: loadingMore,
@@ -339,7 +330,7 @@ class _OutputDisplayState extends State<OutputDisplay> {
                       ),
                     );
                   }
-                  final msg = msgs[index - 1];
+                  final msg = msgs[msgs.length - 1 - index];
                   // ObjectKey by message identity — DisplayMessage instances
                   // are stable across streaming (the same object grows in
                   // place), so this lets Flutter reuse the existing element
