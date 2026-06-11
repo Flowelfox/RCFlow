@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+from pathlib import Path
 
 import httpx
 import pytest
@@ -60,70 +62,84 @@ def test_parse_usage_non_dict():
     }
 
 
-def test_read_oauth_token_present(tmp_path, monkeypatch):
-    config = tmp_path / "cfg"
-    config.mkdir()
-    (config / ".credentials.json").write_text(
-        json.dumps({"claudeAiOauth": {"accessToken": "tok-123"}}), encoding="utf-8"
+def _no_keychain(monkeypatch):
+    """Force the macOS Keychain path to be a no-op (tests run on Linux/CI)."""
+    monkeypatch.setattr(usage_service.sys, "platform", "linux")
+
+
+def test_read_oauth_token_from_managed_file(tmp_path, monkeypatch):
+    _no_keychain(monkeypatch)
+    managed = tmp_path / "managed"
+    managed.mkdir()
+    (managed / ".credentials.json").write_text(
+        json.dumps({"claudeAiOauth": {"accessToken": "managed-tok"}}), encoding="utf-8"
     )
-    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config))
-    assert read_oauth_token() == "tok-123"
+    assert read_oauth_token(managed) == "managed-tok"
+
+
+def test_read_oauth_token_none_config_dir(monkeypatch):
+    _no_keychain(monkeypatch)
+    assert read_oauth_token(None) is None
 
 
 def test_read_oauth_token_missing_file(tmp_path, monkeypatch):
-    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "absent"))
-    monkeypatch.setenv("HOME", str(tmp_path / "nohome"))
-    assert read_oauth_token() is None
-
-
-def test_read_oauth_token_from_managed_dir(tmp_path, monkeypatch):
-    # Token lives only in RCFlow's managed config dir (not env, not ~/.claude).
-    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
-    monkeypatch.setenv("HOME", str(tmp_path / "home"))
-    managed = tmp_path / "managed"
-    managed.mkdir()
-    (managed / ".credentials.json").write_text(
-        json.dumps({"claudeAiOauth": {"accessToken": "managed-tok"}}), encoding="utf-8"
-    )
-    assert read_oauth_token([managed]) == "managed-tok"
-
-
-def test_read_oauth_token_managed_takes_precedence(tmp_path, monkeypatch):
-    # Both managed dir and ~/.claude have a token; managed wins (searched first).
-    home = tmp_path / "home"
-    (home / ".claude").mkdir(parents=True)
-    (home / ".claude" / ".credentials.json").write_text(
-        json.dumps({"claudeAiOauth": {"accessToken": "home-tok"}}), encoding="utf-8"
-    )
-    monkeypatch.setenv("HOME", str(home))
-    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
-    managed = tmp_path / "managed"
-    managed.mkdir()
-    (managed / ".credentials.json").write_text(
-        json.dumps({"claudeAiOauth": {"accessToken": "managed-tok"}}), encoding="utf-8"
-    )
-    assert read_oauth_token([managed]) == "managed-tok"
-    # Falls back to ~/.claude when no managed dir is given.
-    assert read_oauth_token() == "home-tok"
+    _no_keychain(monkeypatch)
+    assert read_oauth_token(tmp_path / "absent") is None
 
 
 def test_read_oauth_token_api_key_worker(tmp_path, monkeypatch):
-    # Credentials file exists but has no claudeAiOauth (API-key auth).
-    config = tmp_path / "cfg"
-    config.mkdir()
-    (config / ".credentials.json").write_text(json.dumps({"other": 1}), encoding="utf-8")
-    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config))
-    monkeypatch.setenv("HOME", str(tmp_path / "nohome"))  # no ~/.claude fallback
-    assert read_oauth_token() is None
+    # File exists but has no claudeAiOauth (API-key auth) → no subscription token.
+    _no_keychain(monkeypatch)
+    managed = tmp_path / "cfg"
+    managed.mkdir()
+    (managed / ".credentials.json").write_text(json.dumps({"other": 1}), encoding="utf-8")
+    assert read_oauth_token(managed) is None
 
 
 def test_read_oauth_token_malformed_json(tmp_path, monkeypatch):
-    config = tmp_path / "cfg"
-    config.mkdir()
-    (config / ".credentials.json").write_text("{not json", encoding="utf-8")
-    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config))
-    monkeypatch.setenv("HOME", str(tmp_path / "nohome"))  # no ~/.claude fallback
-    assert read_oauth_token() is None
+    _no_keychain(monkeypatch)
+    managed = tmp_path / "cfg"
+    managed.mkdir()
+    (managed / ".credentials.json").write_text("{not json", encoding="utf-8")
+    assert read_oauth_token(managed) is None
+
+
+def test_keychain_service_name_is_sha256_prefixed():
+    config = Path("/Users/me/.local/share/rcflow/tools/claude-code/config")
+    digest = hashlib.sha256(str(config).encode()).hexdigest()[:8]
+    assert usage_service._keychain_service(config) == f"Claude Code-credentials-{digest}"
+
+
+def test_read_oauth_token_from_keychain(tmp_path, monkeypatch):
+    # macOS: no file, token comes from `security find-generic-password -w`.
+    monkeypatch.setattr(usage_service.sys, "platform", "darwin")
+    managed = tmp_path / "managed"
+    managed.mkdir()  # no .credentials.json
+
+    class _Proc:
+        returncode = 0
+        stdout = json.dumps({"claudeAiOauth": {"accessToken": "keychain-tok"}})
+
+    def fake_run(argv, **kwargs):
+        assert argv[0] == "/usr/bin/security"
+        assert usage_service._keychain_service(managed) in argv
+        return _Proc()
+
+    monkeypatch.setattr(usage_service.subprocess, "run", fake_run)
+    assert read_oauth_token(managed) == "keychain-tok"
+
+
+def test_read_oauth_token_keychain_failure(tmp_path, monkeypatch):
+    monkeypatch.setattr(usage_service.sys, "platform", "darwin")
+    managed = tmp_path / "managed"
+    managed.mkdir()
+
+    class _Proc:
+        returncode = 44  # e.g. item not found / interaction not allowed
+        stdout = ""
+
+    monkeypatch.setattr(usage_service.subprocess, "run", lambda *a, **k: _Proc())
+    assert read_oauth_token(managed) is None
 
 
 @pytest.mark.asyncio

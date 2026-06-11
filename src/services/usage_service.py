@@ -30,16 +30,17 @@ Usage::
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
-import os
-from pathlib import Path
+import subprocess
+import sys
 from typing import TYPE_CHECKING, Any
 
 import httpx
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -78,39 +79,8 @@ class UsageServiceError(Exception):
         self.retry_after = retry_after
 
 
-def _candidate_config_dirs(extra: Iterable[Path] | None) -> list[Path]:
-    """Config dirs to search for credentials, in priority order, de-duplicated.
-
-    ``extra`` first (e.g. RCFlow's *managed* Claude Code config dir, where a
-    managed worker actually stores the subscription token — it is **not** in
-    ``~/.claude``), then ``CLAUDE_CONFIG_DIR`` from the environment, then the
-    default ``~/.claude`` used by an externally-installed Claude Code.
-    """
-    seen: list[Path] = []
-
-    def add(value: str | Path) -> None:
-        try:
-            resolved = Path(value).expanduser()
-        except (OSError, ValueError):
-            return
-        if resolved not in seen:
-            seen.append(resolved)
-
-    for d in extra or ():
-        add(d)
-    env = os.environ.get("CLAUDE_CONFIG_DIR")
-    if env:
-        add(env)
-    add("~/.claude")
-    return seen
-
-
-def _read_token_from(path: Path) -> str | None:
-    """Read ``claudeAiOauth.accessToken`` from one credentials file, or None."""
-    try:
-        raw = path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
-        return None
+def _token_from_json(raw: str) -> str | None:
+    """Extract ``claudeAiOauth.accessToken`` from a credentials JSON blob."""
     try:
         data = json.loads(raw)
     except json.JSONDecodeError:
@@ -119,22 +89,66 @@ def _read_token_from(path: Path) -> str | None:
     return token if isinstance(token, str) and token else None
 
 
-def read_oauth_token(config_dirs: Iterable[Path] | None = None) -> str | None:
-    """Return the current subscription OAuth access token, or ``None``.
+def _read_token_from_file(config_dir: Path) -> str | None:
+    """Read the token from ``<config_dir>/.credentials.json`` (Linux/Windows)."""
+    try:
+        raw = (config_dir / ".credentials.json").read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+    return _token_from_json(raw)
 
-    Searches each candidate config dir (see :func:`_candidate_config_dirs`) for a
-    ``.credentials.json`` carrying ``claudeAiOauth.accessToken`` and returns the
-    first one found. ``config_dirs`` should include RCFlow's managed Claude Code
-    config dir so managed workers (which keep the token there, not in
-    ``~/.claude``) are covered. Returns ``None`` — never raises — when no
-    candidate has a token (e.g. API-key auth). Re-read every poll so token
-    refreshes written by Claude Code are picked up automatically.
+
+def _keychain_service(config_dir: Path) -> str:
+    """Service name Claude Code uses in the macOS login Keychain for ``config_dir``.
+
+    Claude Code (macOS) stores credentials in the login Keychain rather than a
+    file, under ``Claude Code-credentials-<hash>`` where ``<hash>`` is the first
+    8 hex chars of the SHA-256 of the ``CLAUDE_CONFIG_DIR`` path.
     """
-    for directory in _candidate_config_dirs(config_dirs):
-        token = _read_token_from(directory / ".credentials.json")
-        if token:
-            return token
-    return None
+    digest = hashlib.sha256(str(config_dir).encode("utf-8")).hexdigest()[:8]
+    return f"Claude Code-credentials-{digest}"
+
+
+def _read_token_from_keychain(config_dir: Path) -> str | None:
+    """Read the managed Claude Code token from the macOS login Keychain.
+
+    No-op off macOS. The worker may get a one-time Keychain authorisation prompt
+    the first time it reads the item Claude Code created (then "Always Allow"
+    caches it). Returns ``None`` on any error.
+    """
+    if sys.platform != "darwin":
+        return None
+    service = _keychain_service(config_dir)
+    try:
+        proc = subprocess.run(
+            ["/usr/bin/security", "find-generic-password", "-s", service, "-w"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    raw = proc.stdout.strip()
+    return _token_from_json(raw) if raw else None
+
+
+def read_oauth_token(config_dir: Path | None) -> str | None:
+    """Return the RCFlow-managed Claude Code subscription token, or ``None``.
+
+    ``config_dir`` is RCFlow's **managed** Claude Code config dir
+    (``CLAUDE_CONFIG_DIR`` for the managed agent). The token lives either in a
+    ``.credentials.json`` file there (Linux/Windows) or in the macOS login
+    Keychain keyed by that dir (macOS). Only the managed agent is read — never an
+    external ``~/.claude`` login, which may be a different account. Returns
+    ``None`` (never raises) when no managed subscription token is present, e.g.
+    API-key auth. Re-read every poll so token rotations are picked up.
+    """
+    if config_dir is None:
+        return None
+    return _read_token_from_file(config_dir) or _read_token_from_keychain(config_dir)
 
 
 def _parse_retry_after(value: str | None) -> float | None:
