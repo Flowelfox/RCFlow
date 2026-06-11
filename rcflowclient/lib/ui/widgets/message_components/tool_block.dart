@@ -5,6 +5,8 @@ import '../../../models/ws_messages.dart';
 import '../../../state/pane_state.dart';
 import '../../../theme.dart';
 import '../../../theme/spacing.dart';
+import '../../utils/markdown_copy_menu.dart';
+import '../copy_icon_button.dart';
 import '../diff/diff_viewer.dart';
 
 class ToolBlock extends StatelessWidget {
@@ -180,6 +182,15 @@ class ToolBlock extends StatelessWidget {
                         ),
                       ),
                     ],
+                    if (expanded && output.isNotEmpty) ...[
+                      SizedBox(width: kGapTight),
+                      CopyIconButton(
+                        tooltip: 'Copy output',
+                        iconSize: 13,
+                        onCopy: () =>
+                            writeRichClipboard(html: '', plain: output),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -188,7 +199,7 @@ class ToolBlock extends StatelessWidget {
               Container(
                 width: double.infinity,
                 padding: EdgeInsets.fromLTRB(12, 0, 12, 10),
-                child: Text(
+                child: SelectableText(
                   output,
                   style: TextStyle(
                     color: isError
