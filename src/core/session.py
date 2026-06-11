@@ -96,6 +96,9 @@ class ActiveSession:
         self.session_type = session_type
         self.status = SessionStatus.CREATED
         self._activity_state = ActivityState.IDLE
+        # Status to restore after the session unblocks from waiting on a user
+        # answer (see :meth:`begin_input_wait` / :meth:`end_input_wait`).
+        self._status_before_input_wait: SessionStatus | None = None
         self.created_at = datetime.now(UTC)
         self.ended_at: datetime | None = None
         self.last_activity_at: datetime = datetime.now(UTC)
@@ -648,6 +651,40 @@ class ActiveSession:
         self._activity_state = ActivityState.IDLE
         self.paused_at = None
         self.paused_reason = None
+        self.last_activity_at = datetime.now(UTC)
+        self.mark_dirty()
+        if self._on_update:
+            self._on_update()
+
+    def begin_input_wait(self, reason: str = "awaiting_input") -> None:
+        """Pause the session while it blocks on a deliberate user answer.
+
+        Used by the Claude Code ask gates (AskUserQuestion, plan approval, plan
+        review) so the session visibly **pauses** — surfacing in the session list
+        as waiting-for-you — instead of looking like it's still working. Unlike
+        :meth:`pause` this does not interact with the lifecycle/subprocess (the
+        gate keeps the turn alive); it only flips the status so the UI reflects
+        the wait. Idempotent and a no-op for terminal/already-paused sessions.
+        """
+        terminal = (SessionStatus.COMPLETED, SessionStatus.FAILED, SessionStatus.CANCELLED)
+        self._activity_state = ActivityState.AWAITING_PERMISSION
+        if self.status not in terminal and self.status != SessionStatus.PAUSED:
+            self._status_before_input_wait = self.status
+            self.status = SessionStatus.PAUSED
+            self.paused_at = datetime.now(UTC)
+            self.paused_reason = reason
+        self.mark_dirty()
+        if self._on_update:
+            self._on_update()
+
+    def end_input_wait(self) -> None:
+        """Resume after a :meth:`begin_input_wait`, restoring the prior status."""
+        if self.status == SessionStatus.PAUSED and self._status_before_input_wait is not None:
+            self.status = self._status_before_input_wait
+            self.paused_at = None
+            self.paused_reason = None
+        self._status_before_input_wait = None
+        self._activity_state = ActivityState.RUNNING_SUBPROCESS
         self.last_activity_at = datetime.now(UTC)
         self.mark_dirty()
         if self._on_update:

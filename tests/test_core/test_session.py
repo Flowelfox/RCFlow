@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import StaticPool
 
 from src.core.buffer import MessageType
-from src.core.session import ActiveSession, SessionManager, SessionStatus, SessionType
+from src.core.session import ActiveSession, ActivityState, SessionManager, SessionStatus, SessionType
 from src.database.models import Base
 from src.database.models import Session as SessionModel
 from src.database.models import SessionMessage as SessionMessageModel
@@ -109,6 +109,30 @@ class TestActiveSession:
         session.complete()
         assert session.status == SessionStatus.COMPLETED
         assert session.ended_at is not None
+
+    def test_input_wait_pauses_and_restores(self):
+        session = ActiveSession("test-id", SessionType.ONE_SHOT)
+        session.set_executing()
+        assert session.status == SessionStatus.EXECUTING
+
+        # A deliberate ask (AskUserQuestion / plan gate) pauses the session.
+        session.begin_input_wait("awaiting_question")
+        assert session.status == SessionStatus.PAUSED
+        assert session.paused_reason == "awaiting_question"
+        assert session.activity_state == ActivityState.AWAITING_PERMISSION
+
+        # Answering restores the prior (running) status.
+        session.end_input_wait()
+        assert session.status == SessionStatus.EXECUTING
+        assert session.paused_reason is None
+        assert session.activity_state == ActivityState.RUNNING_SUBPROCESS
+
+    def test_input_wait_noop_on_terminal(self):
+        session = ActiveSession("test-id", SessionType.ONE_SHOT)
+        session.complete()
+        session.begin_input_wait()
+        # Terminal session must not be flipped to paused.
+        assert session.status == SessionStatus.COMPLETED
 
     def test_session_fail(self):
         session = ActiveSession("test-id", SessionType.ONE_SHOT)

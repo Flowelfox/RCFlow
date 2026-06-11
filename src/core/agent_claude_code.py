@@ -466,15 +466,16 @@ class ClaudeCodeAgent:
         """Gate EnterPlanMode on the user's approval (SDK ``can_use_tool`` path)."""
         session._plan_mode_event = asyncio.Event()
         session._plan_mode_approved = False
-        session.set_activity(ActivityState.AWAITING_PERMISSION)
+        session.begin_input_wait("awaiting_plan_approval")
         session.buffer.push_text(MessageType.PLAN_MODE_ASK, {"session_id": session.id})
         try:
             await asyncio.wait_for(session._plan_mode_event.wait(), timeout=_PLAN_MODE_TIMEOUT)
         except TimeoutError:
             session._plan_mode_event = None
+            session.end_input_wait()
             return PermissionResultDeny(message="Plan mode timed out.", interrupt=True)
         session._plan_mode_event = None
-        session.set_activity(ActivityState.RUNNING_SUBPROCESS)
+        session.end_input_wait()
         if not session._plan_mode_approved:
             return PermissionResultDeny(message="Plan mode denied.", interrupt=True)
         return PermissionResultAllow()
@@ -486,7 +487,7 @@ class ClaudeCodeAgent:
         session._plan_review_event = asyncio.Event()
         session._plan_review_approved = False
         session._plan_review_feedback = None
-        session.set_activity(ActivityState.AWAITING_PERMISSION)
+        session.begin_input_wait("awaiting_plan_review")
         session.buffer.push_text(
             MessageType.PLAN_REVIEW_ASK,
             {"session_id": session.id, "plan_input": tool_input},
@@ -495,9 +496,10 @@ class ClaudeCodeAgent:
             await asyncio.wait_for(session._plan_review_event.wait(), timeout=_PLAN_REVIEW_TIMEOUT)
         except TimeoutError:
             session._plan_review_event = None
+            session.end_input_wait()
             return PermissionResultDeny(message="Plan review timed out.", interrupt=True)
         session._plan_review_event = None
-        session.set_activity(ActivityState.RUNNING_SUBPROCESS)
+        session.end_input_wait()
         feedback = session._plan_review_feedback or ""
         session._plan_review_feedback = None
         if session._plan_review_approved:
@@ -521,12 +523,13 @@ class ClaudeCodeAgent:
         )
         session._question_event = asyncio.Event()
         session._question_answers = None
-        session.set_activity(ActivityState.AWAITING_PERMISSION)
+        session.begin_input_wait("awaiting_question")
         try:
             await asyncio.wait_for(session._question_event.wait(), timeout=_QUESTION_TIMEOUT)
         except TimeoutError:
             session._question_event = None
             session._question_answers = None
+            session.end_input_wait()
             session.buffer.push_text(
                 MessageType.ERROR,
                 {
@@ -540,7 +543,7 @@ class ClaudeCodeAgent:
         answers = session._question_answers or {}
         session._question_event = None
         session._question_answers = None
-        session.set_activity(ActivityState.RUNNING_SUBPROCESS)
+        session.end_input_wait()
 
         # Persist the answer on the buffered TOOL_START so history replay shows
         # the question resolved.
