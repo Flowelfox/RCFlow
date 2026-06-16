@@ -10,6 +10,7 @@ from sqlalchemy import select
 from src.api.deps import handle_ws_first_message_auth, verify_ws_api_key
 from src.core.attachment_store import AttachmentStore, ResolvedAttachment
 from src.core.session import SessionStatus
+from src.database.models import GitHubPR as GitHubPRModel
 from src.database.models import LinearIssue as LinearIssueModel
 
 logger = logging.getLogger(__name__)
@@ -380,6 +381,25 @@ async def ws_input_text(
                     await websocket.send_json({"type": "linear_issue_list", "issues": []})
                 continue
 
+            if msg_type == "list_github_prs":
+                from src.api.integrations.github import _pr_to_dict  # noqa: PLC0415
+
+                db_session_factory = websocket.app.state.db_session_factory
+                if db_session_factory is not None:
+                    settings = websocket.app.state.settings
+                    async with db_session_factory() as db:
+                        stmt = (
+                            select(GitHubPRModel)
+                            .where(GitHubPRModel.backend_id == settings.RCFLOW_BACKEND_ID)
+                            .order_by(GitHubPRModel.updated_at.desc())
+                        )
+                        pr_rows = (await db.execute(stmt)).scalars().all()
+                        prs_out = [_pr_to_dict(p) for p in pr_rows]
+                    await websocket.send_json({"type": "github_pr_list", "prs": prs_out})
+                else:
+                    await websocket.send_json({"type": "github_pr_list", "prs": []})
+                continue
+
             if msg_type == "start_plan_session":
                 task_id_str = message.get("task_id")
                 plan_project_name: str | None = message.get("project_name") or None
@@ -426,6 +446,77 @@ async def ws_input_text(
                             "code": "PLAN_SESSION_ERROR",
                         }
                     )
+                continue
+
+            if msg_type == "start_pr_assist":
+                from src.services.github_service import GitHubServiceError  # noqa: PLC0415
+                from src.services.pr_assist import build_pr_assist_prompt  # noqa: PLC0415
+
+                pr_id_str = message.get("pr_id")
+                assist_kind = message.get("kind") or "summary"
+                assist_file = message.get("file_path") or None
+                assist_comment = message.get("comment_body") or None
+                assist_line = message.get("line")
+                # fix runs in (and edits) the worktree the client selected.
+                assist_project = message.get("project_name") or None
+                # Resolved project path (from the PR's git-remote match) — applied
+                # directly so the session opens in the same checkout as the PR,
+                # avoiding by-name re-resolution picking a different same-named dir.
+                assist_project_path = message.get("project_path") or None
+                assist_worktree = message.get("selected_worktree_path") or None
+                # The coding agent to run (claude_code/codex/opencode); required
+                # in direct-tool mode where the prompt must name a #tool.
+                assist_agent = message.get("agent") or None
+                if not pr_id_str:
+                    await websocket.send_json({"type": "error", "content": "Missing pr_id", "code": "MISSING_PR_ID"})
+                    continue
+                try:
+                    pr_info, assist_prompt = await build_pr_assist_prompt(
+                        settings=websocket.app.state.settings,
+                        db_factory=websocket.app.state.db_session_factory,
+                        pr_id=pr_id_str,
+                        kind=assist_kind,
+                        file_path=assist_file,
+                        line=assist_line,
+                        comment_body=assist_comment,
+                    )
+                    # review/fix/resolve_conflicts run a full-perms session in a
+                    # local checkout; summary/explain are read-only.
+                    is_writable = assist_kind in ("review", "fix", "resolve_conflicts")
+                    # Attach the linked project to every assist session (so the
+                    # session shows the project badge); the worktree is only used
+                    # by writable sessions.
+                    assist_session_id = await prompt_router.prepare_assist_session(
+                        purpose=f"pr_{assist_kind}",
+                        read_only=not is_writable,
+                        project_name=assist_project,
+                        project_path=assist_project_path,
+                    )
+                    await websocket.send_json(
+                        {
+                            "type": "ack",
+                            "session_id": assist_session_id,
+                            "purpose": f"pr_{assist_kind}",
+                            "pr": pr_info,
+                        }
+                    )
+                    assist_task = asyncio.create_task(
+                        prompt_router.handle_prompt(
+                            assist_prompt,
+                            assist_session_id,
+                            project_name=assist_project if is_writable else None,
+                            project_path=assist_project_path if is_writable else None,
+                            selected_worktree_path=assist_worktree if is_writable else None,
+                            # The agent badge selects the tool directly — no
+                            # #tool parsing of the prompt text (so "#123" in the
+                            # diff/comment is safe).
+                            direct_tool=assist_agent or "claude_code",
+                        )
+                    )
+                    background_tasks.add(assist_task)
+                    assist_task.add_done_callback(background_tasks.discard)
+                except (ValueError, RuntimeError, GitHubServiceError) as e:
+                    await websocket.send_json({"type": "error", "content": str(e), "code": "PR_ASSIST_ERROR"})
                 continue
 
             if msg_type != "prompt":

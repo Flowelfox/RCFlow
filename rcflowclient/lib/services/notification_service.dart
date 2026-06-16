@@ -58,6 +58,21 @@ class NotificationService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Pause the auto-dismiss timer (e.g. while the cursor is over the toast so
+  /// the user can read / select its text).
+  void pauseAutoDismiss(String id) {
+    _timers.remove(id)?.cancel();
+  }
+
+  /// Restart the auto-dismiss countdown (e.g. when the cursor leaves the toast).
+  void resumeAutoDismiss(String id) {
+    if (_timers.containsKey(id)) return; // already counting down
+    final idx = _notifications.indexWhere((n) => n.id == id);
+    if (idx < 0) return;
+    final n = _notifications[idx];
+    _timers[id] = Timer(n.duration, () => dismiss(id));
+  }
+
   void _removeAt(int idx) {
     final n = _notifications.removeAt(idx);
     _timers.remove(n.id)?.cancel();

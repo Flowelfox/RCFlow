@@ -1,8 +1,8 @@
-/// Tests for [PaneState.switchSession] project-panel auto-open behaviour.
+/// Tests for [PaneState.switchSession] right-panel behaviour.
 ///
-/// When a session already has a [SessionInfo.mainProjectPath] (i.e. the user
-/// used @ProjectName at least once), switching to that session must auto-open
-/// the project panel — even if the session is ended, paused, or cancelled.
+/// The right sidebar starts with no active tab. Switching to a session syncs
+/// the project chip from [SessionInfo.mainProjectPath] but does NOT auto-open
+/// the project panel; the panel only opens on an explicit user action.
 library;
 
 import 'package:flutter_test/flutter_test.dart';
@@ -74,7 +74,6 @@ class _StubPaneHost implements PaneHost {
   String? getLastProjectForWorker(String workerId) => null;
 
   @override
-
   @override
   Future<String?> resolveProjectOnWorker(
     String workerId,
@@ -141,50 +140,18 @@ SessionInfo _session(
 // ---------------------------------------------------------------------------
 
 void main() {
-  group('PaneState.switchSession — project panel auto-open', () {
-    test('opens project panel for active session with mainProjectPath', () {
-      final pane = PaneState(
-        paneId: 'p1',
-        host: _StubPaneHost([
-          _session(
-            's1',
-            'active',
-            mainProjectPath: '/home/user/Projects/MyApp',
-          ),
-        ]),
-      );
-
-      pane.switchSession('s1');
-
-      expect(pane.activeRightPanel, 'project');
-    });
-
-    test('opens project panel for paused session with mainProjectPath', () {
-      final pane = PaneState(
-        paneId: 'p1',
-        host: _StubPaneHost([
-          _session(
-            's1',
-            'paused',
-            mainProjectPath: '/home/user/Projects/MyApp',
-          ),
-        ]),
-      );
-
-      pane.switchSession('s1');
-
-      expect(pane.activeRightPanel, 'project');
-    });
-
-    test(
-      'opens project panel for completed (ended) session with mainProjectPath',
-      () {
+  group('PaneState.switchSession — no project panel auto-open', () {
+    // Switching to a session must NOT auto-activate any right panel — the right
+    // sidebar starts with no active tab by default. The project chip still
+    // syncs to the session's project; only the panel stays closed.
+    for (final status in ['active', 'paused', 'completed', 'cancelled']) {
+      test('does not open the project panel for a $status session', () {
         final pane = PaneState(
           paneId: 'p1',
           host: _StubPaneHost([
             _session(
               's1',
-              'completed',
+              status,
               mainProjectPath: '/home/user/Projects/MyApp',
             ),
           ]),
@@ -192,39 +159,12 @@ void main() {
 
         pane.switchSession('s1');
 
-        expect(pane.activeRightPanel, 'project');
-      },
-    );
+        expect(pane.activeRightPanel, isNull);
+        expect(pane.selectedProjectName, 'MyApp'); // chip still synced
+      });
+    }
 
-    test('opens project panel for cancelled session with mainProjectPath', () {
-      final pane = PaneState(
-        paneId: 'p1',
-        host: _StubPaneHost([
-          _session(
-            's1',
-            'cancelled',
-            mainProjectPath: '/home/user/Projects/MyApp',
-          ),
-        ]),
-      );
-
-      pane.switchSession('s1');
-
-      expect(pane.activeRightPanel, 'project');
-    });
-
-    test('does not open project panel when session has no mainProjectPath', () {
-      final pane = PaneState(
-        paneId: 'p1',
-        host: _StubPaneHost([_session('s1', 'completed')]),
-      );
-
-      pane.switchSession('s1');
-
-      expect(pane.activeRightPanel, isNull);
-    });
-
-    test('restores project panel when switching between sessions', () {
+    test('panel stays closed across session switches', () {
       final pane = PaneState(
         paneId: 'p1',
         host: _StubPaneHost([
@@ -233,7 +173,7 @@ void main() {
             'completed',
             mainProjectPath: '/home/user/Projects/Alpha',
           ),
-          _session('s2', 'completed'), // no project
+          _session('s2', 'completed'),
           _session(
             's3',
             'completed',
@@ -243,25 +183,11 @@ void main() {
       );
 
       pane.switchSession('s1');
-      expect(
-        pane.activeRightPanel,
-        'project',
-        reason: 's1 has a project — panel should open',
-      );
-
+      expect(pane.activeRightPanel, isNull);
       pane.switchSession('s2');
-      expect(
-        pane.activeRightPanel,
-        isNull,
-        reason: 's2 has no project — panel should stay closed',
-      );
-
+      expect(pane.activeRightPanel, isNull);
       pane.switchSession('s3');
-      expect(
-        pane.activeRightPanel,
-        'project',
-        reason: 's3 has a project — panel should reopen',
-      );
+      expect(pane.activeRightPanel, isNull);
     });
   });
 
@@ -270,12 +196,21 @@ void main() {
   // ---------------------------------------------------------------------------
 
   group('PaneState — project panel close and reopen', () {
-    PaneState paneWithProject() => PaneState(
-      paneId: 'p1',
-      host: _StubPaneHost([
-        _session('s1', 'active', mainProjectPath: '/home/user/Projects/MyApp'),
-      ]),
-    )..switchSession('s1');
+    // The panel no longer auto-opens on switch, so open it explicitly to set up
+    // the close/reopen scenarios.
+    PaneState paneWithProject() =>
+        PaneState(
+            paneId: 'p1',
+            host: _StubPaneHost([
+              _session(
+                's1',
+                'active',
+                mainProjectPath: '/home/user/Projects/MyApp',
+              ),
+            ]),
+          )
+          ..switchSession('s1')
+          ..openProjectPanel();
 
     test('toggleRightPanel closes an open project panel', () {
       final pane = paneWithProject();
@@ -321,7 +256,7 @@ void main() {
       );
     });
 
-    test('closing then switching back to a project session reopens panel', () {
+    test('switching back to a project session does NOT auto-reopen panel', () {
       final pane = PaneState(
         paneId: 'p1',
         host: _StubPaneHost([
@@ -335,22 +270,17 @@ void main() {
       );
 
       pane.switchSession('s1');
+      pane.openProjectPanel(); // user opens it
       expect(pane.activeRightPanel, 'project');
 
-      pane.toggleRightPanel('project'); // user manually closes panel
+      pane.toggleRightPanel('project'); // user closes it
       expect(pane.activeRightPanel, isNull);
 
-      pane.switchSession('s2'); // navigate away
-      expect(pane.activeRightPanel, isNull);
-
+      pane.switchSession('s2');
       pane.switchSession('s1'); // return to project session
 
-      // Auto-open fires again because switchSession re-evaluates mainProjectPath
-      expect(
-        pane.activeRightPanel,
-        'project',
-        reason: 'panel should reopen when switching back to a project session',
-      );
+      // The panel stays closed — no tab auto-activates on switch.
+      expect(pane.activeRightPanel, isNull);
     });
   });
 
@@ -753,8 +683,9 @@ void main() {
 
       expect(
         pane.selectedToolMention,
-        'claude_code',
-        reason: 'agent chip must reflect the session agentType after switch',
+        'ClaudeCode',
+        reason: 'agent chip must reflect the session agentType (mapped to its '
+            'display/mention name) after switch',
       );
     });
 
@@ -768,7 +699,7 @@ void main() {
       );
 
       pane.switchSession('s1');
-      expect(pane.selectedToolMention, 'claude_code');
+      expect(pane.selectedToolMention, 'ClaudeCode');
 
       pane.switchSession('s2');
       expect(
@@ -789,13 +720,13 @@ void main() {
       );
 
       pane.switchSession('s1');
-      expect(pane.selectedToolMention, 'claude_code');
+      expect(pane.selectedToolMention, 'ClaudeCode');
 
       pane.switchSession('s2');
-      expect(pane.selectedToolMention, 'codex');
+      expect(pane.selectedToolMention, 'Codex');
 
       pane.switchSession('s3');
-      expect(pane.selectedToolMention, 'claude_code');
+      expect(pane.selectedToolMention, 'ClaudeCode');
     });
 
     test('restores agent chip for a completed session with agentType', () {
@@ -810,7 +741,7 @@ void main() {
 
       expect(
         pane.selectedToolMention,
-        'claude_code',
+        'ClaudeCode',
         reason: 'chip must be restored even for ended sessions',
       );
     });

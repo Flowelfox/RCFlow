@@ -96,6 +96,9 @@ class ActiveSession:
         self.session_type = session_type
         self.status = SessionStatus.CREATED
         self._activity_state = ActivityState.IDLE
+        # Status to restore after the session unblocks from waiting on a user
+        # answer (see :meth:`begin_input_wait` / :meth:`end_input_wait`).
+        self._status_before_input_wait: SessionStatus | None = None
         self.created_at = datetime.now(UTC)
         self.ended_at: datetime | None = None
         self.last_activity_at: datetime = datetime.now(UTC)
@@ -653,6 +656,40 @@ class ActiveSession:
         if self._on_update:
             self._on_update()
 
+    def begin_input_wait(self, reason: str = "awaiting_input") -> None:
+        """Pause the session while it blocks on a deliberate user answer.
+
+        Used by the Claude Code ask gates (AskUserQuestion, plan approval, plan
+        review) so the session visibly **pauses** — surfacing in the session list
+        as waiting-for-you — instead of looking like it's still working. Unlike
+        :meth:`pause` this does not interact with the lifecycle/subprocess (the
+        gate keeps the turn alive); it only flips the status so the UI reflects
+        the wait. Idempotent and a no-op for terminal/already-paused sessions.
+        """
+        terminal = (SessionStatus.COMPLETED, SessionStatus.FAILED, SessionStatus.CANCELLED)
+        self._activity_state = ActivityState.AWAITING_PERMISSION
+        if self.status not in terminal and self.status != SessionStatus.PAUSED:
+            self._status_before_input_wait = self.status
+            self.status = SessionStatus.PAUSED
+            self.paused_at = datetime.now(UTC)
+            self.paused_reason = reason
+        self.mark_dirty()
+        if self._on_update:
+            self._on_update()
+
+    def end_input_wait(self) -> None:
+        """Resume after a :meth:`begin_input_wait`, restoring the prior status."""
+        if self.status == SessionStatus.PAUSED and self._status_before_input_wait is not None:
+            self.status = self._status_before_input_wait
+            self.paused_at = None
+            self.paused_reason = None
+        self._status_before_input_wait = None
+        self._activity_state = ActivityState.RUNNING_SUBPROCESS
+        self.last_activity_at = datetime.now(UTC)
+        self.mark_dirty()
+        if self._on_update:
+            self._on_update()
+
     def restore(self) -> None:
         """Restore a session from a terminal or interrupted state back to ACTIVE."""
         restorable = (
@@ -680,6 +717,10 @@ class SessionManager:
         self._badge_state = BadgeState()
         self._sessions: dict[str, ActiveSession] = {}
         self._update_subscribers: dict[str, asyncio.Queue[dict[str, Any] | None]] = {}
+        # Latest account-level subscription usage snapshot (5h / 7d quota), as a
+        # ready-to-send ``worker_usage`` message.  Refreshed by the usage poller
+        # and replayed to each newly-connected client (see ``subscribe_updates``).
+        self._last_worker_usage: dict[str, Any] | None = None
 
     def create_session(self, session_type: SessionType = SessionType.ONE_SHOT) -> ActiveSession:
         """Create, register, and return a new active session."""
@@ -702,6 +743,10 @@ class SessionManager:
         """
         queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
         self._update_subscribers[subscriber_id] = queue
+        # Replay the latest usage snapshot so a fresh client shows quota
+        # immediately instead of waiting a full poll interval.
+        if self._last_worker_usage is not None:
+            queue.put_nowait(self._last_worker_usage)
         return queue
 
     def unsubscribe_updates(self, subscriber_id: str) -> None:
@@ -780,6 +825,43 @@ class SessionManager:
         msg = {"type": "linear_issue_deleted", "id": issue_id}
         for queue in self._update_subscribers.values():
             queue.put_nowait(msg)
+
+    def broadcast_github_pr_update(self, pr_data: dict[str, Any]) -> None:
+        """Broadcast a GitHub pull-request update to all connected output clients."""
+        msg = {"type": "github_pr_update", **pr_data}
+        for queue in self._update_subscribers.values():
+            queue.put_nowait(msg)
+
+    def broadcast_github_pr_deleted(self, pr_id: str) -> None:
+        """Broadcast a GitHub pull-request removal to all connected output clients."""
+        msg = {"type": "github_pr_deleted", "id": pr_id}
+        for queue in self._update_subscribers.values():
+            queue.put_nowait(msg)
+
+    def set_worker_usage(self, windows: dict[str, Any] | None, *, available: bool) -> None:
+        """Cache and broadcast the account-level subscription usage snapshot.
+
+        ``windows`` is the parsed quota windows from the usage service (5h / 7d
+        plus per-model), or ``None`` when unavailable (API-key worker / no token).
+        Builds a ``worker_usage`` message, caches it for connect-time replay, and
+        pushes it to all connected output clients.
+        """
+        msg: dict[str, Any] = {
+            "type": "worker_usage",
+            "backend_id": self._backend_id,
+            "available": available,
+        }
+        if available and windows is not None:
+            msg.update(windows)
+        self._last_worker_usage = msg
+        for queue in self._update_subscribers.values():
+            queue.put_nowait(msg)
+
+    def get_worker_usage(self) -> dict[str, Any]:
+        """Return the latest usage snapshot, or an unavailable placeholder."""
+        if self._last_worker_usage is not None:
+            return self._last_worker_usage
+        return {"type": "worker_usage", "backend_id": self._backend_id, "available": False}
 
     def broadcast_artifact_update(self, artifact_data: dict[str, Any]) -> None:
         """Broadcast an artifact update to all connected output clients."""

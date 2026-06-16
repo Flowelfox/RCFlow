@@ -27,6 +27,48 @@ def _auth_headers() -> dict[str, str]:
     return {"X-API-Key": API_KEY}
 
 
+class TestSetSessionModel:
+    def test_set_valid_alias(self, client: TestClient, session_manager: SessionManager) -> None:
+        session = session_manager.create_session(SessionType.ONE_SHOT)
+        resp = client.patch(
+            f"/api/sessions/{session.id}/model",
+            json={"model": "opusplan"},
+            headers=_auth_headers(),
+        )
+        assert resp.status_code == 200
+        assert resp.json()["selected_model"] == "opusplan"
+        assert session.metadata["selected_model"] == "opusplan"
+
+    def test_default_clears_override(self, client: TestClient, session_manager: SessionManager) -> None:
+        session = session_manager.create_session(SessionType.ONE_SHOT)
+        session.metadata["selected_model"] = "opus"
+        resp = client.patch(
+            f"/api/sessions/{session.id}/model",
+            json={"model": "default"},
+            headers=_auth_headers(),
+        )
+        assert resp.status_code == 200
+        assert resp.json()["selected_model"] is None
+        assert "selected_model" not in session.metadata
+
+    def test_unsupported_model_rejected(self, client: TestClient, session_manager: SessionManager) -> None:
+        session = session_manager.create_session(SessionType.ONE_SHOT)
+        resp = client.patch(
+            f"/api/sessions/{session.id}/model",
+            json={"model": "gpt-4"},
+            headers=_auth_headers(),
+        )
+        assert resp.status_code == 400
+
+    def test_unknown_session(self, client: TestClient) -> None:
+        resp = client.patch(
+            "/api/sessions/nonexistent-id/model",
+            json={"model": "opus"},
+            headers=_auth_headers(),
+        )
+        assert resp.status_code == 404
+
+
 class TestCancelSession:
     def test_cancel_active_session(self, client: TestClient, session_manager: SessionManager) -> None:
         session = session_manager.create_session(SessionType.ONE_SHOT)

@@ -3,6 +3,9 @@
 from src.database.models.artifact import Artifact
 from src.database.models.base import Base
 from src.database.models.draft import Draft
+from src.database.models.github_pr import GitHubPR
+from src.database.models.github_repo_default import GitHubRepoDefault
+from src.database.models.github_review_draft import GitHubReviewDraft
 from src.database.models.linear_issue import LinearIssue
 from src.database.models.llm_call import LLMCall
 from src.database.models.session import Session
@@ -19,6 +22,9 @@ __all__ = [
     "Artifact",
     "Base",
     "Draft",
+    "GitHubPR",
+    "GitHubRepoDefault",
+    "GitHubReviewDraft",
     "LLMCall",
     "LinearIssue",
     "Session",

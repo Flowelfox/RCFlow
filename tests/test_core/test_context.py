@@ -358,6 +358,25 @@ class TestParseDirectToolPrompt:
         assert "prompt" in tool_input
         assert "fix the tests" in tool_input["prompt"]
 
+    def test_explicit_tool_keeps_hash_in_prompt_verbatim(self) -> None:
+        # The agent is chosen out-of-band; a literal "#84" in the text must NOT
+        # be parsed as a #tool mention — it stays in the prompt.
+        tool = _MockTool(name="claude_code", description="agent", executor="claude_code")
+        host = _ContextHost(tool_registry=_registry_with(tool))
+        result = host._parse_direct_tool_prompt(
+            "Address the comment on PR #84 @author", explicit_tool="claude_code"
+        )
+        assert isinstance(result, tuple)
+        tool_def, tool_input, _ = result
+        assert tool_def.name == "claude_code"
+        assert "#84" in tool_input["prompt"] and "@author" in tool_input["prompt"]
+
+    def test_explicit_tool_unknown_returns_error(self) -> None:
+        tool = _MockTool(name="claude_code", description="agent", executor="claude_code")
+        host = _ContextHost(tool_registry=_registry_with(tool))
+        result = host._parse_direct_tool_prompt("do it", explicit_tool="nope")
+        assert isinstance(result, str) and "Unknown agent" in result
+
     def test_project_mention_sets_working_directory(self, tmp_path: Path) -> None:
         project_dir = tmp_path / "MyProject"
         project_dir.mkdir()

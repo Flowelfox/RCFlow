@@ -7,19 +7,49 @@ import '../../utils/link_utils.dart';
 import '../../utils/markdown_copy_menu.dart';
 import '../../utils/selectable_code_block_builder.dart';
 import '../../../theme/spacing.dart';
+import '../copy_icon_button.dart';
+import 'assistant_bubble.dart' show messageActionsAlwaysVisible;
 
-class UserBubble extends StatelessWidget {
+class UserBubble extends StatefulWidget {
   final DisplayMessage message;
   const UserBubble({super.key, required this.message});
 
   @override
+  State<UserBubble> createState() => _UserBubbleState();
+}
+
+class _UserBubbleState extends State<UserBubble> {
+  bool _hovered = false;
+
+  @override
   Widget build(BuildContext context) {
+    final message = widget.message;
     final attachments = message.attachments;
+    final showCopy = _hovered || messageActionsAlwaysVisible(context);
     return Padding(
       padding: EdgeInsets.only(top: 12, bottom: 4, left: 48),
       child: Align(
         alignment: Alignment.centerRight,
-        child: Container(
+        child: MouseRegion(
+          onEnter: (_) => setState(() => _hovered = true),
+          onExit: (_) => setState(() => _hovered = false),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              if (showCopy)
+                Padding(
+                  padding: const EdgeInsets.only(right: 6),
+                  child: CopyIconButton(
+                    tooltip: 'Copy message',
+                    onCopy: () => writeRichClipboard(
+                      html: markdownSourceToHtml(message.content),
+                      plain: markdownToPlainText(message.content),
+                    ),
+                  ),
+                ),
+              Flexible(
+                child: Container(
           padding: EdgeInsets.symmetric(horizontal: kSpace4, vertical: kSpace3),
           decoration: BoxDecoration(
             color: context.appColors.userBubble,
@@ -129,6 +159,10 @@ class UserBubble extends StatelessWidget {
                       ),
                     ),
                   ),
+                ),
+              ),
+            ],
+          ),
                 ),
               ),
             ],

@@ -2,12 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:rcflowclient/theme.dart';
 import 'package:rcflowclient/ui/utils/selectable_code_block_builder.dart';
 
 void main() {
   group('SelectableCodeBlockBuilder', () {
+    // Use the real app theme so the AppColors extension (used by the
+    // code-block copy button on touch platforms) resolves.
     Widget buildApp(Widget child) {
-      return MaterialApp(home: Scaffold(body: child));
+      return MaterialApp(theme: buildAppTheme(), home: Scaffold(body: child));
     }
 
     testWidgets('renders code block text without SingleChildScrollView', (

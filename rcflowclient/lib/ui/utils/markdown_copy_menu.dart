@@ -10,6 +10,26 @@ import 'package:super_clipboard/super_clipboard.dart';
 /// the system clipboard's `text/html` slot.  Pastes into Word, Google
 /// Docs, Slack, etc. then preserve native formatting (bold, lists,
 /// fenced code, tables) instead of showing Markdown syntax.
+/// Write both an HTML and a plain-text payload to the system clipboard via
+/// [super_clipboard], so rich destinations (Word, Slack, browser contenteditable)
+/// get formatting while plain destinations get the newline-preserving text.
+/// Falls back to Flutter's built-in plain clipboard when the rich writer isn't
+/// available on the host platform (or when [html] is empty).
+Future<void> writeRichClipboard({
+  required String html,
+  required String plain,
+}) async {
+  final clipboard = SystemClipboard.instance;
+  if (clipboard == null || html.isEmpty) {
+    await Clipboard.setData(ClipboardData(text: plain));
+    return;
+  }
+  final item = DataWriterItem();
+  item.add(Formats.htmlText(html));
+  item.add(Formats.plainText(plain));
+  await clipboard.write([item]);
+}
+
 String markdownToHtmlForSelection(String rawMarkdown, String plainSelection) {
   final source = extractMarkdownForSelection(rawMarkdown, plainSelection);
   if (source.isEmpty) return '';
@@ -231,6 +251,11 @@ String? _findContiguousBlockMatch(
 ) {
   final normNeedle = _normaliseForMatch(needle);
   if (normNeedle.isEmpty) return null;
+  // Whitespace-stripped needle: SelectionArea.plainText flattens blocks with
+  // NO separator at the joints (e.g. "HeadingPara one.Para two."), so the
+  // space-normalised match misses. Comparing with all whitespace removed makes
+  // the recovery tolerant of those missing/extra joint spaces.
+  final wsNeedle = _stripWhitespace(needle);
 
   // Pre-scan fenced code blocks so a code-line match can be expanded
   // back out to its enclosing ``` … ``` pair.
@@ -247,8 +272,10 @@ String? _findContiguousBlockMatch(
     // would silently widen the user's selection.
     for (var end = start + 1; end < mdLines.length; end++) {
       final candidate = mdLines.sublist(start, end + 1).join('\n');
-      final normCand = _normaliseForMatch(markdownToPlainText(candidate));
-      if (normCand.contains(normNeedle)) {
+      final plainCand = markdownToPlainText(candidate);
+      final normCand = _normaliseForMatch(plainCand);
+      if (normCand.contains(normNeedle) ||
+          _stripWhitespace(plainCand).contains(wsNeedle)) {
         var s = start;
         var e = end;
         // Trim trailing blank lines from the slice.
@@ -279,7 +306,7 @@ String? _findContiguousBlockMatch(
       // Cheap bail: if the accumulator already vastly exceeds the
       // needle, extending further only adds more text and won't help
       // find a tighter match.
-      if (normCand.length > normNeedle.length * 6) break;
+      if (_stripWhitespace(plainCand).length > wsNeedle.length * 6) break;
     }
   }
   return null;
@@ -290,6 +317,12 @@ String? _findContiguousBlockMatch(
 /// selection-area squeeze cell separators / list bullet spacing.
 String _normaliseForMatch(String s) =>
     s.toLowerCase().replaceAll(RegExp(r'\s+'), ' ').trim();
+
+/// Lowercase with **all** whitespace removed — used as a whitespace-insensitive
+/// fallback so a fully flattened selection (no separators at block joints,
+/// which is what SelectionArea.plainText produces) still matches its source.
+String _stripWhitespace(String s) =>
+    s.toLowerCase().replaceAll(RegExp(r'\s+'), '');
 
 bool _isFenceLine(String line) => line.trimLeft().startsWith('```');
 
@@ -446,6 +479,10 @@ class _MessageSelectionAreaState extends State<MessageSelectionArea> {
   // value during menu open / focus transitions.
   String _lastNonEmpty = '';
 
+  // The right-click copy menu, shown as an Overlay entry (NOT a route) so the
+  // SelectionArea keeps focus and the highlight stays visible while it's open.
+  OverlayEntry? _menuEntry;
+
   @override
   void initState() {
     super.initState();
@@ -454,8 +491,15 @@ class _MessageSelectionAreaState extends State<MessageSelectionArea> {
 
   @override
   void dispose() {
+    _menuEntry?.remove();
+    _menuEntry = null;
     HardwareKeyboard.instance.removeHandler(_onHardwareKey);
     super.dispose();
+  }
+
+  void _dismissMenu() {
+    _menuEntry?.remove();
+    _menuEntry = null;
   }
 
   String get _activeSelection => _selectionPlain.trim().isNotEmpty
@@ -492,10 +536,11 @@ class _MessageSelectionAreaState extends State<MessageSelectionArea> {
               currentText.trim() == plain.trim() ||
               plain.contains(currentText));
       if (!stillOurs) return;
-      await _writeRich(
-        html: markdownToHtmlForSelection(widget.rawMarkdown, plain),
-        plain: plain,
-      );
+      // Recover the Markdown source for the selection so the *plain* payload
+      // keeps its newlines/structure too — SelectionArea.plainText flattens
+      // blocks into a run-on string, which is what most paste targets receive.
+      final md = extractMarkdownForSelection(widget.rawMarkdown, plain);
+      await _writeRich(html: markdownSourceToHtml(md), plain: md);
     });
     return false; // don't consume — Flutter's default still runs first.
   }
@@ -504,23 +549,13 @@ class _MessageSelectionAreaState extends State<MessageSelectionArea> {
   /// clipboard via [super_clipboard].  Falls back to Flutter's
   /// built-in plain-text clipboard if the rich writer isn't available
   /// on the host platform.
-  Future<void> _writeRich({required String html, required String plain}) async {
-    final clipboard = SystemClipboard.instance;
-    if (clipboard == null || html.isEmpty) {
-      await Clipboard.setData(ClipboardData(text: plain));
-      return;
-    }
-    final item = DataWriterItem();
-    item.add(Formats.htmlText(html));
-    item.add(Formats.plainText(plain));
-    await clipboard.write([item]);
-  }
+  Future<void> _writeRich({required String html, required String plain}) =>
+      writeRichClipboard(html: html, plain: plain);
 
   Future<void> _copyRich(String plain) async {
-    await _writeRich(
-      html: markdownToHtmlForSelection(widget.rawMarkdown, plain),
-      plain: plain,
-    );
+    // Use the recovered Markdown (newlines preserved) for both payloads.
+    final md = extractMarkdownForSelection(widget.rawMarkdown, plain);
+    await _writeRich(html: markdownSourceToHtml(md), plain: md);
   }
 
   Future<void> _copyMessageRich() async {
@@ -533,53 +568,74 @@ class _MessageSelectionAreaState extends State<MessageSelectionArea> {
   Future<void> _copyPlain(String text) =>
       Clipboard.setData(ClipboardData(text: text));
 
-  Future<void> _showRightClickMenu(BuildContext context, Offset globalPos) async {
+  Future<void> _onMenuCopy(String selection, bool hasSelection) async {
+    if (hasSelection) {
+      await _copyRich(selection);
+    } else {
+      await _copyMessageRich();
+    }
+  }
+
+  Future<void> _onMenuCopyPlain(String selection, bool hasSelection) async {
+    if (hasSelection) {
+      // Strip Markdown syntax but keep the newline/structure by recovering
+      // the source first, then rendering it to plain text.
+      final md = extractMarkdownForSelection(widget.rawMarkdown, selection);
+      await _copyPlain(markdownToPlainText(md));
+    } else {
+      await _copyPlain(markdownToPlainText(widget.rawMarkdown));
+    }
+  }
+
+  void _showRightClickMenu(BuildContext context, Offset globalPos) {
     final selection = _activeSelection;
     final hasSelection = selection.trim().isNotEmpty;
-    final overlay =
-        Overlay.of(context).context.findRenderObject() as RenderBox?;
-    if (overlay == null) return;
-    final position = RelativeRect.fromRect(
-      Rect.fromPoints(globalPos, globalPos),
-      Offset.zero & overlay.size,
-    );
-    final choice = await showMenu<_CopyAction>(
-      context: context,
-      position: position,
-      items: const [
-        PopupMenuItem(
-          value: _CopyAction.rich,
-          height: 36,
-          child: _MenuRow(
-            icon: Icons.content_copy_rounded,
-            label: 'Copy',
+    final overlayState = Overlay.of(context);
+    _dismissMenu();
+
+    // Clamp into the screen so the menu never spills off the right / bottom.
+    const menuWidth = 190.0;
+    const menuHeight = 84.0;
+    final screen = MediaQuery.of(context).size;
+    final left = (globalPos.dx + menuWidth > screen.width)
+        ? (screen.width - menuWidth - 8).clamp(0.0, screen.width)
+        : globalPos.dx;
+    final top = (globalPos.dy + menuHeight > screen.height)
+        ? (screen.height - menuHeight - 8).clamp(0.0, screen.height)
+        : globalPos.dy;
+
+    _menuEntry = OverlayEntry(
+      builder: (_) => Stack(
+        children: [
+          // Outside-tap dismiss layer — translucent so the chat stays visible.
+          // Crucially this is an Overlay entry, not a route, so it does not
+          // defocus the SelectionArea (which would wipe the highlight).
+          Positioned.fill(
+            child: GestureDetector(
+              behavior: HitTestBehavior.translucent,
+              onTap: _dismissMenu,
+              onSecondaryTap: _dismissMenu,
+            ),
           ),
-        ),
-        PopupMenuItem(
-          value: _CopyAction.plain,
-          height: 36,
-          child: _MenuRow(
-            icon: Icons.text_fields_rounded,
-            label: 'Copy as plain text',
+          Positioned(
+            left: left,
+            top: top,
+            width: menuWidth,
+            child: _CopyMenu(
+              onRich: () {
+                _dismissMenu();
+                _onMenuCopy(selection, hasSelection);
+              },
+              onPlain: () {
+                _dismissMenu();
+                _onMenuCopyPlain(selection, hasSelection);
+              },
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
-    if (!mounted || choice == null) return;
-    switch (choice) {
-      case _CopyAction.rich:
-        if (hasSelection) {
-          await _copyRich(selection);
-        } else {
-          await _copyMessageRich();
-        }
-      case _CopyAction.plain:
-        if (hasSelection) {
-          await _copyPlain(selection);
-        } else {
-          await _copyPlain(markdownToPlainText(widget.rawMarkdown));
-        }
-    }
+    overlayState.insert(_menuEntry!);
   }
 
   @override
@@ -623,22 +679,58 @@ class _MessageSelectionAreaState extends State<MessageSelectionArea> {
   }
 }
 
-enum _CopyAction { rich, plain }
+/// The right-click copy popup body (rendered inside an Overlay entry).
+class _CopyMenu extends StatelessWidget {
+  final VoidCallback onRich;
+  final VoidCallback onPlain;
+  const _CopyMenu({required this.onRich, required this.onPlain});
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      elevation: 6,
+      borderRadius: BorderRadius.circular(8),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _MenuRow(
+            icon: Icons.content_copy_rounded,
+            label: 'Copy',
+            onTap: onRich,
+          ),
+          _MenuRow(
+            icon: Icons.text_fields_rounded,
+            label: 'Copy as plain text',
+            onTap: onPlain,
+          ),
+        ],
+      ),
+    );
+  }
+}
 
 class _MenuRow extends StatelessWidget {
   final IconData icon;
   final String label;
-  const _MenuRow({required this.icon, required this.label});
+  final VoidCallback onTap;
+  const _MenuRow({required this.icon, required this.label, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(icon, size: 16),
-        const SizedBox(width: 10),
-        Text(label, style: const TextStyle(fontSize: 13)),
-      ],
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 16),
+            const SizedBox(width: 10),
+            Text(label, style: const TextStyle(fontSize: 13)),
+          ],
+        ),
+      ),
     );
   }
 }

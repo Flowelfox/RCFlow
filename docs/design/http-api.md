@@ -1,5 +1,5 @@
 ---
-updated: 2026-04-26
+updated: 2026-06-11
 ---
 
 # HTTP API
@@ -42,6 +42,7 @@ REST endpoints. All except `/api/health` require `X-API-Key` header (same key as
 |--------|--------------|------|-------------|
 | GET    | `/api/health`| No   | Health check — returns `{"status": "ok"}` |
 | GET    | `/api/info`  | Yes  | Server metadata — `{"os", "backend_id", "active_sessions", "version", "supports_attachments", "attachment_capabilities", "upnp", "natpmp"}`. `upnp` reports the LAN-router IGD mapping; `natpmp` reports the VPN-gateway (RFC 6886) mapping. Each has `{enabled, status, ...}` with status one of `disabled`, `discovering`, `mapped`, `failed`, `closing`. |
+| GET    | `/api/worker/usage` | Yes | Cached account-level Claude subscription quota — `{"available", "five_hour"?, "seven_day"?, "seven_day_opus"?, "seven_day_sonnet"?}`. Each window is `{utilization (0–100), resets_at (ISO-8601\|null)}`. `available` is `false` (windows omitted) for API-key workers or before the first poll. Same snapshot pushed live as `worker_usage` over `/ws/output/text`. |
 
 ## Config
 
@@ -71,6 +72,7 @@ REST endpoints. All except `/api/health` require `X-API-Key` header (same key as
 | PATCH  | `/api/sessions/{session_id}/title`      | Yes  | Set or clear a session title (max 200 chars). Body: `{"title": "..."}` or `{"title": null}`. |
 | PATCH  | `/api/sessions/{session_id}/reorder`    | Yes  | Reorder sessions. Body: `{"after_session_id": "uuid" \| null}`. See [WebSocket — Session Reordering](websocket-api.md#session-reordering). |
 | PATCH  | `/api/sessions/{session_id}/worktree`   | Yes  | Set or clear the selected worktree. Body: `{"path": string \| null}`. When set, Claude Code and Codex use this path as `cwd`. Returns `{"session_id", "selected_worktree_path"}`. |
+| PATCH  | `/api/sessions/{session_id}/model`      | Yes  | Set or clear the per-session Claude Code model override. Body: `{"model": "opus"\|"sonnet"\|"opusplan"\|"haiku" \| null}` (`null`/`"default"` clears; mirrors Claude Code's `/model`). Applies on the next turn — an idle Claude Code process is reset and reconnects (resuming) on the new model. Returns `{"session_id", "selected_model"}`. Drives the interactive **model** badge. |
 
 ## Drafts
 
@@ -176,6 +178,33 @@ Linux/macOS only.
 ## Linear Integration
 
 All under `/api/integrations/linear/`. See [Linear Integration](linear.md#http-endpoints) for full table.
+
+## GitHub Integration
+
+All under `/api/integrations/github/`. See [GitHub Integration](github.md).
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET  | `/api/integrations/github/status`            | Yes | Token configured + validity preflight for the saved token (returns `{configured, valid, login, scopes}`) |
+| POST | `/api/integrations/github/status/check`      | Yes | Validate an unsaved token `{token}` → same shape as `/status` (settings live scope preview) |
+| GET/PUT | `/api/integrations/github/repo-defaults`  | Yes | GET this worker's default-action repos; PUT `{owner, repo, is_default}` sets/clears. Used for cross-worker PR action routing |
+| POST | `/api/integrations/github/sync`              | Yes | Re-sync PRs. `?state=open` (default, fully enriched) / `closed` / `merged` (listed lightly, on demand); `?role=for_me\|created` (default both); `?force=` bypasses the 60s throttle. Returns `{synced, archived_pruned, configured}`. No token → no-op |
+| GET  | `/api/integrations/github/prs`               | Yes | List cached PRs. Optional `?role=`, `?state=`, `?q=`. Returns `{prs, total}` |
+| GET  | `/api/integrations/github/prs/{id}`          | Yes | Single cached PR by local UUID |
+| GET  | `/api/integrations/github/prs/{id}/files`    | Yes | Live changed files (each with a per-file unified-diff `patch`). Returns `{pr_id, files, total}` |
+| GET  | `/api/integrations/github/prs/{id}/file`     | Yes | Full file content at the PR head (default) or base, for expanding diff context beyond the patch hunks. Query `?path=`, `?side=head|base`. Returns `{pr_id, path, side, ref, content}` |
+| GET  | `/api/integrations/github/prs/{id}/diff`     | Yes | Live whole-PR unified diff as raw text. Returns `{pr_id, diff}` |
+| GET  | `/api/integrations/github/prs/{id}/threads`  | Yes | Live inline review threads (path, line, side, resolved/outdated, comments). Returns `{pr_id, threads, total}` |
+| GET/POST | `/api/integrations/github/prs/{id}/conversation` | Yes | GET: global comments + review summaries as a timeline `{pr_id, items, total}`. POST `{body}`: add a global comment → `{pr_id, comment}` |
+| GET/PATCH | `/api/integrations/github/prs/{id}/draft` | Yes | Get / update the local pending review (verdict + summary body) |
+| POST | `/api/integrations/github/prs/{id}/draft/comments`         | Yes | Queue an inline comment `{path, line, side, body}` on the draft |
+| DELETE | `/api/integrations/github/prs/{id}/draft/comments/{index}` | Yes | Remove a queued inline comment |
+| POST | `/api/integrations/github/prs/{id}/review`   | Yes | Submit the review (`event` APPROVE/REQUEST_CHANGES/COMMENT) with queued comments; clears the draft |
+| POST | `/api/integrations/github/prs/{id}/comments/{comment_id}/reply` | Yes | Reply to a review-thread comment |
+| POST | `/api/integrations/github/prs/{id}/threads/{thread_id}/resolve` | Yes | Resolve / unresolve a thread (`?resolved=`) |
+| GET  | `/api/integrations/github/prs/{id}/conflicts` | Yes | Merge-conflict status + conflicting files (local 3-way merge). Returns `{pr_id, conflicted, files, reason}` |
+| POST | `/api/integrations/github/prs/{id}/merge`    | Yes | Merge the PR (`method` merge/squash/rebase, default squash). Maps GitHub 405 (not mergeable) to 409 |
+| POST | `/api/integrations/github/open-pr`           | Yes | Push a worktree's branch (PAT auth via GIT_ASKPASS) and open a PR (`{selected_worktree_path\|project_name, title, base, head_branch?, commit_message?}`) |
 
 ## Auth header
 

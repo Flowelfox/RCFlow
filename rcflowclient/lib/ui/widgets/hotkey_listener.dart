@@ -142,7 +142,10 @@ class _HotkeyListenerState extends State<HotkeyListener> {
         return true;
 
       case HotkeyAction.focusInputArea:
-        if (appState.getPaneType(appState.activePaneId) == PaneType.chat) {
+        // Esc = pause the active pane's running session (same as the pause
+        // button), regardless of where focus is inside the pane. Falls back to
+        // focusing the input when there's nothing to pause.
+        if (!appState.hasNoPanes) {
           final pane = appState.activePane;
           final sid = pane.sessionId;
           if (sid != null && !pane.sessionEnded && !pane.sessionPaused) {

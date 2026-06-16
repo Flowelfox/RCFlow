@@ -119,6 +119,28 @@ async def server_info(request: Request) -> dict[str, Any]:
 
 
 @router.get(
+    "/worker/usage",
+    summary="Account subscription usage",
+    description=(
+        "Returns this worker's latest account-level Claude subscription usage snapshot — "
+        "the rolling **5-hour** and **7-day** quota windows (``utilization`` as a 0-100 "
+        "used-percentage, plus an ISO-8601 ``resets_at``), and per-model 7-day windows "
+        "(``seven_day_opus`` / ``seven_day_sonnet``) when the upstream endpoint reports them. "
+        "The snapshot is refreshed by a background poller and pushed live over "
+        "``/ws/output/text`` as ``worker_usage`` messages; this endpoint exposes the same "
+        "cached value for on-demand reads. ``available`` is ``false`` for API-key workers "
+        "(no subscription token) or before the first successful poll, in which case the "
+        "quota windows are omitted."
+    ),
+    dependencies=[Depends(verify_http_api_key)],
+)
+async def worker_usage(request: Request) -> dict[str, Any]:
+    """Return the cached account-level subscription usage snapshot."""
+    session_manager: SessionManager = request.app.state.session_manager
+    return session_manager.get_worker_usage()
+
+
+@router.get(
     "/projects",
     summary="List project directories",
     description=(

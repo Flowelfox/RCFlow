@@ -55,6 +55,7 @@ class BadgePriority:
     STATUS = 0
     WORKER = 10
     AGENT = 20
+    MODEL = 25
     PROJECT = 30
     WORKTREE = 40
     CAVEMAN = 50
@@ -98,6 +99,12 @@ class BadgeState:
                 badges.append(b)
         except Exception:
             logger.warning("Failed to compute agent badge for %s", session.id, exc_info=True)
+
+        try:
+            if b := self._model_badge(session):
+                badges.append(b)
+        except Exception:
+            logger.warning("Failed to compute model badge for %s", session.id, exc_info=True)
 
         try:
             if b := self._project_badge(session):
@@ -168,6 +175,35 @@ class BadgeState:
             visible=True,
             interactive=False,
             payload={"agent_type": agent},
+        )
+
+    # Claude Code model aliases (mirrors Claude Code's own /model menu) and
+    # their user-facing labels. "default" = no override (worker setting).
+    _MODEL_LABELS: ClassVar[dict[str, str]] = {
+        "opus": "Opus",
+        "sonnet": "Sonnet",
+        "opusplan": "Opus Plan",
+        "haiku": "Haiku",
+    }
+
+    def _model_badge(self, session: ActiveSession) -> BadgeSpec | None:
+        """Interactive model picker — only for Claude Code sessions.
+
+        Gated on a stable signal (live agent OR Claude Code resume metadata) so
+        the badge survives the brief executor reset a model change triggers.
+        """
+        is_claude_code = session.agent_type == "claude_code" or "claude_code_session_id" in session.metadata
+        if not is_claude_code:
+            return None
+        selected = session.metadata.get("selected_model")
+        label = self._MODEL_LABELS.get(selected or "", "Default")
+        return BadgeSpec(
+            type="model",
+            label=label,
+            priority=BadgePriority.MODEL,
+            visible=True,
+            interactive=True,
+            payload={"selected_model": selected, "session_id": session.id},
         )
 
     def _project_badge(self, session: ActiveSession) -> BadgeSpec | None:

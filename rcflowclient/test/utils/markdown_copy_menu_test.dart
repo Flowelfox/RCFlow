@@ -1,7 +1,32 @@
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rcflowclient/ui/utils/markdown_copy_menu.dart';
 
 void main() {
+  group('writeRichClipboard', () {
+    testWidgets('empty html falls back to plain Clipboard.setData (newlines kept)',
+        (tester) async {
+      final captured = <String>[];
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        (call) async {
+          if (call.method == 'Clipboard.setData') {
+            captured.add((call.arguments as Map)['text'] as String);
+          }
+          return null;
+        },
+      );
+      addTearDown(() {
+        tester.binding.defaultBinaryMessenger
+            .setMockMethodCallHandler(SystemChannels.platform, null);
+      });
+
+      await writeRichClipboard(html: '', plain: 'line one\nline two\n\nline four');
+      expect(captured, hasLength(1));
+      expect(captured.single, 'line one\nline two\n\nline four');
+    });
+  });
+
   group('markdownToPlainText', () {
     test('strips heading markers', () {
       expect(markdownToPlainText('# Title'), 'Title');
@@ -45,6 +70,16 @@ void main() {
       expect(plain, isNot(contains('##')));
     });
 
+    test('preserves newlines between blocks (the copy payload)', () {
+      // The per-message copy button copies markdownToPlainText(content); the
+      // bug was a run-on blob. Guard that block boundaries become newlines.
+      final input = '## Task\n\nDo the thing.\n\n- one\n- two';
+      final plain = markdownToPlainText(input);
+      expect(plain, contains('\n'));
+      // The heading must not be glued to the body text.
+      expect(plain, isNot(contains('TaskDo the thing.')));
+    });
+
     test('preserves plain text unchanged when no markdown syntax', () {
       expect(markdownToPlainText('just plain text'), 'just plain text');
     });
@@ -59,6 +94,19 @@ void main() {
         extractMarkdownForSelection(raw, 'First paragraph.'),
         'First paragraph.',
       );
+    });
+
+    test('flattened multi-block selection recovers with newlines', () {
+      // SelectionArea.plainText flattens blocks into a run-on string with no
+      // newlines — this is exactly what the clipboard plain payload was getting.
+      // Recovery must restore the block structure (newlines) from the source.
+      const raw = '## Section\n\nFirst paragraph.\n\nSecond paragraph.';
+      const flattened = 'SectionFirst paragraph.Second paragraph.';
+      final recovered = extractMarkdownForSelection(raw, flattened);
+      expect(recovered, contains('\n'));
+      expect(recovered, contains('## Section'));
+      expect(recovered, contains('First paragraph.'));
+      expect(recovered, contains('Second paragraph.'));
     });
 
     test('line-level mapping recovers heading source', () {

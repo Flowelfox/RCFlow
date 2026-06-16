@@ -376,8 +376,18 @@ class PromptRouter:
         await self._lifecycle.send_interactive_response(session_id, text, accepted=accepted, answers=answers)
 
     async def pause_session(self, session_id: str) -> ActiveSession:
-        """Pause session."""
-        return await self._lifecycle.pause_session(session_id)
+        """Pause session.
+
+        Claude Code style: if the user queued follow-up messages while the turn
+        was running, pausing interrupts the current turn and then delivers those
+        queued messages immediately (rather than leaving them until a manual
+        resume). With no queued messages, the session simply pauses.
+        """
+        session = await self._lifecycle.pause_session(session_id)
+        if session.pending_user_messages:
+            # resume_session reconstructs the executors and drains the queue.
+            session = await self._lifecycle.resume_session(session_id)
+        return session
 
     async def interrupt_subprocess(self, session_id: str) -> ActiveSession:
         """Interrupt subprocess."""
@@ -766,6 +776,38 @@ class PromptRouter:
             if self._session_manager:
                 self._session_manager.broadcast_session_update(session)
 
+    def _apply_project_path(self, session: ActiveSession, project_path: str) -> None:
+        """Apply an already-resolved project directory path directly.
+
+        Used when the caller has resolved the project itself (e.g. a PR-assist
+        session, where the project is matched by the PR's git remote) so the
+        session lands in *exactly* that checkout — avoiding the by-name
+        re-resolution in :meth:`_apply_project_name`, which can pick a different
+        same-named folder. The path is validated to live under a configured
+        projects directory before being applied.
+        """
+        resolved = Path(project_path).resolve()
+        dirs = self._settings.projects_dirs if self._settings else []
+        under_projects = any(
+            resolved == base.resolve() or base.resolve() in resolved.parents for base in dirs
+        )
+        if not resolved.is_dir() or not under_projects:
+            self._push_project_error(
+                session,
+                f"Project path is not under a configured projects directory: {project_path}",
+            )
+            return
+        if not os.access(resolved, os.R_OK | os.X_OK):
+            self._push_project_error(session, f"Permission denied accessing project at {resolved}.")
+            return
+
+        abs_path = str(resolved)
+        if abs_path != session.main_project_path:
+            session.main_project_path = abs_path
+            session.project_name_error = None
+            if self._session_manager:
+                self._session_manager.broadcast_session_update(session)
+
     def _push_project_error(self, session: ActiveSession, message: str) -> None:
         """Push a project validation error to the session buffer and broadcast it."""
         session.project_name_error = message
@@ -892,6 +934,66 @@ class PromptRouter:
 
         planning_prompt = _build_planning_prompt(task_title, task_description, plan_path)
         return session.id, planning_prompt
+
+    async def prepare_assist_session(
+        self,
+        *,
+        purpose: str,
+        read_only: bool = True,
+        project_name: str | None = None,
+        project_path: str | None = None,
+    ) -> str:
+        """Create a one-shot session for on-demand PR-review AI assistance.
+
+        When ``read_only`` (summarise / explain) it seeds deny-all permission
+        rules (no Bash/Edit/Write/Agent) so the assist is pure analysis. When
+        not read-only (apply-fix) it leaves the session with normal permissions
+        so the agent can edit the selected worktree. Returns the session id; the
+        caller fires :meth:`handle_prompt` with the seeded prompt as a background
+        task (same pattern as :meth:`prepare_plan_session`).
+        """
+        session = self._session_manager.create_session(SessionType.ONE_SHOT)
+        # A resolved path (from the PR's git-remote match) wins over a by-name
+        # lookup so the assist opens in the same checkout the PR maps to.
+        if project_path:
+            self._apply_project_path(session, project_path)
+        elif project_name:
+            self._apply_project_name(session, project_name)
+        session.metadata["session_purpose"] = purpose
+
+        if read_only:
+            session.metadata["permission_rules"] = [
+                {"tool_name": "Bash", "decision": "deny", "scope": "tool_session", "path_prefix": None},
+                {"tool_name": "Edit", "decision": "deny", "scope": "tool_session", "path_prefix": None},
+                {"tool_name": "Write", "decision": "deny", "scope": "tool_session", "path_prefix": None},
+                {"tool_name": "Agent", "decision": "deny", "scope": "tool_session", "path_prefix": None},
+            ]
+            from src.core.permissions import PermissionManager  # noqa: PLC0415
+
+            pm = PermissionManager()
+            pm.restore_rules(session.metadata["permission_rules"])
+            session.permission_manager = pm
+
+        # Persist a session row so the assist session is listed and survives a
+        # restart (mirrors the plan-session persistence above).
+        if self._db_session_factory is not None:
+            backend_id = self._settings.RCFLOW_BACKEND_ID if self._settings else ""
+            async with self._db_session_factory() as db:
+                session_uuid = uuid.UUID(session.id)
+                existing = await db.get(SessionModel, session_uuid)
+                if existing is None:
+                    db.add(
+                        SessionModel(
+                            id=session_uuid,
+                            backend_id=backend_id,
+                            created_at=session.created_at,
+                            ended_at=session.ended_at,
+                            session_type=session.session_type.value,
+                            status=session.status.value,
+                        )
+                    )
+                    await db.commit()
+        return session.id
 
     # ------------------------------------------------------------------
     # Main prompt handler
@@ -1064,10 +1166,12 @@ class PromptRouter:
         session_id: str | None = None,
         attachments: list[ResolvedAttachment] | None = None,
         project_name: str | None = None,
+        project_path: str | None = None,
         selected_worktree_path: str | None = None,
         task_id: str | None = None,
         display_text: str | None = None,
         queued_id: str | None = None,
+        direct_tool: str | None = None,
     ) -> str:
         """Handle a user prompt. Creates a new session or resumes an existing one.
 
@@ -1104,9 +1208,13 @@ class PromptRouter:
         if task_id and "primary_task_id" not in session.metadata:
             session.metadata["primary_task_id"] = task_id
 
-        # Resolve and validate the project_name from the client picker BEFORE the
-        # DB row write, so the initial INSERT already contains main_project_path.
-        if project_name:
+        # Resolve and validate the project BEFORE the DB row write, so the initial
+        # INSERT already contains main_project_path. A resolved path (from a PR's
+        # git-remote match) wins over a by-name lookup so the session lands in the
+        # exact checkout the PR maps to.
+        if project_path:
+            self._apply_project_path(session, project_path)
+        elif project_name:
             self._apply_project_name(session, project_name)
 
         # Apply the pre-selected worktree path (sent by the client before the first
@@ -1205,11 +1313,13 @@ class PromptRouter:
             await self._forward_to_opencode(session, _display)
             return session.id
 
-        # Direct tool mode: bypass LLM entirely, parse #tool_name syntax
+        # Direct tool mode: bypass LLM entirely. The tool comes from an explicit
+        # ``direct_tool`` parameter when provided (e.g. PR-assist passing the
+        # agent badge), otherwise it is parsed from the text's #tool_name syntax.
         if self.is_direct_tool_mode:
             session.set_active()
             session.buffer.push_text(MessageType.TEXT_CHUNK, _make_user_buffer_data())
-            await self._context._handle_direct_prompt(session, text)
+            await self._context._handle_direct_prompt(session, text, explicit_tool=direct_tool)
             return session.id
 
         # Bare agent mention: when the user sends only "#ClaudeCode" or "#Codex"

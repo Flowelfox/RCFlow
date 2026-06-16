@@ -74,6 +74,38 @@ class WebSocketService {
     _transport.sendInput(msg);
   }
 
+  /// Start a PR-assist session over the input WebSocket. For the read-only
+  /// kinds (``summary`` / ``explain``) only the PR id, kind and optional file
+  /// path are sent. For ``fix`` the comment body plus the worktree/project the
+  /// full-perms agent should edit are also supplied. The server responds with
+  /// an ack containing the session_id, handled by the standard ack routing in
+  /// AppState._handleInputMessage.
+  void startPrAssist(
+    String prId,
+    String kind, {
+    String? filePath,
+    String? commentBody,
+    int? line,
+    String? projectName,
+    String? projectPath,
+    String? selectedWorktreePath,
+    String? agent,
+  }) {
+    final msg = <String, dynamic>{
+      'type': 'start_pr_assist',
+      'pr_id': prId,
+      'kind': kind,
+      'file_path': ?filePath,
+      'comment_body': ?commentBody,
+      'line': ?line,
+      'project_name': ?projectName,
+      'project_path': ?projectPath,
+      'selected_worktree_path': ?selectedWorktreePath,
+      'agent': ?agent,
+    };
+    _transport.sendInput(msg);
+  }
+
   Future<Map<String, dynamic>> uploadAttachment({
     required List<int> bytes,
     required String fileName,
@@ -411,6 +443,146 @@ class WebSocketService {
     _transport.sendOutput({'type': 'list_linear_issues'});
   }
 
+  void listGithubPrs() {
+    _transport.sendOutput({'type': 'list_github_prs'});
+  }
+
+  /// Trigger a server-side sync of open pull requests from GitHub. The backend
+  /// broadcasts `github_pr_update` for each synced PR. Returns `{"synced": int}`.
+  Future<Map<String, dynamic>> syncGithubPrs({
+    String? role,
+    String? state,
+    bool force = false,
+  }) => _rest.syncGithubPrs(role: role, state: state, force: force);
+
+  Future<Map<String, dynamic>> fetchGithubStatus() => _rest.fetchGithubStatus();
+
+  Future<Map<String, dynamic>> checkGithubToken(String token) =>
+      _rest.checkGithubToken(token);
+
+  Future<Map<String, dynamic>> getGithubRepoDefaults() =>
+      _rest.getGithubRepoDefaults();
+
+  Future<Map<String, dynamic>> setGithubRepoDefault(
+    String owner,
+    String repo,
+    bool isDefault,
+  ) => _rest.setGithubRepoDefault(owner, repo, isDefault);
+
+  Future<Map<String, dynamic>> getGithubPrFiles(String prId) =>
+      _rest.getGithubPrFiles(prId);
+
+  Future<Map<String, dynamic>> getGithubPrProject(String prId) =>
+      _rest.getGithubPrProject(prId);
+
+  Future<Map<String, dynamic>> getGithubPrConflicts(String prId) =>
+      _rest.getGithubPrConflicts(prId);
+
+  Future<Map<String, dynamic>> getGithubPrConversation(String prId) =>
+      _rest.getGithubPrConversation(prId);
+
+  Future<Map<String, dynamic>> postGithubPrConversation(
+    String prId,
+    String body,
+  ) => _rest.postGithubPrConversation(prId, body);
+
+  Future<Map<String, dynamic>> getGithubPrFile(
+    String prId,
+    String path, {
+    String side = 'head',
+  }) => _rest.getGithubPrFile(prId, path, side: side);
+
+  Future<Map<String, dynamic>> getGithubPrThreads(String prId) =>
+      _rest.getGithubPrThreads(prId);
+
+  Future<Map<String, dynamic>> getGithubPrDraft(String prId) =>
+      _rest.getGithubPrDraft(prId);
+
+  Future<Map<String, dynamic>> patchGithubPrDraft(
+    String prId, {
+    String? event,
+    String? body,
+  }) => _rest.patchGithubPrDraft(prId, event: event, body: body);
+
+  Future<Map<String, dynamic>> addGithubPrDraftComment(
+    String prId, {
+    required String path,
+    required int line,
+    required String side,
+    required String body,
+    int? startLine,
+    String? startSide,
+  }) => _rest.addGithubPrDraftComment(
+    prId,
+    path: path,
+    line: line,
+    side: side,
+    body: body,
+    startLine: startLine,
+    startSide: startSide,
+  );
+
+  Future<Map<String, dynamic>> deleteGithubPrDraftComment(
+    String prId,
+    int index,
+  ) => _rest.deleteGithubPrDraftComment(prId, index);
+
+  Future<Map<String, dynamic>> submitGithubPrReview(
+    String prId, {
+    required String event,
+    String? body,
+  }) => _rest.submitGithubPrReview(prId, event: event, body: body);
+
+  Future<Map<String, dynamic>> replyGithubPrComment(
+    String prId,
+    int commentId,
+    String body,
+  ) => _rest.replyGithubPrComment(prId, commentId, body);
+
+  Future<Map<String, dynamic>> deleteGithubPrComment(
+    String prId,
+    int commentId,
+  ) => _rest.deleteGithubPrComment(prId, commentId);
+
+  Future<Map<String, dynamic>> resolveGithubPrThread(
+    String prId,
+    String threadId,
+    bool resolved,
+  ) => _rest.resolveGithubPrThread(prId, threadId, resolved);
+
+  Future<Map<String, dynamic>> mergeGithubPr(
+    String prId, {
+    required String method,
+    String? commitTitle,
+    String? commitMessage,
+  }) => _rest.mergeGithubPr(
+    prId,
+    method: method,
+    commitTitle: commitTitle,
+    commitMessage: commitMessage,
+  );
+
+  /// Open a pull request from a local worktree. Returns `{pr, url}`.
+  Future<Map<String, dynamic>> openGithubPr({
+    String? selectedWorktreePath,
+    String? projectName,
+    required String title,
+    String body = '',
+    String base = 'main',
+    String? headBranch,
+    String? commitMessage,
+    bool draft = false,
+  }) => _rest.openGithubPr(
+    selectedWorktreePath: selectedWorktreePath,
+    projectName: projectName,
+    title: title,
+    body: body,
+    base: base,
+    headBranch: headBranch,
+    commitMessage: commitMessage,
+    draft: draft,
+  );
+
   Future<Map<String, dynamic>> syncLinearIssues() => _rest.syncLinearIssues();
 
   Future<Map<String, dynamic>> createLinearIssue({
@@ -514,6 +686,9 @@ class WebSocketService {
 
   Future<void> setSessionWorktree(String sessionId, String? path) =>
       _rest.setSessionWorktree(sessionId, path);
+
+  Future<void> setSessionModel(String sessionId, String? model) =>
+      _rest.setSessionModel(sessionId, model);
 
   void disconnect() => _transport.disconnect();
 

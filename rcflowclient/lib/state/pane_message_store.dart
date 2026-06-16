@@ -225,6 +225,8 @@ class PaneMessageStore {
     String name,
     Map<String, dynamic>? input, {
     String? displayName,
+    bool answered = false,
+    String? answer,
   }) {
     finalizeStream();
     // AskUserQuestion renders at the top level rather than inside the agent
@@ -250,6 +252,10 @@ class PaneMessageStore {
           toolName: name,
           displayName: displayName,
           toolInput: input,
+          // On replay an already-answered question comes back resolved.
+          finished: answered,
+          expanded: answered,
+          content: answered ? (answer ?? '') : '',
         ),
       );
       // The question is finished via answerQuestion (or the session-end

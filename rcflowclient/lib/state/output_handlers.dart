@@ -51,10 +51,15 @@ void handleTextChunk(Map<String, dynamic> msg, PaneState pane) {
 }
 
 void handleToolStart(Map<String, dynamic> msg, PaneState pane) {
+  // On replay of a live session the backend stamps an already-answered
+  // AskUserQuestion with answered/answer — honour it so the question renders
+  // resolved instead of becoming pickable (and re-submittable) again.
   pane.startToolBlock(
     msg['tool_name'] as String? ?? 'unknown',
     msg['tool_input'] as Map<String, dynamic>?,
     displayName: msg['display_name'] as String?,
+    answered: msg['answered'] == true,
+    answer: msg['answer'] as String?,
   );
 }
 

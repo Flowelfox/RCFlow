@@ -8,6 +8,7 @@ import '../models/legacy_badge_adapter.dart';
 import '../models/scheduled_wake.dart';
 import '../models/session_info.dart';
 import '../models/worker_config.dart';
+import '../models/worker_usage.dart';
 import '../models/ws_message_type.dart';
 import 'settings_service.dart';
 import 'terminal_service.dart';
@@ -66,6 +67,11 @@ class WorkerConnection extends ChangeNotifier {
   int inputTokenLimit = 0;
   int outputTokenLimit = 0;
 
+  /// Latest account-level subscription usage (5h / 7d quota) for this worker,
+  /// from ``worker_usage`` broadcasts. ``unavailable`` until the first poll
+  /// arrives, or permanently for API-key workers (chip stays hidden).
+  WorkerUsage accountUsage = WorkerUsage.unavailable;
+
   /// Per-scope generation counter for the dynamic model catalog. Each
   /// time credentials change for a scope (API key save, login completion,
   /// provider switch), the matching counter is bumped and listeners are
@@ -86,8 +92,7 @@ class WorkerConnection extends ChangeNotifier {
   /// Increment the generation counter for *scope* and notify listeners so
   /// any open dynamic-model dropdown re-fetches.
   void bumpModelCatalog(String scope) {
-    modelCatalogGeneration[scope] =
-        (modelCatalogGeneration[scope] ?? 0) + 1;
+    modelCatalogGeneration[scope] = (modelCatalogGeneration[scope] ?? 0) + 1;
     notifyListeners();
   }
 
@@ -142,7 +147,7 @@ class WorkerConnection extends ChangeNotifier {
   /// ``session_update`` broadcast.  Consumers use this to rehydrate the
   /// pinned queue on reconnect.  See ``Queued User Messages`` in ``docs/design/sessions.md``.
   void Function(String sessionId, List<Map<String, dynamic>> snapshot)?
-      onQueuedMessagesSnapshot;
+  onQueuedMessagesSnapshot;
 
   // Pending auto-load session after connect
   String? _pendingAutoLoadSessionId;
@@ -213,6 +218,7 @@ class WorkerConnection extends ChangeNotifier {
       ws.listSessions(offset: 0, limit: _sessionPageSize);
       ws.listTasks();
       ws.listLinearIssues();
+      ws.listGithubPrs();
       ws.requestArtifacts();
       _fetchServerInfo();
       _fetchTokenLimits();
@@ -361,6 +367,10 @@ class WorkerConnection extends ChangeNotifier {
       case WsOutputType.sessionReorder:
         _handleSessionReorder(msg);
         return;
+      case WsOutputType.workerUsage:
+        accountUsage = WorkerUsage.fromJson(msg);
+        notifyListeners();
+        return;
       // Everything else (including task/artifact/app-level) forwarded upstream.
       default:
         onOutputMessage?.call(msg, config.id);
@@ -390,7 +400,9 @@ class WorkerConnection extends ChangeNotifier {
       // badges (list responses don't always include the full badge set).
       // Badges are overwritten by individual session_update messages that
       // always carry the authoritative badge list.
-      if (parsed.badges.isEmpty && existing != null && existing.badges.isNotEmpty) {
+      if (parsed.badges.isEmpty &&
+          existing != null &&
+          existing.badges.isNotEmpty) {
         parsed = parsed.copyWith(badges: existing.badges);
       }
       // Preserve pending ScheduleWakeup timers when the list response omits
@@ -403,6 +415,18 @@ class WorkerConnection extends ChangeNotifier {
           existing != null &&
           existing.scheduledWakes.isNotEmpty) {
         parsed = parsed.copyWith(scheduledWakes: existing.scheduledWakes);
+      }
+      // A bulk list refresh must never resurrect a session the client already
+      // knows is terminal (e.g. one the user just ended) back to a running
+      // state — the list can race an in-flight server-side archive, which is
+      // what made ending a session feel like it needed two clicks. An explicit
+      // restore arrives as a single session_update (handled elsewhere), not a
+      // list, so this only blocks stale resurrection.
+      const terminalStatuses = {'completed', 'failed', 'cancelled'};
+      if (existing != null &&
+          terminalStatuses.contains(existing.status) &&
+          !terminalStatuses.contains(parsed.status)) {
+        parsed = parsed.copyWith(status: existing.status);
       }
       // Server worker badge carries backend_id as label. Replace with the
       // user-configured worker name — same replacement that session_update
@@ -852,7 +876,9 @@ class WorkerConnection extends ChangeNotifier {
   ) {
     final p = (provider ?? '').toLowerCase();
     if (p == 'none' || p == 'bedrock') return true;
-    if (p == 'anthropic') return anthropicKey != null && anthropicKey.isNotEmpty;
+    if (p == 'anthropic') {
+      return anthropicKey != null && anthropicKey.isNotEmpty;
+    }
     if (p == 'openai') return openaiKey != null && openaiKey.isNotEmpty;
     // Unknown provider — assume configured; server-side init will raise if
     // it's actually wrong.

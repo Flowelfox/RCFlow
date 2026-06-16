@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 
@@ -7,6 +8,20 @@ import '../../utils/link_utils.dart';
 import '../../utils/markdown_copy_menu.dart';
 import '../../utils/selectable_code_block_builder.dart';
 import '../../../theme/spacing.dart';
+import '../copy_icon_button.dart';
+
+/// Whether copy buttons should always be visible (touch platforms) rather than
+/// hover-revealed (desktop / web).
+bool messageActionsAlwaysVisible(BuildContext context) {
+  if (kIsWeb) return false;
+  switch (Theme.of(context).platform) {
+    case TargetPlatform.iOS:
+    case TargetPlatform.android:
+      return true;
+    default:
+      return false;
+  }
+}
 
 class AssistantBubble extends StatefulWidget {
   final DisplayMessage message;
@@ -23,6 +38,7 @@ class _AssistantBubbleState extends State<AssistantBubble> {
   // didChangeDependencies handles theme flips by clearing the cache.
   String? _cachedContent;
   Widget? _cachedBody;
+  bool _hovered = false;
 
   @override
   void didChangeDependencies() {
@@ -47,9 +63,30 @@ class _AssistantBubbleState extends State<AssistantBubble> {
       _cachedContent = content;
       _cachedBody = _buildMarkdown(context, content);
     }
-    return Padding(
-      padding: const EdgeInsets.only(top: kSpace1, bottom: kSpace1, right: kSpace6),
-      child: MessageSelectionArea(rawMarkdown: content, child: _cachedBody!),
+    final showCopy = _hovered || messageActionsAlwaysVisible(context);
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: Padding(
+        padding: const EdgeInsets.only(top: kSpace1, bottom: kSpace1, right: kSpace6),
+        child: Stack(
+          children: [
+            MessageSelectionArea(rawMarkdown: content, child: _cachedBody!),
+            if (showCopy)
+              Positioned(
+                top: 0,
+                right: 0,
+                child: CopyIconButton(
+                  tooltip: 'Copy message',
+                  onCopy: () => writeRichClipboard(
+                    html: markdownSourceToHtml(content),
+                    plain: markdownToPlainText(content),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
     );
   }
 

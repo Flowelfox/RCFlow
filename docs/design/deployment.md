@@ -1,5 +1,5 @@
 ---
-updated: 2026-06-03
+updated: 2026-06-08
 ---
 
 # Platform Support, Deployment & Bundling
@@ -106,6 +106,7 @@ uv run rcflow                    # or: uv run rcflow run — starts the server
 - **Server settings** — IP address, port, WSS Enabled checkbox; pre-populated from `settings.json`.
 - **Start/Stop button** — Starts the server as a child subprocess (`rcflow run`).
 - **Copy Token button** — Copies the API key to the macOS pasteboard.
+- **Install CLI button** — Wires the global `rcflow` terminal command to this app (frozen builds only). On confirmation it points `~/.local/bin/rcflow` at the running executable (a symlink on macOS/Linux, a `.cmd` shim on Windows) — the DMG is drag-to-Applications and never puts `rcflow` on PATH otherwise (`src/services/cli_link.py`). A right-aligned **CLI: installed / not installed** pill (green / grey) shows the current state and refreshes on the UI tick; if `~/.local/bin` isn't on PATH after install, a dialog shows the line to add. The button reads "Reinstall CLI" once installed.
 - **Status indicator** — "Running (WSS)", "Stopped", "Starting…", error (red).
 - **Instance details** — Bound address, uptime, active session count, backend ID (polled from `/api/info` every 5 s).
 - **Inline log viewer** — Scrollable text area (Menlo 11 pt) showing live server subprocess stdout. Colors follow system appearance: dark background in Dark Mode, light background in Light Mode. ERROR/CRITICAL lines red, WARNING lines amber.
@@ -336,6 +337,8 @@ Environment variables: `RCFLOW_VERSION` (pin version), `RCFLOW_REPO` (override G
 **Windows (zip/manual):** `.\install.ps1` (as Administrator) — installs to `C:\RCFlow\`, downloads NSSM, registers Windows Service, generates `settings.json` with random API key, runs migrations, creates firewall rule.
 
 **Windows (setup.exe):** Run the Inno Setup installer — installs to `%PROGRAMFILES%\RCFlow\` (user-level, no admin required), runs migrations, optionally registers "Start with Windows" autostart, and optionally launches the GUI. `settings.json` is generated automatically on first server start. The GUI runs the server as a background subprocess and provides a window with server controls, live logs, and a system tray icon.
+
+**macOS (.dmg):** Drag **RCFlow Worker.app** to Applications. The DMG is GUI-only — it does **not** put a global `rcflow` command on PATH. To get the terminal command, either run the `get-worker.sh` one-liner above, or open the app and click **Install CLI** in the settings panel (it symlinks `~/.local/bin/rcflow` and tells you if that directory needs adding to PATH). The CLI status pill shows whether it's wired up.
 
 All install scripts are idempotent — safe to run again for upgrades. Existing `settings.json` and `data/` are preserved.
 

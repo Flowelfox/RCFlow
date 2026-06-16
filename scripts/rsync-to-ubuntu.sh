@@ -16,7 +16,8 @@
 set -e
 
 REMOTE="vmubuntu:~/Projects/RCFlow/"
-SOURCE="/home/flowelfox/Projects/RCFlow/"
+# Sync the repo/worktree this script lives in (worktree-aware).
+SOURCE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/"
 
 rsync -avz --progress "$@" \
   --exclude='.git/' \

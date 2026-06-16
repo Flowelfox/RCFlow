@@ -44,6 +44,7 @@ from src.gui.updater import (
     cleanup_partial_downloads,
     resolve_current_version,
 )
+from src.services import cli_link
 
 # Apply appearance settings before any CTk window is created
 ctk.set_appearance_mode("system")
@@ -245,6 +246,22 @@ class RCFlowDashboard:
         )
         self._add_client_btn.pack()
 
+        # "Install CLI" — only for frozen builds (from source, ``rcflow`` is
+        # already on PATH via the venv).  Wires ``~/.local/bin/rcflow`` to this app.
+        self._install_cli_btn: ctk.CTkButton | None = None
+        if cli_link.is_supported():
+            self._install_cli_btn = ctk.CTkButton(
+                btns,
+                text="Install CLI",
+                width=104,
+                fg_color=theme.BTN_COPY_FG,
+                hover_color=theme.BTN_COPY_HOVER,
+                text_color=theme.BTN_COPY_TEXT,
+                font=ctk.CTkFont(size=theme.FONT_SIZE_BODY),
+                command=self._on_install_cli,
+            )
+            self._install_cli_btn.pack(pady=(s, 0))
+
         # ── Update banner (hidden unless update available) ───────────
         self._build_update_banner(row=1)
 
@@ -258,6 +275,20 @@ class RCFlowDashboard:
             font=ctk.CTkFont(size=theme.FONT_SIZE_SMALL, weight="bold"),
         )
         self._status_label.grid(row=2, column=0, sticky="w", padx=p, pady=(s + 2, 0))
+
+        # ── CLI-installed pill (right-aligned, same row) ──────────────
+        self._cli_status_label: ctk.CTkLabel | None = None
+        if cli_link.is_supported():
+            self._cli_status_label = ctk.CTkLabel(
+                self._root,
+                text="  CLI: …  ",
+                fg_color=theme.STATUS_STOPPED,
+                text_color=("#ffffff", "#e5e7eb"),
+                corner_radius=6,
+                font=ctk.CTkFont(size=theme.FONT_SIZE_SMALL, weight="bold"),
+            )
+            self._cli_status_label.grid(row=2, column=0, sticky="e", padx=p, pady=(s + 2, 0))
+            self._refresh_cli_status()
 
         # ── Instance details card ────────────────────────────────────
         dc = ctk.CTkFrame(self._root, corner_radius=8)
@@ -742,6 +773,45 @@ class RCFlowDashboard:
 
     # ── Status & details ──────────────────────────────────────────────────
 
+    def _refresh_cli_status(self) -> None:
+        """Update the green/grey 'CLI installed' pill from the launcher state."""
+        if self._cli_status_label is None:
+            return
+        installed = cli_link.is_installed()
+        self._cli_status_label.configure(
+            text="  CLI: installed  " if installed else "  CLI: not installed  ",
+            fg_color=theme.STATUS_RUNNING if installed else theme.STATUS_STOPPED,
+        )
+        if self._install_cli_btn is not None:
+            self._install_cli_btn.configure(text="Reinstall CLI" if installed else "Install CLI")
+
+    def _on_install_cli(self) -> None:
+        """Create the ``rcflow`` launcher in ~/.local/bin after confirmation."""
+        from tkinter import messagebox  # noqa: PLC0415
+
+        path = cli_link.link_path()
+        if not messagebox.askyesno(
+            "Install CLI command",
+            f"Create the 'rcflow' terminal command at\n{path}\n\n"
+            "It will point at this application so you can run 'rcflow' from a terminal.",
+        ):
+            return
+        try:
+            cli_link.install()
+        except OSError as exc:
+            self._set_status(f"CLI install failed: {exc}", error=True, sticky=True)
+            messagebox.showerror("CLI install failed", str(exc))
+            return
+        self._refresh_cli_status()
+        self._set_status("CLI command installed", sticky=True)
+        if not cli_link.bin_dir_on_path():
+            messagebox.showinfo(
+                "Almost done — add to PATH",
+                f"Installed at {path}, but {cli_link.bin_dir()} is not on your PATH.\n\n"
+                "Add it to your shell profile, then restart your terminal:\n\n"
+                f"  echo 'export PATH=\"{cli_link.bin_dir()}:$PATH\"' >> ~/.zshrc",
+            )
+
     def _set_status(self, text: str, *, error: bool = False, sticky: bool = False) -> None:
         import time  # noqa: PLC0415
 
@@ -773,6 +843,7 @@ class RCFlowDashboard:
             pass
 
         self._drain_log_queue()
+        self._refresh_cli_status()
         running = self._server.is_running()
 
         if running:

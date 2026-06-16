@@ -324,6 +324,11 @@ class ClaudeCodeAgent:
         assert isinstance(executor, ClaudeCodeSdkExecutor)  # noqa: S101
 
         session.claude_code_executor = executor
+        # Per-session model override (the model badge) — applied at executor
+        # build so this and resumed turns run on the picked model.
+        selected_model = session.metadata.get("selected_model")
+        if selected_model:
+            executor._config_overrides["model"] = selected_model
         session.session_type = SessionType.LONG_RUNNING
         session.set_activity(ActivityState.RUNNING_SUBPROCESS)
 
@@ -404,6 +409,9 @@ class ClaudeCodeAgent:
         executor.set_can_use_tool(self._make_can_use_tool(session))
         executor._tool_def = tool_def
         executor._last_parameters = session.metadata.get("claude_code_parameters", {})
+        selected_model = session.metadata.get("selected_model")
+        if selected_model:
+            executor._config_overrides["model"] = selected_model
         return executor
 
     def reattach_executor(self, session: ActiveSession) -> bool:
@@ -466,15 +474,16 @@ class ClaudeCodeAgent:
         """Gate EnterPlanMode on the user's approval (SDK ``can_use_tool`` path)."""
         session._plan_mode_event = asyncio.Event()
         session._plan_mode_approved = False
-        session.set_activity(ActivityState.AWAITING_PERMISSION)
+        session.begin_input_wait("awaiting_plan_approval")
         session.buffer.push_text(MessageType.PLAN_MODE_ASK, {"session_id": session.id})
         try:
             await asyncio.wait_for(session._plan_mode_event.wait(), timeout=_PLAN_MODE_TIMEOUT)
         except TimeoutError:
             session._plan_mode_event = None
+            session.end_input_wait()
             return PermissionResultDeny(message="Plan mode timed out.", interrupt=True)
         session._plan_mode_event = None
-        session.set_activity(ActivityState.RUNNING_SUBPROCESS)
+        session.end_input_wait()
         if not session._plan_mode_approved:
             return PermissionResultDeny(message="Plan mode denied.", interrupt=True)
         return PermissionResultAllow()
@@ -486,7 +495,7 @@ class ClaudeCodeAgent:
         session._plan_review_event = asyncio.Event()
         session._plan_review_approved = False
         session._plan_review_feedback = None
-        session.set_activity(ActivityState.AWAITING_PERMISSION)
+        session.begin_input_wait("awaiting_plan_review")
         session.buffer.push_text(
             MessageType.PLAN_REVIEW_ASK,
             {"session_id": session.id, "plan_input": tool_input},
@@ -495,9 +504,10 @@ class ClaudeCodeAgent:
             await asyncio.wait_for(session._plan_review_event.wait(), timeout=_PLAN_REVIEW_TIMEOUT)
         except TimeoutError:
             session._plan_review_event = None
+            session.end_input_wait()
             return PermissionResultDeny(message="Plan review timed out.", interrupt=True)
         session._plan_review_event = None
-        session.set_activity(ActivityState.RUNNING_SUBPROCESS)
+        session.end_input_wait()
         feedback = session._plan_review_feedback or ""
         session._plan_review_feedback = None
         if session._plan_review_approved:
@@ -521,12 +531,13 @@ class ClaudeCodeAgent:
         )
         session._question_event = asyncio.Event()
         session._question_answers = None
-        session.set_activity(ActivityState.AWAITING_PERMISSION)
+        session.begin_input_wait("awaiting_question")
         try:
             await asyncio.wait_for(session._question_event.wait(), timeout=_QUESTION_TIMEOUT)
         except TimeoutError:
             session._question_event = None
             session._question_answers = None
+            session.end_input_wait()
             session.buffer.push_text(
                 MessageType.ERROR,
                 {
@@ -540,7 +551,7 @@ class ClaudeCodeAgent:
         answers = session._question_answers or {}
         session._question_event = None
         session._question_answers = None
-        session.set_activity(ActivityState.RUNNING_SUBPROCESS)
+        session.end_input_wait()
 
         # Persist the answer on the buffered TOOL_START so history replay shows
         # the question resolved.

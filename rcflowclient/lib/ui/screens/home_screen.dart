@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
@@ -14,6 +15,7 @@ import '../onboarding_keys.dart' as onboarding;
 import '../widgets/connection_bar.dart';
 import '../widgets/custom_title_bar.dart';
 import '../../services/keyboard_state_reconciler.dart';
+import '../../services/settings_service.dart';
 import '../widgets/hotkey_listener.dart';
 import '../widgets/input_area.dart';
 import '../widgets/onboarding_overlay.dart';
@@ -41,10 +43,18 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
 
   double _sidebarFraction = _defaultFraction;
 
+  /// Debounces persisting the window bounds during a resize/move drag.
+  Timer? _winSaveDebounce;
+
   @override
   void initState() {
     super.initState();
     if (_isDesktop) windowManager.addListener(this);
+    // Restore the persisted sidebar width fraction.
+    final saved = context.read<AppState>().settings.sidebarFraction;
+    if (saved != null) {
+      _sidebarFraction = saved.clamp(0.0, _maxFraction);
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) => _checkFirstRun());
   }
 
@@ -66,8 +76,55 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
 
   @override
   void dispose() {
+    _winSaveDebounce?.cancel();
     if (_isDesktop) windowManager.removeListener(this);
     super.dispose();
+  }
+
+  SettingsService get _settings => context.read<AppState>().settings;
+
+  /// Persist the current window bounds (skipped while maximized/fullscreen so we
+  /// keep the last *restored* size). Debounced during drags.
+  void _scheduleWindowSave() {
+    _winSaveDebounce?.cancel();
+    _winSaveDebounce = Timer(const Duration(milliseconds: 400), () async {
+      if (!_isDesktop) return;
+      if (await windowManager.isMaximized() ||
+          await windowManager.isFullScreen()) {
+        return;
+      }
+      final b = await windowManager.getBounds();
+      _settings.windowBounds = {
+        'x': b.left,
+        'y': b.top,
+        'width': b.width,
+        'height': b.height,
+      };
+    });
+  }
+
+  @override
+  void onWindowResize() => _scheduleWindowSave();
+
+  @override
+  void onWindowMove() => _scheduleWindowSave();
+
+  @override
+  void onWindowMaximize() => _settings.windowMaximized = true;
+
+  @override
+  void onWindowUnmaximize() {
+    _settings.windowMaximized = false;
+    _scheduleWindowSave();
+  }
+
+  @override
+  void onWindowEnterFullScreen() => _settings.windowFullScreen = true;
+
+  @override
+  void onWindowLeaveFullScreen() {
+    _settings.windowFullScreen = false;
+    _scheduleWindowSave();
   }
 
   @override
@@ -122,6 +179,8 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
                                     _sidebarFraction = newWidth / totalWidth;
                                   });
                                 },
+                                onDragEnd: () =>
+                                    _settings.sidebarFraction = _sidebarFraction,
                               ),
                             ],
                             Expanded(
@@ -457,6 +516,8 @@ class _HomeScreenState extends State<HomeScreen> with WindowListener {
                           _sidebarFraction = newWidth / totalWidth;
                         });
                       },
+                      onDragEnd: () =>
+                          _settings.sidebarFraction = _sidebarFraction,
                     ),
                     Expanded(
                       child: Consumer<AppState>(
@@ -547,8 +608,9 @@ class _WelcomePane extends StatelessWidget {
 
 class _SidebarDivider extends StatefulWidget {
   final ValueChanged<double> onDrag;
+  final VoidCallback? onDragEnd;
 
-  const _SidebarDivider({required this.onDrag});
+  const _SidebarDivider({required this.onDrag, this.onDragEnd});
 
   @override
   State<_SidebarDivider> createState() => _SidebarDividerState();
@@ -568,7 +630,10 @@ class _SidebarDividerState extends State<_SidebarDivider> {
       onExit: (_) => setState(() => _hovering = false),
       child: GestureDetector(
         onPanStart: (_) => setState(() => _dragging = true),
-        onPanEnd: (_) => setState(() => _dragging = false),
+        onPanEnd: (_) {
+          setState(() => _dragging = false);
+          widget.onDragEnd?.call();
+        },
         onPanCancel: () => setState(() => _dragging = false),
         onPanUpdate: (details) => widget.onDrag(details.delta.dx),
         child: Container(

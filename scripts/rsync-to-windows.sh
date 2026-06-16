@@ -2,10 +2,12 @@
 set -e
 
 REMOTE="/mnt/c/Users/Flowelfox/Projects/RCFlow/"
-SOURCE="/home/flowelfox/Projects/RCFlow/"
+# Sync the repo/worktree this script actually lives in (so running the copy
+# inside a `wt` worktree syncs that worktree, not the main checkout).
+SOURCE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/"
 
 rsync -avz --progress "$@" \
-  --exclude='.git/' \
+  --exclude='.git' \
   --exclude='.venv/' \
   --exclude='__pycache__/' \
   --exclude='*.pyc' \

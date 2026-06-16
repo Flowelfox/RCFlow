@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import uuid
 from datetime import UTC, datetime
@@ -706,6 +707,81 @@ async def set_session_worktree(
 
     logger.info("Session %s selected_worktree_path set to %r via HTTP API", session_id, path)
     return {"session_id": session_id, "selected_worktree_path": path}
+
+
+# Claude Code model aliases the picker offers (mirrors Claude Code's /model).
+_CLAUDE_CODE_MODEL_ALIASES = frozenset({"opus", "sonnet", "opusplan", "haiku"})
+
+
+class SetSessionModelRequest(BaseModel):
+    """Body for the set-session-model endpoint."""
+
+    model: str | None = None
+
+
+@router.patch(
+    "/sessions/{session_id}/model",
+    summary="Set the Claude Code model for a session",
+    description=(
+        "Set or clear the per-session Claude Code model override. Accepts one of "
+        "Claude Code's `/model` aliases (`opus`, `sonnet`, `opusplan`, `haiku`); "
+        'send `model: null` or `"default"` to clear the override and use the '
+        "worker's configured model. The change applies on the next turn — an idle "
+        "Claude Code process is reset so it reconnects (resuming the conversation) "
+        "on the new model. Only meaningful for Claude Code sessions."
+    ),
+    dependencies=[Depends(verify_http_api_key)],
+)
+async def set_session_model(
+    session_id: str,
+    body: SetSessionModelRequest,
+    request: Request,
+) -> dict[str, Any]:
+    """Set the per-session Claude Code model override."""
+    session_manager: SessionManager = request.app.state.session_manager
+    session = session_manager.get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+
+    normalized = (body.model or "").strip().lower()
+    if normalized in ("", "default"):
+        session.metadata.pop("selected_model", None)
+        stored: str | None = None
+    elif normalized in _CLAUDE_CODE_MODEL_ALIASES:
+        session.metadata["selected_model"] = normalized
+        stored = normalized
+    else:
+        raise HTTPException(status_code=400, detail=f"Unsupported model: {body.model!r}")
+
+    # Apply on the next turn: reset an idle Claude Code executor so it reconnects
+    # (resuming the conversation) with the new model. If a turn is streaming, the
+    # override is stored and applies once that turn finishes.
+    executor = session.claude_code_executor
+    stream_task = session._claude_code_stream_task
+    streaming = stream_task is not None and not stream_task.done()
+    if executor is not None and not streaming:
+        with contextlib.suppress(Exception):
+            await executor.cancel()
+        session.claude_code_executor = None
+    elif executor is not None and streaming:
+        session.buffer.push_text(
+            MessageType.TEXT_CHUNK,
+            {
+                "session_id": session.id,
+                "content": f"Model set to `{stored or 'default'}`. It will apply on the next message.",
+                "role": "system",
+            },
+        )
+
+    session_manager.broadcast_session_update(session)
+
+    db_session_factory = request.app.state.db_session_factory
+    if db_session_factory is not None:
+        async with db_session_factory() as db:
+            await session_manager.persist_session_metadata(session, db)
+
+    logger.info("Session %s selected_model set to %r via HTTP API", session_id, stored)
+    return {"session_id": session_id, "selected_model": stored}
 
 
 class DraftUpsertRequest(BaseModel):

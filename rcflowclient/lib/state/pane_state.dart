@@ -31,6 +31,7 @@ class PaneNavEntry {
   final String? taskId;
   final String? artifactId;
   final String? linearIssueId;
+  final String? githubPrId;
 
   /// Tool name when [paneType] is [PaneType.workerSettings].
   /// One of ``"claude_code"``, ``"codex"``, or ``"opencode"``.
@@ -46,6 +47,7 @@ class PaneNavEntry {
     this.taskId,
     this.artifactId,
     this.linearIssueId,
+    this.githubPrId,
     this.workerSettingsTool,
     this.workerSettingsSection,
   });
@@ -221,6 +223,18 @@ class PaneState extends ChangeNotifier {
 
   void clearLinearIssueId() {
     _view.linearIssueId = null;
+    notifyListeners();
+  }
+
+  String? get githubPrId => _view.githubPrId;
+
+  void setGithubPrId(String? githubPrId) {
+    _view.githubPrId = githubPrId;
+    notifyListeners();
+  }
+
+  void clearGithubPrId() {
+    _view.githubPrId = null;
     notifyListeners();
   }
 
@@ -857,14 +871,12 @@ class PaneState extends ChangeNotifier {
       _host.requestUnsubscribe(oldSessionId, oldWorkerId);
     }
 
-    // Sync the project chip with the session's confirmed project.
-    // Also auto-opens the project panel when switching to a session that
-    // already has a project attached (handles back-navigation and restore).
+    // Sync the project chip with the session's confirmed project. The right
+    // panel is left closed by default (no tab auto-activates on session open).
     final mainPath = session?.mainProjectPath;
     if (mainPath != null) {
       _selectedProjectName = mainPath.split('/').last;
       _selectedProjectPath = mainPath;
-      _activeRightPanel = 'project';
     } else {
       _selectedProjectName = null;
       _selectedProjectPath = null;
@@ -872,11 +884,15 @@ class PaneState extends ChangeNotifier {
     _projectNameError = null;
 
     // Restore the agent chip from the session's known agent type so that
-    // switching to an existing session (e.g. after reconnect) shows which
-    // agent drove that session without requiring the user to re-select it.
-    // Store the raw internal name (e.g. "claude_code") — display-name mapping
-    // is handled by the input area and badge composer independently.
-    _selectedToolMention = session?.agentType;
+    // switching to an existing session (e.g. after reconnect, or a session
+    // created from a PR) shows which agent drove that session without requiring
+    // the user to re-select it. Store the mention/display form (e.g.
+    // "ClaudeCode", not the raw "claude_code") to match every other code path
+    // that sets this field — the tool chip renders the value verbatim.
+    final sessionAgent = session?.agentType;
+    _selectedToolMention = sessionAgent == null
+        ? null
+        : (kAgentMentionNames[sessionAgent] ?? sessionAgent);
 
     notifyListeners();
 
@@ -1130,7 +1146,10 @@ class PaneState extends ChangeNotifier {
     try {
       _ws?.interruptSubprocess(sid);
     } catch (e) {
-      _msg.addSystemMessage('Failed to interrupt subprocess: $e', isError: true);
+      _msg.addSystemMessage(
+        'Failed to interrupt subprocess: $e',
+        isError: true,
+      );
     }
   }
 
@@ -1299,16 +1318,12 @@ class PaneState extends ChangeNotifier {
   /// Sync chip state from a confirmed server-side project path.
   /// Called when a session_update transitions main_project_path from null→non-null
   /// (i.e. the server has accepted and echoed back our project_name selection).
+  /// Updates the chip only — the right panel is not auto-opened.
   void syncProjectFromSession(String path) {
     final name = path.split('/').last;
-    if (_selectedProjectName == name &&
-        _selectedProjectPath == path &&
-        _activeRightPanel == 'project') {
-      return;
-    }
+    if (_selectedProjectName == name && _selectedProjectPath == path) return;
     _selectedProjectName = name;
     _selectedProjectPath = path;
-    _activeRightPanel = 'project';
     notifyListeners();
   }
 
@@ -1358,7 +1373,15 @@ class PaneState extends ChangeNotifier {
     String name,
     Map<String, dynamic>? input, {
     String? displayName,
-  }) => _msg.startToolBlock(name, input, displayName: displayName);
+    bool answered = false,
+    String? answer,
+  }) => _msg.startToolBlock(
+    name,
+    input,
+    displayName: displayName,
+    answered: answered,
+    answer: answer,
+  );
 
   /// Append output text to the current tool block.
   void appendToolOutput(String text, {bool isError = false}) =>

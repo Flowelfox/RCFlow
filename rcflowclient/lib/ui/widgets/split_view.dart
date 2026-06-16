@@ -19,7 +19,12 @@ class SplitView extends StatelessWidget {
         final appState = context.read<AppState>();
         final pane = appState.panes[leaf.paneId];
         if (pane == null) return const SizedBox.shrink();
-        return SessionPane(key: ValueKey(leaf.paneId), pane: pane);
+        // GlobalObjectKey (not ValueKey) so a pane's State (scroll position,
+        // loaded PR/diff, etc.) is preserved when the split tree restructures —
+        // e.g. closing a sibling promotes this pane to a different parent. A
+        // LocalKey only matches under the same parent, which would remount the
+        // pane and reload its content.
+        return SessionPane(key: GlobalObjectKey(leaf.paneId), pane: pane);
       case SplitBranch branch:
         return _SplitBranchView(branch: branch);
     }

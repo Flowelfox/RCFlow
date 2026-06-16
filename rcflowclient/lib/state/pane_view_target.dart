@@ -18,6 +18,9 @@ class PaneViewTarget {
   /// Linear issue detail view target (when the pane shows a Linear issue).
   String? linearIssueId;
 
+  /// GitHub PR review view target (when the pane shows a pull request).
+  String? githubPrId;
+
   /// Managed tool whose settings are shown (claude_code / codex / opencode).
   String? workerSettingsTool;
 

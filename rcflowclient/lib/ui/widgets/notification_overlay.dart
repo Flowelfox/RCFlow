@@ -75,6 +75,10 @@ class _NotificationOverlayState extends State<NotificationOverlay> {
           child: NotificationToast(
             notification: notification,
             onDismiss: () => widget.service.dismiss(notification.id),
+            onMouseEnter: () =>
+                widget.service.pauseAutoDismiss(notification.id),
+            onMouseExit: () =>
+                widget.service.resumeAutoDismiss(notification.id),
           ),
         ),
       ),

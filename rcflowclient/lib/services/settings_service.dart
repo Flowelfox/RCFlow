@@ -54,6 +54,13 @@ class SettingsService {
   static const _tasksCollapsedGroupsKey = 'rcflow_tasks_collapsed_groups';
   static const _tasksGroupByWorkerKey = 'rcflow_tasks_group_by_worker';
   static const _workersGroupByProjectKey = 'rcflow_workers_group_by_project';
+  static const _prFileListModeKey = 'rcflow_pr_file_list_mode';
+  static const _prConversationCollapsedKey = 'rcflow_pr_conversation_collapsed';
+  static const _prHiddenReposKey = 'rcflow_pr_hidden_repos';
+  static const _sidebarFractionKey = 'rcflow_sidebar_fraction';
+  static const _windowBoundsKey = 'rcflow_window_bounds';
+  static const _windowMaximizedKey = 'rcflow_window_maximized';
+  static const _windowFullScreenKey = 'rcflow_window_fullscreen';
   static const _artifactsGroupByProjectKey =
       'rcflow_artifacts_group_by_project';
   static const _artifactsExpandedWorkersKey =
@@ -84,8 +91,7 @@ class SettingsService {
 
   /// Whether the client should automatically check for updates on startup.
   /// Defaults to true when not explicitly set.
-  bool get autoUpdateEnabled =>
-      _prefs.getBool(_autoUpdateEnabledKey) ?? true;
+  bool get autoUpdateEnabled => _prefs.getBool(_autoUpdateEnabledKey) ?? true;
   set autoUpdateEnabled(bool value) =>
       _prefs.setBool(_autoUpdateEnabledKey, value);
 
@@ -283,6 +289,71 @@ class SettingsService {
 
   String get fontSize => _prefs.getString(_fontSizeKey) ?? 'medium';
   set fontSize(String value) => _prefs.setString(_fontSizeKey, value);
+
+  /// Last-used PR review file-list mode ('flat' | 'tree' | 'commented'); new PR
+  /// panes open with this view preselected.
+  String get prFileListMode => _prefs.getString(_prFileListModeKey) ?? 'flat';
+  set prFileListMode(String value) =>
+      _prefs.setString(_prFileListModeKey, value);
+
+  /// Whether the PR review conversation panel is collapsed; new PR panes open
+  /// with this state preserved.
+  bool get prConversationCollapsed =>
+      _prefs.getBool(_prConversationCollapsedKey) ?? false;
+  set prConversationCollapsed(bool value) =>
+      _prefs.setBool(_prConversationCollapsedKey, value);
+
+  /// Repo slugs ("owner/name") the user has un-checked in the Pull Requests
+  /// repo filter. Persisted so the selection survives a client restart.
+  List<String> get prHiddenRepos =>
+      _prefs.getStringList(_prHiddenReposKey) ?? const [];
+  set prHiddenRepos(List<String> value) =>
+      _prefs.setStringList(_prHiddenReposKey, value);
+
+  // ── Desktop window + layout persistence ───────────────────────────────────
+
+  /// Left sidebar width as a fraction of the window width (null = default).
+  double? get sidebarFraction => _prefs.getDouble(_sidebarFractionKey);
+  set sidebarFraction(double? value) {
+    if (value == null) {
+      _prefs.remove(_sidebarFractionKey);
+    } else {
+      _prefs.setDouble(_sidebarFractionKey, value);
+    }
+  }
+
+  /// Last window bounds as `{x, y, width, height}` (null = none saved).
+  Map<String, double>? get windowBounds {
+    final raw = _prefs.getString(_windowBoundsKey);
+    if (raw == null) return null;
+    try {
+      final m = jsonDecode(raw) as Map<String, dynamic>;
+      return {
+        'x': (m['x'] as num).toDouble(),
+        'y': (m['y'] as num).toDouble(),
+        'width': (m['width'] as num).toDouble(),
+        'height': (m['height'] as num).toDouble(),
+      };
+    } catch (_) {
+      return null;
+    }
+  }
+
+  set windowBounds(Map<String, double>? value) {
+    if (value == null) {
+      _prefs.remove(_windowBoundsKey);
+    } else {
+      _prefs.setString(_windowBoundsKey, jsonEncode(value));
+    }
+  }
+
+  bool get windowMaximized => _prefs.getBool(_windowMaximizedKey) ?? false;
+  set windowMaximized(bool value) =>
+      _prefs.setBool(_windowMaximizedKey, value);
+
+  bool get windowFullScreen => _prefs.getBool(_windowFullScreenKey) ?? false;
+  set windowFullScreen(bool value) =>
+      _prefs.setBool(_windowFullScreenKey, value);
 
   bool get compactMode => _prefs.getBool(_compactModeKey) ?? false;
   set compactMode(bool value) => _prefs.setBool(_compactModeKey, value);

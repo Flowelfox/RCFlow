@@ -248,8 +248,19 @@ class Settings(BaseSettings):
     LINEAR_TEAM_ID: str = ""
     LINEAR_SYNC_ON_STARTUP: bool = False
 
+    # GitHub integration (PR reviews)
+    GITHUB_TOKEN: str = ""
+    GITHUB_DEFAULT_REPO: str = ""
+    GITHUB_SYNC_ON_STARTUP: bool = False
+
     # Telemetry
     TELEMETRY_RETENTION_DAYS: int = 90
+
+    # Account-level subscription usage (5h / 7d quota windows) polled from the
+    # Claude OAuth usage endpoint and broadcast to clients.  Subscription-auth
+    # workers only; a no-op when no subscription token is present.
+    ACCOUNT_USAGE_ENABLED: bool = True
+    ACCOUNT_USAGE_POLL_INTERVAL_SECONDS: int = 60
 
     # UPnP IGD port forwarding (off by default; non-fatal if router lacks UPnP)
     UPNP_ENABLED: bool = False
@@ -693,6 +704,41 @@ CONFIG_OPTIONS: list[dict[str, Any]] = [
         "type": "boolean",
         "group": "Linear",
         "description": "Automatically sync Linear issues when the server starts",
+        "required": False,
+        "restart_required": False,
+    },
+    # --- GitHub ---
+    {
+        "key": "GITHUB_TOKEN",
+        "label": "GitHub Token",
+        "type": "secret",
+        "group": "GitHub",
+        "description": (
+            "Personal access token used to review pull requests "
+            "(github.com → Settings → Developer settings → Personal access tokens; "
+            "needs repo + read:org scope)"
+        ),
+        "required": False,
+        "restart_required": False,
+    },
+    {
+        "key": "GITHUB_DEFAULT_REPO",
+        "label": "Default Repository (optional)",
+        "type": "string",
+        "group": "GitHub",
+        "description": (
+            "Default repository in owner/name form to scope pull-request listing. "
+            "Leave blank to use all accessible repositories."
+        ),
+        "required": False,
+        "restart_required": False,
+    },
+    {
+        "key": "GITHUB_SYNC_ON_STARTUP",
+        "label": "Sync Pull Requests on Startup",
+        "type": "boolean",
+        "group": "GitHub",
+        "description": "Automatically sync GitHub pull requests when the server starts",
         "required": False,
         "restart_required": False,
     },

@@ -13,8 +13,10 @@ import 'output_display.dart';
 import 'pane_header.dart';
 import 'session_panel.dart' show TerminalDragData;
 import 'session_panel/task_drag_data.dart';
+import 'session_panel/github_pr_drag_data.dart';
 import 'artifact_pane.dart';
 import 'linear_issue_pane.dart';
+import 'pr_review/pr_review_pane.dart';
 import 'statistics_pane.dart';
 import 'task_pane.dart';
 import 'terminal_pane.dart';
@@ -80,7 +82,8 @@ class _SessionPaneState extends State<SessionPane> {
         onWillAcceptWithDetails: (details) =>
             details.data is SessionDragData ||
             details.data is TerminalDragData ||
-            details.data is TaskDragData,
+            details.data is TaskDragData ||
+            details.data is GithubPrDragData,
         onMove: (details) {
           final box = context.findRenderObject() as RenderBox?;
           if (box == null || !box.hasSize) return;
@@ -113,6 +116,8 @@ class _SessionPaneState extends State<SessionPane> {
             );
           } else if (data is TaskDragData) {
             appState.splitPaneWithTask(widget.pane.paneId, zone, data.taskId);
+          } else if (data is GithubPrDragData) {
+            appState.splitPaneWithGithubPr(widget.pane.paneId, zone, data.prId);
           }
         },
         builder: (context, candidateData, rejectedData) {
@@ -121,6 +126,7 @@ class _SessionPaneState extends State<SessionPane> {
           final isTaskPane = paneType == PaneType.task;
           final isArtifactPane = paneType == PaneType.artifact;
           final isLinearIssuePane = paneType == PaneType.linearIssue;
+          final isPrReviewPane = paneType == PaneType.prReview;
           final isWorkerSettingsPane = paneType == PaneType.workerSettings;
           final terminalInfo = isTerminalPane
               ? appState.getTerminalPaneInfo(widget.pane.paneId)
@@ -179,6 +185,11 @@ class _SessionPaneState extends State<SessionPane> {
                           paneId: widget.pane.paneId,
                           pane: widget.pane,
                         )
+                      : isPrReviewPane
+                      ? PrReviewPane(
+                          paneId: widget.pane.paneId,
+                          pane: widget.pane,
+                        )
                       : isWorkerSettingsPane
                       ? WorkerSettingsPane(
                           paneId: widget.pane.paneId,
@@ -188,10 +199,22 @@ class _SessionPaneState extends State<SessionPane> {
                           children: [
                             const PaneHeader(),
                             Expanded(
-                              child: _OutputWithRightPanels(pane: widget.pane),
+                              child: _OutputWithRightPanels(
+                                pane: widget.pane,
+                                attachOnboardingKey: !multiPane,
+                              ),
                             ),
                             const QueuedMessagesBar(),
-                            InputArea(key: onboarding.inputAreaKey),
+                            // The onboarding GlobalKey can only live in one place
+                            // in the tree. Attaching it to every split pane makes
+                            // Flutter thrash it between them (the input area /
+                            // right rail appearing to be "shared" and flickering).
+                            // Onboarding only runs with a single pane, so attach
+                            // it only then — in split mode no pane carries it and
+                            // each renders its own input area independently.
+                            InputArea(
+                              key: multiPane ? null : onboarding.inputAreaKey,
+                            ),
                           ],
                         ),
                 ),
@@ -212,7 +235,15 @@ class _SessionPaneState extends State<SessionPane> {
 /// tapping the active tab closes it.
 class _OutputWithRightPanels extends StatefulWidget {
   final PaneState pane;
-  const _OutputWithRightPanels({required this.pane});
+
+  /// Whether to attach the onboarding GlobalKey to the right rail. Only true for
+  /// a single pane — in split mode no pane carries it (a GlobalKey can't exist
+  /// in two panes at once, which causes the rail to look "shared"/flicker).
+  final bool attachOnboardingKey;
+  const _OutputWithRightPanels({
+    required this.pane,
+    required this.attachOnboardingKey,
+  });
 
   @override
   State<_OutputWithRightPanels> createState() => _OutputWithRightPanelsState();
@@ -253,11 +284,8 @@ class _OutputWithRightPanelsState extends State<_OutputWithRightPanels> {
                   onHorizontalDragStart: (_) =>
                       setState(() => _dragging = true),
                   onHorizontalDragUpdate: (details) {
-                    final newWidth =
-                        (pane.rightPanelWidth - details.delta.dx).clamp(
-                          PaneState.rightPanelMinWidth,
-                          dynamicMax,
-                        );
+                    final newWidth = (pane.rightPanelWidth - details.delta.dx)
+                        .clamp(PaneState.rightPanelMinWidth, dynamicMax);
                     pane.setRightPanelWidth(newWidth);
                   },
                   onHorizontalDragEnd: (_) => setState(() => _dragging = false),
@@ -291,6 +319,7 @@ class _OutputWithRightPanelsState extends State<_OutputWithRightPanels> {
               hasTodos: hasTodos,
               activePanel: activePanel,
               pane: pane,
+              attachOnboardingKey: widget.attachOnboardingKey,
             ),
           ],
         );
@@ -304,18 +333,20 @@ class _OutputWithRightPanelsState extends State<_OutputWithRightPanels> {
 class _RightBookmarks extends StatelessWidget {
   final bool hasTodos;
   final String? activePanel;
+  final bool attachOnboardingKey;
   final PaneState pane;
 
   const _RightBookmarks({
     required this.hasTodos,
     required this.activePanel,
     required this.pane,
+    required this.attachOnboardingKey,
   });
 
   @override
   Widget build(BuildContext context) {
     return Column(
-      key: onboarding.rightBookmarksKey,
+      key: attachOnboardingKey ? onboarding.rightBookmarksKey : null,
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
         _BookmarkTab(
@@ -384,7 +415,10 @@ class _BookmarkTab extends StatelessWidget {
         borderRadius: const BorderRadius.horizontal(left: Radius.circular(6)),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 150),
-          padding: const EdgeInsets.symmetric(horizontal: kSpace1, vertical: 10),
+          padding: const EdgeInsets.symmetric(
+            horizontal: kSpace1,
+            vertical: 10,
+          ),
           decoration: BoxDecoration(
             color: isActive
                 ? context.appColors.bgSurface

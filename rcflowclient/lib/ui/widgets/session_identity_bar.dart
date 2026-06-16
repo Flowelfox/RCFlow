@@ -233,7 +233,7 @@ class _SessionBar extends StatelessWidget {
                   children: [
                     BadgeBar(
                       badges: session.badges,
-                      slotFilter: {'status', 'caveman', 'agent'},
+                      slotFilter: {'status', 'caveman', 'agent', 'model'},
                     ),
                     const SizedBox(width: 10),
                     Expanded(

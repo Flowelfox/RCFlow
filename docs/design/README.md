@@ -32,6 +32,7 @@ This file is the **index**. Detailed sections live in sibling files (`./architec
 | How does `/` slash command work? | [Slash Commands](slash-commands.md) |
 | How does the Flutter client lay out / route messages / persist drafts? | [Architecture](architecture.md) |
 | How is a Linear issue synced/linked? | [Linear Integration](linear.md) |
+| How is a GitHub PR reviewed in-app? | [GitHub Integration](github.md) |
 | How does telemetry roll up? | [Telemetry](telemetry.md) |
 | Where do permission prompts come from? | [Permissions](permissions.md) |
 | How is a release built / signed / installed? | [Deployment](deployment.md) |
@@ -54,6 +55,7 @@ This file is the **index**. Detailed sections live in sibling files (`./architec
 | [Database](database.md) | All tables (sessions, tasks, artifacts, telemetry, queue, drafts, Linear) with per-table anchors |
 | [Configuration](configuration.md) | All env vars, remote config endpoints, UPnP / NAT-PMP networking |
 | [Linear Integration](linear.md) | Service, REST endpoints, WS messages, client UI |
+| [GitHub Integration](github.md) | PR reviews: service, PAT auth, phased roadmap, REST/GraphQL split, client review pane |
 | [Telemetry](telemetry.md) | Three-phase pipeline (raw → minutely → retention), REST endpoints |
 | [Project Structure](project-structure.md) | Repo layout |
 | [Deployment](deployment.md) | Platform support, systemd / Windows GUI / macOS menu bar, bundling, code signing |

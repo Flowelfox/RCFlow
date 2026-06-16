@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from src.api.http import router as http_router
+from src.api.integrations.github import router as github_router
 from src.api.integrations.linear import router as linear_router
 from src.api.routes.dashboard import router as dashboard_router
 from src.api.ws.input_text import router as input_text_router
@@ -226,6 +227,73 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     telemetry_task = asyncio.create_task(_run_telemetry_loop())
 
+    # Account-level subscription usage poll (5h / 7d quota) — reads the worker's
+    # Claude subscription OAuth token and broadcasts the quota windows to clients.
+    # Subscription-auth only; reports unavailable (no-op) for API-key workers.
+    async def _run_usage_poll_loop() -> None:
+        from src.services.usage_service import (  # noqa: PLC0415
+            UsageService,
+            UsageServiceError,
+            read_oauth_token,
+        )
+
+        interval = max(15, settings.ACCOUNT_USAGE_POLL_INTERVAL_SECONDS)
+        max_backoff = 900.0  # cap transient-failure backoff at 15 minutes
+        backoff = interval
+        # The token belongs to RCFlow's managed Claude Code agent: a file in the
+        # managed config dir (Linux/Windows) or the macOS login Keychain keyed by
+        # that dir. We never read an external ~/.claude login (different account).
+        try:
+            managed_cc_dir = tool_settings.get_config_dir("claude_code")
+        except Exception:
+            managed_cc_dir = None
+        while True:
+            # Default to the steady cadence; only deviate when the server tells
+            # us to (Retry-After) or repeated failures warrant backing off, so
+            # we never hammer the endpoint or trip its rate limit.
+            delay = float(interval)
+            try:
+                token = read_oauth_token(managed_cc_dir)
+                if token:
+                    async with UsageService(token) as svc:
+                        windows = await svc.fetch_usage()
+                    session_manager.set_worker_usage(windows, available=True)
+                else:
+                    session_manager.set_worker_usage(None, available=False)
+                backoff = interval  # success → reset backoff
+            except UsageServiceError as exc:
+                if exc.status_code == 429:
+                    # Rate limited: honour Retry-After, else exponential backoff.
+                    delay = max(exc.retry_after or 0.0, backoff)
+                    backoff = min(backoff * 2, max_backoff)
+                    logger.warning("Account usage rate-limited; backing off %.0fs", delay)
+                elif exc.status_code in (401, 403):
+                    # Expected, transient: Claude Code rotates the access token
+                    # periodically, and a poll can land in the brief window
+                    # before the refreshed token is written.  Re-reading the
+                    # credentials file next cycle fixes it, so retry at the
+                    # normal cadence (no backoff) and keep it out of WARN noise.
+                    delay = float(interval)
+                    backoff = interval
+                    logger.debug(
+                        "Account usage auth not ready (HTTP %s); retrying in %.0fs",
+                        exc.status_code,
+                        delay,
+                    )
+                else:
+                    delay = backoff
+                    backoff = min(backoff * 2, max_backoff)
+                    logger.warning("Account usage poll failed: %s (retry in %.0fs)", exc, delay)
+            except Exception:
+                delay = backoff
+                backoff = min(backoff * 2, max_backoff)
+                logger.exception("Account usage poll failed (non-fatal)")
+            await asyncio.sleep(delay)
+
+    usage_task: asyncio.Task[None] | None = None
+    if settings.ACCOUNT_USAGE_ENABLED:
+        usage_task = asyncio.create_task(_run_usage_poll_loop())
+
     # Incremental session flush — persists title, conversation_history and
     # new buffer messages for ACTIVE sessions on a periodic tick so an
     # ungraceful crash / SIGKILL doesn't lose un-archived state.  Graceful
@@ -329,6 +397,41 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         _bg_tasks.add(_t)
         _t.add_done_callback(_bg_tasks.discard)
 
+    # GitHub startup sync (non-blocking background task)
+    if settings.GITHUB_SYNC_ON_STARTUP and settings.GITHUB_TOKEN:
+        from src.api.integrations.github import _persist_synced_prs, _pr_to_dict  # noqa: PLC0415
+        from src.services.github_service import GitHubService as _GitHubService  # noqa: PLC0415
+        from src.services.github_service import GitHubServiceError as _GitHubServiceError  # noqa: PLC0415
+
+        async def _run_github_startup_sync() -> None:
+            repo = settings.GITHUB_DEFAULT_REPO or None
+            try:
+                parsed = []
+                async with _GitHubService(settings.GITHUB_TOKEN) as svc:
+                    for r in ("for_me", "created"):
+                        parsed.extend(await svc.list_pull_requests(r, repo=repo))
+                async with db_session_factory() as db:
+                    upserted, deleted_ids = await _persist_synced_prs(
+                        db, settings.RCFLOW_BACKEND_ID, parsed, list(settings.projects_dirs)
+                    )
+                for row in upserted:
+                    session_manager.broadcast_github_pr_update(_pr_to_dict(row))
+                for pr_id in deleted_ids:
+                    session_manager.broadcast_github_pr_deleted(pr_id)
+                logger.info(
+                    "GitHub startup sync: %d PRs, %d archived-repo PRs pruned",
+                    len(upserted),
+                    len(deleted_ids),
+                )
+            except _GitHubServiceError as exc:
+                logger.warning("GitHub startup sync failed: %s", exc)
+            except Exception as exc:
+                logger.warning("GitHub startup sync unexpected error: %s", exc)
+
+        _gt = asyncio.create_task(_run_github_startup_sync())
+        _bg_tasks.add(_gt)
+        _gt.add_done_callback(_bg_tasks.discard)
+
     yield
 
     # Shutdown
@@ -337,6 +440,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     reaper_task.cancel()
     if flush_task is not None:
         flush_task.cancel()
+    if usage_task is not None:
+        usage_task.cancel()
     logger.info("Shutting down RCFlow server")
     await terminal_manager.close_all()
     await prompt_router.cancel_pending_tasks()
@@ -382,6 +487,7 @@ def create_app() -> FastAPI:
 
     app.include_router(http_router)
     app.include_router(linear_router)
+    app.include_router(github_router)
     app.include_router(dashboard_router)
     app.include_router(input_text_router)
     app.include_router(output_text_router)
