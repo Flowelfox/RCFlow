@@ -87,6 +87,8 @@ def _make_gui(tmp_path: Path) -> Any:
             "_natpmp_check",
             "_toggle_btn",
             "_status_label",
+            "_cli_status_label",
+            "_install_cli_btn",
             "_uptime_var",
             "_bound_addr_var",
             "_sessions_var",
