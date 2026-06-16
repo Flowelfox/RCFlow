@@ -281,6 +281,32 @@ class TestWorktreeBadge:
     def _bs(self) -> BadgeState:
         return BadgeState()
 
+    def test_model_badge_absent_for_non_claude_code(self) -> None:
+        session = _make_session(agent_type="codex")
+        badges = self._bs().compute(session)
+        assert not any(b.type == "model" for b in badges)
+
+    def test_model_badge_default_for_claude_code(self) -> None:
+        session = _make_session(agent_type="claude_code")
+        mb = [b for b in self._bs().compute(session) if b.type == "model"]
+        assert len(mb) == 1
+        assert mb[0].label == "Default"
+        assert mb[0].interactive is True
+        assert mb[0].payload["session_id"] == "test-session-id"
+
+    def test_model_badge_shows_selected_label(self) -> None:
+        session = _make_session(agent_type="claude_code", metadata={"selected_model": "opusplan"})
+        mb = [b for b in self._bs().compute(session) if b.type == "model"]
+        assert mb[0].label == "Opus Plan"
+        assert mb[0].payload["selected_model"] == "opusplan"
+
+    def test_model_badge_present_via_resume_metadata(self) -> None:
+        # No live executor (agent_type None) but a Claude Code session id stays —
+        # the badge must survive the executor reset a model change triggers.
+        session = _make_session(metadata={"claude_code_session_id": "abc"})
+        mb = [b for b in self._bs().compute(session) if b.type == "model"]
+        assert len(mb) == 1
+
     def test_worktree_badge_absent_without_metadata(self) -> None:
         session = _make_session()
         badges = self._bs().compute(session)

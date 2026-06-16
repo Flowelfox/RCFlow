@@ -20,6 +20,7 @@ import 'ui/badges/renderers/caveman_badge_renderer.dart';
 import 'ui/badges/renderers/project_badge_renderer.dart';
 import 'ui/badges/renderers/status_badge_renderer.dart';
 import 'ui/badges/renderers/worker_badge_renderer.dart';
+import 'ui/badges/renderers/model_badge_renderer.dart';
 import 'ui/badges/renderers/worktree_badge_renderer.dart';
 import 'ui/screens/android_shell.dart';
 import 'ui/screens/home_screen.dart';
@@ -41,6 +42,7 @@ void _registerBadges(BadgeRegistry registry) {
   registerCavemanBadge(registry);
   registerProjectBadge(registry);
   registerWorktreeBadge(registry);
+  registerModelBadge(registry);
 }
 
 /// Migrate legacy single-server settings to the workers model.

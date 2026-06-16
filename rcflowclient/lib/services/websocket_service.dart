@@ -687,6 +687,9 @@ class WebSocketService {
   Future<void> setSessionWorktree(String sessionId, String? path) =>
       _rest.setSessionWorktree(sessionId, path);
 
+  Future<void> setSessionModel(String sessionId, String? model) =>
+      _rest.setSessionModel(sessionId, model);
+
   void disconnect() => _transport.disconnect();
 
   void dispose() => _transport.dispose();

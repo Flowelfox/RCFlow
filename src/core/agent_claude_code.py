@@ -324,6 +324,11 @@ class ClaudeCodeAgent:
         assert isinstance(executor, ClaudeCodeSdkExecutor)  # noqa: S101
 
         session.claude_code_executor = executor
+        # Per-session model override (the model badge) — applied at executor
+        # build so this and resumed turns run on the picked model.
+        selected_model = session.metadata.get("selected_model")
+        if selected_model:
+            executor._config_overrides["model"] = selected_model
         session.session_type = SessionType.LONG_RUNNING
         session.set_activity(ActivityState.RUNNING_SUBPROCESS)
 
@@ -404,6 +409,9 @@ class ClaudeCodeAgent:
         executor.set_can_use_tool(self._make_can_use_tool(session))
         executor._tool_def = tool_def
         executor._last_parameters = session.metadata.get("claude_code_parameters", {})
+        selected_model = session.metadata.get("selected_model")
+        if selected_model:
+            executor._config_overrides["model"] = selected_model
         return executor
 
     def reattach_executor(self, session: ActiveSession) -> bool:

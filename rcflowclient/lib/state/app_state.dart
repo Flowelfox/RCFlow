@@ -232,6 +232,18 @@ class AppState extends ChangeNotifier implements PaneHost {
     }
   }
 
+  /// Set (or clear, with null) the Claude Code model override for a session.
+  /// The backend broadcasts the updated badge, so no local refresh is needed.
+  Future<void> setSessionModel(String sessionId, String? model) async {
+    final worker = workerForSession(sessionId);
+    if (worker == null) return;
+    try {
+      await worker.ws.setSessionModel(sessionId, model);
+    } catch (e) {
+      addSystemMessage('Failed to set model: $e', isError: true);
+    }
+  }
+
   // --- Closed pane history (for reopen-last-closed) ---
   static const _maxClosedPaneHistory = 30;
   final List<_ClosedPaneRecord> _closedPaneHistory = [];

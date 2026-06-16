@@ -1,5 +1,5 @@
 ---
-updated: 2026-06-08
+updated: 2026-06-11
 ---
 
 # HTTP API
@@ -72,6 +72,7 @@ REST endpoints. All except `/api/health` require `X-API-Key` header (same key as
 | PATCH  | `/api/sessions/{session_id}/title`      | Yes  | Set or clear a session title (max 200 chars). Body: `{"title": "..."}` or `{"title": null}`. |
 | PATCH  | `/api/sessions/{session_id}/reorder`    | Yes  | Reorder sessions. Body: `{"after_session_id": "uuid" \| null}`. See [WebSocket — Session Reordering](websocket-api.md#session-reordering). |
 | PATCH  | `/api/sessions/{session_id}/worktree`   | Yes  | Set or clear the selected worktree. Body: `{"path": string \| null}`. When set, Claude Code and Codex use this path as `cwd`. Returns `{"session_id", "selected_worktree_path"}`. |
+| PATCH  | `/api/sessions/{session_id}/model`      | Yes  | Set or clear the per-session Claude Code model override. Body: `{"model": "opus"\|"sonnet"\|"opusplan"\|"haiku" \| null}` (`null`/`"default"` clears; mirrors Claude Code's `/model`). Applies on the next turn — an idle Claude Code process is reset and reconnects (resuming) on the new model. Returns `{"session_id", "selected_model"}`. Drives the interactive **model** badge. |
 
 ## Drafts
 

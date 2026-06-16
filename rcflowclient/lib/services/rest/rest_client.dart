@@ -2380,6 +2380,31 @@ class RestClient {
   ///
   /// [path] is the absolute path of the worktree to select, or null to clear.
   /// When set, Claude Code and Codex agents will use this directory.
+  /// Set or clear the per-session Claude Code model override (`opus`, `sonnet`,
+  /// `opusplan`, `haiku`, or null/"default" to clear).
+  Future<void> setSessionModel(String sessionId, String? model) async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url = _serverUrl!.http('/api/sessions/$sessionId/model');
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.openUrl('PATCH', url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      request.headers.contentType = io.ContentType.json;
+      request.add(utf8.encode(jsonEncode({'model': model})));
+      final response = await request.close();
+      final body = await response.transform(utf8.decoder).join();
+      if (response.statusCode != 200) {
+        throw Exception(
+          response.statusCode == 404
+              ? 'Session not found'
+              : 'Server returned ${response.statusCode}: $body',
+        );
+      }
+    } finally {
+      client.close();
+    }
+  }
+
   Future<void> setSessionWorktree(String sessionId, String? path) async {
     if (_serverUrl == null) throw StateError('Not connected');
     final url = _serverUrl!.http('/api/sessions/$sessionId/worktree');
