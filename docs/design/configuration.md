@@ -1,5 +1,5 @@
 ---
-updated: 2026-06-08
+updated: 2026-06-17
 ---
 
 # Configuration
@@ -56,7 +56,7 @@ All configuration is via environment variables, loaded from a `settings.json` fi
 | `GITHUB_DEFAULT_REPO`   | no       |                 | Optional. Default repository in `owner/name` form to scope pull-request listing. When blank, all accessible repositories are used. |
 | `GITHUB_SYNC_ON_STARTUP`| no       | `false`         | Automatically sync GitHub pull requests from API on server startup |
 | `ACCOUNT_USAGE_ENABLED` | no       | `true`          | Poll the Claude subscription usage endpoint for the account's 5-hour / 7-day quota windows and broadcast them to clients. Subscription-auth workers only; a no-op when no subscription OAuth token is present (API-key workers). |
-| `ACCOUNT_USAGE_POLL_INTERVAL_SECONDS` | no | `60`     | Seconds between account-usage polls. Failures back off exponentially (and honour the server's `Retry-After` on a 429) up to 15 minutes; minimum effective interval is 15 s. |
+| `ACCOUNT_USAGE_POLL_INTERVAL_SECONDS` | no | `300`    | Seconds between account-usage polls. Quota windows are 5h/7d so minute-level resolution is unnecessary; a tighter cadence trips the endpoint's rate limit. Failures back off exponentially (and honour the server's `Retry-After` on a 429) up to 15 minutes; minimum effective interval is 15 s. |
 | `UPNP_ENABLED`          | no       | `false`         | Enable UPnP IGD port forwarding. When true, the worker asks the local router to forward an external port to its internal `RCFLOW_PORT` on startup and releases it on shutdown. Non-fatal if no IGD is discovered. Also togglable via `rcflow run --upnp` / `--no-upnp`. |
 | `UPNP_LEASE_SECONDS`    | no       | `3600`          | Router-side lease duration for the UPnP mapping. Service renews at 50% of this value. `0` = permanent (not accepted by all routers). |
 | `UPNP_DISCOVERY_TIMEOUT_MS` | no   | `2000`          | SSDP M-SEARCH timeout (ms) for IGD discovery. Increase on slow or congested LANs. |

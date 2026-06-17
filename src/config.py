@@ -260,7 +260,7 @@ class Settings(BaseSettings):
     # Claude OAuth usage endpoint and broadcast to clients.  Subscription-auth
     # workers only; a no-op when no subscription token is present.
     ACCOUNT_USAGE_ENABLED: bool = True
-    ACCOUNT_USAGE_POLL_INTERVAL_SECONDS: int = 60
+    ACCOUNT_USAGE_POLL_INTERVAL_SECONDS: int = 300
 
     # UPnP IGD port forwarding (off by default; non-fatal if router lacks UPnP)
     UPNP_ENABLED: bool = False
