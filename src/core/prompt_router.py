@@ -788,9 +788,7 @@ class PromptRouter:
         """
         resolved = Path(project_path).resolve()
         dirs = self._settings.projects_dirs if self._settings else []
-        under_projects = any(
-            resolved == base.resolve() or base.resolve() in resolved.parents for base in dirs
-        )
+        under_projects = any(resolved == base.resolve() or base.resolve() in resolved.parents for base in dirs)
         if not resolved.is_dir() or not under_projects:
             self._push_project_error(
                 session,
@@ -942,6 +940,7 @@ class PromptRouter:
         read_only: bool = True,
         project_name: str | None = None,
         project_path: str | None = None,
+        title: str | None = None,
     ) -> str:
         """Create a one-shot session for on-demand PR-review AI assistance.
 
@@ -951,6 +950,10 @@ class PromptRouter:
         so the agent can edit the selected worktree. Returns the session id; the
         caller fires :meth:`handle_prompt` with the seeded prompt as a background
         task (same pattern as :meth:`prepare_plan_session`).
+
+        When ``title`` is given it is set as the session title up front (e.g.
+        ``"PR#123 review: <PR title>"``) so PR-assist sessions are named
+        consistently instead of falling back to the truncated first prompt.
         """
         session = self._session_manager.create_session(SessionType.ONE_SHOT)
         # A resolved path (from the PR's git-remote match) wins over a by-name
@@ -960,6 +963,10 @@ class PromptRouter:
         elif project_name:
             self._apply_project_name(session, project_name)
         session.metadata["session_purpose"] = purpose
+        # Pre-set the title so the prompt-derived fallback (see context.py) is
+        # skipped; PR-assist sessions get a stable "PR#<n> <kind>: <title>" name.
+        if title:
+            session.title = title
 
         if read_only:
             session.metadata["permission_rules"] = [
@@ -990,6 +997,7 @@ class PromptRouter:
                             ended_at=session.ended_at,
                             session_type=session.session_type.value,
                             status=session.status.value,
+                            title=session.title,
                         )
                     )
                     await db.commit()

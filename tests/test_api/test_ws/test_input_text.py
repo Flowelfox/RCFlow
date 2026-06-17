@@ -19,6 +19,8 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from src.api.ws.input_text import _PR_ASSIST_TITLE_MAX, _build_pr_assist_title
+
 API_KEY = "test-api-key"
 
 # ---------------------------------------------------------------------------
@@ -419,3 +421,28 @@ class TestPromptDispatch:
             ws.receive_json()
 
         mock_ensure.assert_called_once_with(None)
+
+
+# ---------------------------------------------------------------------------
+# PR-assist session title
+# ---------------------------------------------------------------------------
+
+
+class TestBuildPrAssistTitle:
+    def test_includes_number_kind_and_title(self) -> None:
+        title = _build_pr_assist_title({"number": 123, "title": "Fix login race"}, "review")
+        assert title == "PR#123 review: Fix login race"
+
+    def test_falls_back_when_title_missing(self) -> None:
+        assert _build_pr_assist_title({"number": 7, "title": ""}, "fix") == "PR#7 fix"
+        assert _build_pr_assist_title({"number": 7, "title": None}, "fix") == "PR#7 fix"
+
+    def test_falls_back_when_number_missing(self) -> None:
+        assert _build_pr_assist_title({"title": "Add feature"}, "summary") == "PR summary: Add feature"
+
+    def test_truncates_long_pr_title(self) -> None:
+        long_title = "x" * 200
+        result = _build_pr_assist_title({"number": 1, "title": long_title}, "review")
+        assert result.endswith("…")
+        assert result.startswith("PR#1 review: ")
+        assert len(result) <= len("PR#1 review: ") + _PR_ASSIST_TITLE_MAX + 1

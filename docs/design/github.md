@@ -1,5 +1,5 @@
 ---
-updated: 2026-06-11
+updated: 2026-06-17
 ---
 
 # GitHub Integration — PR Reviews
@@ -156,7 +156,7 @@ Inbound (client → server):
 | Type | Effect |
 |------|--------|
 | `list_github_prs` | Server replies with `github_pr_list` — all cached PRs for this backend, newest first |
-| `start_pr_assist` | `{pr_id, kind, file_path?, line?, comment_body?, project_name?, project_path?, selected_worktree_path?}` — `project_path` (the PR's git-remote-resolved checkout) is applied directly so the session opens in the same project as the PR, not a same-named folder found by name. — acks a `session_id` and streams the assist into it. `summary`/`explain` are read-only diff analysis. `review`/`fix`/`resolve_conflicts` run a **full-perms** agent session in the local checkout. `review` opens a worktree via the `wt` CLI, pulls the latest, gathers the PR via `gh` (falling back to local git with a chat warning) — the prompt embeds the PR description (verbatim) and existing comments with their `file:line` metadata, but **not** the diff (PRs can be huge); it produces a structured report and only posts the review via `gh` after the user approves. `fix` addresses `comment_body`; `resolve_conflicts` merges the base into the PR head and resolves conflicts (the optional `comment_body` carries the conflicting file list as a hint), then reports what it fixed / how / why and asks the human for permission before committing & pushing. `fix` edits the tree but never pushes |
+| `start_pr_assist` | `{pr_id, kind, file_path?, line?, comment_body?, project_name?, project_path?, selected_worktree_path?}` — `project_path` (the PR's git-remote-resolved checkout) is applied directly so the session opens in the same project as the PR, not a same-named folder found by name. — acks a `session_id` and streams the assist into it. `summary`/`explain` are read-only diff analysis. `review`/`fix`/`resolve_conflicts` run a **full-perms** agent session in the local checkout. `review` opens a worktree via the `wt` CLI, pulls the latest, gathers the PR via `gh` (falling back to local git with a chat warning) — the prompt embeds the PR description (verbatim) and existing comments with their `file:line` metadata, but **not** the diff (PRs can be huge); it produces a structured report and only posts the review via `gh` after the user approves. `fix` addresses `comment_body`; `resolve_conflicts` merges the base into the PR head and resolves conflicts (the optional `comment_body` carries the conflicting file list as a hint), then reports what it fixed / how / why and asks the human for permission before committing & pushing. `fix` edits the tree but never pushes. The assist session is named up front as `PR#<n> <kind>: <PR title>` (e.g. `PR#123 review: Fix login race`, PR title truncated for length) instead of falling back to the truncated first prompt |
 
 Outbound (server → all connected output clients), mirroring the Linear broadcasts:
 
