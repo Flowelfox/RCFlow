@@ -38,6 +38,7 @@ and note which component is affected where it matters.
 - **Sessions no longer auto-close by default** — sessions used to be automatically ended after 6 hours of idle time. The auto-close timeout is now configurable from Worker Settings → Session Limits, and **disabled by default**. Set "Inactivity Timeout (minutes)" to a positive number to opt in; set it to 0 (or leave it blank) to keep sessions open indefinitely. Changes take effect without restarting the worker (Backend)
 
 ### Fixed
+- **Answering the agent's last question now continues on its own** — when the agent finished a turn by asking you a question, submitting your answer left it stuck (the question collapsed but nothing happened) until you manually paused and resumed; the agent now picks up your answer and carries on by itself (Backend)
 - **Sessions pause while Claude Code waits for your answer** — when the agent asks a question or asks you to approve a plan, the session now shows as paused (so it stands out in the session list as needing you) and returns to running once you answer (Backend)
 - **Answered questions stay answered** — after submitting an answer to one of the agent's questions, reopening the session no longer showed the question as unanswered and let you pick/submit again; the answered state is now preserved (Client)
 - **Ending a session takes effect on the first click** — a just-ended session could briefly pop back as still running (a list refresh racing the server), so it looked like you had to end it twice; it now stays ended (Client)
