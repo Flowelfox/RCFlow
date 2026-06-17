@@ -16,9 +16,19 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
-from src.api.integrations.github import _persist_synced_prs
+from src.api.integrations import github as gh_mod
+from src.api.integrations.github import (
+    _build_token_status,
+    _cached_repo_slugs,
+    _draft_to_dict,
+    _persist_synced_prs,
+    _pr_to_dict,
+    _upsert_prs,
+)
 from src.database.models import Base
 from src.database.models import GitHubPR as GitHubPRModel
+from src.database.models import GitHubReviewDraft as GitHubReviewDraftModel
+from src.services.github_service import GitHubServiceError
 
 _BACKEND_ID = "backend-1"
 
@@ -135,3 +145,221 @@ async def test_persist_stamps_local_project(db_session, tmp_path):
     assert by_repo["web"].project_path == str(clone)
     # No local clone for acme/other → project stays null.
     assert by_repo["other"].project_name is None
+
+
+# ---------------------------------------------------------------------------
+# _upsert_prs
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_upsert_inserts_new_rows(db_session):
+    rows = await _upsert_prs(db_session, _BACKEND_ID, [_parsed("acme", "web", 1)])
+
+    assert len(rows) == 1
+    assert rows[0].github_id == "acme/web#1"
+    assert rows[0].synced_at is not None
+    assert await _count(db_session) == 1
+
+
+@pytest.mark.asyncio
+async def test_upsert_updates_existing_row_in_place(db_session):
+    first = await _upsert_prs(db_session, _BACKEND_ID, [_parsed("acme", "web", 1)])
+    original_id = first[0].id
+
+    updated = _parsed("acme", "web", 1)
+    updated["title"] = "PR 1 (edited)"
+    second = await _upsert_prs(db_session, _BACKEND_ID, [updated])
+
+    # Same github_id → same row updated, not a duplicate.
+    assert second[0].id == original_id
+    assert second[0].title == "PR 1 (edited)"
+    assert await _count(db_session) == 1
+
+
+@pytest.mark.asyncio
+async def test_upsert_all_bucket_does_not_downgrade_role(db_session):
+    created = _parsed("acme", "web", 1)
+    created["role"] = "created"
+    await _upsert_prs(db_session, _BACKEND_ID, [created])
+
+    # A later "all"-bucket sync must not clobber the created/for_me role.
+    all_bucket = _parsed("acme", "web", 1)
+    all_bucket["role"] = "all"
+    rows = await _upsert_prs(db_session, _BACKEND_ID, [all_bucket])
+
+    assert rows[0].role == "created"
+
+
+@pytest.mark.asyncio
+async def test_upsert_all_bucket_sets_role_on_new_row(db_session):
+    all_bucket = _parsed("acme", "web", 1)
+    all_bucket["role"] = "all"
+    rows = await _upsert_prs(db_session, _BACKEND_ID, [all_bucket])
+
+    assert rows[0].role == "all"
+
+
+# ---------------------------------------------------------------------------
+# _cached_repo_slugs
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_cached_repo_slugs_returns_distinct_slugs(db_session):
+    await _upsert_prs(
+        db_session,
+        _BACKEND_ID,
+        [_parsed("acme", "web", 1), _parsed("acme", "web", 2), _parsed("acme", "api", 3)],
+    )
+
+    slugs = await _cached_repo_slugs(db_session, _BACKEND_ID)
+
+    assert sorted(slugs) == ["acme/api", "acme/web"]
+
+
+@pytest.mark.asyncio
+async def test_cached_repo_slugs_scoped_to_backend(db_session):
+    await _upsert_prs(db_session, _BACKEND_ID, [_parsed("acme", "web", 1)])
+    await _upsert_prs(db_session, "other-backend", [_parsed("acme", "api", 2)])
+
+    assert await _cached_repo_slugs(db_session, _BACKEND_ID) == ["acme/web"]
+
+
+# ---------------------------------------------------------------------------
+# _pr_to_dict / _draft_to_dict
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_pr_to_dict_is_json_safe(db_session):
+    [row] = await _upsert_prs(db_session, _BACKEND_ID, [_parsed("acme", "web", 7)])
+
+    d = _pr_to_dict(row)
+
+    assert d["github_id"] == "acme/web#7"
+    assert d["repo_name"] == "web"
+    assert d["number"] == 7
+    assert isinstance(d["id"], str)
+    # Datetimes are ISO strings, not datetime objects.
+    assert isinstance(d["created_at"], str)
+    assert isinstance(d["synced_at"], str)
+    assert d["task_id"] is None
+
+
+def test_draft_to_dict_parses_comment_json():
+    now = datetime.now(UTC)
+    draft = GitHubReviewDraftModel(
+        id=uuid.uuid4(),
+        backend_id=_BACKEND_ID,
+        pr_id=uuid.uuid4(),
+        event="REQUEST_CHANGES",
+        body="needs work",
+        comments='[{"path": "a.py", "line": 1, "side": "RIGHT", "body": "nit"}]',
+        created_at=now,
+        updated_at=now,
+    )
+
+    d = _draft_to_dict(draft)
+
+    assert d["event"] == "REQUEST_CHANGES"
+    assert d["body"] == "needs work"
+    assert d["comments"] == [{"path": "a.py", "line": 1, "side": "RIGHT", "body": "nit"}]
+    assert isinstance(d["id"], str)
+    assert isinstance(d["pr_id"], str)
+
+
+def test_draft_to_dict_defaults_empty_comments():
+    now = datetime.now(UTC)
+    draft = GitHubReviewDraftModel(
+        id=uuid.uuid4(),
+        backend_id=_BACKEND_ID,
+        pr_id=uuid.uuid4(),
+        event="COMMENT",
+        body="",
+        comments="",
+        created_at=now,
+        updated_at=now,
+    )
+
+    assert _draft_to_dict(draft)["comments"] == []
+
+
+# ---------------------------------------------------------------------------
+# _build_token_status
+# ---------------------------------------------------------------------------
+
+
+class _FakeService:
+    """Stand-in for GitHubService used by _build_token_status tests."""
+
+    def __init__(self, *, info: dict | None = None, error: Exception | None = None) -> None:
+        self._info = info
+        self._error = error
+        self.closed = False
+
+    async def token_info(self) -> dict:
+        if self._error is not None:
+            raise self._error
+        assert self._info is not None
+        return self._info
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
+@pytest.mark.asyncio
+async def test_build_token_status_no_token():
+    status = await _build_token_status(None)
+
+    assert status == {
+        "configured": False,
+        "valid": False,
+        "login": None,
+        "fine_grained": False,
+        "scopes": status["scopes"],
+    }
+    # Every required scope is reported unsatisfied when unconfigured.
+    assert all(s["satisfied"] is False for s in status["scopes"])
+
+
+@pytest.mark.asyncio
+async def test_build_token_status_invalid_token(monkeypatch):
+    fake = _FakeService(error=GitHubServiceError("bad credentials"))
+    monkeypatch.setattr(gh_mod, "GitHubService", lambda token: fake)
+
+    status = await _build_token_status("ghp_bad")
+
+    assert status["configured"] is True
+    assert status["valid"] is False
+    assert status["error"] == "bad credentials"
+    assert fake.closed  # service always closed in finally
+
+
+@pytest.mark.asyncio
+async def test_build_token_status_valid_classic_token(monkeypatch):
+    fake = _FakeService(info={"fine_grained": False, "login": "alice", "scopes": ["repo", "read:org"]})
+    monkeypatch.setattr(gh_mod, "GitHubService", lambda token: fake)
+
+    status = await _build_token_status("ghp_good")
+
+    assert status["valid"] is True
+    assert status["login"] == "alice"
+    assert status["fine_grained"] is False
+    assert status["granted"] == ["repo", "read:org"]
+    # repo scope granted → satisfied flag set true for it.
+    assert any(s.get("satisfied") is True for s in status["scopes"])
+    assert fake.closed
+
+
+@pytest.mark.asyncio
+async def test_build_token_status_fine_grained_token(monkeypatch):
+    fake = _FakeService(info={"fine_grained": True, "login": "bob", "scopes": []})
+    monkeypatch.setattr(gh_mod, "GitHubService", lambda token: fake)
+
+    status = await _build_token_status("github_pat_xxx")
+
+    assert status["valid"] is True
+    assert status["fine_grained"] is True
+    # Fine-grained tokens can't enumerate scopes → satisfied is null.
+    assert all(s["satisfied"] is None for s in status["scopes"])
