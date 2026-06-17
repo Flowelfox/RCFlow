@@ -1149,6 +1149,55 @@ async def test_pause_session_resolves_pending_question_event(
     assert session._question_response is None
 
 
+@pytest.mark.asyncio
+async def test_resume_session_releases_pending_question_event(
+    session_manager: SessionManager,
+) -> None:
+    """Resuming a session blocked on an AskUserQuestion releases the gate.
+
+    Otherwise the relay stays parked on the gate, ``is_busy_for_queue()`` keeps
+    reporting busy, and a message queued by the resume-triggering send can never
+    drain (the symptom: a normal message sits in the queue until a manual pause).
+    """
+    router = _make_router(session_manager)
+    session = session_manager.create_session(SessionType.LONG_RUNNING)
+    session.set_active()
+    # Block on a question, mirroring begin_input_wait("awaiting_question").
+    session._question_event = asyncio.Event()
+    session._question_answers = {"stale": "value"}
+    session._question_tool_use_id = "q1"
+    session.begin_input_wait("awaiting_question")
+    assert session.status == SessionStatus.PAUSED
+
+    result = await router.resume_session(session.id)
+
+    assert result.status == SessionStatus.ACTIVE
+    assert session._question_event.is_set()
+    assert session._question_answers is None
+    assert session._question_tool_use_id is None
+
+
+@pytest.mark.asyncio
+async def test_resume_session_releases_pending_plan_gates(
+    session_manager: SessionManager,
+) -> None:
+    """Resuming also denies open plan-mode / plan-review gates so the relay unblocks."""
+    router = _make_router(session_manager)
+    session = session_manager.create_session(SessionType.LONG_RUNNING)
+    session.set_active()
+    session._plan_mode_event = asyncio.Event()
+    session._plan_review_event = asyncio.Event()
+    session.begin_input_wait("awaiting_plan")
+    assert session.status == SessionStatus.PAUSED
+
+    await router.resume_session(session.id)
+
+    assert session._plan_mode_event.is_set()
+    assert session._plan_mode_approved is False
+    assert session._plan_review_event.is_set()
+    assert session._plan_review_approved is False
+
+
 # ---------------------------------------------------------------------------
 # handle_prompt — selected_worktree_path pre-selection
 # ---------------------------------------------------------------------------

@@ -39,6 +39,7 @@ and note which component is affected where it matters.
 
 ### Fixed
 - **Answering the agent's last question now continues on its own** — when the agent finished a turn by asking you a question, submitting your answer left it stuck (the question collapsed but nothing happened) until you manually paused and resumed; the agent now picks up your answer and carries on by itself (Backend)
+- **Messages sent while the agent is waiting on a question now go through** — typing a new message instead of answering a pending question left it sitting in the queue, and you had to pause the session to make the agent pick it up; sending now releases the pending question and delivers your message automatically (Backend)
 - **Sessions pause while Claude Code waits for your answer** — when the agent asks a question or asks you to approve a plan, the session now shows as paused (so it stands out in the session list as needing you) and returns to running once you answer (Backend)
 - **Answered questions stay answered** — after submitting an answer to one of the agent's questions, reopening the session no longer showed the question as unanswered and let you pick/submit again; the answered state is now preserved (Client)
 - **Ending a session takes effect on the first click** — a just-ended session could briefly pop back as still running (a list refresh racing the server), so it looked like you had to end it twice; it now stays ended (Client)
