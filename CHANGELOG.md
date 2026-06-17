@@ -12,6 +12,8 @@ and note which component is affected where it matters.
 
 ## [Unreleased]
 
+## [Backend 0.44.0 / Client 1.59.0] — 2026-06-17
+
 ### Added
 - **Pick the Claude Code model per session** — Claude Code sessions now show a model badge in the pane header; click it to switch between Default, Opus, Sonnet, Opus Plan, and Haiku (the same options as Claude Code's `/model`). The choice applies to the next message and is remembered for the session (Backend + Client)
 - **"All" tab in Pull Requests** — alongside "For me" and "Owned", a new All tab lists every pull request (any author) in the repositories you already work in, so you can browse all open / merged / closed PRs without them being tied to your account (Backend + Client)
