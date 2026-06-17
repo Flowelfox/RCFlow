@@ -696,6 +696,27 @@ class SessionLifecycle:
         )
         return session
 
+    @staticmethod
+    def _release_pending_input_gates(session: ActiveSession) -> None:
+        """Unblock any open interactive gate (question / plan mode / plan review).
+
+        Mirrors the gate-release in :meth:`pause_session` / cancel: the awaited
+        ``can_use_tool`` callback wakes with no answer (questions) or a denial
+        (plan gates) so the relay stops parking on the gate.  Idempotent — a
+        no-op when no gate is open.
+        """
+        if session._plan_mode_event is not None and not session._plan_mode_event.is_set():
+            session._plan_mode_approved = False
+            session._plan_mode_event.set()
+        if session._plan_review_event is not None and not session._plan_review_event.is_set():
+            session._plan_review_approved = False
+            session._plan_review_feedback = None
+            session._plan_review_event.set()
+        if session._question_event is not None and not session._question_event.is_set():
+            session._question_answers = None
+            session._question_tool_use_id = None
+            session._question_event.set()
+
     async def resume_session(self, session_id: str) -> ActiveSession:
         """Resume a paused session.
 
@@ -727,6 +748,14 @@ class SessionLifecycle:
         # itself and risk double-delivering the head message).
         if session.status != SessionStatus.PAUSED:
             return session
+
+        # Release any interactive gate the session is blocked on (AskUserQuestion,
+        # plan-mode approval, plan-review).  Resuming means the user chose to
+        # proceed rather than answer, so unblock the relay — otherwise the agent
+        # task stays parked on the gate, ``is_busy_for_queue()`` keeps reporting
+        # busy, and a message queued by the same resume-triggering send can never
+        # drain (it only delivered after a manual pause, which already did this).
+        self._release_pending_input_gates(session)
 
         session.resume()
 

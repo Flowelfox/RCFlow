@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from claude_agent_sdk import PermissionResultAllow, PermissionResultDeny
@@ -14,6 +14,7 @@ from claude_agent_sdk import PermissionResultAllow, PermissionResultDeny
 from src.core.agent_claude_code import ClaudeCodeAgent
 from src.core.buffer import MessageType
 from src.core.permissions import PermissionDecision
+from src.core.session import SessionStatus
 from src.core.session_lifecycle import _parse_answer_text
 
 
@@ -167,6 +168,83 @@ class TestPlanModeCallback:
         result, _ = await asyncio.gather(agent._handle_exit_plan_mode(session, {}), feedback())
         assert isinstance(result, PermissionResultDeny)
         assert result.message == "use async instead"
+
+
+class TestDrainQuestionContinuation:
+    """The relay returns on the turn-boundary result when AskUserQuestion is the
+    last action; ``_drain_question_continuation`` must then wait for the answer
+    and stream the model's continuation instead of leaving it buffered.
+    """
+
+    @pytest.mark.asyncio
+    async def test_no_pending_question_is_noop(self):
+        agent = _make_agent()
+        session = _make_session()
+        session._question_tool_use_id = None
+        executor = MagicMock()
+        executor.is_running = True
+        relay = AsyncMock()
+        agent._relay_claude_code_stream = relay  # type: ignore[method-assign]
+
+        drained = await agent._drain_question_continuation(session, executor)
+
+        assert drained is False
+        relay.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_waits_for_answer_then_streams_continuation(self):
+        agent = _make_agent()
+        session = _make_session()
+        # A question raised this turn that the relay saw but whose answer (its
+        # tool_result) has not arrived yet.
+        session._question_tool_use_id = "q1"
+        session._question_event = asyncio.Event()
+        session.status = SessionStatus.ACTIVE
+
+        executor = MagicMock()
+        executor.is_running = True
+        sentinel_stream = object()
+        executor.read_more_events = MagicMock(return_value=sentinel_stream)
+
+        relayed: list[object] = []
+
+        async def fake_relay(_session, stream):
+            relayed.append(stream)
+            # The continuation carries the question's tool_result, which the real
+            # relay uses to clear the pending-question marker.
+            _session._question_tool_use_id = None
+
+        agent._relay_claude_code_stream = fake_relay  # type: ignore[method-assign]
+
+        task = asyncio.create_task(agent._drain_question_continuation(session, executor))
+        # Let the helper reach `gate.wait()` before the answer lands.
+        await asyncio.sleep(0)
+        assert not task.done()
+
+        # User answers → gate resolves.
+        session._question_event.set()
+        drained = await asyncio.wait_for(task, timeout=1)
+
+        assert drained is True
+        assert relayed == [sentinel_stream]
+        executor.read_more_events.assert_called_once_with(include_assistant=True)
+
+    @pytest.mark.asyncio
+    async def test_gate_missing_returns_without_streaming(self):
+        agent = _make_agent()
+        session = _make_session()
+        session._question_tool_use_id = "q1"
+        session._question_event = None  # gate never opened / already resolved
+        session.status = SessionStatus.ACTIVE
+        executor = MagicMock()
+        executor.is_running = True
+        relay = AsyncMock()
+        agent._relay_claude_code_stream = relay  # type: ignore[method-assign]
+
+        drained = await agent._drain_question_continuation(session, executor)
+
+        assert drained is False
+        relay.assert_not_awaited()
 
 
 class TestParseAnswerText:

@@ -1,5 +1,5 @@
 ---
-updated: 2026-06-02
+updated: 2026-06-17
 ---
 
 # Executors
@@ -29,6 +29,12 @@ Per-executor implementation details for the long-running coding agents (Claude C
 > and the model continues in the same turn). The relay no longer gates questions
 > or permissions; it just records the question's `tool_use_id` to drop the
 > resolved tool_use / tool_result from the chat (the widget shows the answer).
+> **AskUserQuestion as the last action of a turn:** Claude Code emits the
+> turn-boundary `result` while the `can_use_tool` gate is still open, so the
+> relay returns before the user answers. `_drain_question_continuation` (called
+> at relay-end) then waits for the answer and streams the model's follow-up turn
+> so the agent resumes on its own — without it the answer was accepted but the
+> continuation sat unread until a manual pause/resume.
 > `permission_mode="default"` is used (the callback is skipped under
 > `bypassPermissions`). Plan mode (`EnterPlanMode` / `ExitPlanMode`) is gated the
 > same way — through `can_use_tool` (approve → allow; plan-review feedback →

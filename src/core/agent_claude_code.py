@@ -1345,6 +1345,12 @@ class ClaudeCodeAgent:
         if session.status in (SessionStatus.COMPLETED, SessionStatus.CANCELLED, SessionStatus.FAILED):
             return
 
+        # AskUserQuestion as the final action of the turn: the relay returned on
+        # the turn-boundary result with the gate still open.  Wait for the answer
+        # and stream the continuation so the agent resumes without a manual
+        # pause/resume (no-op unless an unanswered question is pending).
+        await self._drain_question_continuation(session, executor)
+
         # If the session was paused during relay (e.g. max_turns), the relay already
         # pushed AGENT_GROUP_END and SESSION_PAUSED — just clean up and return.
         if session.status == SessionStatus.PAUSED:
@@ -1488,6 +1494,51 @@ class ClaudeCodeAgent:
         if session._active_monitors and not executor.is_running:
             await self._terminate_active_monitors(session, reason="executor_exit")
 
+    async def _drain_question_continuation(
+        self,
+        session: ActiveSession,
+        executor: ClaudeCodeSdkExecutor,
+    ) -> bool:
+        """Stream the model's continuation after a turn-ending AskUserQuestion.
+
+        When AskUserQuestion is the *last* action of a turn, Claude Code emits
+        the turn-boundary ``result`` while the ``can_use_tool`` gate is still
+        open, so the relay (``_stream_turn``) returns before the user answers.
+        Without this the answer is accepted but the model's follow-up turn sits
+        unread in the executor's queue until a manual pause/resume drains it.
+
+        Here we wait for the answer (the gate handler returns it to Claude Code,
+        which then produces a continuation turn) and stream that continuation so
+        the agent resumes on its own.  Returns ``True`` when a continuation was
+        streamed (so the caller skips the paused-teardown path), ``False`` when
+        there was no unanswered question to wait on (the common case → no-op).
+
+        The loop terminates when the continuation's tool_result for the question
+        arrives (the relay clears ``_question_tool_use_id`` at that point), the
+        question times out, or the executor exits.
+        """
+        if session._question_tool_use_id is None:
+            return False
+        drained = False
+        while executor.is_running and session._question_tool_use_id is not None:
+            if session.status in (SessionStatus.COMPLETED, SessionStatus.CANCELLED, SessionStatus.FAILED):
+                return drained
+            gate = session._question_event
+            if gate is None:
+                # The gate was never opened (race with can_use_tool) or already
+                # resolved without us — nothing left to wait on.
+                return drained
+            try:
+                await asyncio.wait_for(gate.wait(), timeout=_QUESTION_TIMEOUT)
+            except TimeoutError:
+                return drained
+            # Answer delivered → Claude Code resumes the turn.  ``read_more_events``
+            # drains everything up to the next idle gap / result, including the
+            # question's tool_result (which clears ``_question_tool_use_id``).
+            await self._relay_claude_code_stream(session, executor.read_more_events(include_assistant=True))
+            drained = True
+        return drained
+
     async def _end_claude_code_session(self, session: ActiveSession) -> None:
         """Clean up Claude Code state when the session ends."""
         if session.claude_code_executor is not None:
@@ -1623,6 +1674,10 @@ class ClaudeCodeAgent:
         # If the relay ended the session itself (e.g. plan mode denied), already done.
         if session.status in (SessionStatus.COMPLETED, SessionStatus.CANCELLED, SessionStatus.FAILED):
             return
+
+        # AskUserQuestion as the final action of the turn — see
+        # ``_stream_claude_code_events`` for rationale.
+        await self._drain_question_continuation(session, executor)
 
         # If the session was paused during relay (e.g. max_turns), relay already
         # pushed AGENT_GROUP_END and SESSION_PAUSED — just clean up and return.

@@ -16,6 +16,26 @@ from src.database.models import LinearIssue as LinearIssueModel
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+# Max PR-title length kept in a PR-assist session label before truncation.
+_PR_ASSIST_TITLE_MAX = 60
+
+
+def _build_pr_assist_title(pr_info: dict, kind: str) -> str:
+    """Build a consistent PR-assist session title: ``PR#<n> <kind>: <title>``.
+
+    Example: ``"PR#123 review: Fix login race"``. Falls back to ``"PR#<n>
+    <kind>"`` when the PR title is missing, and truncates long PR titles so the
+    session label stays compact.
+    """
+    number = pr_info.get("number")
+    prefix = f"PR#{number} {kind}" if number is not None else f"PR {kind}"
+    pr_title = (pr_info.get("title") or "").strip()
+    if not pr_title:
+        return prefix
+    if len(pr_title) > _PR_ASSIST_TITLE_MAX:
+        pr_title = pr_title[:_PR_ASSIST_TITLE_MAX].rstrip() + "…"
+    return f"{prefix}: {pr_title}"
+
 
 @router.websocket("/ws/input/text")
 async def ws_input_text(
@@ -483,6 +503,11 @@ async def ws_input_text(
                     # review/fix/resolve_conflicts run a full-perms session in a
                     # local checkout; summary/explain are read-only.
                     is_writable = assist_kind in ("review", "fix", "resolve_conflicts")
+                    # Name the session consistently: "PR#<n> <kind>: <PR title>"
+                    # (e.g. "PR#123 review: Fix login race"). Falls back to a
+                    # plain "PR#<n> <kind>" if the title is missing. The PR title
+                    # is capped so the session label stays compact.
+                    assist_title = _build_pr_assist_title(pr_info, assist_kind)
                     # Attach the linked project to every assist session (so the
                     # session shows the project badge); the worktree is only used
                     # by writable sessions.
@@ -491,6 +516,7 @@ async def ws_input_text(
                         read_only=not is_writable,
                         project_name=assist_project,
                         project_path=assist_project_path,
+                        title=assist_title,
                     )
                     await websocket.send_json(
                         {
