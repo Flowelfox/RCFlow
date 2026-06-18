@@ -70,8 +70,7 @@ def get_app_path() -> Path:
     app_path = APP_BUILD_DIR / APP_NAME
     if not app_path.exists():
         print(
-            f"ERROR: Built app not found at {app_path}\n"
-            "  Run 'flutter build macos --release' in rcflowclient/ first.",
+            f"ERROR: Built app not found at {app_path}\n  Run 'flutter build macos --release' in rcflowclient/ first.",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -133,7 +132,7 @@ def _make_dmg_background(icns_path: Path, output_png: Path, width: int = 540, he
             try:
                 font = ImageFont.truetype(font_path, 13)
                 break
-            except Exception:
+            except Exception:  # noqa: S112 — try the next candidate font
                 continue
     if font:
         bbox = draw.textbbox((0, 0), label, font=font)
@@ -165,6 +164,11 @@ def build_styled_dmg(app_path: Path, out_dmg: Path, volname: str) -> Path:
     has_background = _make_dmg_background(icns, bg_png)
 
     tmp_dmg = PROJECT_ROOT / "build" / f"{out_dmg.stem}-rw.dmg"
+    # Ensure the scratch dir exists. _make_dmg_background creates it as a side
+    # effect, but it returns early without doing so when Pillow is unavailable
+    # (e.g. CI where pip refuses to install into an externally-managed env), so
+    # hdiutil would otherwise fail with "No such file or directory".
+    tmp_dmg.parent.mkdir(parents=True, exist_ok=True)
     if tmp_dmg.exists():
         tmp_dmg.unlink()
 
@@ -265,8 +269,7 @@ def create_pkg(app_path: Path, version: str, arch: str) -> Path:
     pkgbuild = shutil.which("pkgbuild")
     if not pkgbuild:
         print(
-            "ERROR: pkgbuild not found. Install Xcode command line tools:\n"
-            "  xcode-select --install",
+            "ERROR: pkgbuild not found. Install Xcode command line tools:\n  xcode-select --install",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -298,22 +301,27 @@ def create_pkg(app_path: Path, version: str, arch: str) -> Path:
 
     postinstall = scripts_dir / "postinstall"
     postinstall.write_text(
-        "#!/bin/bash\n"
-        "set -e\n"
-        f'xattr -dr com.apple.quarantine "/Applications/{APP_NAME}" 2>/dev/null || true\n'
+        f'#!/bin/bash\nset -e\nxattr -dr com.apple.quarantine "/Applications/{APP_NAME}" 2>/dev/null || true\n'
     )
-    os.chmod(postinstall, 0o755)
+    os.chmod(postinstall, 0o755)  # noqa: S103 — installer postinstall script must be executable
 
     print(f"Building {pkg_name}...")
-    subprocess.check_call([
-        pkgbuild,
-        "--root", str(pkg_root),
-        "--scripts", str(scripts_dir),
-        "--identifier", BUNDLE_ID,
-        "--version", version,
-        "--install-location", "/",
-        str(pkg_path),
-    ])
+    subprocess.check_call(
+        [
+            pkgbuild,
+            "--root",
+            str(pkg_root),
+            "--scripts",
+            str(scripts_dir),
+            "--identifier",
+            BUNDLE_ID,
+            "--version",
+            version,
+            "--install-location",
+            "/",
+            str(pkg_path),
+        ]
+    )
 
     # Clean up
     shutil.rmtree(pkg_root)
@@ -345,6 +353,7 @@ def install_app(app_path: Path) -> None:
 
 
 def main() -> None:
+    """CLI entry point: parse args and build the macOS client distributable(s)."""
     parser = argparse.ArgumentParser(description="Build RCFlow macOS client distributable")
     parser.add_argument(
         "--skip-build",

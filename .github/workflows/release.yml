@@ -299,7 +299,14 @@ jobs:
           # Styled drag-to-Applications image (background + icon layout). Pillow
           # is best-effort — without it the icon layout still applies, just no
           # custom background.
-          python3 -m pip install --quiet pillow || python3 -m pip install --quiet --user pillow || true
+          # Newer runner images ship an externally-managed Python (PEP 668), so
+          # plain/--user pip installs are rejected; --break-system-packages is the
+          # documented escape hatch. Best-effort — a missing Pillow only drops the
+          # custom DMG background, it does not fail packaging.
+          python3 -m pip install --quiet pillow \
+            || python3 -m pip install --quiet --user pillow \
+            || python3 -m pip install --quiet --break-system-packages pillow \
+            || true
           python3 scripts/bundle_macos_client.py \
             --styled-dmg --app "$APP_PATH" --out "$DMG_PATH" --volname "RCFlow Client"
 
@@ -336,6 +343,12 @@ jobs:
 
       - name: Build Windows desktop
         working-directory: rcflowclient
+        # MSVC 14.51 (VS 2022 18.x) turned <experimental/coroutine> into a hard
+        # error (STL1011); audioplayers_windows still includes it. The CL env
+        # var prepends this define to every cl.exe invocation so the deprecated
+        # header compiles until the plugin moves to C++20 <coroutine>.
+        env:
+          CL: /D_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS
         run: flutter build windows --release
 
       - name: Get client version
@@ -391,6 +404,16 @@ jobs:
         with:
           channel: stable
           cache: true
+
+      # super_native_extensions builds Rust via cargokit, which lazily runs
+      # `rustup target add` mid-Gradle — that download intermittently fails on
+      # the runner ("could not rename 'downloaded' file"). Install the toolchain
+      # and all Android targets up front (serially) so cargokit's later call is
+      # a no-op and never triggers the flaky download.
+      - name: Set up Rust (Android targets)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: armv7-linux-androideabi,aarch64-linux-android,x86_64-linux-android,i686-linux-android
 
       - name: Install Flutter packages
         working-directory: rcflowclient

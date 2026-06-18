@@ -194,6 +194,17 @@ jobs:
         working-directory: rcflowclient
         run: flutter pub get
 
+      # ── Android: install Rust + targets before the Gradle build ──────────
+      # super_native_extensions builds Rust via cargokit, which lazily runs
+      # `rustup target add` mid-Gradle — that download intermittently fails on
+      # the runner ("could not rename 'downloaded' file"). Install the toolchain
+      # and all Android targets up front so cargokit's later call is a no-op.
+      - name: Set up Rust (Android only)
+        if: matrix.platform == 'android'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: armv7-linux-androideabi,aarch64-linux-android,x86_64-linux-android,i686-linux-android
+
       # ── Android: accept SDK licenses ─────────────────────────────────────
       # The pre-installed Android SDK on GitHub runners may have unaccepted
       # license agreements; flutter doctor --android-licenses accepts them.
@@ -231,6 +242,12 @@ jobs:
       - name: Build Windows desktop
         if: matrix.platform == 'windows'
         working-directory: rcflowclient
+        # MSVC 14.51 (VS 2022 18.x) turned <experimental/coroutine> into a hard
+        # error (STL1011); audioplayers_windows still includes it. The CL env
+        # var prepends this define to every cl.exe invocation so the deprecated
+        # header compiles until the plugin moves to C++20 <coroutine>.
+        env:
+          CL: /D_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS
         run: flutter build windows --release
 
       # --split-per-abi creates separate, smaller APKs for each CPU architecture.
