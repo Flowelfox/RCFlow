@@ -64,6 +64,26 @@ void main() {
     test('older version is not newer', () {
       expect(UpdateService.isNewer('1.37.0', '1.38.0'), isFalse);
     });
+
+    test('release is newer than the matching -dev prerelease', () {
+      // A local dev build of X.Y.Z should see the published X.Y.Z as an update.
+      expect(UpdateService.isNewer('1.59.0', '1.59.0-dev.gb45b7ee'), isTrue);
+    });
+
+    test('-dev prerelease is not newer than its matching release', () {
+      expect(UpdateService.isNewer('1.59.0-dev.gb45b7ee', '1.59.0'), isFalse);
+    });
+
+    test('two -dev builds of the same base compare equal', () {
+      expect(
+        UpdateService.isNewer('1.59.0-dev.gaaaaaaa', '1.59.0-dev.gb45b7ee'),
+        isFalse,
+      );
+    });
+
+    test('a -dev build of the next version beats the current release', () {
+      expect(UpdateService.isNewer('1.60.0-dev.gb45b7ee', '1.59.0'), isTrue);
+    });
   });
 
   group('restoreCachedState', () {

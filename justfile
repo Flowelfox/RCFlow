@@ -114,9 +114,13 @@ bundle-linux-client:
         printf '  sudo apt-get install cmake ninja-build clang pkg-config libgtk-3-dev dpkg\n\n'
         exit 1
     fi
-    (cd rcflowclient && flutter build linux --release)
-    mkdir -p dist
+    # Compute the dev version up front and bake it into the build (--build-name)
+    # so the app's runtime PackageInfo.version carries the -dev suffix too — not
+    # just the package filename. Otherwise a local build reports the clean
+    # release version and never sees the published release as an update.
     CLIENT_VERSION=$(grep '^version:' rcflowclient/pubspec.yaml | sed 's/version: //' | sed 's/+.*//')-dev$(git rev-parse --short=7 HEAD 2>/dev/null | sed 's/^/.g/')
+    (cd rcflowclient && flutter build linux --release --build-name="$CLIENT_VERSION")
+    mkdir -p dist
     PKG_NAME="rcflow-v${CLIENT_VERSION}-linux-client-amd64"
     DEB_ROOT=$(mktemp -d)
     trap "rm -rf '$DEB_ROOT'" EXIT
@@ -162,9 +166,11 @@ bundle-linux-client-install: bundle-linux-client
 bundle-macos-client:
     #!/usr/bin/env bash
     set -euo pipefail
-    (cd rcflowclient && flutter build macos --release)
-    mkdir -p dist
+    # Bake the dev version into the build so the app reports it at runtime
+    # (see bundle-linux-client for the full rationale).
     CLIENT_VERSION=$(grep '^version:' rcflowclient/pubspec.yaml | sed 's/version: //' | sed 's/+.*//')-dev$(git rev-parse --short=7 HEAD 2>/dev/null | sed 's/^/.g/')
+    (cd rcflowclient && flutter build macos --release --build-name="$CLIENT_VERSION")
+    mkdir -p dist
     CLIENT_ARCH=$(uname -m | sed 's/x86_64/amd64/')
     DMG_PATH="dist/rcflow-v${CLIENT_VERSION}-macos-client-${CLIENT_ARCH}.dmg"
     APP_PATH="rcflowclient/build/macos/Build/Products/Release/RCFlow.app"
@@ -192,7 +198,9 @@ bundle-macos-client-install: bundle-macos-client
 # Requires Inno Setup 6 (iscc.exe on PATH or at default install location)
 [windows]
 bundle-windows-client:
-    Set-Location rcflowclient; flutter build windows --release
+    # Bake the dev version into the build (--build-name) so the app reports it at
+    # runtime, not just in the installer filename (see bundle-linux-client).
+    $appVersion = ((Get-Content rcflowclient/pubspec.yaml | Select-String '^version:').Line -replace 'version: ', '' -replace '\+.*', ''); $gh = (git rev-parse --short=7 HEAD 2>$null); $appVersion = "$appVersion-dev" + $(if ($gh) { ".g$gh" } else { "" }); Set-Location rcflowclient; flutter build windows --release --build-name=$appVersion; Set-Location ..
     $appVersion = ((Get-Content rcflowclient/pubspec.yaml | Select-String '^version:').Line -replace 'version: ', '' -replace '\+.*', ''); $gh = (git rev-parse --short=7 HEAD 2>$null); $appVersion = "$appVersion-dev" + $(if ($gh) { ".g$gh" } else { "" }); $bundleDir = (Resolve-Path 'rcflowclient\build\windows\x64\runner\Release').Path; $outputFilename = "rcflow-v${appVersion}-windows-client-amd64"; if (-not (Test-Path dist)) { New-Item -ItemType Directory -Path dist | Out-Null }; iscc scripts\inno_setup_client.iss "/DBundleDir=$bundleDir" "/DAppVersion=$appVersion" "/DArch=amd64" "/DOutputDir=dist" "/DOutputFilename=$outputFilename"
 
 # Build and install Windows Flutter client (must be on Windows)

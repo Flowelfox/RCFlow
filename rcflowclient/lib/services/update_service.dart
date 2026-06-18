@@ -154,21 +154,33 @@ class UpdateService extends ChangeNotifier {
 
   /// Returns true if [a] is strictly newer than [b].
   ///
-  /// Versions are compared numerically by dot-separated segments, so "1.10.0"
-  /// is correctly treated as newer than "1.9.0".
+  /// Compares MAJOR.MINOR.PATCH numerically ("1.10.0" > "1.9.0") and, per SemVer
+  /// precedence, treats a prerelease as *older* than the matching release:
+  /// "1.59.0-dev.gb45b7ee" < "1.59.0". That lets a local -dev build of X.Y.Z see
+  /// the published X.Y.Z release as an available update. Prerelease identifiers
+  /// are not ordered against each other (two -dev builds of the same base compare
+  /// equal → no update).
   static bool isNewer(String a, String b) {
+    final aPre = a.contains('-');
+    final bPre = b.contains('-');
     final aParts = _parseParts(a);
     final bParts = _parseParts(b);
     final len = aParts.length > bParts.length ? aParts.length : bParts.length;
     for (var i = 0; i < len; i++) {
       final av = i < aParts.length ? aParts[i] : 0;
       final bv = i < bParts.length ? bParts[i] : 0;
-      if (av > bv) return true;
-      if (av < bv) return false;
+      if (av != bv) return av > bv;
     }
-    return false; // equal
+    // Equal release numbers: a release (no prerelease) outranks a prerelease.
+    return !aPre && bPre;
   }
 
-  static List<int> _parseParts(String version) =>
-      version.split('.').map((p) => int.tryParse(p) ?? 0).toList();
+  /// Parses the numeric MAJOR.MINOR.PATCH base, ignoring any prerelease suffix
+  /// (everything from the first '-') so "0.44.0-dev.gX" parses as [0, 44, 0].
+  static List<int> _parseParts(String version) => version
+      .split('-')
+      .first
+      .split('.')
+      .map((p) => int.tryParse(p) ?? 0)
+      .toList();
 }

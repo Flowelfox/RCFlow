@@ -81,23 +81,40 @@ def normalize_version(value: str) -> str:
 
 
 def is_newer(a: str, b: str) -> bool:
-    """Return True when *a* is strictly newer than *b* by numeric segments.
+    """Return True when *a* is strictly newer than *b*.
 
-    ``"1.10.0"`` is correctly treated as newer than ``"1.9.0"``.  Non-numeric
-    segments (e.g. ``"1.0.0-rc1"``) coerce to 0 and are otherwise ignored —
-    sufficient for the server's release tags which are pure ``MAJOR.MINOR.PATCH``.
+    Compares ``MAJOR.MINOR.PATCH`` numerically (``"1.10.0"`` > ``"1.9.0"``) and,
+    per SemVer precedence, treats a prerelease as *older* than the matching
+    release: ``"0.44.0-dev.gb45b7ee" < "0.44.0"``.  This is what lets a local
+    ``-dev`` build of X.Y.Z see the published X.Y.Z release as an available
+    update.  Prerelease identifiers themselves are not ordered against each
+    other (two ``-dev`` builds of the same base compare equal → no update).
     """
-    aparts = _parse_parts(a)
-    bparts = _parse_parts(b)
+    abase, apre = _split_prerelease(a)
+    bbase, bpre = _split_prerelease(b)
+    aparts = _parse_parts(abase)
+    bparts = _parse_parts(bbase)
     n = max(len(aparts), len(bparts))
     for i in range(n):
         av = aparts[i] if i < len(aparts) else 0
         bv = bparts[i] if i < len(bparts) else 0
-        if av > bv:
-            return True
-        if av < bv:
-            return False
-    return False
+        if av != bv:
+            return av > bv
+    # Equal release numbers: a release (no prerelease) outranks a prerelease.
+    return (not apre) and bpre
+
+
+def _split_prerelease(version: str) -> tuple[str, bool]:
+    """Split ``X.Y.Z[-prerelease]`` into the numeric base and a prerelease flag.
+
+    ``"0.44.0-dev.gb45b7ee"`` → ``("0.44.0", True)``; ``"0.44.0"`` →
+    ``("0.44.0", False)``.  Build metadata is already stripped upstream by
+    :func:`normalize_version`.
+    """
+    dash = version.find("-")
+    if dash == -1:
+        return version, False
+    return version[:dash], True
 
 
 def _parse_parts(version: str) -> list[int]:

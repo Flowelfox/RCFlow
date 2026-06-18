@@ -12,6 +12,10 @@ and note which component is affected where it matters.
 
 ## [Unreleased]
 
+### Fixed
+- **Update checks now recognise a new release over a local dev build** — a development build of version X.Y.Z is now correctly treated as older than the published X.Y.Z release, so the worker and client offer the update instead of considering themselves already current (Backend + Client)
+- **Development client builds are now marked as dev** — locally built clients now report their version with a `-dev.g<hash>` suffix (matching the worker), so they show as a dev build in the UI and correctly detect the published release as an available update (Client)
+
 ## [Backend 0.44.0 / Client 1.59.0] — 2026-06-17
 
 ### Added

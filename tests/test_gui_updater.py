@@ -94,6 +94,17 @@ def test_normalize_version(raw: str, expected: str) -> None:
         ("1.0.1", "1.0.0", True),
         ("1.0", "1.0.0", False),
         ("1.0.0.1", "1.0.0", True),
+        # SemVer prerelease: a -dev build of X.Y.Z is older than the release,
+        # so the published release IS an available update for the dev build.
+        ("0.44.0", "0.44.0-dev.gb45b7ee", True),
+        ("0.44.0-dev.gb45b7ee", "0.44.0", False),
+        # Two dev builds of the same base compare equal → no update.
+        ("0.44.0-dev.gaaaaaaa", "0.44.0-dev.gb45b7ee", False),
+        # A newer release still beats an older dev build, and vice versa.
+        ("0.45.0", "0.44.0-dev.gb45b7ee", True),
+        ("0.44.0-dev.gb45b7ee", "0.43.0", True),
+        # A dev build of the next version is newer than the current release.
+        ("0.45.0-dev.gb45b7ee", "0.44.0", True),
     ],
 )
 def test_is_newer(a: str, b: str, expected: bool) -> None:
