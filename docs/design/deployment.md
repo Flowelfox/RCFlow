@@ -1,5 +1,5 @@
 ---
-updated: 2026-06-08
+updated: 2026-06-18
 ---
 
 # Platform Support, Deployment & Bundling
@@ -218,7 +218,8 @@ The worker GUI (Windows tray, macOS menu bar, future Linux dashboard) polls the 
 - When a newer version is available, an amber banner appears above the status pill and a "Update available — install vX.Y.Z" item appears near the top of the tray/menu-bar menu. The user clicks **Download & Install**, the installer is streamed to a per-platform cache dir (`%TEMP%\rcflow-updates`, `~/Library/Caches/rcflow/updates`, `~/.cache/rcflow/updates`), and a modal asks whether to launch it (`os.startfile` / `open` / `xdg-open`) or reveal it in the file manager.
 - The worker process keeps running during the download. The installer is responsible for prompting the user to close the worker before overwriting the binary.
 - Auto-checks can be turned off from the dashboard's **Updates** card or by setting `RCFLOW_UPDATE_AUTO_CHECK=false`. Manual checks still work in either case.
-- Versions are normalized (`v1.2.3+45` → `1.2.3`) and compared by numeric dot-segments, so `1.10.0` is correctly newer than `1.9.0`. Dismissing a version hides the banner until a strictly newer version appears.
+- Versions are normalized (`v1.2.3+45` → `1.2.3`) and compared by numeric dot-segments, so `1.10.0` is correctly newer than `1.9.0`. Per SemVer precedence a prerelease is older than its matching release, so a local `-dev.g<hash>` build of `X.Y.Z` sees the published `X.Y.Z` as an available update (two `-dev` builds of the same base compare equal → no update). Dismissing a version hides the banner until a strictly newer version appears.
+- Local dev builds carry a `-dev.g<hash>` suffix so they are distinguishable from releases and trigger the rule above: the worker bakes it into its `VERSION` file (`scripts/bundle.py`, non-`--release`), and the client `bundle-*-client` justfile recipes pass it via `flutter build --build-name` so the app's runtime `PackageInfo.version` (not just the artifact filename) reflects it. CI release builds use the clean `pyproject`/`pubspec` version.
 - Dev (unfrozen) builds skip the auto-check on launch when no `rcflow` package version is resolvable, but the manual "Check for Updates" button still works for testing.
 
 No checksum or signature verification is performed beyond TLS — the user-facing install flow matches the existing Flutter client. Stalled `*.partial` downloads older than one day are garbage-collected on each GUI startup.
