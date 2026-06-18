@@ -12,6 +12,8 @@ and note which component is affected where it matters.
 
 ## [Unreleased]
 
+## [Backend 0.44.1 / Client 1.59.1] — 2026-06-18
+
 ### Security
 - **Patched known vulnerabilities in bundled libraries** — updated third-party dependencies to versions that fix several denial-of-service and request-parsing issues in the web stack and refresh the bundled cryptography/OpenSSL libraries. No behaviour change for users (Backend)
 
