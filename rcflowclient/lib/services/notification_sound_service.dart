@@ -1,6 +1,11 @@
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:audioplayers/audioplayers.dart';
+import 'package:ffi/ffi.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart' show rootBundle;
+import 'package:win32/win32.dart' show PlaySound;
 
 import 'settings_service.dart';
 
@@ -20,114 +25,139 @@ const defaultSounds = [
   NotificationSoundInfo(id: 'notif', label: 'Nova Pulse'),
 ];
 
+// PlaySound flags (winmm). Defined locally so we don't depend on win32
+// re-exporting them.  SND_SYNC is 0 (the default); we play synchronously on a
+// background isolate because SND_ASYNC's single playback slot wedges after the
+// first sound on this embedding (returns TRUE but emits nothing).
+const int _sndNodefault = 0x0002; // silence (not the system default) on error
+const int _sndFilename = 0x00020000; // pszSound is a file name
+
+/// Plays [path] to completion via the native winmm `PlaySound` (synchronous).
+/// Top-level so it can run inside [Isolate.run] off the UI thread.
+int _playSoundSyncBlocking(String path) {
+  final pszSound = path.toNativeUtf16();
+  try {
+    return PlaySound(pszSound, 0, _sndFilename | _sndNodefault);
+  } finally {
+    malloc.free(pszSound);
+  }
+}
+
+/// Plays short notification sounds.
+///
+/// Windows uses the native `PlaySound` (winmm) API directly instead of
+/// `audioplayers`.  The `audioplayers` Windows backend (Windows Media
+/// Foundation) proved unreliable here: the first play worked but every
+/// subsequent play was silent, and it logs "channel sent a message from native
+/// to Flutter on a non-platform thread" errors.  `PlaySound` is the canonical
+/// Win32 WAV API — it replays reliably, works while the window is unfocused,
+/// and uses no platform event channel.  All other platforms keep
+/// `audioplayers`.
 class NotificationSoundService {
   final SettingsService _settings;
-  final AudioPlayer _player;
 
-  // Tracks which source is currently loaded in the player.
-  // Format: the soundId for built-in sounds, or 'custom:<path>' for custom files.
-  String? _loadedKey;
+  // audioplayers instance — only created/used on non-Windows platforms.
+  AudioPlayer? _player;
+
+  // Cache of built-in asset sounds extracted to temp files (Windows only):
+  // soundId -> absolute temp-file path.  PlaySound needs a real file path,
+  // but bundled assets live inside the app, so each is written out once.
+  final Map<String, String> _extractedPaths = {};
 
   NotificationSoundService({
     required SettingsService settings,
     AudioPlayer? player,
   }) : _settings = settings,
-       _player = player ?? AudioPlayer() {
-    // On Windows, the audioplayers plugin uses Windows Media Foundation (WMF)
-    // to load audio sources asynchronously.  When the app window is not
-    // focused, Flutter's platform-event processing is in a reduced-activity
-    // state, so the WMF "source loaded" callback never reaches Dart and
-    // play() silently does nothing.
-    //
-    // Fix: use ReleaseMode.stop so that stopping the player keeps the source
-    // loaded (instead of releasing it).  We pre-load the configured sound
-    // during construction — while the window is guaranteed to be focused at
-    // app startup — and then use seek(0)+resume() for playback.  Both of
-    // those calls are synchronous platform-channel round-trips that complete
-    // immediately without waiting for any WMF background callbacks.
-    if (Platform.isWindows) {
-      _player.setReleaseMode(ReleaseMode.stop);
-      _preloadCurrentSound();
-    }
+       _player = Platform.isWindows ? null : (player ?? AudioPlayer());
+
+  /// Plays the "Sound when done" (completion) sound.
+  Future<void> playCompletionSound() async {
+    await _playSound(
+      _settings.completionSound,
+      _settings.completionCustomSoundPath,
+    );
   }
 
-  /// Eagerly loads the currently configured sound into the player.
-  /// Called once at construction while the window is focused.
-  void _preloadCurrentSound() {
-    final soundId = _settings.notificationSound;
-    if (soundId == 'custom') return; // custom path may not exist yet
-    _player
-        .setSource(AssetSource('sounds/$soundId.wav'))
-        .then((_) {
-          _loadedKey = soundId;
-        })
-        .catchError((_) {});
+  /// Plays the "Sound on message" sound.
+  Future<void> playMessageSound() async {
+    await _playSound(_settings.messageSound, _settings.messageCustomSoundPath);
   }
 
-  Future<void> playNotificationSound() async {
-    final soundId = _settings.notificationSound;
-    await _playSound(soundId);
+  /// Plays [soundId] (a preset id, or 'custom' with [customPath]) for previews.
+  Future<void> previewSound(String soundId, {String customPath = ''}) async {
+    await _playSound(soundId, customPath);
   }
 
-  Future<void> previewSound(String soundId) async {
-    await _playSound(soundId);
-  }
-
-  Future<void> _playSound(String soundId) async {
+  Future<void> _playSound(String soundId, String customPath) async {
     try {
       if (Platform.isWindows) {
-        await _playSoundWindows(soundId);
+        await _playWindows(soundId, customPath);
       } else {
-        await _playSoundDefault(soundId);
+        await _playAudioplayers(soundId, customPath);
       }
-    } catch (_) {
-      // Silently ignore playback errors
+    } catch (e) {
+      // Non-fatal: a failed notification sound must not break the app, but
+      // log it so playback problems are diagnosable.
+      debugPrint('NotificationSoundService: playback failed for "$soundId": $e');
     }
   }
 
-  /// Windows-specific playback: avoid triggering an async WMF source reload
-  /// when the app window may not be focused.
-  Future<void> _playSoundWindows(String soundId) async {
-    final String key;
-    final Source source;
-
+  /// Native Windows playback via winmm `PlaySound`, run synchronously on a
+  /// background isolate so it plays to completion reliably on every call
+  /// without blocking the UI thread.
+  Future<void> _playWindows(String soundId, String customPath) async {
+    final String path;
     if (soundId == 'custom') {
-      final path = _settings.customSoundPath;
-      if (path.isEmpty) return;
-      key = 'custom:$path';
-      source = DeviceFileSource(path);
+      if (customPath.isEmpty) return;
+      path = customPath;
     } else {
-      key = soundId;
-      source = AssetSource('sounds/$soundId.wav');
+      final extracted = await _windowsAssetPath(soundId);
+      if (extracted == null) return;
+      path = extracted;
     }
 
-    if (_loadedKey == key) {
-      // Source already loaded — seek to beginning and resume.
-      // These are synchronous platform-channel calls that return immediately
-      // and do not wait for WMF callbacks, so they work even when the
-      // app window is unfocused.
-      await _player.seek(Duration.zero);
-      await _player.resume();
-    } else {
-      // Different sound — must load it first.  This path requires the full
-      // async cycle; it works reliably when triggered from the UI (focused).
-      await _player.stop();
-      await _player.play(source);
-      _loadedKey = key;
-    }
+    await Isolate.run(() => _playSoundSyncBlocking(path));
   }
 
-  /// Default playback path used on non-Windows platforms.
-  Future<void> _playSoundDefault(String soundId) async {
-    await _player.stop();
+  /// Returns an on-disk path to the built-in WAV [soundId] for `PlaySound`.
+  ///
+  /// Prefers the asset Flutter already ships inside the install folder
+  /// (`<exe dir>\data\flutter_assets\assets\sounds\<id>.wav`) so nothing is
+  /// written out.  Falls back to extracting the asset to a temp file if that
+  /// layout isn't found (e.g. an unusual packaging).
+  Future<String?> _windowsAssetPath(String soundId) async {
+    final cached = _extractedPaths[soundId];
+    if (cached != null && File(cached).existsSync()) return cached;
 
+    final exeDir = File(Platform.resolvedExecutable).parent.path;
+    final bundled = File(
+      '$exeDir\\data\\flutter_assets\\assets\\sounds\\$soundId.wav',
+    );
+    if (bundled.existsSync()) {
+      _extractedPaths[soundId] = bundled.path;
+      return bundled.path;
+    }
+
+    final data = await rootBundle.load('assets/sounds/$soundId.wav');
+    final file = File('${Directory.systemTemp.path}/rcflow_sound_$soundId.wav');
+    await file.writeAsBytes(
+      data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes),
+      flush: true,
+    );
+    _extractedPaths[soundId] = file.path;
+    return file.path;
+  }
+
+  /// audioplayers playback path (non-Windows platforms).
+  Future<void> _playAudioplayers(String soundId, String customPath) async {
+    final player = _player ??= AudioPlayer();
+    await player.stop();
     if (soundId == 'custom') {
-      final path = _settings.customSoundPath;
-      if (path.isNotEmpty) {
-        await _player.play(DeviceFileSource(path));
+      if (customPath.isNotEmpty) {
+        await player.play(DeviceFileSource(customPath));
       }
     } else {
-      await _player.play(AssetSource('sounds/$soundId.wav'));
+      await player.play(AssetSource('sounds/$soundId.wav'));
     }
   }
 
@@ -163,6 +193,6 @@ class NotificationSoundService {
   }
 
   void dispose() {
-    _player.dispose();
+    _player?.dispose();
   }
 }

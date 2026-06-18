@@ -54,7 +54,9 @@ class TerminalSessionTile extends StatelessWidget {
                   )
                 : null,
           ),
-          child: ListTile(
+          child: Material(
+            type: MaterialType.transparency,
+            child: ListTile(
             leading: Container(
               width: 30,
               height: 30,
@@ -115,6 +117,7 @@ class TerminalSessionTile extends StatelessWidget {
                     onSessionSelected?.call();
                   },
             onLongPress: () => _showTerminalRenameDialog(context),
+          ),
           ),
         ),
       ),

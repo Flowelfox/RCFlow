@@ -39,6 +39,9 @@ dependencies:
   flutter_markdown_plus: ^1.0.7
   markdown: ^7.3.0
   audioplayers: ^6.1.0
+  # Windows native sound playback (winmm PlaySound) + FFI string marshalling.
+  win32: ^5.15.0
+  ffi: ^2.1.0
   file_picker: ^11.0.2
   window_manager: ^0.5.1
   url_launcher: ^6.3.1

@@ -26,8 +26,13 @@ class SettingsService {
   static const _soundEnabledKey = 'rcflow_sound_enabled';
   static const _vibrateEnabledKey = 'rcflow_vibrate_enabled';
   static const _soundOnCompleteEnabledKey = 'rcflow_sound_on_complete';
+  // Completion ("Sound when done") sound — reuses the original keys so an
+  // existing user's chosen sound carries over to the completion slot.
   static const _notificationSoundKey = 'rcflow_notification_sound';
   static const _customSoundPathKey = 'rcflow_custom_sound_path';
+  // Per-message ("Sound on message") sound — independent selection.
+  static const _messageSoundKey = 'rcflow_message_sound';
+  static const _messageCustomSoundPathKey = 'rcflow_message_custom_sound_path';
 
   static const _terminalScrollbackKey = 'rcflow_terminal_scrollback';
   static const _terminalColorSchemeKey = 'rcflow_terminal_color_scheme';
@@ -369,14 +374,27 @@ class SettingsService {
   bool get vibrateEnabled => _prefs.getBool(_vibrateEnabledKey) ?? true;
   set vibrateEnabled(bool value) => _prefs.setBool(_vibrateEnabledKey, value);
 
-  String get notificationSound =>
+  /// Sound played when the agent finishes a turn ("Sound when done").
+  String get completionSound =>
       _prefs.getString(_notificationSoundKey) ?? 'gentle_chime';
-  set notificationSound(String value) =>
+  set completionSound(String value) =>
       _prefs.setString(_notificationSoundKey, value);
 
-  String get customSoundPath => _prefs.getString(_customSoundPathKey) ?? '';
-  set customSoundPath(String value) =>
+  String get completionCustomSoundPath =>
+      _prefs.getString(_customSoundPathKey) ?? '';
+  set completionCustomSoundPath(String value) =>
       _prefs.setString(_customSoundPathKey, value);
+
+  /// Sound played on each new assistant message ("Sound on message").
+  String get messageSound =>
+      _prefs.getString(_messageSoundKey) ?? 'soft_ping';
+  set messageSound(String value) =>
+      _prefs.setString(_messageSoundKey, value);
+
+  String get messageCustomSoundPath =>
+      _prefs.getString(_messageCustomSoundPathKey) ?? '';
+  set messageCustomSoundPath(String value) =>
+      _prefs.setString(_messageCustomSoundPathKey, value);
 
   int get terminalScrollback => _prefs.getInt(_terminalScrollbackKey) ?? 1000;
   set terminalScrollback(int value) =>
@@ -654,16 +672,20 @@ class SettingsService {
     enabled: soundEnabled,
     soundOnComplete: soundOnCompleteEnabled,
     vibrateEnabled: vibrateEnabled,
-    notificationSound: notificationSound,
-    customSoundPath: customSoundPath,
+    completionSound: completionSound,
+    completionCustomSoundPath: completionCustomSoundPath,
+    messageSound: messageSound,
+    messageCustomSoundPath: messageCustomSoundPath,
   );
 
   set sound(SoundConfig cfg) {
     soundEnabled = cfg.enabled;
     soundOnCompleteEnabled = cfg.soundOnComplete;
     vibrateEnabled = cfg.vibrateEnabled;
-    notificationSound = cfg.notificationSound;
-    customSoundPath = cfg.customSoundPath;
+    completionSound = cfg.completionSound;
+    completionCustomSoundPath = cfg.completionCustomSoundPath;
+    messageSound = cfg.messageSound;
+    messageCustomSoundPath = cfg.messageCustomSoundPath;
   }
 
   ToastConfig get toast => ToastConfig(

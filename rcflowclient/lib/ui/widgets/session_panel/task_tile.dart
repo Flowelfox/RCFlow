@@ -84,7 +84,9 @@ class TaskTile extends StatelessWidget {
                 )
               : null,
         ),
-        child: ListTile(
+        child: Material(
+          type: MaterialType.transparency,
+          child: ListTile(
           leading: isSelected
               ? Container(
                   width: 30,
@@ -219,6 +221,7 @@ class TaskTile extends StatelessWidget {
                 state.openTaskInPane(task.taskId);
                 onTaskSelected?.call();
               },
+        ),
         ),
       ),
     );

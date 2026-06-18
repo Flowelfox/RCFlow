@@ -31,7 +31,9 @@ class _SessionRefTile extends StatelessWidget {
           color: context.appColors.bgElevated,
           borderRadius: BorderRadius.circular(8),
         ),
-        child: ListTile(
+        child: Material(
+          type: MaterialType.transparency,
+          child: ListTile(
           dense: true,
           visualDensity: const VisualDensity(vertical: -3),
           leading: Icon(
@@ -58,6 +60,7 @@ class _SessionRefTile extends StatelessWidget {
           onTap: () {
             appState.ensureChatPane().switchSession(ref.sessionId);
           },
+        ),
         ),
       ),
     );
@@ -218,7 +221,9 @@ class _LinkedIssueTile extends StatelessWidget {
           color: context.appColors.bgElevated,
           borderRadius: BorderRadius.circular(8),
         ),
-        child: ListTile(
+        child: Material(
+          type: MaterialType.transparency,
+          child: ListTile(
           dense: true,
           visualDensity: const VisualDensity(vertical: -3),
           leading: Container(
@@ -272,6 +277,7 @@ class _LinkedIssueTile extends StatelessWidget {
             style: TextStyle(color: context.appColors.textMuted, fontSize: 10),
           ),
           onTap: () => appState.openLinearIssueInPane(issue.id),
+        ),
         ),
       ),
     );

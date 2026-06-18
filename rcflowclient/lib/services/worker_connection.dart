@@ -555,6 +555,7 @@ class WorkerConnection extends ChangeNotifier {
     if (index >= 0) {
       final existing = sessions[index];
       final prevMainProjectPath = existing.mainProjectPath;
+      final prevActivity = existing.activityState;
       sessions[index] = SessionInfo(
         sessionId: sessionId,
         sessionType: sessionType ?? existing.sessionType,
@@ -593,6 +594,31 @@ class WorkerConnection extends ChangeNotifier {
       if (newMainProjectPath != null &&
           newMainProjectPath != prevMainProjectPath) {
         onProjectPathAttached?.call(sessionId, newMainProjectPath);
+      }
+
+      // Detect end-of-turn: the session was processing and has now gone idle
+      // while still active (waiting for input).  Agent executors
+      // (Claude Code / Codex / OpenCode) never emit a `turn_complete` output
+      // message — they only flip activity_state to idle via this session
+      // update — so synthesize one here.  Routing it through the normal output
+      // pipeline reuses the existing notification-sound and awaiting-input
+      // toast logic uniformly for every executor type.
+      final newActivity = activityState ?? existing.activityState;
+      final effectiveStatus = status ?? existing.status;
+      // A live, running session uses status `active` (conversational) or
+      // `executing` (one-shot / long-running); both toggle activity_state
+      // between idle and processing per turn.  Terminal/paused statuses are
+      // excluded so pause/cancel/end never sound a completion.
+      final fireTurnComplete =
+          prevActivity != null &&
+          prevActivity != 'idle' &&
+          newActivity == 'idle' &&
+          (effectiveStatus == 'active' || effectiveStatus == 'executing');
+      if (fireTurnComplete) {
+        onOutputMessage?.call(
+          {'type': 'turn_complete', 'session_id': sessionId},
+          config.id,
+        );
       }
     } else {
       sessions.insert(

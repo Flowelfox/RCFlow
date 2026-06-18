@@ -11,9 +11,17 @@ class _NotificationsSectionState extends State<_NotificationsSection> {
   late bool _soundEnabled;
   late bool _soundOnCompleteEnabled;
   late bool _vibrateEnabled;
-  late String _selectedSound;
-  late String _customSoundPath;
-  String? _customSoundError;
+
+  // Completion ("Sound when done") sound.
+  late String _completionSound;
+  late String _completionCustomPath;
+  String? _completionError;
+
+  // Per-message ("Sound on message") sound.
+  late String _messageSound;
+  late String _messageCustomPath;
+  String? _messageError;
+
   NotificationSoundService? _soundService;
   late bool _toastEnabled;
   late bool _toastBackgroundSessions;
@@ -28,8 +36,10 @@ class _NotificationsSectionState extends State<_NotificationsSection> {
     _soundEnabled = settings.soundEnabled;
     _soundOnCompleteEnabled = settings.soundOnCompleteEnabled;
     _vibrateEnabled = settings.vibrateEnabled;
-    _selectedSound = settings.notificationSound;
-    _customSoundPath = settings.customSoundPath;
+    _completionSound = settings.completionSound;
+    _completionCustomPath = settings.completionCustomSoundPath;
+    _messageSound = settings.messageSound;
+    _messageCustomPath = settings.messageCustomSoundPath;
     _soundService = appState.soundService;
     _toastEnabled = settings.toastEnabled;
     _toastBackgroundSessions = settings.toastBackgroundSessions;
@@ -37,38 +47,104 @@ class _NotificationsSectionState extends State<_NotificationsSection> {
     _toastConnections = settings.toastConnections;
   }
 
-  bool get _anySoundEnabled => _soundEnabled || _soundOnCompleteEnabled;
+  String _fileName(String path) {
+    if (path.isEmpty) return '';
+    final sep = Platform.isWindows ? '\\' : '/';
+    return path.split(sep).last;
+  }
 
-  Future<void> _pickCustomSound(SettingsService settings) async {
+  /// A settings toggle where only the switch is interactive (no full-row hit
+  /// target / hover highlight).
+  Widget _switchRow({
+    required String title,
+    required String subtitle,
+    required bool value,
+    required ValueChanged<bool> onChanged,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Expanded(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(
+                    color: context.appColors.textPrimary,
+                    fontSize: 15,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  style: TextStyle(
+                    color: context.appColors.textMuted,
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          Switch(
+            value: value,
+            activeTrackColor: context.appColors.accent,
+            onChanged: onChanged,
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Opens a file picker, validates the WAV, and applies it to the target slot
+  /// (completion when [forCompletion], otherwise the per-message slot).
+  Future<void> _pickCustomSound(
+    SettingsService settings, {
+    required bool forCompletion,
+  }) async {
     final result = await FilePicker.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['wav'],
       dialogTitle: 'Select notification sound',
     );
     if (result == null || result.files.isEmpty) return;
-
     final path = result.files.single.path;
     if (path == null) return;
 
     final error = await _soundService?.validateCustomSound(path);
     if (error != null) {
-      setState(() => _customSoundError = error);
+      setState(() {
+        if (forCompletion) {
+          _completionError = error;
+        } else {
+          _messageError = error;
+        }
+      });
       return;
     }
 
     setState(() {
-      _customSoundPath = path;
-      _customSoundError = null;
-      _selectedSound = 'custom';
+      if (forCompletion) {
+        _completionCustomPath = path;
+        _completionSound = 'custom';
+        _completionError = null;
+      } else {
+        _messageCustomPath = path;
+        _messageSound = 'custom';
+        _messageError = null;
+      }
     });
-    settings.customSoundPath = path;
-    settings.notificationSound = 'custom';
-  }
-
-  String get _customFileName {
-    if (_customSoundPath.isEmpty) return '';
-    final sep = Platform.isWindows ? '\\' : '/';
-    return _customSoundPath.split(sep).last;
+    if (forCompletion) {
+      settings.completionCustomSoundPath = path;
+      settings.completionSound = 'custom';
+    } else {
+      settings.messageCustomSoundPath = path;
+      settings.messageSound = 'custom';
+    }
   }
 
   @override
@@ -83,142 +159,58 @@ class _NotificationsSectionState extends State<_NotificationsSection> {
           title: 'Notifications',
           icon: Icons.notifications_outlined,
         ),
-        SwitchListTile(
-          title: Text(
-            'Sound when done',
-            style: TextStyle(
-              color: context.appColors.textPrimary,
-              fontSize: 15,
-            ),
-          ),
-          subtitle: Text(
-            'Play a sound when work finishes and waiting for input',
-            style: TextStyle(color: context.appColors.textMuted, fontSize: 12),
-          ),
-          value: _soundOnCompleteEnabled,
-          activeTrackColor: context.appColors.accent,
-          contentPadding: EdgeInsets.zero,
-          onChanged: (v) {
+
+        // --- Sound when done ---
+        _soundBlock(
+          settings: settings,
+          forCompletion: true,
+          title: 'Sound when done',
+          subtitle: 'Play a sound when the agent finishes and waits for input',
+          enabled: _soundOnCompleteEnabled,
+          onToggle: (v) {
             setState(() => _soundOnCompleteEnabled = v);
             settings.soundOnCompleteEnabled = v;
           },
+          selectedSound: _completionSound,
+          customPath: _completionCustomPath,
+          error: _completionError,
+          onSelectPreset: (id) {
+            setState(() => _completionSound = id);
+            settings.completionSound = id;
+          },
         ),
-        SwitchListTile(
-          title: Text(
-            'Sound on message',
-            style: TextStyle(
-              color: context.appColors.textPrimary,
-              fontSize: 15,
-            ),
-          ),
-          subtitle: Text(
-            'Play a sound when a message arrives',
-            style: TextStyle(color: context.appColors.textMuted, fontSize: 12),
-          ),
-          value: _soundEnabled,
-          activeTrackColor: context.appColors.accent,
-          contentPadding: EdgeInsets.zero,
-          onChanged: (v) {
+
+        // --- Sound on message ---
+        _soundBlock(
+          settings: settings,
+          forCompletion: false,
+          title: 'Sound on message',
+          subtitle: 'Play a sound for each new message from the agent',
+          enabled: _soundEnabled,
+          onToggle: (v) {
             setState(() => _soundEnabled = v);
             settings.soundEnabled = v;
           },
+          selectedSound: _messageSound,
+          customPath: _messageCustomPath,
+          error: _messageError,
+          onSelectPreset: (id) {
+            setState(() => _messageSound = id);
+            settings.messageSound = id;
+          },
         ),
-        if (_anySoundEnabled) ...[
-          SizedBox(height: 12),
-          Text(
-            'Notification sound',
-            style: TextStyle(
-              color: context.appColors.textSecondary,
-              fontSize: 13,
-            ),
-          ),
-          SizedBox(height: 8),
-          Container(
-            decoration: BoxDecoration(
-              color: context.appColors.bgElevated,
-              borderRadius: BorderRadius.circular(kRadiusLarge),
-            ),
-            clipBehavior: Clip.antiAlias,
-            child: Column(
-              children: [
-                for (final sound in defaultSounds)
-                  _SoundOption(
-                    label: sound.label,
-                    selected: _selectedSound == sound.id,
-                    isLast: false,
-                    onTap: () {
-                      setState(() => _selectedSound = sound.id);
-                      settings.notificationSound = sound.id;
-                    },
-                    onPreview: () => _soundService?.previewSound(sound.id),
-                  ),
-                if (Platform.isWindows) ...[
-                  _SoundOption(
-                    label: _customSoundPath.isNotEmpty
-                        ? 'Custom: $_customFileName'
-                        : 'Custom sound...',
-                    selected: _selectedSound == 'custom',
-                    isLast: true,
-                    onTap: () {
-                      if (_customSoundPath.isNotEmpty) {
-                        setState(() => _selectedSound = 'custom');
-                        settings.notificationSound = 'custom';
-                      } else {
-                        _pickCustomSound(settings);
-                      }
-                    },
-                    onPreview: _customSoundPath.isNotEmpty
-                        ? () => _soundService?.previewSound('custom')
-                        : null,
-                    trailing: IconButton(
-                      icon: Icon(
-                        Icons.folder_open,
-                        color: context.appColors.textMuted,
-                        size: 20,
-                      ),
-                      onPressed: () => _pickCustomSound(settings),
-                      tooltip: 'Browse...',
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-          if (_customSoundError != null) ...[
-            SizedBox(height: 6),
-            Text(
-              _customSoundError!,
-              style: TextStyle(
-                color: context.appColors.errorText,
-                fontSize: 12,
-              ),
-            ),
-          ],
-        ],
+
         if (Platform.isAndroid || Platform.isIOS)
-          SwitchListTile(
-            title: Text(
-              'Vibrate on message',
-              style: TextStyle(
-                color: context.appColors.textPrimary,
-                fontSize: 15,
-              ),
-            ),
-            subtitle: Text(
-              'Vibrate when a message arrives',
-              style: TextStyle(
-                color: context.appColors.textMuted,
-                fontSize: 12,
-              ),
-            ),
+          _switchRow(
+            title: 'Vibrate on message',
+            subtitle: 'Vibrate when a message arrives',
             value: _vibrateEnabled,
-            activeTrackColor: context.appColors.accent,
-            contentPadding: EdgeInsets.zero,
             onChanged: (v) {
               setState(() => _vibrateEnabled = v);
               settings.vibrateEnabled = v;
             },
           ),
+
         const SizedBox(height: 20),
         Text(
           'Toast Notifications',
@@ -228,91 +220,38 @@ class _NotificationsSectionState extends State<_NotificationsSection> {
           ),
         ),
         const SizedBox(height: 4),
-        SwitchListTile(
-          title: Text(
-            'Enable toast notifications',
-            style: TextStyle(
-              color: context.appColors.textPrimary,
-              fontSize: 15,
-            ),
-          ),
-          subtitle: Text(
-            'Show popup alerts for important events',
-            style: TextStyle(color: context.appColors.textMuted, fontSize: 12),
-          ),
+        _switchRow(
+          title: 'Enable toast notifications',
+          subtitle: 'Show popup alerts for important events',
           value: _toastEnabled,
-          activeTrackColor: context.appColors.accent,
-          contentPadding: EdgeInsets.zero,
           onChanged: (v) {
             setState(() => _toastEnabled = v);
             settings.toastEnabled = v;
           },
         ),
         if (_toastEnabled) ...[
-          SwitchListTile(
-            title: Text(
-              'Background session alerts',
-              style: TextStyle(
-                color: context.appColors.textPrimary,
-                fontSize: 15,
-              ),
-            ),
-            subtitle: Text(
-              'Sessions waiting for input, errors, completions',
-              style: TextStyle(
-                color: context.appColors.textMuted,
-                fontSize: 12,
-              ),
-            ),
+          _switchRow(
+            title: 'Background session alerts',
+            subtitle: 'Sessions waiting for input, errors, completions',
             value: _toastBackgroundSessions,
-            activeTrackColor: context.appColors.accent,
-            contentPadding: EdgeInsets.zero,
             onChanged: (v) {
               setState(() => _toastBackgroundSessions = v);
               settings.toastBackgroundSessions = v;
             },
           ),
-          SwitchListTile(
-            title: Text(
-              'Task updates',
-              style: TextStyle(
-                color: context.appColors.textPrimary,
-                fontSize: 15,
-              ),
-            ),
-            subtitle: Text(
-              'Task created or status changed',
-              style: TextStyle(
-                color: context.appColors.textMuted,
-                fontSize: 12,
-              ),
-            ),
+          _switchRow(
+            title: 'Task updates',
+            subtitle: 'Task created or status changed',
             value: _toastTasks,
-            activeTrackColor: context.appColors.accent,
-            contentPadding: EdgeInsets.zero,
             onChanged: (v) {
               setState(() => _toastTasks = v);
               settings.toastTasks = v;
             },
           ),
-          SwitchListTile(
-            title: Text(
-              'Connection alerts',
-              style: TextStyle(
-                color: context.appColors.textPrimary,
-                fontSize: 15,
-              ),
-            ),
-            subtitle: Text(
-              'Worker connect/disconnect/reconnect events',
-              style: TextStyle(
-                color: context.appColors.textMuted,
-                fontSize: 12,
-              ),
-            ),
+          _switchRow(
+            title: 'Connection alerts',
+            subtitle: 'Worker connect/disconnect/reconnect events',
             value: _toastConnections,
-            activeTrackColor: context.appColors.accent,
-            contentPadding: EdgeInsets.zero,
             onChanged: (v) {
               setState(() => _toastConnections = v);
               settings.toastConnections = v;
@@ -322,81 +261,135 @@ class _NotificationsSectionState extends State<_NotificationsSection> {
       ],
     );
   }
-}
 
-class _SoundOption extends StatelessWidget {
-  final String label;
-  final bool selected;
-  final bool isLast;
-  final VoidCallback onTap;
-  final VoidCallback? onPreview;
-  final Widget? trailing;
+  /// A switch row plus, when enabled, an inline sound picker (dropdown +
+  /// preview, and a browse button when a custom sound is selected on Windows).
+  Widget _soundBlock({
+    required SettingsService settings,
+    required bool forCompletion,
+    required String title,
+    required String subtitle,
+    required bool enabled,
+    required ValueChanged<bool> onToggle,
+    required String selectedSound,
+    required String customPath,
+    required String? error,
+    required ValueChanged<String> onSelectPreset,
+  }) {
+    final supportsCustom = Platform.isWindows;
+    final ids = [
+      for (final s in defaultSounds) s.id,
+      if (supportsCustom) 'custom',
+    ];
+    final value =
+        ids.contains(selectedSound) ? selectedSound : defaultSounds.first.id;
 
-  const _SoundOption({
-    required this.label,
-    required this.selected,
-    required this.isLast,
-    required this.onTap,
-    this.onPreview,
-    this.trailing,
-  });
-
-  @override
-  Widget build(BuildContext context) {
     return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        InkWell(
-          onTap: onTap,
-          child: Padding(
-            padding: EdgeInsets.symmetric(horizontal: kSpace3, vertical: 10),
+        _switchRow(
+          title: title,
+          subtitle: subtitle,
+          value: enabled,
+          onChanged: onToggle,
+        ),
+        if (enabled) ...[
+          Padding(
+            padding: const EdgeInsets.only(bottom: 4),
             child: Row(
               children: [
-                Icon(
-                  selected
-                      ? Icons.radio_button_checked
-                      : Icons.radio_button_unchecked,
-                  color: selected
-                      ? context.appColors.accentLight
-                      : context.appColors.textMuted,
-                  size: 20,
-                ),
-                SizedBox(width: 10),
                 Expanded(
-                  child: Text(
-                    label,
-                    style: TextStyle(
-                      color: selected
-                          ? context.appColors.textPrimary
-                          : context.appColors.textSecondary,
-                      fontSize: 14,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: kSpace3),
+                    decoration: BoxDecoration(
+                      color: context.appColors.bgElevated,
+                      borderRadius: BorderRadius.circular(kRadiusLarge),
                     ),
-                    overflow: TextOverflow.ellipsis,
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<String>(
+                        value: value,
+                        isExpanded: true,
+                        dropdownColor: context.appColors.bgElevated,
+                        borderRadius: BorderRadius.circular(kRadiusLarge),
+                        style: TextStyle(
+                          color: context.appColors.textPrimary,
+                          fontSize: 14,
+                        ),
+                        items: [
+                          for (final s in defaultSounds)
+                            DropdownMenuItem(
+                              value: s.id,
+                              child: Text(s.label),
+                            ),
+                          if (supportsCustom)
+                            DropdownMenuItem(
+                              value: 'custom',
+                              child: Text(
+                                customPath.isNotEmpty
+                                    ? 'Custom: ${_fileName(customPath)}'
+                                    : 'Custom sound…',
+                              ),
+                            ),
+                        ],
+                        onChanged: (v) {
+                          if (v == null) return;
+                          if (v == 'custom') {
+                            _pickCustomSound(
+                              settings,
+                              forCompletion: forCompletion,
+                            );
+                          } else {
+                            onSelectPreset(v);
+                          }
+                        },
+                      ),
+                    ),
                   ),
                 ),
-                ?trailing,
-                if (onPreview != null)
+                if (supportsCustom && value == 'custom')
                   IconButton(
                     icon: Icon(
-                      Icons.play_arrow_rounded,
+                      Icons.folder_open,
                       color: context.appColors.textMuted,
-                      size: 22,
+                      size: 20,
                     ),
-                    onPressed: onPreview,
-                    tooltip: 'Preview',
-                    constraints: BoxConstraints(minWidth: 36, minHeight: 36),
-                    padding: EdgeInsets.zero,
+                    tooltip: 'Browse…',
+                    onPressed: () => _pickCustomSound(
+                      settings,
+                      forCompletion: forCompletion,
+                    ),
                   ),
+                IconButton(
+                  icon: Icon(
+                    Icons.play_arrow_rounded,
+                    color: context.appColors.accentLight,
+                    size: 24,
+                  ),
+                  tooltip: 'Preview',
+                  onPressed: (value == 'custom' && customPath.isEmpty)
+                      ? null
+                      : () => _soundService?.previewSound(
+                          value,
+                          customPath: customPath,
+                        ),
+                ),
               ],
             ),
           ),
-        ),
-        if (!isLast)
-          Divider(color: context.appColors.divider, height: 1, indent: 42),
+          if (error != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Text(
+                error,
+                style: TextStyle(
+                  color: context.appColors.errorText,
+                  fontSize: 12,
+                ),
+              ),
+            ),
+        ],
       ],
     );
   }
 }
-
-// ---------------------------------------------------------------------------
-// Hotkeys section (desktop only)
-// ---------------------------------------------------------------------------
