@@ -8,6 +8,7 @@ abstract final class BadgePriority {
   static const int worker = 10;
   static const int agent = 20;
   static const int project = 30;
+  static const int pr = 35;
   static const int worktree = 40;
   static const int caveman = 50;
 }

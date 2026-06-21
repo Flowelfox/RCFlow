@@ -81,6 +81,7 @@ This file is the **index**. Detailed sections live in sibling files (`./architec
 | Client Platforms     | Android, Windows (desktop)    |
 | Android Keep-Alive   | flutter_foreground_task       |
 | File Picker          | file_picker (file attachments) |
+| Notification Sounds  | audioplayers (Android/macOS/Linux); win32 `PlaySound` via ffi (Windows native, reliable repeat playback) |
 | Bundling             | PyInstaller (self-contained distributable) |
 | Windows GUI          | CustomTkinter (modern ctk widgets, system dark/light mode) |
 | Windows Tray         | pystray + Pillow (system tray icon)        |

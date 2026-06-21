@@ -57,6 +57,7 @@ class BadgePriority:
     AGENT = 20
     MODEL = 25
     PROJECT = 30
+    PR = 35
     WORKTREE = 40
     CAVEMAN = 50
 
@@ -111,6 +112,12 @@ class BadgeState:
                 badges.append(b)
         except Exception:
             logger.warning("Failed to compute project badge for %s", session.id, exc_info=True)
+
+        try:
+            if b := self._pr_badge(session.metadata.get("github_pr")):
+                badges.append(b)
+        except Exception:
+            logger.warning("Failed to compute PR badge for %s", session.id, exc_info=True)
 
         try:
             if b := self._worktree_badge(session):
@@ -275,6 +282,40 @@ class BadgeState:
             payload=payload,
         )
 
+    def _pr_badge(self, github_pr: dict[str, Any] | None) -> BadgeSpec | None:
+        """Build the GitHub pull-request badge from stored PR metadata.
+
+        ``github_pr`` is the dict stashed in ``session.metadata["github_pr"]``
+        when the session is created from a PR (the Pull requests view) or when a
+        PR is opened for the session's branch mid-run. It carries enough to label
+        the chip and route a tap to the PR review pane.
+
+        Args:
+            github_pr: The stored PR descriptor, or ``None`` when the session has
+                no associated PR.
+        """
+        if not github_pr:
+            return None
+        number = github_pr.get("number")
+        label = f"PR#{number}" if number is not None else "PR"
+        return BadgeSpec(
+            type="pr",
+            label=label,
+            priority=BadgePriority.PR,
+            visible=True,
+            # Tapping opens the PR in the review pane (client resolves by pr_id).
+            interactive=True,
+            payload={
+                "pr_id": github_pr.get("pr_id"),
+                "number": number,
+                "repo_owner": github_pr.get("repo_owner"),
+                "repo_name": github_pr.get("repo_name"),
+                "title": github_pr.get("title"),
+                "url": github_pr.get("url"),
+                "state": github_pr.get("state"),
+            },
+        )
+
     def _caveman_badge(self, session: ActiveSession) -> BadgeSpec | None:
         if not session.metadata.get("caveman_mode", False):
             return None
@@ -294,13 +335,15 @@ class BadgeState:
         worker_id: str | None = None,
         caveman_mode: bool = False,
         caveman_level: str = "full",
+        github_pr: dict[str, Any] | None = None,
     ) -> list[BadgeSpec]:
         """Return a minimal badge list for DB-archived sessions.
 
         Archived sessions are no longer in memory, so only flat fields are
         available.  This produces the status and worker badges (always) plus
-        the caveman badge when the session had it enabled.  The worker badge
-        label is the raw ``backend_id``; the client replaces it with the
+        the PR badge (when the session was tied to a pull request) and the
+        caveman badge when the session had it enabled.  The worker badge label
+        is the raw ``backend_id``; the client replaces it with the
         user-configured friendly name during session-list processing.
 
         Args:
@@ -308,6 +351,8 @@ class BadgeState:
             worker_id: Backend identifier of the worker that ran the session.
             caveman_mode: Whether caveman mode was active for this session.
             caveman_level: Caveman mode level (default ``"full"``).
+            github_pr: Stored PR descriptor (from persisted session metadata) or
+                ``None`` when the session had no associated pull request.
         """
         badges: list[BadgeSpec] = [
             BadgeSpec(
@@ -327,6 +372,8 @@ class BadgeState:
                 payload={"worker_id": worker_id or ""},
             ),
         ]
+        if b := self._pr_badge(github_pr):
+            badges.append(b)
         if caveman_mode:
             badges.append(
                 BadgeSpec(

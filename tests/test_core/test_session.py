@@ -319,6 +319,122 @@ class TestSessionManager:
         assert s2.status == SessionStatus.COMPLETED
         assert s3.status == SessionStatus.COMPLETED  # was already complete
 
+
+class TestAttachPrToSessions:
+    """attach_pr_to_sessions — badge a live session when a PR lands on its branch."""
+
+    _PROJECT = "/home/user/Projects/Demo"
+
+    def _branch_session(self, manager: SessionManager, branch: str, project: str | None):
+        session = manager.create_session()
+        session.set_active()
+        session.main_project_path = project
+        # Recorded worktree branch — avoids a live git resolve in the test.
+        session.metadata["worktree"] = {"repo_path": project, "branch": branch, "last_action": "new"}
+        return session
+
+    def _pr(self, **over):
+        pr = {
+            "id": "pr-uuid-9",
+            "number": 42,
+            "repo_owner": "octo",
+            "repo_name": "demo",
+            "title": "Add feature",
+            "url": "https://github.com/octo/demo/pull/42",
+            "head_ref": "feature/x",
+            "project_path": self._PROJECT,
+            "state": "open",
+        }
+        pr.update(over)
+        return pr
+
+    async def test_attaches_to_matching_branch(self):
+        manager = SessionManager("test-backend")
+        session = self._branch_session(manager, "feature/x", self._PROJECT)
+        updated = await manager.attach_pr_to_sessions(self._pr())
+        assert updated == [session]
+        assert session.metadata["github_pr"]["pr_id"] == "pr-uuid-9"
+        assert session.metadata["github_pr"]["number"] == 42
+
+    async def test_ignores_non_matching_branch(self):
+        manager = SessionManager("test-backend")
+        session = self._branch_session(manager, "other-branch", self._PROJECT)
+        updated = await manager.attach_pr_to_sessions(self._pr())
+        assert updated == []
+        assert "github_pr" not in session.metadata
+
+    async def test_ignores_branch_in_different_project(self):
+        manager = SessionManager("test-backend")
+        session = self._branch_session(manager, "feature/x", "/home/user/Projects/Other")
+        updated = await manager.attach_pr_to_sessions(self._pr())
+        assert updated == []
+        assert "github_pr" not in session.metadata
+
+    async def test_prefix_named_sibling_project_not_matched(self):
+        # /Projects/Demo must NOT match a session in /Projects/Demo2 (the old
+        # substring guard wrongly matched prefixes).
+        manager = SessionManager("test-backend")
+        session = self._branch_session(manager, "feature/x", "/home/user/Projects/Demo2")
+        updated = await manager.attach_pr_to_sessions(self._pr())
+        assert updated == []
+        assert "github_pr" not in session.metadata
+
+    async def test_attaches_to_worktree_nested_under_project(self):
+        # A session whose checkout is a worktree nested under the PR's project
+        # path still matches (boundary-safe nested-path check).
+        manager = SessionManager("test-backend")
+        session = self._branch_session(manager, "feature/x", self._PROJECT + "/.worktrees/x")
+        updated = await manager.attach_pr_to_sessions(self._pr())
+        assert updated == [session]
+
+    async def test_skips_non_open_pr(self):
+        manager = SessionManager("test-backend")
+        session = self._branch_session(manager, "feature/x", self._PROJECT)
+        updated = await manager.attach_pr_to_sessions(self._pr(state="closed"))
+        assert updated == []
+        assert "github_pr" not in session.metadata
+
+    async def test_idempotent_no_rebroadcast(self):
+        manager = SessionManager("test-backend")
+        self._branch_session(manager, "feature/x", self._PROJECT)
+        first = await manager.attach_pr_to_sessions(self._pr())
+        second = await manager.attach_pr_to_sessions(self._pr())
+        assert len(first) == 1
+        assert second == []  # unchanged descriptor — no redundant update
+
+    async def test_ignores_terminal_session(self):
+        manager = SessionManager("test-backend")
+        session = self._branch_session(manager, "feature/x", self._PROJECT)
+        session.complete()
+        updated = await manager.attach_pr_to_sessions(self._pr())
+        assert updated == []
+        assert "github_pr" not in session.metadata
+
+    async def test_restrict_to_path_scopes_to_worktree(self):
+        # open-PR flow: only the pushed worktree's session is badged, even when
+        # another session shares the same branch name elsewhere.
+        manager = SessionManager("test-backend")
+        target = self._branch_session(manager, "feature/x", self._PROJECT)
+        target.metadata["agent_cwd"] = self._PROJECT
+        other = self._branch_session(manager, "feature/x", "/home/user/Projects/Other")
+        other.metadata["agent_cwd"] = "/home/user/Projects/Other"
+        # A freshly-opened PR has no resolved project_path.
+        updated = await manager.attach_pr_to_sessions(self._pr(project_path=None), restrict_to_path=self._PROJECT)
+        assert updated == [target]
+        assert "github_pr" not in other.metadata
+
+    async def test_git_fallback_safe_when_branch_unresolvable(self):
+        # No worktree metadata and a non-repo cwd → git resolve returns None,
+        # no match, no crash.
+        manager = SessionManager("test-backend")
+        session = manager.create_session()
+        session.set_active()
+        session.main_project_path = self._PROJECT
+        session.metadata["agent_cwd"] = "/nonexistent/not-a-repo"
+        updated = await manager.attach_pr_to_sessions(self._pr(project_path=None))
+        assert updated == []
+        assert "github_pr" not in session.metadata
+
     def test_complete_all_active_handles_paused(self):
         manager = SessionManager("test-backend")
         session = manager.create_session()

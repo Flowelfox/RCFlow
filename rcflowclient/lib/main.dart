@@ -17,6 +17,7 @@ import 'ui/dialogs/worker_edit_dialog.dart';
 import 'ui/badges/badge_registry.dart';
 import 'ui/badges/renderers/agent_badge_renderer.dart';
 import 'ui/badges/renderers/caveman_badge_renderer.dart';
+import 'ui/badges/renderers/pr_badge_renderer.dart';
 import 'ui/badges/renderers/project_badge_renderer.dart';
 import 'ui/badges/renderers/status_badge_renderer.dart';
 import 'ui/badges/renderers/worker_badge_renderer.dart';
@@ -41,6 +42,7 @@ void _registerBadges(BadgeRegistry registry) {
   registerAgentBadge(registry);
   registerCavemanBadge(registry);
   registerProjectBadge(registry);
+  registerPrBadge(registry);
   registerWorktreeBadge(registry);
   registerModelBadge(registry);
 }
@@ -92,6 +94,30 @@ void _migrateToWorkers(SettingsService settings) {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Flutter's deprecated RawKeyboard tracker is still fed in parallel on
+  // Windows (transit mode `rawKeyData`). It throws a debug-only assertion
+  // when a global keyboard hook (Wispr Flow, AutoHotkey, etc.) delivers a
+  // modifier key-down whose modifier flags were stripped — e.g. an "Alt Left"
+  // down reported with modifiers:0. _synchronizeModifiers then drops the
+  // just-pressed key, leaving RawKeyboard's pressed-key set empty and tripping
+  // its `keysPressed.isNotEmpty` assert (and the matching RawKeyboard vs
+  // HardwareKeyboard divergence assert). The app drives all shortcuts through
+  // HardwareKeyboard, which tracks state correctly and is reconciled against
+  // the OS, so these are harmless false-positives. Swallow exactly those two
+  // so they don't spam the console; forward everything else untouched.
+  final defaultOnError = FlutterError.onError;
+  FlutterError.onError = (FlutterErrorDetails details) {
+    final text = details.exceptionAsString();
+    final isBenignRawKeyAssert =
+        text.contains(
+          'Attempted to send a key down event when no keys are in keysPressed',
+        ) ||
+        (text.contains('RawKeyboard reported') &&
+            text.contains('HardwareKeyboard reported'));
+    if (isBenignRawKeyAssert) return;
+    defaultOnError?.call(details);
+  };
 
   final settings = SettingsService();
   await settings.init();

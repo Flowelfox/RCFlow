@@ -581,7 +581,9 @@ class _WorkerGroupState extends State<WorkerGroup> {
                       )
                     : null,
               ),
-              child: ListTile(
+              child: Material(
+                type: MaterialType.transparency,
+                child: ListTile(
                 leading: SessionLeadingIcon(session: s),
                 title: Text(
                   s.title ?? s.shortId,
@@ -706,6 +708,7 @@ class _WorkerGroupState extends State<WorkerGroup> {
                   widget.onSessionSelectTap(s.sessionId, flatIdx);
                 },
               ),
+              ),
             );
           },
         ),
@@ -790,7 +793,9 @@ class _WorkerGroupState extends State<WorkerGroup> {
                     )
                   : null,
             ),
-            child: ListTile(
+            child: Material(
+              type: MaterialType.transparency,
+              child: ListTile(
               leading: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -944,6 +949,7 @@ class _WorkerGroupState extends State<WorkerGroup> {
                 final flatIdx = widget.currentFlatList.indexOf(s);
                 widget.onSessionSelectTap(s.sessionId, flatIdx);
               },
+            ),
             ),
           ),
         ),

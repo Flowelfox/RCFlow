@@ -76,7 +76,9 @@ class LinearIssueTile extends StatelessWidget {
                 )
               : null,
         ),
-        child: ListTile(
+        child: Material(
+          type: MaterialType.transparency,
+          child: ListTile(
           leading: Container(
             width: 30,
             height: 30,
@@ -146,6 +148,7 @@ class LinearIssueTile extends StatelessWidget {
             state.openLinearIssueInPane(issue.id);
             onSelected?.call();
           },
+        ),
         ),
       ),
     );

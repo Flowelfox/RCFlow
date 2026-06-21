@@ -59,7 +59,9 @@ class PrTile extends StatelessWidget {
               )
             : null,
       ),
-      child: ListTile(
+      child: Material(
+        type: MaterialType.transparency,
+        child: ListTile(
         leading: Container(
           width: 30,
           height: 30,
@@ -130,6 +132,7 @@ class PrTile extends StatelessWidget {
           state.openGithubPrInPane(_primary.id);
           onSelected?.call();
         },
+      ),
       ),
     );
 

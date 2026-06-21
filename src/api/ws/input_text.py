@@ -511,12 +511,25 @@ async def ws_input_text(
                     # Attach the linked project to every assist session (so the
                     # session shows the project badge); the worktree is only used
                     # by writable sessions.
+                    # Stash a PR descriptor so the session carries a PR badge
+                    # (tapping it opens the PR in the review pane). pr_info is the
+                    # build_pr_assist_prompt shape (id/number/repo_owner/repo_name/title).
+                    github_pr_descriptor = {
+                        "pr_id": pr_info.get("id"),
+                        "number": pr_info.get("number"),
+                        "repo_owner": pr_info.get("repo_owner"),
+                        "repo_name": pr_info.get("repo_name"),
+                        "title": pr_info.get("title"),
+                        "url": pr_info.get("url"),
+                        "state": pr_info.get("state"),
+                    }
                     assist_session_id = await prompt_router.prepare_assist_session(
                         purpose=f"pr_{assist_kind}",
                         read_only=not is_writable,
                         project_name=assist_project,
                         project_path=assist_project_path,
                         title=assist_title,
+                        github_pr=github_pr_descriptor,
                     )
                     await websocket.send_json(
                         {

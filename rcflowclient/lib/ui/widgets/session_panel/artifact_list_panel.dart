@@ -1191,7 +1191,9 @@ class _ArtifactTile extends StatelessWidget {
               )
             : null,
       ),
-      child: ListTile(
+      child: Material(
+        type: MaterialType.transparency,
+        child: ListTile(
         leading: isSelected
             ? Container(
                 width: 30,
@@ -1272,6 +1274,7 @@ class _ArtifactTile extends StatelessWidget {
               state.openArtifactInPane(artifact.artifactId);
               onArtifactSelected?.call();
             },
+      ),
       ),
       ),
     );

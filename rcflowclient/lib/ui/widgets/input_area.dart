@@ -15,7 +15,9 @@ import '../../state/input_area_view_model.dart';
 import '../../state/pane_state.dart';
 import '../../theme.dart';
 import '../../tips.dart';
+import '../../models/badge_spec.dart';
 import '../badges/badge_chip.dart';
+import '../badges/badge_registry.dart';
 import '../utils/markdown_copy_menu.dart' show readClipboardAsMarkdown;
 import 'create_worktree_dialog.dart';
 import 'session_identity_bar.dart' show CavemanPreviewBadge, WorkerBadge;
@@ -1036,6 +1038,18 @@ class _InputAreaState extends State<InputArea> {
       (s) => s.pausedReason,
     );
     final sessionId = context.select<PaneState, String?>((s) => s.sessionId);
+    // The active session's PR badge (set when the session was started from a PR
+    // or a PR was opened for its branch). Rendered as a clickable chip in the
+    // strip below, alongside the project/worktree/model chips.
+    final activePrBadge = context.select<AppState, BadgeSpec?>((s) {
+      if (sessionId == null) return null;
+      final session = s.sessionById(sessionId);
+      if (session == null) return null;
+      for (final b in session.badges) {
+        if (b.type == 'pr' && b.visible) return b;
+      }
+      return null;
+    });
     final paneWorkerId = context.select<PaneState, String?>((s) => s.workerId);
     final bottom = MediaQuery.of(context).viewPadding.bottom;
     final showPauseResume = _isDesktop && sessionId != null && !sessionEnded;
@@ -1210,6 +1224,7 @@ class _InputAreaState extends State<InputArea> {
                 selectedTool != null ||
                 showWorktreeChip ||
                 showActiveWorktreeChip ||
+                activePrBadge != null ||
                 _vm.pendingAttachments.isNotEmpty ||
                 _vm.uploadingAttachments)
               Padding(
@@ -1248,6 +1263,11 @@ class _InputAreaState extends State<InputArea> {
                           );
                         },
                       ),
+                    // PR badge (clickable → opens the PR review pane). Rendered
+                    // via the badge registry so it matches the server-computed
+                    // `pr` badge and stays consistent with other badge chips.
+                    if (activePrBadge != null)
+                      BadgeRegistry.instance.render(context, activePrBadge),
                     if (selectedTool != null)
                       _ToolChip(
                         name: selectedTool,

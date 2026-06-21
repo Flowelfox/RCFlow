@@ -316,6 +316,8 @@ async def build_pr_assist_prompt(
         "repo_owner": pr.repo_owner,
         "repo_name": pr.repo_name,
         "title": pr.title,
+        "url": pr.url,
+        "state": pr.state,
         "kind": kind,
         "file_path": file_path,
     }

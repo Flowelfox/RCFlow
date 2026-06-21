@@ -49,41 +49,56 @@ class AppearanceConfig {
 // ---------------------------------------------------------------------------
 
 class SoundConfig {
-  /// Play sound on any new message (assistant, tool, etc.)
+  /// Play a sound on each new assistant message ("Sound on message").
   final bool enabled;
 
-  /// Play the completion sound when a session finishes or returns a summary.
+  /// Play the completion sound when the agent finishes a turn ("Sound when
+  /// done").
   final bool soundOnComplete;
 
   /// Vibrate on mobile when a message arrives.
   final bool vibrateEnabled;
 
-  /// Named preset (e.g. 'chime', 'ping') or empty for default.
-  final String notificationSound;
+  /// Completion sound: named preset (e.g. 'gentle_chime') or 'custom'.
+  final String completionSound;
 
-  /// Absolute path to a custom audio file, or empty if using a preset.
-  final String customSoundPath;
+  /// Absolute path to the completion custom audio file, or empty.
+  final String completionCustomSoundPath;
+
+  /// Per-message sound: named preset or 'custom'.
+  final String messageSound;
+
+  /// Absolute path to the per-message custom audio file, or empty.
+  final String messageCustomSoundPath;
 
   const SoundConfig({
     this.enabled = false,
     this.soundOnComplete = true,
     this.vibrateEnabled = true,
-    this.notificationSound = '',
-    this.customSoundPath = '',
+    this.completionSound = 'gentle_chime',
+    this.completionCustomSoundPath = '',
+    this.messageSound = 'soft_ping',
+    this.messageCustomSoundPath = '',
   });
 
   SoundConfig copyWith({
     bool? enabled,
     bool? soundOnComplete,
     bool? vibrateEnabled,
-    String? notificationSound,
-    String? customSoundPath,
+    String? completionSound,
+    String? completionCustomSoundPath,
+    String? messageSound,
+    String? messageCustomSoundPath,
   }) => SoundConfig(
     enabled: enabled ?? this.enabled,
     soundOnComplete: soundOnComplete ?? this.soundOnComplete,
     vibrateEnabled: vibrateEnabled ?? this.vibrateEnabled,
-    notificationSound: notificationSound ?? this.notificationSound,
-    customSoundPath: customSoundPath ?? this.customSoundPath,
+    completionSound: completionSound ?? this.completionSound,
+    completionCustomSoundPath:
+        completionCustomSoundPath ?? this.completionCustomSoundPath,
+    messageSound: messageSound ?? this.messageSound,
+    messageCustomSoundPath:
+        messageCustomSoundPath ?? this.messageCustomSoundPath,
   );
 
   @override
@@ -92,16 +107,20 @@ class SoundConfig {
       other.enabled == enabled &&
       other.soundOnComplete == soundOnComplete &&
       other.vibrateEnabled == vibrateEnabled &&
-      other.notificationSound == notificationSound &&
-      other.customSoundPath == customSoundPath;
+      other.completionSound == completionSound &&
+      other.completionCustomSoundPath == completionCustomSoundPath &&
+      other.messageSound == messageSound &&
+      other.messageCustomSoundPath == messageCustomSoundPath;
 
   @override
   int get hashCode => Object.hash(
     enabled,
     soundOnComplete,
     vibrateEnabled,
-    notificationSound,
-    customSoundPath,
+    completionSound,
+    completionCustomSoundPath,
+    messageSound,
+    messageCustomSoundPath,
   );
 }
 

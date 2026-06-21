@@ -1,5 +1,5 @@
 ---
-updated: 2026-06-08
+updated: 2026-06-18
 ---
 
 # WebSocket API
@@ -384,6 +384,8 @@ Recognised error codes:
 ```
 
 `turn_complete` is an **ephemeral** turn-finalization signal — never archived to the database, never replayed on reconnect. Emitted at the end of a non-managed-executor turn (direct tool / LLM-only turn) so clients can finalize the trailing tool block (switch the spinner to a completed-state icon) and stop the streaming animation. Managed coding-agent executors (Claude Code, Codex, OpenCode) emit their own terminal messages instead.
+
+Because managed-executor turns produce no `turn_complete`, the client synthesizes one when a `session_update` reports the session transitioning from a processing `activity_state` back to `idle` while still `active`. This gives every executor a uniform turn-complete signal for driving the completion notification sound and the "waiting for input" toast. The client de-duplicates the real and synthesized signals per session so the completion sound never plays twice.
 
 ```json
 {

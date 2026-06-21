@@ -1,5 +1,5 @@
 ---
-updated: 2026-06-17
+updated: 2026-06-21
 ---
 
 # GitHub Integration — PR Reviews
@@ -165,6 +165,38 @@ Outbound (server → all connected output clients), mirroring the Linear broadca
 | `github_pr_list` | `{prs: [...]}` — full cached snapshot (reply to `list_github_prs`) |
 | `github_pr_update` | a single serialised PR (fields as `GET /prs/{id}`) — emitted on each sync upsert |
 | `github_pr_deleted` | `{id}` — a PR removed from the cache |
+
+## Session PR badge
+
+A session can carry a **PR badge** (`type: "pr"`, priority `35` — between the
+project and worktree badges) that links it to a pull request. The badge is
+interactive: tapping it opens that PR in the review pane (the client resolves by
+the badge payload's `pr_id`). It is emitted by `BadgeState._pr_badge` from a
+`github_pr` descriptor stored in `session.metadata` —
+`{pr_id, number, repo_owner, repo_name, title, url, state}` — and is included in
+the `session_update` `badges` array. The descriptor is persisted in the session
+metadata so the badge survives a restart and shows on archived sessions
+(`BadgeState.compute_archived` re-emits it).
+
+The badge attaches in two ways:
+
+1. **Created from the Pull requests view.** When a session is started from a PR
+   (the `start_pr_assist` flow), the handler stashes the PR descriptor and
+   passes it to `prepare_assist_session`, which stores it in metadata and
+   broadcasts a `session_update` so the badge renders immediately — alongside
+   the project badge already attached to assist sessions.
+2. **A PR opened for the session's branch mid-run.** When a PR is opened from a
+   worktree (`POST /open-pr`) or detected by a sync (`POST /sync`),
+   `SessionManager.attach_pr_to_sessions` stamps the descriptor onto any **open**
+   session on the PR's `head_ref`, broadcasts the update, and persists the
+   metadata. A session's branch is read from its worktree metadata when
+   recorded, otherwise resolved live from its working directory with
+   `git rev-parse` — so a session working directly in the main checkout on a
+   feature branch (no separate worktree) is matched too. A same-named branch in
+   an unrelated repo can't grab the badge: sync matches are guarded by the PR's
+   resolved `project_path` (boundary-safe path compare), and the open-PR flow —
+   where a freshly-opened PR has no resolved `project_path` yet — scopes
+   matching to the exact worktree that was pushed.
 
 ## Configuration
 

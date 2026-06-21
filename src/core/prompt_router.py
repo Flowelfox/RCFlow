@@ -941,6 +941,7 @@ class PromptRouter:
         project_name: str | None = None,
         project_path: str | None = None,
         title: str | None = None,
+        github_pr: dict[str, Any] | None = None,
     ) -> str:
         """Create a one-shot session for on-demand PR-review AI assistance.
 
@@ -954,6 +955,12 @@ class PromptRouter:
         When ``title`` is given it is set as the session title up front (e.g.
         ``"PR#123 review: <PR title>"``) so PR-assist sessions are named
         consistently instead of falling back to the truncated first prompt.
+
+        When ``github_pr`` is given it is stored in session metadata so the
+        session carries a PR badge (the first of the two ways a PR badge
+        attaches — created directly from the Pull requests view). It is the
+        descriptor consumed by ``BadgeState._pr_badge``: ``{pr_id, number,
+        repo_owner, repo_name, title, url, state}``.
         """
         session = self._session_manager.create_session(SessionType.ONE_SHOT)
         # A resolved path (from the PR's git-remote match) wins over a by-name
@@ -963,6 +970,8 @@ class PromptRouter:
         elif project_name:
             self._apply_project_name(session, project_name)
         session.metadata["session_purpose"] = purpose
+        if github_pr:
+            session.metadata["github_pr"] = github_pr
         # Pre-set the title so the prompt-derived fallback (see context.py) is
         # skipped; PR-assist sessions get a stable "PR#<n> <kind>: <title>" name.
         if title:
@@ -998,9 +1007,15 @@ class PromptRouter:
                             session_type=session.session_type.value,
                             status=session.status.value,
                             title=session.title,
+                            # Persist metadata so the PR descriptor (and thus the
+                            # PR badge) survives a restart / session archival.
+                            metadata_=dict(session.metadata),
                         )
                     )
                     await db.commit()
+        # Broadcast now so the PR badge (and title) render before the first
+        # assist turn produces its own session_update.
+        self._session_manager.broadcast_session_update(session)
         return session.id
 
     # ------------------------------------------------------------------

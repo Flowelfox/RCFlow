@@ -122,6 +122,15 @@ class AppState extends ChangeNotifier implements PaneHost {
   // Sessions with temporarily muted sound (during history replay after switch)
   final Set<String> _soundMutedSessions = {};
 
+  // Sessions that just fired a completion sound — suppresses a duplicate
+  // completion sound from a near-simultaneous real + synthesized turn_complete.
+  final Set<String> _recentCompletionSessions = {};
+
+  // Sessions currently mid assistant-text block.  Used to detect the start of
+  // a new assistant message (first text chunk after a tool/thinking/etc.) so
+  // the "Sound on message" setting can ding once per message, not per token.
+  final Set<String> _activeAssistantTextSessions = {};
+
   // Merged session list (all workers)
   @override
   List<SessionInfo> get sessions => _registry.sessions;
@@ -1901,13 +1910,22 @@ class AppState extends ChangeNotifier implements PaneHost {
   // --- Output channel message handling ---
 
   /// Message types that trigger the "completion" sound (session resolved).
+  ///
+  /// `turnComplete` is the normal end-of-turn signal (agent finished, waiting
+  /// for input); `summary` only arrives for sessions that emit a summary, so it
+  /// alone misses the common case.
   static const _completionSoundTypes = {
+    WsOutputType.turnComplete,
     WsOutputType.summary,
     WsOutputType.planModeAsk,
     WsOutputType.planReviewAsk,
   };
 
-  /// Message types that trigger the generic "new message" sound.
+  /// Discrete event types that count as a "new message" sound on their own (in
+  /// addition to each new assistant text bubble, detected separately).  Note
+  /// `turnComplete` is intentionally absent — it is not a visible message, so
+  /// "Sound on message" must not fire on it (the final text bubble already
+  /// dings, and turn completion is covered by "Sound when done").
   static const _messageSoundTypes = {
     WsOutputType.summary,
     WsOutputType.error,
@@ -1915,8 +1933,23 @@ class AppState extends ChangeNotifier implements PaneHost {
     WsOutputType.planReviewAsk,
   };
 
+  /// Output types that end the current assistant text message, so the next
+  /// assistant text chunk starts a new one.  Deliberately excludes
+  /// `subprocessStatus`, `thinking`, `agentGroup*`, `todoUpdate`, and
+  /// `toolOutput`, which can interleave within a single logical message.
+  static const _messageBreakTypes = {
+    WsOutputType.toolStart,
+    WsOutputType.turnComplete,
+    WsOutputType.summary,
+    WsOutputType.error,
+    WsOutputType.sessionEnd,
+    WsOutputType.planModeAsk,
+    WsOutputType.planReviewAsk,
+  };
+
   /// Message types that indicate a session is waiting for user input.
   static const _awaitingInputTypes = {
+    WsOutputType.turnComplete,
     WsOutputType.summary,
     WsOutputType.planModeAsk,
     WsOutputType.planReviewAsk,
@@ -1970,14 +2003,62 @@ class AppState extends ChangeNotifier implements PaneHost {
 
     final sessionId = msg['session_id'] as String?;
     final muted = sessionId != null && _soundMutedSessions.contains(sessionId);
-    if (!muted && wsType != null) {
+
+    // Detect the start of a new assistant message for the per-message "Sound on
+    // message" setting: the first assistant text chunk after a real message
+    // break (a tool call or a turn/terminal boundary).  Only those types reset
+    // the tracker — NOT subprocess_status / thinking / agent_group / todo /
+    // tool_output, which can interleave mid-stream and would otherwise split
+    // one logical message into many dings.  Tracked unconditionally (even while
+    // muted) so boundaries stay correct across replay; the ding itself still
+    // respects the mute below.
+    final isAssistantText =
+        wsType == WsOutputType.textChunk && msg['role'] != 'user';
+    var isNewAssistantMessage = false;
+    if (sessionId != null && wsType != null) {
+      if (isAssistantText) {
+        isNewAssistantMessage = _activeAssistantTextSessions.add(sessionId);
+      } else if (_messageBreakTypes.contains(wsType)) {
+        _activeAssistantTextSessions.remove(sessionId);
+      }
+    }
+
+    // The session-switch mute exists to suppress the burst of replayed history
+    // messages when a session is opened.  A synthesized `turn_complete` comes
+    // from a live activity_state transition, never from replayed history, so it
+    // must bypass the mute — otherwise a turn that finishes within ~3s of
+    // switching to the session is silently dropped.
+    final bypassMute = wsType == WsOutputType.turnComplete;
+    if (wsType != null && (!muted || bypassMute)) {
       final playForComplete =
           _settings.soundOnCompleteEnabled &&
           _completionSoundTypes.contains(wsType);
       final playForMessage =
-          _settings.soundEnabled && _messageSoundTypes.contains(wsType);
-      if (playForComplete || playForMessage) {
-        _soundService.playNotificationSound();
+          _settings.soundEnabled &&
+          (_messageSoundTypes.contains(wsType) || isNewAssistantMessage);
+      // De-duplicate near-simultaneous completion signals for the same
+      // session: a non-agent turn emits a real `turn_complete` AND flips to
+      // idle (which synthesizes another `turn_complete`), so without this the
+      // sound would play twice.
+      final isCompletion = _completionSoundTypes.contains(wsType);
+      final duplicate =
+          isCompletion &&
+          sessionId != null &&
+          _recentCompletionSessions.contains(sessionId);
+      if ((playForComplete || playForMessage) && !duplicate) {
+        if (isCompletion && sessionId != null) {
+          _recentCompletionSessions.add(sessionId);
+          Future.delayed(const Duration(milliseconds: 1500), () {
+            _recentCompletionSessions.remove(sessionId);
+          });
+        }
+        // Completion takes priority over the per-message sound when an event
+        // qualifies as both (e.g. a summary), so each turn-end plays once.
+        if (playForComplete) {
+          _soundService.playCompletionSound();
+        } else {
+          _soundService.playMessageSound();
+        }
       }
     }
 

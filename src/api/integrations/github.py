@@ -233,6 +233,32 @@ async def _persist_synced_prs(
     return upserted, deleted_ids
 
 
+async def _attach_pr_badges(
+    session_manager: Any,
+    db_factory: Any,
+    pr_dicts: list[dict[str, Any]],
+    *,
+    restrict_to_path: str | None = None,
+) -> None:
+    """Attach PR badges to live sessions on each PR's head branch, then persist.
+
+    For every PR in ``pr_dicts`` this asks the session manager to stamp the PR
+    descriptor onto any active session working on that PR's head branch (which
+    broadcasts a ``session_update`` so the badge renders live), then writes the
+    updated session metadata to the DB so the badge survives a restart. A
+    no-op when no session matches. ``restrict_to_path`` scopes matching to a
+    single worktree (the open-PR flow passes the pushed worktree).
+    """
+    affected: dict[str, Any] = {}
+    for pr in pr_dicts:
+        for session in await session_manager.attach_pr_to_sessions(pr, restrict_to_path=restrict_to_path):
+            affected[session.id] = session
+    if affected:
+        async with db_factory() as db:
+            for session in affected.values():
+                await session_manager.persist_session_metadata(session, db)
+
+
 async def _cached_repo_slugs(db: AsyncSession, backend_id: str) -> list[str]:
     """Distinct ``owner/name`` repo slugs already cached for this worker.
 
@@ -488,10 +514,14 @@ async def sync_github_prs(
             db, settings.RCFLOW_BACKEND_ID, parsed, list(settings.projects_dirs)
         )
 
-    for row in upserted:
-        session_manager.broadcast_github_pr_update(_pr_to_dict(row))
+    pr_dicts = [_pr_to_dict(row) for row in upserted]
+    for pr in pr_dicts:
+        session_manager.broadcast_github_pr_update(pr)
     for pr_id in deleted_ids:
         session_manager.broadcast_github_pr_deleted(pr_id)
+    # Attach a PR badge to any live session whose branch matches a synced PR
+    # (the PR may have been opened outside RCFlow while the session ran).
+    await _attach_pr_badges(session_manager, db_factory, pr_dicts)
 
     logger.info(
         "GitHub sync complete: %d PRs upserted, %d archived-repo PRs pruned",
@@ -1291,4 +1321,8 @@ async def open_github_pr(body: OpenPrRequest, request: Request) -> dict[str, Any
         row = rows[0]
     result = _pr_to_dict(row)
     session_manager.broadcast_github_pr_update(result)
+    # The PR was just opened from a worktree — badge the live session in that
+    # exact worktree (a freshly-opened PR has no resolved project_path yet, so
+    # scope by the pushed worktree path rather than the branch alone).
+    await _attach_pr_badges(session_manager, db_factory, [result], restrict_to_path=worktree_path)
     return {"pr": result, "url": result["url"]}

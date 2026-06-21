@@ -1,6 +1,7 @@
 """Unit tests for src.core.badges — BadgeSpec and BadgeState."""
 
 import json
+from typing import ClassVar
 from unittest.mock import MagicMock
 
 import pytest
@@ -92,6 +93,7 @@ class TestBadgePriority:
             BadgePriority.WORKER,
             BadgePriority.AGENT,
             BadgePriority.PROJECT,
+            BadgePriority.PR,
             BadgePriority.WORKTREE,
             BadgePriority.CAVEMAN,
         ]
@@ -102,6 +104,7 @@ class TestBadgePriority:
         assert BadgePriority.WORKER == 10
         assert BadgePriority.AGENT == 20
         assert BadgePriority.PROJECT == 30
+        assert BadgePriority.PR == 35
         assert BadgePriority.WORKTREE == 40
         assert BadgePriority.CAVEMAN == 50
 
@@ -275,6 +278,51 @@ class TestProjectBadge:
         badges = self._bs().compute(session)
         pb = next(b for b in badges if b.type == "project")
         assert pb.payload["error"] == "resolution failed"
+
+
+class TestPrBadge:
+    def _bs(self) -> BadgeState:
+        return BadgeState()
+
+    _PR: ClassVar[dict] = {
+        "pr_id": "pr-uuid-1",
+        "number": 123,
+        "repo_owner": "octo",
+        "repo_name": "demo",
+        "title": "Fix login race",
+        "url": "https://github.com/octo/demo/pull/123",
+        "state": "open",
+    }
+
+    def test_pr_badge_absent_without_metadata(self) -> None:
+        session = _make_session()
+        badges = self._bs().compute(session)
+        assert not any(b.type == "pr" for b in badges)
+
+    def test_pr_badge_present_with_metadata(self) -> None:
+        session = _make_session(metadata={"github_pr": self._PR})
+        pb = [b for b in self._bs().compute(session) if b.type == "pr"]
+        assert len(pb) == 1
+        assert pb[0].label == "PR#123"
+        assert pb[0].interactive is True
+        assert pb[0].priority == BadgePriority.PR
+
+    def test_pr_badge_payload_routes_to_pane(self) -> None:
+        session = _make_session(metadata={"github_pr": self._PR})
+        pb = next(b for b in self._bs().compute(session) if b.type == "pr")
+        assert pb.payload["pr_id"] == "pr-uuid-1"
+        assert pb.payload["repo_owner"] == "octo"
+        assert pb.payload["url"] == "https://github.com/octo/demo/pull/123"
+
+    def test_pr_badge_label_without_number(self) -> None:
+        session = _make_session(metadata={"github_pr": {"pr_id": "x"}})
+        pb = next(b for b in self._bs().compute(session) if b.type == "pr")
+        assert pb.label == "PR"
+
+    def test_pr_badge_serialisable(self) -> None:
+        session = _make_session(metadata={"github_pr": self._PR})
+        for b in self._bs().compute(session):
+            json.dumps(b.to_dict())  # must not raise
 
 
 class TestWorktreeBadge:
@@ -525,6 +573,21 @@ class TestComputeArchived:
         badges = self._bs().compute_archived("completed", worker_id="w", caveman_mode=True, caveman_level="moderate")
         cb = next(b for b in badges if b.type == "caveman")
         assert cb.payload["level"] == "moderate"
+
+    def test_no_pr_badge_by_default(self) -> None:
+        badges = self._bs().compute_archived("completed", worker_id="w")
+        assert not any(b.type == "pr" for b in badges)
+
+    def test_pr_badge_present_when_metadata_persisted(self) -> None:
+        badges = self._bs().compute_archived(
+            "completed",
+            worker_id="w",
+            github_pr={"pr_id": "p1", "number": 7},
+        )
+        pb = [b for b in badges if b.type == "pr"]
+        assert len(pb) == 1
+        assert pb[0].label == "PR#7"
+        assert pb[0].priority == BadgePriority.PR
 
     def test_all_badges_serialisable(self) -> None:
         badges = self._bs().compute_archived("completed", worker_id="bk", caveman_mode=True)
