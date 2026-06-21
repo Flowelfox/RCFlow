@@ -13,6 +13,7 @@ and note which component is affected where it matters.
 ## [Unreleased]
 
 ### Added
+- **Sessions now show a PR badge** — a session tied to a pull request displays a PR badge you can tap to jump straight to that PR's review pane. It appears when you start a session from the Pull requests view, and also lights up automatically when a PR is opened for the branch a session is already working on (Backend + Client)
 - **Separate notification sounds for "when done" and "on each message"** — the two sound toggles now each have their own sound picker, so you can choose the same sound or a different one for turn completion vs. each new message, preview either with one tap, and pick a custom `.wav` per slot (Windows). Each toggle still turns on and off independently (Client)
 
 ### Changed

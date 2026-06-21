@@ -17,6 +17,7 @@ import 'ui/dialogs/worker_edit_dialog.dart';
 import 'ui/badges/badge_registry.dart';
 import 'ui/badges/renderers/agent_badge_renderer.dart';
 import 'ui/badges/renderers/caveman_badge_renderer.dart';
+import 'ui/badges/renderers/pr_badge_renderer.dart';
 import 'ui/badges/renderers/project_badge_renderer.dart';
 import 'ui/badges/renderers/status_badge_renderer.dart';
 import 'ui/badges/renderers/worker_badge_renderer.dart';
@@ -41,6 +42,7 @@ void _registerBadges(BadgeRegistry registry) {
   registerAgentBadge(registry);
   registerCavemanBadge(registry);
   registerProjectBadge(registry);
+  registerPrBadge(registry);
   registerWorktreeBadge(registry);
   registerModelBadge(registry);
 }

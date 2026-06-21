@@ -3,6 +3,7 @@
 import asyncio
 import contextlib
 import logging
+import os
 import uuid
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -838,6 +839,135 @@ class SessionManager:
         for queue in self._update_subscribers.values():
             queue.put_nowait(msg)
 
+    @staticmethod
+    def _metadata_branch(session: ActiveSession) -> str | None:
+        """Return *session*'s branch from its worktree metadata, if recorded.
+
+        Reads ``session.metadata["worktree"]`` (a ``WorktreeInfo`` dataclass or
+        a serialised dict). Returns ``None`` when no worktree branch is recorded
+        — the caller then falls back to resolving the branch from the session's
+        working directory via git.
+        """
+        wt = session.metadata.get("worktree")
+        if wt is None:
+            return None
+        if hasattr(wt, "branch"):
+            return wt.branch or None
+        if isinstance(wt, dict):
+            return wt.get("branch") or None
+        return None
+
+    @staticmethod
+    def _session_cwd(session: ActiveSession) -> str | None:
+        """Best-effort working directory for *session* (worktree, else project)."""
+        return (
+            session.metadata.get("agent_cwd")
+            or session.metadata.get("selected_worktree_path")
+            or session.main_project_path
+        )
+
+    @staticmethod
+    def _path_within(child: str, parent: str) -> bool:
+        """Return whether *child* equals *parent* or is nested under it (boundary-safe).
+
+        Uses a path-separator boundary so ``/p/Demo`` is **not** treated as
+        nested under ``/p/Dem`` (plain substring would wrongly match).
+        """
+        child = child.rstrip("/\\")
+        parent = parent.rstrip("/\\")
+        return child == parent or child.startswith(parent + "/") or child.startswith(parent + os.sep)
+
+    @classmethod
+    def _same_or_nested(cls, a: str, b: str) -> bool:
+        """Return whether *a* and *b* are the same path or one is nested in the other.
+
+        Covers a session whose checkout is the project root as well as one whose
+        cwd is a worktree nested under it (or vice versa).
+        """
+        return cls._path_within(a, b) or cls._path_within(b, a)
+
+    @staticmethod
+    async def _git_branch(cwd: str) -> str | None:
+        """Resolve the current git branch of *cwd*, or ``None`` on any failure."""
+        from src.services import git_ops  # noqa: PLC0415 — avoid import cycle at module load
+
+        try:
+            branch = await git_ops.current_branch(cwd)
+        except Exception:
+            return None
+        return branch or None
+
+    async def attach_pr_to_sessions(
+        self,
+        pr_data: dict[str, Any],
+        *,
+        restrict_to_path: str | None = None,
+    ) -> list[ActiveSession]:
+        """Attach a PR badge to any live session working on the PR's head branch.
+
+        Called when a pull request is opened or synced (GitHub integration): if
+        an active session is on the PR's head branch in the same local checkout,
+        its ``github_pr`` metadata is set/refreshed and a ``session_update`` is
+        broadcast so the PR badge appears live (the second of the two ways a PR
+        badge attaches — the first being session creation from the Pull requests
+        view). Only open PRs attach. Returns the sessions that were updated so
+        the caller can persist their metadata.
+
+        A session's branch is taken from its worktree metadata when recorded,
+        otherwise resolved live from its working directory via git — so a session
+        working directly in the main checkout on a feature branch (no separate
+        worktree) is matched too.
+
+        Args:
+            pr_data: A serialised PR dict (the ``_pr_to_dict`` shape) carrying
+                ``head_ref``, ``project_path``, ``state`` and identity fields.
+            restrict_to_path: When set, only sessions whose working directory is
+                that path (or nested under it) are considered — used by the
+                open-PR flow to target the exact worktree that was pushed, so a
+                same-named branch elsewhere can't grab the badge.
+        """
+        if pr_data.get("state") not in (None, "open"):
+            return []
+        head_ref = pr_data.get("head_ref")
+        if not head_ref:
+            return []
+        project_path = pr_data.get("project_path")
+        descriptor: dict[str, Any] = {
+            "pr_id": pr_data.get("id"),
+            "number": pr_data.get("number"),
+            "repo_owner": pr_data.get("repo_owner"),
+            "repo_name": pr_data.get("repo_name"),
+            "title": pr_data.get("title"),
+            "url": pr_data.get("url"),
+            "state": pr_data.get("state"),
+        }
+        updated: list[ActiveSession] = []
+        branch_cache: dict[str, str | None] = {}
+        for session in self.list_active_sessions():
+            cwd = self._session_cwd(session)
+            # Open-PR precision: only the worktree that was actually pushed.
+            if restrict_to_path and not (cwd and self._path_within(cwd, restrict_to_path)):
+                continue
+            # Same-checkout guard: when the PR resolved to a local project, skip
+            # sessions in an unrelated checkout (boundary-safe path compare) so a
+            # same-named branch in another repo can't grab the badge.
+            sp = session.main_project_path
+            if project_path and sp and not self._same_or_nested(sp, project_path):
+                continue
+            branch = self._metadata_branch(session)
+            if branch is None and cwd:
+                if cwd not in branch_cache:
+                    branch_cache[cwd] = await self._git_branch(cwd)
+                branch = branch_cache[cwd]
+            if branch != head_ref:
+                continue
+            if session.metadata.get("github_pr") == descriptor:
+                continue
+            session.metadata["github_pr"] = descriptor
+            self.broadcast_session_update(session)
+            updated.append(session)
+        return updated
+
     def set_worker_usage(self, windows: dict[str, Any] | None, *, available: bool) -> None:
         """Cache and broadcast the account-level subscription usage snapshot.
 
@@ -1141,6 +1271,7 @@ class SessionManager:
                     worker_id=self._backend_id,
                     caveman_mode=archived_meta.get("caveman_mode", False),
                     caveman_level=archived_meta.get("caveman_level", "full"),
+                    github_pr=archived_meta.get("github_pr"),
                 )
                 result.append(
                     {
