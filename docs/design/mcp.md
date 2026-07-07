@@ -60,7 +60,6 @@ Bridge-originated tool calls push `TOOL_START`-path buffer messages with an `ori
 
 Permissions: `can_use_tool` short-circuits `mcp__rcflow__*` tools with an allow — the bridge gates them itself (see the worktree gate above), so gating in both places would double-prompt.
 
-Not supported on the legacy raw-CLI executor (`RCFLOW_CC_EXECUTOR=legacy`).
 
 ### Codex — stdio proxy + HTTP
 

@@ -1,5 +1,5 @@
 ---
-updated: 2026-06-18
+updated: 2026-07-07
 ---
 
 # Platform Support, Deployment & Bundling
@@ -44,14 +44,7 @@ Process creation and termination are abstracted in `src/utils/process.py`:
 - `new_session_kwargs()` — returns the correct kwargs to isolate child process trees (`start_new_session` on POSIX, `CREATE_NEW_PROCESS_GROUP` on Windows).
 - `kill_process_tree()` — kills a process and all its children (`os.killpg` on POSIX, `taskkill /T /F` on Windows).
 
-Both `ClaudeCodeExecutor` and `CodexExecutor` use these helpers.
-
-`src/utils/pty_utils.py` (Unix-only) provides PTY helpers used by `ClaudeCodeExecutor` in PTY mode:
-
-- `configure_raw(fd)` — sets a PTY slave fd to raw mode (no echo, no `OPOST`, no `ICANON`).
-- `set_winsize(fd, rows, cols)` — configures terminal dimensions via `TIOCSWINSZ`.
-- `PtyLineReader` — async line reader over a PTY master fd using `loop.add_reader`.
-- `strip_ansi(text)` — strips ANSI/VT100 escape sequences from decoded output.
+The agent executors use these helpers for subprocess teardown. (The former `src/utils/pty_utils.py` served the removed raw-CLI Claude Code executor's PTY mode and has been deleted; the client terminal feature has its own PTY handling in `src/terminal/`.)
 
 ---
 
