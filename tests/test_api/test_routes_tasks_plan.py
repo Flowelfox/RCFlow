@@ -40,6 +40,7 @@ def _mock_router(
     session_id: str = "sess-plan-1",
     planning_prompt: str = "# Plan this task",
     prepare_side_effect=None,
+    direct_tool_mode: bool = False,
 ) -> MagicMock:
     router = MagicMock()
     if prepare_side_effect is not None:
@@ -47,6 +48,7 @@ def _mock_router(
     else:
         router.prepare_plan_session = AsyncMock(return_value=(session_id, planning_prompt))
     router.handle_prompt = AsyncMock()
+    router.is_direct_tool_mode = direct_tool_mode
     return router
 
 
@@ -122,6 +124,38 @@ class TestStartPlanSession:
             project_name="my-project",
             selected_worktree_path="/repo/.wt/feat",
         )
+
+    def test_direct_mode_without_agent_returns_422(self, client: TestClient, test_app: FastAPI) -> None:
+        """No server-side agent default: direct-tool mode rejects agent-less plans."""
+        router = _mock_router(direct_tool_mode=True)
+        test_app.state.prompt_router = router
+
+        resp = client.post(_plan_url(), json={}, headers=_auth())
+
+        assert resp.status_code == 422
+        assert "agent" in resp.json()["detail"]
+        router.prepare_plan_session.assert_not_awaited()
+        router.handle_prompt.assert_not_awaited()
+
+    def test_agent_forwarded_as_direct_tool(self, client: TestClient, test_app: FastAPI) -> None:
+        router = _mock_router(direct_tool_mode=True)
+        test_app.state.prompt_router = router
+
+        resp = client.post(_plan_url(), json={"agent": "codex"}, headers=_auth())
+
+        assert resp.status_code == 200
+        router.handle_prompt.assert_awaited_once()
+        assert router.handle_prompt.call_args.kwargs["direct_tool"] == "codex"
+
+    def test_llm_mode_without_agent_allowed(self, client: TestClient, test_app: FastAPI) -> None:
+        router = _mock_router(direct_tool_mode=False)
+        test_app.state.prompt_router = router
+
+        resp = client.post(_plan_url(), json={}, headers=_auth())
+
+        assert resp.status_code == 200
+        router.handle_prompt.assert_awaited_once()
+        assert router.handle_prompt.call_args.kwargs["direct_tool"] is None
 
     def test_empty_body_uses_none_defaults(self, client: TestClient, test_app: FastAPI) -> None:
         router = _mock_router()

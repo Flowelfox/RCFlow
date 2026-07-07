@@ -1,5 +1,5 @@
 ---
-updated: 2026-07-06
+updated: 2026-07-07
 ---
 
 # HTTP API
@@ -135,7 +135,7 @@ See [Tools — Per-Tool Settings Isolation](tools.md#per-tool-settings-isolation
 | DELETE | `/api/tasks/{task_id}`                  | Yes  | Delete task + all session associations. |
 | POST   | `/api/tasks/{task_id}/sessions`         | Yes  | Attach session to task. Body: `{"session_id": "..."}`. Returns 201. |
 | DELETE | `/api/tasks/{task_id}/sessions/{sid}`   | Yes  | Detach session from task. |
-| POST   | `/api/tasks/{task_id}/plan`             | Yes  | Start a read-only planning session for a task. Body: `{"project_name"?, "selected_worktree_path"?}`. Returns `{"session_id", "task_id"}`. Plan saved as Markdown artifact + linked via `plan_artifact_id` when session ends. See [Pre-Planning Sessions](sessions.md#pre-planning-sessions). |
+| POST   | `/api/tasks/{task_id}/plan`             | Yes  | Start a read-only planning session for a task. Body: `{"project_name"?, "selected_worktree_path"?, "agent"?}`. `agent` (`claude_code`/`codex`/`opencode`) is passed through as `direct_tool` — required in direct-tool mode (422 without it; no server-side default), optional in LLM mode. Returns `{"session_id", "task_id"}`. Plan saved as Markdown artifact + linked via `plan_artifact_id` when session ends. See [Pre-Planning Sessions](sessions.md#pre-planning-sessions). |
 
 ## Uploads / Attachments
 
