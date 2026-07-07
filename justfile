@@ -114,6 +114,13 @@ bundle-linux-client:
         printf '  sudo apt-get install cmake ninja-build clang pkg-config libgtk-3-dev dpkg\n\n'
         exit 1
     fi
+    # audioplayers_linux plugin links against GStreamer — headers must be present
+    if ! pkg-config --exists gstreamer-1.0 gstreamer-app-1.0 gstreamer-audio-1.0 gtk+-3.0; then
+        printf '\nERROR: Missing dev libraries (GStreamer/GTK) required by the Flutter Linux build.\n\n'
+        printf 'Install them on Debian/Ubuntu with:\n'
+        printf '  sudo apt-get install libgtk-3-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev\n\n'
+        exit 1
+    fi
     # Compute the dev version up front and bake it into the build (--build-name)
     # so the app's runtime PackageInfo.version carries the -dev suffix too — not
     # just the package filename. Otherwise a local build reports the clean
@@ -254,6 +261,13 @@ flutter-windows:
     Set-Location rcflowclient; flutter build windows --release
     if (-not (Test-Path build/artifacts)) { New-Item -ItemType Directory -Path build/artifacts | Out-Null }
     Copy-Item -Recurse -Force rcflowclient\build\windows\x64\runner\Release build\artifacts\windows
+
+# VM verification toolkit — run end-to-end worker/client checks on the Ubuntu VM
+# (SSH host "vmubuntu"). Run `just vm help` for all subcommands.
+# See docs/design/vm-verification.md for the full playbook.
+[unix]
+vm *ARGS:
+    bash scripts/vm/vm.sh {{ ARGS }}
 
 # Clean build artifacts
 [unix]

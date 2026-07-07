@@ -159,6 +159,9 @@ max-complexity = 70
 # Database migrations are mechanically generated; complexity + docstring gates
 # don't fit generated code.
 "src/database/migrations/*" = ["C901", "D100", "D101", "D103"]
+# The VM smoke test is a test script: assert is its failure mechanism, step
+# helpers are self-documenting, and it talks to a self-signed-TLS worker.
+"scripts/vm/*" = ["S101", "S501", "D103"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["src"]
