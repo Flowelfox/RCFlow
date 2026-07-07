@@ -1,5 +1,5 @@
 ---
-updated: 2026-04-26
+updated: 2026-07-06
 ---
 
 # Linear Integration
@@ -176,7 +176,9 @@ The sidebar `SessionListPanel` has a **3-tab layout**: **Workers**, **Tasks**, *
 - Search bar, status filter chips, source filter chips
 - Tasks grouped by status with collapsible sections
 - **Sync button** (⟳) in the filter bar — calls `worker.ws.syncLinearIssues()` then `listLinearIssues()`
+- **Empty state** (no tasks and no issues) also shows a **"Sync from Linear"** button (when any worker has Linear configured), so the first sync can be triggered before anything is cached
 - **"Unlinked Issues" section** at the bottom — collapsible list of `LinearIssueTile` for all issues where `taskId == null`
+- **Lazy rendering + scroll pagination**: the panel renders a flat row list via `ListView.builder` (each header/tile is its own row, so off-screen rows aren't laid out). The unlinked-issues section renders 50 issues at a time; scrolling near the bottom (or tapping the "N more — scroll to load" footer row) loads the next page
 - **Multi-select**: Shift+click selects a range, Ctrl/Meta+click toggles individual tasks, plain click while a selection exists toggles the clicked task; plain click with no selection opens the task in a pane (unchanged). Escape clears the selection.
 - **Selection toolbar**: thin bar shown below the filter bar when ≥1 task is selected, displaying the count and a clear button.
 - **Bulk right-click context menu**: when tasks are selected and the user right-clicks any tile (adding the clicked tile to the selection if not already in it), a bulk menu appears with: *Mark all → In Progress / To Do / Review / Done*, *Delete N tasks…* (with confirmation dialog), and *Clear selection*. When no selection is active the per-tile single-task menu is used instead.

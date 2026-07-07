@@ -97,7 +97,19 @@ class _TaskListPanelState extends State<TaskListPanel> {
   bool _groupByWorker = false;
   bool _syncing = false;
   final TextEditingController _searchController = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
   String _searchQuery = '';
+
+  /// Number of unlinked Linear issues currently rendered. Grows by
+  /// [_unlinkedPageSize] as the user scrolls near the bottom of the list, so
+  /// huge issue caches don't build thousands of tiles up front.
+  int _unlinkedVisibleCount = _unlinkedPageSize;
+
+  /// Total unlinked issues after filtering, cached during [build] so the
+  /// scroll listener knows whether more pages remain.
+  int _unlinkedFilteredTotal = 0;
+
+  static const int _unlinkedPageSize = 50;
   final Set<String> _activeStatusFilters = {};
   final Set<String> _activeSourceFilters = {};
 
@@ -112,6 +124,10 @@ class _TaskListPanelState extends State<TaskListPanel> {
   /// to resolve Shift+click ranges without passing the list through every
   /// widget constructor.
   List<TaskInfo> _currentFlatList = [];
+
+  /// Index of each task in [_currentFlatList], rebuilt once per [build] so
+  /// tile construction doesn't pay an O(n) `indexOf` per task.
+  Map<String, int> _flatIndexById = {};
 
   static const _statusOrder = ['in_progress', 'todo', 'review', 'done'];
   static const _statusLabels = {
@@ -147,12 +163,25 @@ class _TaskListPanelState extends State<TaskListPanel> {
       _collapsedGroups.clear();
       _collapsedGroups.addAll(savedCollapsed);
     }
+    _scrollController.addListener(_onScroll);
   }
 
   @override
   void dispose() {
     _searchController.dispose();
+    _scrollController.dispose();
     super.dispose();
+  }
+
+  /// Loads the next page of unlinked issues when the user scrolls near the
+  /// bottom of the list.
+  void _onScroll() {
+    if (!_scrollController.hasClients) return;
+    if (_unlinkedCollapsed) return;
+    if (_scrollController.position.extentAfter < 300 &&
+        _unlinkedVisibleCount < _unlinkedFilteredTotal) {
+      setState(() => _unlinkedVisibleCount += _unlinkedPageSize);
+    }
   }
 
   void _saveFilters() {
@@ -250,7 +279,7 @@ class _TaskListPanelState extends State<TaskListPanel> {
     TaskInfo task,
     AppState appState,
   ) {
-    final idx = _currentFlatList.indexOf(task);
+    final idx = _flatIndexById[task.taskId] ?? -1;
     return TaskTile(
       key: ValueKey(task.taskId),
       task: task,
@@ -660,18 +689,25 @@ class _TaskListPanelState extends State<TaskListPanel> {
           groupByWorker: _groupByWorker,
           collapsedWorkerGroups: _collapsedWorkerGroups,
         );
+        _flatIndexById = {
+          for (var i = 0; i < _currentFlatList.length; i++)
+            _currentFlatList[i].taskId: i,
+        };
+        _unlinkedFilteredTotal = 0;
 
-        // Build list items
-        final listItems = <Widget>[];
+        // Build the flat row list. Every header and tile is its own row so
+        // ListView.builder can lay out only what is on screen — grouping
+        // rows into Columns would force the entire group to build at once.
+        final rows = <Widget>[];
         if (filtered.isEmpty && filteredUnlinked.isEmpty && _hasActiveFilters) {
-          listItems.add(_buildNoResults(context));
+          rows.add(_buildNoResults(context));
         } else if (_groupByWorker) {
           _buildWorkerGroupedItems(
             context,
             state,
             filtered,
             filteredUnlinked,
-            listItems,
+            rows,
           );
         } else {
           // Group by status (default)
@@ -686,14 +722,10 @@ class _TaskListPanelState extends State<TaskListPanel> {
             final group = grouped[status] ?? [];
             if (group.isEmpty) continue;
             final collapsed = _collapsedGroups.contains(status);
-            listItems.add(
-              _buildStatusGroup(context, state, status, group, collapsed),
-            );
+            _addStatusGroupRows(context, state, status, group, collapsed, rows);
           }
           if (filteredUnlinked.isNotEmpty) {
-            listItems.add(
-              _buildUnlinkedIssuesSection(context, state, filteredUnlinked),
-            );
+            _addUnlinkedIssuesRows(context, state, filteredUnlinked, rows);
           }
         }
 
@@ -714,9 +746,11 @@ class _TaskListPanelState extends State<TaskListPanel> {
               if (_selectedTaskIds.isNotEmpty)
                 _buildSelectionBar(context, state),
               Expanded(
-                child: ListView(
+                child: ListView.builder(
+                  controller: _scrollController,
                   padding: const EdgeInsets.symmetric(vertical: kSpace1),
-                  children: listItems,
+                  itemCount: rows.length,
+                  itemBuilder: (context, index) => rows[index],
                 ),
               ),
             ],
@@ -765,6 +799,34 @@ class _TaskListPanelState extends State<TaskListPanel> {
               padding: const EdgeInsets.symmetric(horizontal: kSpace4, vertical: 10),
             ),
           ),
+          if (state.anyWorkerHasLinear) ...[
+            const SizedBox(height: kGapTight),
+            _syncing
+                ? const Padding(
+                    padding: EdgeInsets.all(kSpace2),
+                    child: SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  )
+                : OutlinedButton.icon(
+                    onPressed: () => _sync(context, state),
+                    icon: const Icon(Icons.sync, size: 18),
+                    label: const Text('Sync from Linear'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: context.appColors.textSecondary,
+                      side: BorderSide(color: context.appColors.divider),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(kRadiusMedium),
+                      ),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: kSpace4,
+                        vertical: 10,
+                      ),
+                    ),
+                  ),
+          ],
         ],
       ),
     );
@@ -986,137 +1048,170 @@ class _TaskListPanelState extends State<TaskListPanel> {
     for (final workerName in workerNames) {
       final workerTasks = tasksByWorker[workerName] ?? [];
       final workerIssues = issuesByWorker[workerName] ?? [];
-      out.add(
-        _buildWorkerGroup(
-          context,
-          state,
-          workerName,
-          workerTasks,
-          workerIssues,
-        ),
+      _buildWorkerGroup(
+        context,
+        state,
+        workerName,
+        workerTasks,
+        workerIssues,
+        out,
       );
     }
   }
 
-  Widget _buildWorkerGroup(
+  void _buildWorkerGroup(
     BuildContext context,
     AppState state,
     String workerName,
     List<TaskInfo> tasks,
     List<LinearIssueInfo> unlinkedIssues,
+    List<Widget> out,
   ) {
     final collapsed = _collapsedWorkerGroups.contains(workerName);
     final totalCount = tasks.length + unlinkedIssues.length;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        CollapsibleGroupHeader(
-          label: workerName,
-          count: totalCount,
-          collapsed: collapsed,
-          icon: Icons.person_outline_rounded,
-          onToggle: () => setState(() {
-            if (collapsed) {
-              _collapsedWorkerGroups.remove(workerName);
-            } else {
-              _collapsedWorkerGroups.add(workerName);
-            }
-          }),
-        ),
-        if (!collapsed) ...[
-          ...tasks.map((t) => _buildTaskTile(context, t, state)),
-          if (unlinkedIssues.isNotEmpty) ...[
-            Padding(
-              padding: const EdgeInsets.only(left: 32, top: 2, bottom: 2),
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.link_off_rounded,
-                    color: context.appColors.textMuted,
-                    size: 11,
-                  ),
-                  const SizedBox(width: kGapInline),
-                  Text(
-                    'Unlinked',
-                    style: TextStyle(
-                      color: context.appColors.textMuted,
-                      fontSize: 10,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            ...unlinkedIssues.map(
-              (issue) => LinearIssueTile(
-                issue: issue,
-                state: state,
-                onSelected: widget.onTaskSelected,
-              ),
-            ),
-          ],
-        ],
-      ],
+    out.add(
+      CollapsibleGroupHeader(
+        label: workerName,
+        count: totalCount,
+        collapsed: collapsed,
+        icon: Icons.person_outline_rounded,
+        onToggle: () => setState(() {
+          if (collapsed) {
+            _collapsedWorkerGroups.remove(workerName);
+          } else {
+            _collapsedWorkerGroups.add(workerName);
+          }
+        }),
+      ),
     );
+    if (collapsed) return;
+    for (final t in tasks) {
+      out.add(_buildTaskTile(context, t, state));
+    }
+    if (unlinkedIssues.isNotEmpty) {
+      out.add(
+        Padding(
+          padding: const EdgeInsets.only(left: 32, top: 2, bottom: 2),
+          child: Row(
+            children: [
+              Icon(
+                Icons.link_off_rounded,
+                color: context.appColors.textMuted,
+                size: 11,
+              ),
+              const SizedBox(width: kGapInline),
+              Text(
+                'Unlinked',
+                style: TextStyle(
+                  color: context.appColors.textMuted,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+      for (final issue in unlinkedIssues) {
+        out.add(
+          LinearIssueTile(
+            issue: issue,
+            state: state,
+            onSelected: widget.onTaskSelected,
+          ),
+        );
+      }
+    }
   }
 
-  Widget _buildStatusGroup(
+  void _addStatusGroupRows(
     BuildContext context,
     AppState state,
     String status,
     List<TaskInfo> tasks,
     bool collapsed,
+    List<Widget> out,
   ) {
     final label = _statusLabels[status] ?? status;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        CollapsibleGroupHeader(
-          label: label,
-          count: tasks.length,
-          collapsed: collapsed,
-          onToggle: () {
-            setState(() {
-              if (collapsed) {
-                _collapsedGroups.remove(status);
-              } else {
-                _collapsedGroups.add(status);
-              }
-            });
-            _saveCollapsedGroups();
-          },
-        ),
-        if (!collapsed) ...tasks.map((t) => _buildTaskTile(context, t, state)),
-      ],
+    out.add(
+      CollapsibleGroupHeader(
+        label: label,
+        count: tasks.length,
+        collapsed: collapsed,
+        onToggle: () {
+          setState(() {
+            if (collapsed) {
+              _collapsedGroups.remove(status);
+            } else {
+              _collapsedGroups.add(status);
+            }
+          });
+          _saveCollapsedGroups();
+        },
+      ),
     );
+    if (collapsed) return;
+    for (final t in tasks) {
+      out.add(_buildTaskTile(context, t, state));
+    }
   }
 
-  Widget _buildUnlinkedIssuesSection(
+  void _addUnlinkedIssuesRows(
     BuildContext context,
     AppState state,
     List<LinearIssueInfo> issues,
+    List<Widget> out,
   ) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Divider(height: 1),
-        CollapsibleGroupHeader(
-          label: 'Unlinked Issues',
-          count: issues.length,
-          collapsed: _unlinkedCollapsed,
-          icon: Icons.link_off_rounded,
-          onToggle: () =>
-              setState(() => _unlinkedCollapsed = !_unlinkedCollapsed),
+    _unlinkedFilteredTotal = issues.length;
+    out.add(const Divider(height: 1));
+    out.add(
+      CollapsibleGroupHeader(
+        label: 'Unlinked Issues',
+        count: issues.length,
+        collapsed: _unlinkedCollapsed,
+        icon: Icons.link_off_rounded,
+        onToggle: () =>
+            setState(() => _unlinkedCollapsed = !_unlinkedCollapsed),
+      ),
+    );
+    if (_unlinkedCollapsed) return;
+    final visible = issues.length > _unlinkedVisibleCount
+        ? issues.sublist(0, _unlinkedVisibleCount)
+        : issues;
+    for (final issue in visible) {
+      out.add(
+        LinearIssueTile(
+          issue: issue,
+          state: state,
+          onSelected: widget.onTaskSelected,
         ),
-        if (!_unlinkedCollapsed)
-          ...issues.map(
-            (issue) => LinearIssueTile(
-              issue: issue,
-              state: state,
-              onSelected: widget.onTaskSelected,
+      );
+    }
+    final remaining = issues.length - visible.length;
+    if (remaining > 0) {
+      out.add(_buildLoadMoreRow(context, remaining));
+    }
+  }
+
+  /// Footer row shown while more unlinked issues remain unrendered. Scrolling
+  /// near the bottom loads the next page automatically; tapping loads it
+  /// immediately.
+  Widget _buildLoadMoreRow(BuildContext context, int remaining) {
+    return InkWell(
+      onTap: () =>
+          setState(() => _unlinkedVisibleCount += _unlinkedPageSize),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: kSpace2),
+        child: Center(
+          child: Text(
+            '$remaining more — scroll to load',
+            style: TextStyle(
+              color: context.appColors.textMuted,
+              fontSize: 11,
             ),
           ),
-      ],
+        ),
+      ),
     );
   }
 }
