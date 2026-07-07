@@ -37,6 +37,7 @@ This file is the **index**. Detailed sections live in sibling files (`./architec
 | Where do permission prompts come from? | [Permissions](permissions.md) |
 | How is a release built / signed / installed? | [Deployment](deployment.md) |
 | How does a nested agent call RCFlow tools? | [MCP Agent Bridge](mcp.md) |
+| How do I verify a build end-to-end on the Ubuntu VM? | [VM Verification](vm-verification.md) |
 
 ## Index
 
@@ -61,6 +62,7 @@ This file is the **index**. Detailed sections live in sibling files (`./architec
 | [Telemetry](telemetry.md) | Three-phase pipeline (raw → minutely → retention), REST endpoints |
 | [Project Structure](project-structure.md) | Repo layout |
 | [Deployment](deployment.md) | Platform support, systemd / Windows GUI / macOS menu bar, bundling, code signing |
+| [VM Verification](vm-verification.md) | Live worker + client E2E verification on the Ubuntu VM (`just vm …` toolkit, smoke test, screenshots) |
 | [Refactoring](refactoring.md) | Multi-phase code-structure improvement plan: status, deferred items, coverage ratchet |
 
 ## Technology Stack

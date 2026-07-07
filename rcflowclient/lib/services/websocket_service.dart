@@ -441,6 +441,9 @@ class WebSocketService {
 
   Future<Map<String, dynamic>> fetchLinearTeams() => _rest.fetchLinearTeams();
 
+  Future<Map<String, dynamic>> fetchLinearViewer() =>
+      _rest.fetchLinearViewer();
+
   void listLinearIssues() {
     _transport.sendOutput({'type': 'list_linear_issues'});
   }

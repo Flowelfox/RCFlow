@@ -1310,6 +1310,31 @@ class RestClient {
     }
   }
 
+  /// Fetch the identity of the Linear account the worker is connected as.
+  ///
+  /// Returns `{"id": "...", "name": "...", "display_name": "...", ...}` from
+  /// `GET /api/integrations/linear/viewer`. Throws when the worker has no
+  /// Linear key configured (503), the endpoint doesn't exist yet (older
+  /// workers, 404) or Linear is unreachable (502) — callers treat any
+  /// failure as "viewer unknown".
+  Future<Map<String, dynamic>> fetchLinearViewer() async {
+    if (_serverUrl == null) throw StateError('Not connected');
+    final url = _serverUrl!.http('/api/integrations/linear/viewer');
+    final client = _createHttpClient(allowSelfSigned: _allowSelfSigned);
+    try {
+      final request = await client.getUrl(url);
+      request.headers.set('X-API-Key', _serverUrl!.apiKey);
+      final response = await request.close();
+      final body = await response.transform(utf8.decoder).join();
+      if (response.statusCode != 200) {
+        throw Exception('Server returned ${response.statusCode}: $body');
+      }
+      return jsonDecode(body) as Map<String, dynamic>;
+    } finally {
+      client.close();
+    }
+  }
+
   Future<Map<String, dynamic>> syncLinearIssues() async {
     if (_serverUrl == null) throw StateError('Not connected');
     final url = _serverUrl!.http('/api/integrations/linear/sync');

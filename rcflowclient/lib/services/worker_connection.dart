@@ -48,6 +48,13 @@ class WorkerConnection extends ChangeNotifier {
   /// Whether this worker has a Linear API key configured.
   bool hasLinear = false;
 
+  /// Identity of the Linear account this worker is connected as (from
+  /// `GET /api/integrations/linear/viewer`). Null until fetched, and cleared
+  /// when the fetch fails (no key, older worker, Linear unreachable) so a
+  /// stale identity never survives a key change.
+  String? linearViewerId;
+  String? linearViewerName;
+
   /// Whether this worker has the API key required for its configured
   /// ``LLM_PROVIDER``. ``true`` when the provider is ``none`` (direct tool
   /// mode) or ``bedrock`` (AWS SDK resolves creds from its own chain).
@@ -883,9 +890,39 @@ class WorkerConnection extends ChangeNotifier {
             anthropicKey,
             openaiKey,
           );
+          if (hasLinear) {
+            fetchLinearViewer();
+          } else {
+            linearViewerId = null;
+            linearViewerName = null;
+          }
           notifyListeners();
         })
         .catchError((_) {});
+  }
+
+  /// Fetch (or refresh) the Linear viewer identity for this worker.
+  ///
+  /// Quiet best-effort: any failure (no key, older worker without the
+  /// endpoint, Linear unreachable) clears the identity so the "Me" filter
+  /// never matches against a stale account.
+  void fetchLinearViewer() {
+    ws
+        .fetchLinearViewer()
+        .then((viewer) {
+          final id = viewer['id'];
+          linearViewerId = id is String && id.isNotEmpty ? id : null;
+          final name = viewer['display_name'] ?? viewer['name'];
+          linearViewerName = name is String && name.isNotEmpty ? name : null;
+          notifyListeners();
+        })
+        .catchError((_) {
+          if (linearViewerId != null || linearViewerName != null) {
+            linearViewerId = null;
+            linearViewerName = null;
+            notifyListeners();
+          }
+        });
   }
 
   /// Decide whether an LLM can actually run given the fetched config values.

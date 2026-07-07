@@ -1,9 +1,11 @@
 # CLAUDE.md — RCFlow Project Instructions
 
+RCFlow is a background worker (Python/FastAPI, `src/`) that exposes WebSocket + REST APIs for turning natural-language prompts into tool executions (Claude Code, Codex, shell, …), plus a Flutter client (`rcflowclient/`) for Android and desktop. Full overview: `docs/design/README.md`; repo layout: `docs/design/project-structure.md`.
+
 ## Critical Rules
 
 1. **Read `docs/design/README.md` before starting any new task in this project.** It is the design entry point and index — pick the relevant subdoc(s) under [`docs/design/`](docs/design/) for the area you're touching (HTTP API, WebSocket API, sessions, executors, database, mentions, slash commands, etc.). The design docs are the single source of truth for architecture, conventions, and decisions.
-2. **Never use the built-in `EnterWorktree` tool.** It is permanently denied in `.claude/settings.local.json`. Always use the `wt` CLI instead — it is bundled as a project dependency (`wtpython` in `pyproject.toml`) and available at `.venv/bin/wt` after `uv sync`. Use `wt new`, `wt attach`, `wt merge`, and `wt rm` for all worktree operations.
+2. **Never use the built-in `EnterWorktree` tool.** Always use the `wt` CLI instead — it is bundled as a project dependency (`wtpython` in `pyproject.toml`) and available at `.venv/bin/wt` after `uv sync`. Use `wt new`, `wt attach`, `wt merge`, and `wt rm` for all worktree operations.
 3. **Any changes to the system design must be reflected in the matching subdoc under `docs/design/`.** If a task modifies architecture, adds endpoints, changes data models, or alters any documented behavior, update the relevant `docs/design/<topic>.md` file as part of that task. Bump the `updated:` frontmatter date on any subdoc you edit. Update `docs/design/README.md` only when adding or removing whole topics.
 4. Do not introduce new dependencies without documenting them in the Technology Stack table in `docs/design/README.md`.
 5. Do not add or remove WebSocket endpoints, tool definition fields, or database models without updating `docs/design/websocket-api.md`, `docs/design/tools.md`, or `docs/design/database.md` respectively.
@@ -12,73 +14,61 @@
 
 ## Project Conventions
 
+### Python (backend, `src/`)
+
 - Python 3.12+ required
 - Use `uv` for dependency management
-- Use `ruff` for linting and formatting
-- Use `ty` for type checking
+- Use `ruff` for linting and formatting — docstrings on public modules/classes/functions are enforced (pydocstyle pep257 via ruff `D` rules; tests are exempt)
+- Use `ty` for type checking. It is intentionally **not** a project dependency — it runs via `uvx ty check src/` (pre-commit, CI, and `just typecheck`). Do not add it to `pyproject.toml` or invoke it with `uv run`.
 - Use `pytest` for testing
 - Use SQLAlchemy 2.0 async style (not legacy 1.x patterns)
 - Use FastAPI with async endpoints and WebSocket handlers
-- All configuration via environment variables / `.env` file
+- All configuration via environment variables and `settings.json` in the data dir (a legacy `.env` is auto-migrated on first run; see `docs/design/configuration.md`)
 - Type-annotate all public functions and class attributes
 
-## Justfile Targets
+### Flutter (client, `rcflowclient/`)
 
-Run targets with `just <target>`. Run `just` with no arguments to list all available recipes.
+- State management via Provider (`lib/state/`)
+- `flutter_lints` defaults; CI runs `flutter analyze --fatal-warnings`
+- No code generation — no build_runner, no `.g.dart`/`.freezed.dart` files
+
+### Pre-commit hooks
+
+`just dev` installs them. Every commit runs: ruff (auto-fix) + ruff-format + `uvx ty check src/` + a fast pytest subset (`tests/test_core`, `tests/test_executors`). If ruff modifies files during the commit, the commit aborts — restage and commit again.
+
+## Common Commands
+
+Run targets with `just <target>`. Run `just` with no arguments for the full annotated recipe list — bundling/packaging, emulator, uninstall, and cleanup targets live there and are not repeated here.
 
 ### Development
 
 - `install` — install production dependencies (`uv sync`)
 - `dev` — install with dev dependencies and set up pre-commit hooks
-- `run` — start the server (`uv run rcflow`)
-- `run-gui` — start the worker GUI (dashboard + tray) in dev mode (`uv run rcflow gui`)
+- `run` — start the server (`uv run rcflow run`)
+- `run-gui` — start the worker GUI (dashboard + tray) in dev mode (`uv run --extra tray rcflow gui`)
 
 ### Code Quality
 
 - `lint` — run ruff linter on `src/` and `tests/`
 - `format` — auto-format and fix code with ruff
-- `typecheck` — run ty type checker on `src/`
-- `check` — run all static checks (ruff + ty + flutter analyze)
+- `typecheck` — run ty type checker on `src/` (via `uvx` so the resolver mirrors CI)
+- `check` — full local CI gate: ruff + ty + Python tests with coverage floor + flutter analyze + Flutter tests with coverage floor. Slow — use `lint`/`typecheck` for quick static checks.
 
 ### Testing
 
-- `test` — run all tests (Python pytest + Flutter)
+- `test` — run all tests (Python + Flutter; slow — prefer targeted runs while iterating)
 - `coverage` — run Python tests with coverage report
+- Single Python test: `uv run pytest tests/test_core/test_session.py::test_name` — async mode is auto (no marker needed), 60s per-test timeout, LLM calls are mocked (no API keys required)
+- Single Flutter test: `cd rcflowclient && flutter test test/<path>_test.dart`
+- `vm <command>` — live worker/client E2E verification on the Ubuntu VM (see `docs/design/vm-verification.md`; `just vm help` lists subcommands)
+
+**Coverage floors are enforced** by `just check` and CI: Python ≥ 54% (`fail_under` in `pyproject.toml`), Flutter ≥ 14% (`rcflowclient/coverage_threshold.txt`). New code needs tests to keep the gates green. The floors are ratchets — raise them as coverage grows; never lower them.
 
 ### Database Migrations
 
 - `migrate` — apply all pending Alembic migrations
 - `migrate-gen <msg>` — generate a new Alembic migration with the given message
 - `migrate-down` — rollback the last migration
-
-### Bundling / Packaging
-
-- `bundle [FLAGS]` — build distributable package for the current platform
-- `bundle-linux-worker [FLAGS]` — build Linux worker `.deb` package
-- `bundle-linux-worker-install` — build and install Linux worker `.deb`
-- `bundle-linux-client` — build Linux Flutter client `.deb`
-- `bundle-linux-client-install` — build and install Linux Flutter client `.deb`
-- `bundle-macos-worker [FLAGS]` — build macOS worker DMG (macOS only)
-- `bundle-macos-worker-install` — build and install macOS worker DMG (macOS only)
-- `bundle-macos-client` — build macOS Flutter client `.dmg` (macOS only)
-- `bundle-macos-client-install` — build and install macOS Flutter client (macOS only)
-- `bundle-windows-worker [FLAGS]` — build Windows worker installer (Windows only)
-- `bundle-windows-worker-install` — build and install Windows worker (Windows only)
-- `bundle-windows-client` — build Windows Flutter client `.exe` installer (Windows only)
-- `bundle-windows-client-install` — build and install Windows Flutter client (Windows only)
-
-### Flutter / Emulator (Unix/WSL2)
-
-- `start-emulator` — start Windows Android emulator (cold boot) from WSL2
-- `setup-emulator` — set up WSL2 ADB connection to Windows emulator
-- `run-android` — run Flutter app on Android emulator in hot reload mode (connects to Windows emulator)
-- `flutter-build` — build Flutter debug APK
-- `flutter-release` — build Flutter release APK (split per ABI)
-- `flutter-windows` — build Flutter Windows desktop app (Windows only)
-
-### Cleanup
-
-- `clean` — remove build artifacts, caches, and coverage files
 
 ## Versioning
 

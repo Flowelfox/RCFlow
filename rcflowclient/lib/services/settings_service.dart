@@ -52,6 +52,9 @@ class SettingsService {
   static const _tasksFilterSearchKey = 'rcflow_tasks_filter_search';
   static const _tasksFilterStatusKey = 'rcflow_tasks_filter_status';
   static const _tasksFilterSourceKey = 'rcflow_tasks_filter_source';
+  static const _tasksFilterAssigneesKey = 'rcflow_tasks_filter_assignees';
+  static const _tasksFilterPrioritiesKey = 'rcflow_tasks_filter_priorities';
+  static const _tasksFilterLabelsKey = 'rcflow_tasks_filter_labels';
   static const _artifactsFilterSearchKey = 'rcflow_artifacts_filter_search';
 
   // Expanded/collapsed state persistence keys
@@ -564,6 +567,26 @@ class SettingsService {
       _getJsonStringList(_tasksFilterSourceKey);
   set tasksFilterSource(List<String> value) =>
       _setJsonStringList(_tasksFilterSourceKey, value);
+
+  List<String> get tasksFilterAssignees =>
+      _getJsonStringList(_tasksFilterAssigneesKey);
+  set tasksFilterAssignees(List<String> value) =>
+      _setJsonStringList(_tasksFilterAssigneesKey, value);
+
+  /// Priorities are stored as decimal strings; non-numeric entries are
+  /// dropped on read.
+  List<int> get tasksFilterPriorities =>
+      _getJsonStringList(_tasksFilterPrioritiesKey)
+          .map(int.tryParse)
+          .whereType<int>()
+          .toList();
+  set tasksFilterPriorities(List<int> value) => _setJsonStringList(
+      _tasksFilterPrioritiesKey, value.map((e) => '$e').toList());
+
+  List<String> get tasksFilterLabels =>
+      _getJsonStringList(_tasksFilterLabelsKey);
+  set tasksFilterLabels(List<String> value) =>
+      _setJsonStringList(_tasksFilterLabelsKey, value);
 
   String get artifactsFilterSearch =>
       _prefs.getString(_artifactsFilterSearchKey) ?? '';

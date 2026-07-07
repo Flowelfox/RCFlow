@@ -400,6 +400,68 @@ class TestLinearServiceErrors:
 
 
 # ---------------------------------------------------------------------------
+# TestLinearServiceFetchViewer
+# ---------------------------------------------------------------------------
+
+
+class TestLinearServiceFetchViewer:
+    @pytest.mark.asyncio
+    async def test_returns_normalized_viewer(self) -> None:
+        body = {
+            "data": {
+                "viewer": {
+                    "id": "user-1",
+                    "name": "Jane Doe",
+                    "displayName": "jane",
+                    "email": "jane@example.com",
+                    "avatarUrl": "https://cdn.linear.app/jane.png",
+                }
+            }
+        }
+        mock_post = AsyncMock(return_value=_mock_response(200, body))
+        with patch.object(httpx.AsyncClient, "post", mock_post):
+            async with LinearService(api_key="lin_api_test") as svc:
+                viewer = await svc.fetch_viewer()
+
+        assert viewer == {
+            "id": "user-1",
+            "name": "Jane Doe",
+            "display_name": "jane",
+            "email": "jane@example.com",
+            "avatar_url": "https://cdn.linear.app/jane.png",
+        }
+
+    @pytest.mark.asyncio
+    async def test_missing_optional_fields_fall_back(self) -> None:
+        body = {"data": {"viewer": {"id": "user-2", "name": "Bob"}}}
+        mock_post = AsyncMock(return_value=_mock_response(200, body))
+        with patch.object(httpx.AsyncClient, "post", mock_post):
+            async with LinearService(api_key="lin_api_test") as svc:
+                viewer = await svc.fetch_viewer()
+
+        assert viewer["display_name"] == "Bob"
+        assert viewer["email"] is None
+        assert viewer["avatar_url"] is None
+
+    @pytest.mark.asyncio
+    async def test_null_viewer_raises_error(self) -> None:
+        mock_post = AsyncMock(return_value=_mock_response(200, {"data": {"viewer": None}}))
+        with patch.object(httpx.AsyncClient, "post", mock_post):
+            async with LinearService(api_key="lin_api_test") as svc:
+                with pytest.raises(LinearServiceError, match="no data"):
+                    await svc.fetch_viewer()
+
+    @pytest.mark.asyncio
+    async def test_graphql_error_raises_service_error(self) -> None:
+        body = {"errors": [{"message": "not authorized"}]}
+        mock_post = AsyncMock(return_value=_mock_response(200, body))
+        with patch.object(httpx.AsyncClient, "post", mock_post):
+            async with LinearService(api_key="lin_api_test") as svc:
+                with pytest.raises(LinearServiceError, match="not authorized"):
+                    await svc.fetch_viewer()
+
+
+# ---------------------------------------------------------------------------
 # TestLinearServiceContextManager
 # ---------------------------------------------------------------------------
 
