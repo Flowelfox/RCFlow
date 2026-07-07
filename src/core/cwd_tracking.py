@@ -361,7 +361,7 @@ def extract_paths_from_tool_input(tool_input: dict[str, object]) -> list[str]:
                 if not isinstance(item, dict):
                     continue
                 for key in _PATH_FIELDS:
-                    sub = item.get(key)  # ty:ignore[invalid-argument-type]
+                    sub = item.get(key)
                     if isinstance(sub, str) and sub:
                         found.append(sub)
     return found
