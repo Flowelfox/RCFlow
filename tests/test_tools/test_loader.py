@@ -64,3 +64,25 @@ class TestLoadToolsFromDirectory:
     def test_load_from_nonexistent_dir(self):
         tools = load_tools_from_directory(Path("/nonexistent/path"))
         assert tools == []
+
+
+class TestExposeToAgents:
+    def _load(self, data: dict):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(data, f)
+            f.flush()
+            return load_tool_file(Path(f.name))
+
+    def test_defaults_to_false(self, sample_tool_json: dict):
+        assert self._load(sample_tool_json).expose_to_agents is False
+
+    def test_opt_in(self, sample_tool_json: dict):
+        sample_tool_json["expose_to_agents"] = True
+        assert self._load(sample_tool_json).expose_to_agents is True
+
+    def test_forced_off_for_agent_executors(self, sample_tool_json: dict):
+        """Recursion guard: agent-executor tools can never be agent-exposed."""
+        sample_tool_json["expose_to_agents"] = True
+        sample_tool_json["executor"] = "claude_code"
+        sample_tool_json["executor_config"] = {"claude_code": {}}
+        assert self._load(sample_tool_json).expose_to_agents is False

@@ -210,6 +210,17 @@ CLAUDE_CODE_SETTINGS_SCHEMA: list[dict[str, Any]] = [
         "managed_only": True,
         "coming_soon": True,
     },
+    {
+        "key": "expose_rcflow_tools",
+        "label": "Expose RCFlow tools",
+        "type": "boolean",
+        "default": False,
+        "description": (
+            "Let Claude Code list and call RCFlow tools during a session"
+            " (served over MCP). Takes effect for new sessions."
+        ),
+        "managed_only": True,
+    },
 ]
 
 CODEX_SETTINGS_SCHEMA: list[dict[str, Any]] = [
@@ -278,6 +289,16 @@ CODEX_SETTINGS_SCHEMA: list[dict[str, Any]] = [
             "Inject caveman terse-mode instruction at session start"
             " (~65-75% fewer output tokens). Takes effect for new sessions."
             " Experimental — Codex hook delivery unverified."
+        ),
+        "managed_only": True,
+    },
+    {
+        "key": "expose_rcflow_tools",
+        "label": "Expose RCFlow tools",
+        "type": "boolean",
+        "default": False,
+        "description": (
+            "Let Codex list and call RCFlow tools during a session (served over MCP). Takes effect for new sessions."
         ),
         "managed_only": True,
     },
@@ -536,6 +557,91 @@ def _sync_caveman_mode(tool_name: str, settings: dict[str, Any], config_dir: Pat
     # Codex and OpenCode: no-op until delivery mechanism is confirmed.
     # The caveman_mode key is still exposed in the UI so users can
     # pre-configure it; the side-effect will be wired in once verified.
+
+
+# ---------------------------------------------------------------------------
+# Codex MCP bridge registration (managed CODEX_HOME/config.toml)
+# ---------------------------------------------------------------------------
+
+_CODEX_MCP_BLOCK_BEGIN = "# --- BEGIN RCFlow MCP bridge (auto-generated, do not edit) ---"
+_CODEX_MCP_BLOCK_END = "# --- END RCFlow MCP bridge ---"
+
+
+def _strip_codex_mcp_block(text: str) -> str:
+    """Remove the RCFlow-managed MCP server block from *text*, if present."""
+    begin = text.find(_CODEX_MCP_BLOCK_BEGIN)
+    if begin == -1:
+        return text
+    end = text.find(_CODEX_MCP_BLOCK_END, begin)
+    if end == -1:  # noqa: SIM108 — broken block (end marker lost): drop from the begin marker
+        remainder = text[:begin]
+    else:
+        remainder = text[:begin] + text[end + len(_CODEX_MCP_BLOCK_END) :].lstrip("\n")
+    if not remainder.strip():
+        return ""
+    return remainder.rstrip() + "\n"
+
+
+def ensure_codex_mcp_registration(codex_home: Path, enabled: bool, command: str | None) -> None:
+    """Idempotently add/remove the ``[mcp_servers.rcflow]`` block in the managed ``config.toml``.
+
+    The block is marker-delimited and machine-owned; user-added entries
+    (including a user's own ``[mcp_servers.rcflow]``) are never touched — if a
+    foreign ``rcflow`` entry exists, registration is skipped with a warning so
+    the file stays a valid TOML document. All failures are non-fatal: Codex
+    still runs without the bridge.
+    """
+    import tomllib  # noqa: PLC0415 — stdlib, only needed here
+
+    config_path = codex_home / "config.toml"
+    try:
+        original = config_path.read_text(encoding="utf-8") if config_path.is_file() else ""
+    except OSError:
+        logger.warning("Cannot read %s; skipping MCP bridge registration", config_path)
+        return
+
+    stripped = _strip_codex_mcp_block(original)
+    new_text = stripped
+
+    if enabled and command:
+        try:
+            parsed = tomllib.loads(stripped)
+        except tomllib.TOMLDecodeError:
+            logger.warning("Managed config.toml is not valid TOML; skipping MCP bridge registration")
+            return
+        if "rcflow" in parsed.get("mcp_servers", {}):
+            logger.warning("User-owned [mcp_servers.rcflow] found in %s; leaving it untouched", config_path)
+        else:
+            # json.dumps produces a valid TOML basic string (handles Windows
+            # backslashes and quotes).
+            block = (
+                f"{_CODEX_MCP_BLOCK_BEGIN}\n"
+                f"[mcp_servers.rcflow]\n"
+                f"command = {json.dumps(command)}\n"
+                f"args = []\n"
+                f"{_CODEX_MCP_BLOCK_END}\n"
+            )
+            new_text = (stripped.rstrip() + "\n\n" if stripped.strip() else "") + block
+
+    if new_text == original:
+        return
+
+    try:
+        import tomllib as _check  # noqa: PLC0415
+
+        _check.loads(new_text)
+    except Exception:
+        logger.warning("Refusing to write invalid TOML to %s", config_path)
+        return
+
+    try:
+        codex_home.mkdir(parents=True, exist_ok=True)
+        tmp = config_path.with_suffix(".toml.tmp")
+        tmp.write_text(new_text, encoding="utf-8")
+        tmp.replace(config_path)
+        logger.info("MCP bridge registration %s in %s", "written" if enabled else "removed", config_path)
+    except OSError:
+        logger.warning("Failed to write %s; skipping MCP bridge registration", config_path)
 
 
 # ---------------------------------------------------------------------------

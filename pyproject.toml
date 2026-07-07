@@ -51,6 +51,7 @@ dev = [
 
 [project.scripts]
 rcflow = "src.__main__:main"
+rcflow-mcp = "src.mcp_proxy:main"
 
 [build-system]
 requires = ["hatchling"]

@@ -6,6 +6,7 @@
   "session_type": "one-shot",
   "llm_context": "stateless",
   "executor": "shell",
+  "expose_to_agents": true,
 
   "parameters": {
     "type": "object",

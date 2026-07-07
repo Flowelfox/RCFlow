@@ -13,6 +13,7 @@ from src.api.routes import (
     artifacts_router,
     auth_router,
     config_router,
+    mcp_router,
     models_router,
     projects_router,
     rcflow_plugins_router,
@@ -44,3 +45,4 @@ router.include_router(worktrees_router)
 router.include_router(telemetry_router)
 router.include_router(slash_commands_router)
 router.include_router(rcflow_plugins_router)
+router.include_router(mcp_router)

@@ -1,5 +1,5 @@
 ---
-updated: 2026-06-01
+updated: 2026-07-07
 ---
 
 # RCFlow Design
@@ -36,6 +36,7 @@ This file is the **index**. Detailed sections live in sibling files (`./architec
 | How does telemetry roll up? | [Telemetry](telemetry.md) |
 | Where do permission prompts come from? | [Permissions](permissions.md) |
 | How is a release built / signed / installed? | [Deployment](deployment.md) |
+| How does a nested agent call RCFlow tools? | [MCP Agent Bridge](mcp.md) |
 
 ## Index
 
@@ -52,6 +53,7 @@ This file is the **index**. Detailed sections live in sibling files (`./architec
 | [Direct Tool Mode](direct-tool-mode.md) | `LLM_PROVIDER=none` operating mode |
 | [Tools](tools.md) | Pluggable tool JSON schema, agent prompt format, tool definition fields, tool-management service, per-tool settings isolation |
 | [Executors](executors.md) | Claude Code (PTY/pipe), Codex CLI, Worktree executor implementations |
+| [MCP Agent Bridge](mcp.md) | Exposing registry tools to nested agents over MCP: zero-touch contract, per-agent wiring, token model |
 | [Database](database.md) | All tables (sessions, tasks, artifacts, telemetry, queue, drafts, Linear) with per-table anchors |
 | [Configuration](configuration.md) | All env vars, remote config endpoints, UPnP / NAT-PMP networking |
 | [Linear Integration](linear.md) | Service, REST endpoints, WS messages, client UI |

@@ -24,7 +24,10 @@ import os
 import uuid
 from collections.abc import AsyncGenerator
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from src.services.mcp_bridge import McpBridge
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -152,6 +155,9 @@ class PromptRouter:
         self._telemetry = telemetry_service
         self._pending_store = pending_store
         self._wakeup_store = wakeup_store
+        # MCP agent bridge, injected post-construction by main.py (the bridge
+        # itself needs a router reference for dispatch).
+        self._mcp_bridge: McpBridge | None = None
         # The scheduler is initialised lazily so the ``on_fire`` closure
         # can capture ``self``.  It is created the first time a wake is
         # armed (or on startup-recovery, whichever comes first).
@@ -184,6 +190,15 @@ class PromptRouter:
         self._codex = CodexAgent(self)
         self._opencode = OpenCodeAgent(self)
         self._lifecycle = SessionLifecycle(self)
+
+    def set_mcp_bridge(self, bridge: "McpBridge") -> None:
+        """Inject the MCP agent bridge (constructed after the router in main.py)."""
+        self._mcp_bridge = bridge
+
+    @property
+    def mcp_bridge(self) -> "McpBridge | None":
+        """The MCP agent bridge, or None when not wired (e.g. bare unit tests)."""
+        return self._mcp_bridge
 
     # ------------------------------------------------------------------
     # Background-task delegation
@@ -427,7 +442,15 @@ class PromptRouter:
             return {}
         # Extract keys relevant to executor config
         overrides: dict[str, Any] = {}
-        for key in ("model", "default_permission_mode", "max_turns", "timeout", "approval_mode", "provider"):
+        for key in (
+            "model",
+            "default_permission_mode",
+            "max_turns",
+            "timeout",
+            "approval_mode",
+            "provider",
+            "expose_rcflow_tools",
+        ):
             val = settings.get(key)
             if val not in (None, "", []):
                 overrides[key] = val
@@ -454,6 +477,7 @@ class PromptRouter:
                 binary_path=binary_path,
                 extra_env=self._build_claude_code_extra_env(),
                 config_overrides=self._get_managed_config_overrides("claude_code"),
+                mcp_bridge=self._mcp_bridge,
             )
 
         # Codex executors are always created fresh (one per session)
@@ -1725,7 +1749,34 @@ class PromptRouter:
                 session.set_activity(ActivityState.PROCESSING_LLM)
                 return deny_msg
 
+        result_text, _ = await self.execute_one_shot_tool(session, tool_def, tool_call)
+
+        session.set_active()
+        session.set_activity(ActivityState.PROCESSING_LLM)
+
+        return result_text
+
+    async def execute_one_shot_tool(
+        self,
+        session: ActiveSession,
+        tool_def: ToolDefinition,
+        tool_call: ToolCallRequest,
+        *,
+        origin: str = "llm",
+    ) -> tuple[str, bool]:
+        """Execute a one-shot tool (shell / http / worktree) and stream output to the session buffer.
+
+        Shared dispatch used by the LLM tool loop (``_execute_tool``) and the MCP
+        agent bridge. Deliberately excludes LLM-loop concerns: no ``TOOL_START``
+        push, no session state transitions, no permission gating — callers own
+        those. ``origin`` is stamped on buffer payloads for non-LLM callers so
+        the client can distinguish agent-initiated tool calls.
+
+        Returns ``(result_text, is_error)``.
+        """
         executor = self._get_executor(tool_def.executor)
+        origin_fields: dict[str, Any] = {} if origin == "llm" else {"origin": origin}
+        is_error = False
 
         # Telemetry: record start of this tool call.
         _tel_tool_call = None
@@ -1750,13 +1801,14 @@ class PromptRouter:
                             "tool_name": tool_call.tool_name,
                             "content": chunk.content,
                             "stream": chunk.stream,
+                            **origin_fields,
                         },
                     )
                 result_text = "".join(collected_output)
             else:
                 # Non-streaming execution
                 result = await executor.execute(tool_def, tool_call.tool_input)
-                failed = bool(result.exit_code)
+                is_error = bool(result.exit_code)
                 if result.output and result.error:
                     result_text = f"{result.output}\n[error] {result.error}"
                 elif result.error:
@@ -1771,7 +1823,8 @@ class PromptRouter:
                         "tool_name": tool_call.tool_name,
                         "content": result_text,
                         "stream": "stdout",
-                        "is_error": failed,
+                        "is_error": is_error,
+                        **origin_fields,
                     },
                 )
 
@@ -1782,17 +1835,16 @@ class PromptRouter:
             if self._telemetry is not None and _tel_tool_call is not None:
                 await self._telemetry.record_tool_end(_tel_tool_call, status="error", error=str(e))
             result_text = f"Tool execution failed: {e}"
+            is_error = True
             session.buffer.push_text(
                 MessageType.ERROR,
                 {
                     "session_id": session.id,
                     "content": result_text,
                     "code": "TOOL_EXEC_ERROR",
+                    **origin_fields,
                 },
             )
-
-        session.set_active()
-        session.set_activity(ActivityState.PROCESSING_LLM)
 
         # Real-time artifact scan for tool output and input values
         if self._artifact_scanner and self._settings and self._settings.ARTIFACT_AUTO_SCAN:
@@ -1804,7 +1856,7 @@ class PromptRouter:
 
         # Track active worktree context in session metadata so clients can show
         # worktree controls.  Updated on every successful mutating worktree call.
-        if tool_def is not None and tool_def.executor == "worktree":
+        if tool_def.executor == "worktree":
             self._update_session_worktree_meta(session, tool_call, result_text)
 
-        return result_text
+        return result_text, is_error

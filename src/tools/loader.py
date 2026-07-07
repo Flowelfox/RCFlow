@@ -15,6 +15,11 @@ VALID_SESSION_TYPES = {"one-shot", "long-running"}
 VALID_LLM_CONTEXTS = {"stateless", "session-scoped"}
 VALID_OS = {"windows", "linux", "darwin"}
 
+# Executors that spawn a nested coding agent. Tools using these executors are
+# never exposed over the MCP agent bridge, regardless of ``expose_to_agents``
+# (recursion guard — an agent must not be able to spawn another agent).
+AGENT_EXECUTORS = {"claude_code", "codex", "opencode"}
+
 _DEFAULT_SHELL = "powershell.exe" if sys.platform == "win32" else "/bin/bash"
 
 # Map sys.platform values to the canonical os names used in tool definitions.
@@ -94,6 +99,7 @@ class ToolDefinition(BaseModel):
     executor: str
     parameters: dict[str, Any]
     executor_config: dict[str, Any]
+    expose_to_agents: bool = False
 
     @property
     def mention_name(self) -> str:
@@ -153,6 +159,13 @@ def load_tool_file(path: Path) -> ToolDefinition:
     for os_val in tool.os:
         if os_val not in VALID_OS:
             raise ValueError(f"Tool '{tool.name}': invalid os value '{os_val}'. Must be one of {VALID_OS}")
+    if tool.expose_to_agents and tool.executor in AGENT_EXECUTORS:
+        logger.warning(
+            "Tool '%s': expose_to_agents ignored for agent executor '%s' (recursion guard)",
+            tool.name,
+            tool.executor,
+        )
+        tool.expose_to_agents = False
 
     return tool
 

@@ -25,6 +25,7 @@ from src.database.engine import check_connection, dispose_engine, get_session_fa
 from src.logs import setup_logging
 from src.paths import get_data_dir, is_frozen
 from src.services.artifact_scanner import ArtifactScanner
+from src.services.mcp_bridge import McpBridge
 from src.services.model_catalog import ModelCatalog
 from src.services.telemetry_service import TelemetryService
 from src.services.tool_manager import ToolManager
@@ -186,6 +187,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         wakeup_store=wakeup_store,
     )
     app.state.prompt_router = prompt_router
+
+    # MCP agent bridge — lets nested coding agents (Claude Code, Codex) list
+    # and call agent-exposed registry tools. Bidirectional with the router:
+    # the bridge dispatches through the router's one-shot path, the router
+    # hands executors the bridge for MCP wiring at agent spawn.
+    mcp_bridge = McpBridge(tool_registry, session_manager, prompt_router)
+    prompt_router.set_mcp_bridge(mcp_bridge)
+    app.state.mcp_bridge = mcp_bridge
 
     # Re-arm any wake that survived the restart.  The store hydrates
     # the per-session mirrors and we hand each wake to the scheduler so

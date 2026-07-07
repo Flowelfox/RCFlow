@@ -1,5 +1,5 @@
 ---
-updated: 2026-04-27
+updated: 2026-07-07
 ---
 
 # Pluggable Tool Definitions
@@ -186,6 +186,7 @@ Every prompt dispatched to a coding agent (Claude Code, Codex, OpenCode) is norm
 | `executor`        | enum   | yes      | `shell`, `http`, `claude_code`, `codex`, or `worktree` |
 | `parameters`      | object | yes      | JSON Schema describing the tool's input parameters    |
 | `executor_config` | object | yes      | Executor-specific configuration                       |
+| `expose_to_agents`| bool   | no       | Offer this tool to nested coding agents over the [MCP agent bridge](mcp.md) (default `false`). Ignored (forced off, with a load-time warning) for agent executors — recursion guard. |
 
 ## Tool Management Service
 
@@ -286,6 +287,7 @@ Schema fields may include `"coming_soon": true` — the flag is forwarded in the
 | `timeout`                  | string      | yes          | —                      | Process timeout in seconds (default 1800)          |
 | `caveman_mode`             | boolean     | yes          | —                      | Inject caveman terse-mode instruction via CLAUDE.md (new sessions only) |
 | `undercover`               | boolean     | yes          | —                      | Strip AI attribution from commits and PRs (default false) — **coming soon**, disabled in client and rejected by PATCH |
+| `expose_rcflow_tools`      | boolean     | yes          | —                      | Serve agent-exposed RCFlow tools to Claude Code over the in-process [MCP bridge](mcp.md) (default false, new sessions only) |
 
 **Provider env sync:** When `provider` or any credential field is updated, `ToolSettingsManager` automatically rebuilds the `env` section of the Claude Code `settings.json`:
 
@@ -306,6 +308,7 @@ When the tool has a non-empty `provider`, `PromptRouter._build_claude_code_extra
 | `approval_mode`  | select | no           | Tool-call approval (full-auto / yolo)      |
 | `timeout`        | string | yes          | Process timeout in seconds (default 600)   |
 | `caveman_mode`   | boolean| yes          | Inject caveman terse-mode instruction (experimental — hook delivery unverified) |
+| `expose_rcflow_tools` | boolean | yes     | Serve agent-exposed RCFlow tools to Codex via the `rcflow-mcp` stdio proxy (default false, new sessions only) — see [MCP bridge](mcp.md) |
 
 Provider sync behavior:
 - **OpenAI** (`provider=openai`): sets `env.CODEX_API_KEY` from `codex_api_key`. RCFlow injects this into the subprocess environment.

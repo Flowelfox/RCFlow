@@ -1,5 +1,5 @@
 ---
-updated: 2026-07-06
+updated: 2026-07-07
 ---
 
 # Executors
@@ -10,6 +10,7 @@ Per-executor implementation details for the long-running coding agents (Claude C
 - [Tools](tools.md) — JSON tool schema, executor selection field, per-tool settings
 - [Sessions](sessions.md) — long-running session lifecycle
 - [Permissions](permissions.md) — interactive approval relay (Claude Code only)
+- [MCP Agent Bridge](mcp.md) — how both agents list/call RCFlow tools during a session
 
 ---
 
@@ -52,6 +53,15 @@ Per-executor implementation details for the long-running coding agents (Claude C
 > narration ("Monitor event — no action needed") is suppressed. **Caveat
 > (inherent CC behavior):** under the SDK each Monitor event *wakes the model* (an
 > extra turn + tokens per event) — RCFlow can't change that.
+>
+> **RCFlow tools over MCP:** when the per-tool `expose_rcflow_tools` setting is
+> on, `_build_options` attaches an in-process SDK MCP server (`mcp_servers=
+> {"rcflow": …}`) built live from the [MCP agent bridge](mcp.md)'s registry
+> tool list, so Claude Code can call agent-exposed RCFlow tools as
+> `mcp__rcflow__<name>`. Handlers dispatch straight into the bridge (same
+> process, no token). `can_use_tool` waves `mcp__rcflow__*` through — the
+> bridge gates these calls itself (mutating worktree ops always ask; see
+> [MCP Agent Bridge](mcp.md)). Not available on the legacy executor.
 >
 > The remainder of this section describes the **legacy** raw-CLI executor
 > (`RCFLOW_CC_EXECUTOR=legacy`).
@@ -168,6 +178,8 @@ The `codex` executor manages an OpenAI Codex CLI subprocess for delegating codin
 
 **Result summarization:** When Codex emits a `turn.completed` event, the prompt router fires a summary task and pushes a `session_end_ask`, same as Claude Code.
 
+**RCFlow tools over MCP:** when the per-tool `expose_rcflow_tools` setting is on, Codex spawn syncs a machine-owned `[mcp_servers.rcflow]` block into the managed `CODEX_HOME/config.toml` (pointing at the bundled `rcflow-mcp` stdio proxy) and injects a per-session `RCFLOW_MCP_TOKEN` + `RCFLOW_MCP_URL` into the subprocess env. The proxy forwards `tools/list` / `tools/call` to the worker's `/api/mcp/*` endpoints. When the setting is off the block is removed. See [MCP Agent Bridge](mcp.md).
+
 **Authentication:** Codex supports two auth methods, selectable via the per-tool `provider` setting:
 - **OpenAI API key** (`provider: "openai"`): `CODEX_API_KEY` is injected into the subprocess environment from the per-tool settings.
 - **ChatGPT subscription** (`provider: "chatgpt"`): OAuth tokens from `~/.codex/auth.json` are used. RCFlow symlinks this file into `CODEX_HOME` so the isolated instance can access the user's cached login. The user must run `codex login` on the host machine first.
@@ -254,3 +266,7 @@ The `merge` action always passes `auto_commit_changes=True` to `WorktreeManager.
 ### HTTP API
 
 The worktree HTTP routes (`src/api/routes/worktrees.py`) provide the same operations over REST for the Flutter client. See [HTTP API](http-api.md) for endpoint details.
+
+### Agent Exposure (MCP)
+
+The `worktree` tool ships with `"expose_to_agents": true`, so nested agents can call it as `mcp__rcflow__worktree` via the [MCP agent bridge](mcp.md). This is the preferred route over the `wt` CLI (which stays on the agent PATH) because calls run through this executor — session worktree metadata, the client badge, and auto-selection after `new` stay in sync, which raw `wt` invocations bypass. Mutating actions require explicit user approval (the same always-ask rule as the LLM tool loop); `list` is exempt.
