@@ -20,6 +20,7 @@ from src.gui.updater import (
     cleanup_partial_downloads,
     is_newer,
     normalize_version,
+    stream_download,
 )
 
 if TYPE_CHECKING:
@@ -390,6 +391,55 @@ def test_http_fetcher_returns_no_url_when_no_match(monkeypatch: pytest.MonkeyPat
     assert info.version == "0.44.0"
     assert info.download_url is None
     assert info.asset_name is None
+
+
+# ── stream_download (module-level, shared with the rcflow update CLI) ──────
+
+
+def _fake_urlopen_bytes(monkeypatch: pytest.MonkeyPatch, body: bytes) -> None:
+    class _Resp:
+        status = 200
+        headers: ClassVar[dict[str, str]] = {"Content-Length": str(len(body))}
+        _data = body
+
+        def read(self, n: int = -1) -> bytes:
+            if not self._data:
+                return b""
+            chunk, type(self)._data = self._data[:n], self._data[n:]
+            return chunk
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc) -> None:
+            pass
+
+    monkeypatch.setattr("urllib.request.urlopen", lambda req, timeout=None: _Resp())
+
+
+def test_stream_download_happy_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _fake_urlopen_bytes(monkeypatch, b"deb-bytes")
+    info = UpdateInfo("1.0.0", "https://rel", "https://dl", "x.deb", 9)
+    dest = tmp_path / "x.deb"
+    progress: list[tuple[int, int]] = []
+
+    stream_download(info, dest, lambda r, t: progress.append((r, t)))
+
+    assert dest.read_bytes() == b"deb-bytes"
+    assert not dest.with_suffix(dest.suffix + ".partial").exists()
+    assert progress and progress[-1] == (9, 9)
+
+
+def test_stream_download_truncated_raises(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _fake_urlopen_bytes(monkeypatch, b"short")
+    info = UpdateInfo("1.0.0", "https://rel", "https://dl", "x.deb", 100)
+    dest = tmp_path / "x.deb"
+
+    with pytest.raises(RuntimeError, match="truncated"):
+        stream_download(info, dest, None)
+
+    assert not dest.exists()
+    assert not dest.with_suffix(dest.suffix + ".partial").exists()
 
 
 # ── Partial-download cleanup ────────────────────────────────────────────────

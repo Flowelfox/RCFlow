@@ -678,6 +678,13 @@ def _cmd_set_api_key(args: argparse.Namespace) -> None:
     print("API key updated successfully.")
 
 
+def _cmd_update(args: argparse.Namespace) -> None:
+    """Self-update the worker from the latest GitHub release."""
+    from src.services.cli_update import run_update  # noqa: PLC0415
+
+    sys.exit(run_update(check_only=args.check, assume_yes=args.yes))
+
+
 # ── Worker-service control (shared with the GUI via the same controller) ─────
 
 
@@ -836,6 +843,21 @@ def main() -> None:
     set_api_key_parser = subparsers.add_parser("set-api-key", help="Set a new API key")
     set_api_key_parser.add_argument("value", help="The new API key value")
     set_api_key_parser.set_defaults(func=_cmd_set_api_key)
+
+    # rcflow update
+    update_parser = subparsers.add_parser("update", help="Update the worker to the latest GitHub release")
+    update_parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Only check: print current vs latest and exit (0 up-to-date, 3 update available)",
+    )
+    update_parser.add_argument(
+        "-y",
+        "--yes",
+        action="store_true",
+        help="Skip the confirmation prompt (required for non-interactive use)",
+    )
+    update_parser.set_defaults(func=_cmd_update)
 
     # ── Worker-service control ──────────────────────────────────────────────
     # `run` is the raw foreground worker the service execs; these verbs ask the
