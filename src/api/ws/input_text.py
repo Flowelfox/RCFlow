@@ -424,12 +424,33 @@ async def ws_input_text(
                 task_id_str = message.get("task_id")
                 plan_project_name: str | None = message.get("project_name") or None
                 plan_worktree_path: str | None = message.get("selected_worktree_path") or None
+                # The coding agent to run (claude_code/codex/opencode); required
+                # in direct-tool mode where the prompt would otherwise be parsed
+                # for a #tool mention (and markdown "## " headings in the
+                # generated planning prompt would be misread as tool names).
+                # There is no server-side default: the agent is the per-worker
+                # setting chosen in the client, so when it is missing in
+                # direct-tool mode the user must pick one rather than silently
+                # getting an agent they never selected (or don't have installed).
+                plan_agent: str | None = message.get("agent") or None
                 if not task_id_str:
                     await websocket.send_json(
                         {
                             "type": "error",
                             "content": "Missing task_id",
                             "code": "MISSING_TASK_ID",
+                        }
+                    )
+                    continue
+                if not plan_agent and prompt_router.is_direct_tool_mode:
+                    await websocket.send_json(
+                        {
+                            "type": "error",
+                            "content": (
+                                "No coding agent selected for this worker. "
+                                "Set a default agent in the worker settings to use Make plan."
+                            ),
+                            "code": "MISSING_AGENT",
                         }
                     )
                     continue
@@ -454,6 +475,7 @@ async def ws_input_text(
                             project_name=plan_project_name,
                             selected_worktree_path=plan_worktree_path,
                             task_id=task_id_str,
+                            direct_tool=plan_agent,
                         )
                     )
                     background_tasks.add(plan_task)

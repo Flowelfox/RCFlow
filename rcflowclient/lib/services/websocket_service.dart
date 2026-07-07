@@ -64,12 +64,14 @@ class WebSocketService {
     String taskId, {
     String? projectName,
     String? selectedWorktreePath,
+    String? agent,
   }) {
     final msg = <String, dynamic>{
       'type': 'start_plan_session',
       'task_id': taskId,
       'project_name': ?projectName,
       'selected_worktree_path': ?selectedWorktreePath,
+      'agent': ?agent,
     };
     _transport.sendInput(msg);
   }

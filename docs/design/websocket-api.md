@@ -1,5 +1,5 @@
 ---
-updated: 2026-06-18
+updated: 2026-07-06
 ---
 
 # WebSocket API
@@ -133,9 +133,12 @@ Start a read-only pre-planning session for a task (ONE_SHOT, write-restricted):
   "type": "start_plan_session",
   "task_id": "uuid",
   "project_name": "my-project",
-  "selected_worktree_path": "/path/to/worktree"
+  "selected_worktree_path": "/path/to/worktree",
+  "agent": "claude_code"
 }
 ```
+
+`agent` is the coding agent to run (`claude_code`/`codex`/`opencode`), sent by the client from the worker's per-worker default-agent setting. It is passed through as `direct_tool` so that in direct-tool mode the generated planning prompt is used verbatim instead of being parsed for a `#tool` mention (whose markdown `## ` headings would otherwise be misread as tool names). There is no server-side default: in direct-tool mode a missing `agent` is rejected with a `MISSING_AGENT` error (the client also guards this before sending); in LLM mode `agent` is optional and the LLM routes the prompt.
 
 The server calls `prepare_plan_session()`, fires the planning prompt as a background task, and immediately sends a `session_update` ack. When the session ends (for any reason) the plan file is upserted as an artifact and linked to the task via `plan_artifact_id`, which triggers a `task_update` broadcast.
 

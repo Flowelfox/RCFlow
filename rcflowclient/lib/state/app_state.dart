@@ -899,6 +899,18 @@ class AppState extends ChangeNotifier implements PaneHost {
       return;
     }
 
+    // Direct-tool mode runs the plan on the worker's default agent; there is
+    // no server-side fallback, so require the user to pick one up front.
+    final agent = defaultAgentForWorker(task.workerId);
+    if (agent == null && !worker.hasLlmConfigured) {
+      addSystemMessage(
+        'No default coding agent set for this worker. '
+        'Choose one in the worker settings to use Make plan.',
+        isError: true,
+      );
+      return;
+    }
+
     // Save project name and worktree before startNewChat clears them.
     final projectName = pane.selectedProjectName;
     final worktreePath = pane.pendingWorktreePath;
@@ -916,6 +928,8 @@ class AppState extends ChangeNotifier implements PaneHost {
       task.taskId,
       projectName: projectName,
       selectedWorktreePath: worktreePath,
+      // The coding agent the worker should run (direct-tool mode needs it).
+      agent: agent,
     );
   }
 
