@@ -74,10 +74,6 @@ class WakeupScheduler:
         # debug logging; the scheduler doesn't index by session today.
         _ = session_id
 
-    def pending_count(self) -> int:
-        """Return the pending count."""
-        return len(self._tasks)
-
     # ------------------------------------------------------------------
     # Internals
 

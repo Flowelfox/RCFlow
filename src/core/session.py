@@ -515,10 +515,6 @@ class ActiveSession:
         """Remove and return the named wake, or None if not present."""
         return self._wakes.remove(wake_id)
 
-    def mirror_clear_wakes(self) -> list[ScheduledWake]:
-        """Drop all pending wakes; used on session end / cancel."""
-        return self._wakes.clear()
-
     @property
     def title(self) -> str | None:
         """Human-readable session title, or None if not yet set."""
@@ -821,12 +817,6 @@ class SessionManager:
         for queue in self._update_subscribers.values():
             queue.put_nowait(msg)
 
-    def broadcast_linear_issue_deleted(self, issue_id: str) -> None:
-        """Broadcast a Linear issue deletion to all connected output clients."""
-        msg = {"type": "linear_issue_deleted", "id": issue_id}
-        for queue in self._update_subscribers.values():
-            queue.put_nowait(msg)
-
     def broadcast_github_pr_update(self, pr_data: dict[str, Any]) -> None:
         """Broadcast a GitHub pull-request update to all connected output clients."""
         msg = {"type": "github_pr_update", **pr_data}
@@ -992,12 +982,6 @@ class SessionManager:
         if self._last_worker_usage is not None:
             return self._last_worker_usage
         return {"type": "worker_usage", "backend_id": self._backend_id, "available": False}
-
-    def broadcast_artifact_update(self, artifact_data: dict[str, Any]) -> None:
-        """Broadcast an artifact update to all connected output clients."""
-        msg = {"type": "artifact_update", **artifact_data}
-        for queue in self._update_subscribers.values():
-            queue.put_nowait(msg)
 
     def broadcast_artifact_deleted(self, artifact_id: str) -> None:
         """Broadcast an artifact deletion to all connected output clients."""
@@ -1301,16 +1285,6 @@ class SessionManager:
 
         result.sort(key=session_sort_key)
         return result
-
-    async def archive_all_completed(self, db: AsyncSession) -> None:
-        """Archive all completed/failed/cancelled sessions."""
-        to_archive = [
-            s.id
-            for s in self._sessions.values()
-            if s.status in (SessionStatus.COMPLETED, SessionStatus.FAILED, SessionStatus.CANCELLED)
-        ]
-        for session_id in to_archive:
-            await self.archive_session(session_id, db)
 
     async def persist_session_metadata(self, session: "ActiveSession", db: AsyncSession) -> None:
         """Write the session's current title, metadata, and main_project_path to the DB.
