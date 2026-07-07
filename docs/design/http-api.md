@@ -1,5 +1,5 @@
 ---
-updated: 2026-06-11
+updated: 2026-07-06
 ---
 
 # HTTP API
@@ -150,7 +150,7 @@ Linux/macOS only.
 | Method | Endpoint                              | Auth | Description |
 |--------|---------------------------------------|------|-------------|
 | GET    | `/api/worktrees`                      | Yes  | List worktrees for a repo. Required `?repo_path=`. Returns `{"worktrees": [{name, branch, base, path, created_at}]}`. |
-| POST   | `/api/worktrees`                      | Yes  | Create. Body: `{"branch", "base"="main", "repo_path"}`. Branch must follow `type/ticket/description`. Returns 201 with `{"worktree": {...}}`. |
+| POST   | `/api/worktrees`                      | Yes  | Create. Body: `{"branch", "base"="main", "repo_path"}`. Any branch name accepted unless the repo's `.worktrees/.wt-config` defines `valid_branch_types` (then 422 on mismatch). Returns 201 with `{"worktree": {...}}`. |
 | POST   | `/api/worktrees/{name}/merge`         | Yes  | Squash-merge into base + clean up. Body: `{"message", "repo_path", "into"?, "no_ff"?, "keep"?}`. |
 | DELETE | `/api/worktrees/{name}`               | Yes  | Remove worktree + branch without merging. Required `?repo_path=`. |
 

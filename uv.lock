@@ -2507,8 +2507,8 @@ wheels = [
 
 [[package]]
 name = "wtpython"
-version = "1.1.0"
-source = { git = "https://github.com/Flowelfox/worktree-manager-python#de545239dcbcd870347675bd4f6b428e81ef9bc3" }
+version = "1.2.0"
+source = { git = "https://github.com/Flowelfox/worktree-manager-python#09244e641e105fd2fa5b225f7b2fb2fe6162e0cb" }
 dependencies = [
     { name = "click" },
     { name = "rich" },

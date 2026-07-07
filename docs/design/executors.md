@@ -1,5 +1,5 @@
 ---
-updated: 2026-06-17
+updated: 2026-07-06
 ---
 
 # Executors
@@ -233,7 +233,7 @@ All five actions share `repo_path` (required) and live in a single `tools/worktr
 | Field                  | Default | Description                                            |
 |------------------------|---------|--------------------------------------------------------|
 | `default_base_branch`  | `"main"` | Branch to base new worktrees on when `base` is omitted |
-| `validate_branch_type` | `true`  | Enforce `type/ticket/description` branch naming        |
+| `validate_branch_type` | `true`  | Respect the repo's naming convention from `.worktrees/.wt-config` (no-op when none is configured); `false` skips validation even when configured |
 
 ### Platform Restriction
 
@@ -245,7 +245,7 @@ The executor and all tool definitions explicitly default `base` to `"main"`. Thi
 
 ### Branch Naming Convention
 
-New branches must follow the `type/ticket/description` pattern (e.g. `feature/PROJ-123/add-auth`, `fix/PROJ-456/null-check`). Valid type prefixes are: `feature`, `fix`, `docs`, `hotfix`, `tech-debt`. Validation can be disabled per-tool via `"validate_branch_type": false` in `executor_config.worktree`.
+By default any branch name is accepted — no naming convention is enforced. A repository can opt into a `<type>/...` convention by listing allowed types in its `.worktrees/.wt-config` file (wtpython ≥ 1.2.0), e.g. `{"valid_branch_types": ["feature", "fix"]}`; branch names must then start with one of the configured types, and the prefix is stripped from the worktree directory name. Validation can additionally be disabled per-tool via `"validate_branch_type": false` in `executor_config.worktree` (skips the convention even when configured).
 
 ### Auto-commit on Merge
 

@@ -17,14 +17,20 @@ and note which component is affected where it matters.
 - **Separate notification sounds for "when done" and "on each message"** — the two sound toggles now each have their own sound picker, so you can choose the same sound or a different one for turn completion vs. each new message, preview either with one tap, and pick a custom `.wav` per slot (Windows). Each toggle still turns on and off independently (Client)
 
 ### Changed
+- **Worktree branch names are no longer forced into a naming convention** — new worktrees accept any branch name by default. Repositories that want the `type/description` convention (e.g. `feature/add-auth`) can opt in by listing allowed types in the repo's worktree config file (Backend + Client)
 - **Cleaner notification sound settings** — each sound toggle now shows its picker inline as a compact dropdown with a preview button, instead of a long shared list (Client)
 
 ### Fixed
+- **"Make plan" no longer fails in direct tool mode** — starting a plan from a task used to error with "Unknown tool ##" because the generated planning text was scanned for a #tool mention and its Markdown headings were misread as tool names; the plan now runs with the coding agent you chose as the worker's default, and clearly asks you to pick one if none is set (Backend + Client)
+- **Linear sync available when the Tasks tab is empty** — the Tasks tab's empty state now offers a "Sync from Linear" button, so you can pull in your Linear issues before any tasks exist instead of having no way to trigger the first sync (Client)
 - **"Sound on message" now dings once per message** — it fires on each new assistant message rather than on every streamed fragment or tool step, so a turn with several replies no longer produces a burst of sounds, and tool calls stay silent (Client)
 - **"Sound when done" never played** — the completion sound was listening for the wrong event, so no sound played when an agent finished a turn and was waiting for input. It now plays on every turn completion (Client)
 - **Notification sounds were silent on Windows** — the first sound (and the Settings preview button) produced no audio because of a faulty playback shortcut; sounds now play reliably the first time and every time (Client)
 - **Highlight on selected sessions, tasks, PRs and other list items rendered correctly** — the coloured background and tap ripple on highlighted sidebar items no longer trigger a stream of internal warnings (Client)
 - **Spurious keyboard warnings on Windows** — using a global dictation/hotkey tool (e.g. Wispr Flow) that intercepts modifier keys no longer floods the logs with harmless "key down" warnings; keyboard shortcuts are unaffected (Client)
+
+### Performance
+- **Tasks tab no longer lags with many Linear issues** — the task list now renders only what's on screen and loads unlinked Linear issues in pages of 50 as you scroll, so large synced issue sets no longer freeze the sidebar (Client)
 
 ## [Backend 0.44.1 / Client 1.59.1] — 2026-06-18
 
