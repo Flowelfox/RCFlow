@@ -71,6 +71,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # Settings
     app.state.settings = settings
 
+    # Linear viewer identity cache: tuple[api_key, viewer_dict] | None.
+    # See GET /api/integrations/linear/viewer.
+    app.state.linear_viewer_cache = None
+
     # Attachment store (temporary in-memory store for user-uploaded files)
     app.state.attachment_store = AttachmentStore()
 

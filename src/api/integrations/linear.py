@@ -6,7 +6,8 @@ Endpoints
 ---------
 POST   /api/integrations/linear/test                Test an API key and return accessible teams
 GET    /api/integrations/linear/teams               List teams accessible via the configured API key
-GET    /api/integrations/linear/issues              List cached issues
+GET    /api/integrations/linear/viewer              Identity of the configured API key's Linear user
+GET    /api/integrations/linear/issues              List cached issues (filters: state_type, priority, assignee_id, q)
 GET    /api/integrations/linear/issues/{id}         Single cached issue
 POST   /api/integrations/linear/sync                Trigger full re-sync from Linear
 POST   /api/integrations/linear/issues              Create new issue in Linear + cache it
@@ -66,9 +67,9 @@ def _issue_to_dict(issue: LinearIssueModel) -> dict[str, Any]:
         "team_name": issue.team_name,
         "url": issue.url,
         "labels": json.loads(issue.labels or "[]"),
-        "created_at": issue.created_at.isoformat(),
-        "updated_at": issue.updated_at.isoformat(),
-        "synced_at": issue.synced_at.isoformat(),
+        "created_at": issue.created_at.isoformat() if issue.created_at else "",
+        "updated_at": issue.updated_at.isoformat() if issue.updated_at else "",
+        "synced_at": issue.synced_at.isoformat() if issue.synced_at else "",
         "task_id": str(issue.task_id) if issue.task_id else None,
     }
 
@@ -185,6 +186,16 @@ class LinkTaskRequest(BaseModel):
     task_id: str
 
 
+class LinearViewerResponse(BaseModel):
+    """Identity of the Linear account that owns the configured ``LINEAR_API_KEY``."""
+
+    id: str
+    name: str
+    display_name: str
+    email: str | None = None
+    avatar_url: str | None = None
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
@@ -233,6 +244,40 @@ async def list_linear_teams(request: Request) -> dict[str, Any]:
 
 
 @router.get(
+    "/viewer",
+    summary="Get the connected Linear account's identity",
+    response_model=LinearViewerResponse,
+    description=(
+        "Returns the Linear user (GraphQL `viewer`) that owns the configured "
+        "LINEAR_API_KEY. Used by clients to resolve the 'Me' assignee filter. "
+        "Cached in memory per worker process; the cache is invalidated "
+        "automatically when the API key changes and can be bypassed with "
+        "?refresh=true. Requires LINEAR_API_KEY (503 otherwise)."
+    ),
+)
+async def get_linear_viewer(
+    request: Request,
+    refresh: bool = Query(False, description="Bypass the in-memory cache and re-fetch from Linear"),
+) -> LinearViewerResponse:
+    """Return the viewer identity for the configured Linear API key (cached per process)."""
+    settings = request.app.state.settings
+    cached: tuple[str, dict[str, Any]] | None = getattr(request.app.state, "linear_viewer_cache", None)
+    if not refresh and cached is not None and cached[0] == settings.LINEAR_API_KEY:
+        return LinearViewerResponse(**cached[1])
+
+    svc = _get_linear_service(request)
+    try:
+        viewer = await svc.fetch_viewer()
+    except LinearServiceError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    finally:
+        await svc.aclose()
+
+    request.app.state.linear_viewer_cache = (settings.LINEAR_API_KEY, viewer)
+    return LinearViewerResponse(**viewer)
+
+
+@router.get(
     "/issues",
     summary="List cached Linear issues",
     description=(
@@ -243,6 +288,7 @@ async def list_linear_issues(
     request: Request,
     state_type: str | None = Query(None, description="Filter by state_type (started, completed, etc.)"),
     priority: int | None = Query(None, description="Filter by priority (0-4)"),
+    assignee_id: str | None = Query(None, description="Filter by Linear assignee user ID (exact match)"),
     q: str | None = Query(None, description="Search title or identifier"),
 ) -> dict[str, Any]:
     """List all cached Linear issues with optional filters."""
@@ -255,6 +301,8 @@ async def list_linear_issues(
             stmt = stmt.where(LinearIssueModel.state_type == state_type)
         if priority is not None:
             stmt = stmt.where(LinearIssueModel.priority == priority)
+        if assignee_id:
+            stmt = stmt.where(LinearIssueModel.assignee_id == assignee_id)
         rows = (await db.execute(stmt)).scalars().all()
 
     issues = [_issue_to_dict(r) for r in rows]

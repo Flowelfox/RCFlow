@@ -200,6 +200,18 @@ query ListAllIssues($after: String) {
 }
 """
 
+_VIEWER_QUERY = """
+query Viewer {
+  viewer {
+    id
+    name
+    displayName
+    email
+    avatarUrl
+  }
+}
+"""
+
 
 def _parse_issue(node: dict[str, Any]) -> dict[str, Any]:
     """Convert a raw GraphQL issue node to a normalised dict."""
@@ -294,6 +306,25 @@ class LinearService:
         data = await self._gql(_TEAMS_QUERY)
         nodes = data.get("teams", {}).get("nodes", [])
         return [{"id": t["id"], "name": t["name"]} for t in nodes]
+
+    async def fetch_viewer(self) -> dict[str, Any]:
+        """Fetch the identity of the user who owns the API key (GraphQL ``viewer``).
+
+        Returns a dict with ``id``, ``name``, ``display_name``, ``email`` and
+        ``avatar_url`` keys. Raises :class:`LinearServiceError` on API failure or
+        when no viewer is returned.
+        """
+        data = await self._gql(_VIEWER_QUERY)
+        viewer = data.get("viewer")
+        if not viewer:
+            raise LinearServiceError("Linear viewer query returned no data")
+        return {
+            "id": viewer["id"],
+            "name": viewer.get("name", ""),
+            "display_name": viewer.get("displayName") or viewer.get("name", ""),
+            "email": viewer.get("email"),
+            "avatar_url": viewer.get("avatarUrl"),
+        }
 
     async def fetch_all_issues(self) -> list[dict[str, Any]]:
         """Fetch all issues across all accessible teams, paginating through all pages.
