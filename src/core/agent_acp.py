@@ -43,6 +43,40 @@ logger = logging.getLogger(__name__)
 _truncate_tool_output = truncate_tool_output
 
 
+def worker_loopback_url(settings: Any) -> str:
+    """Loopback base URL of this worker for agent subprocesses (rcflow-mcp).
+
+    Scheme must match how uvicorn was launched: TLS is on when WSS is enabled
+    (auto self-signed certs) or explicit cert paths are configured.
+    """
+    port = getattr(settings, "RCFLOW_PORT", None) or 53890
+    tls = bool(
+        settings is not None
+        and (
+            getattr(settings, "WSS_ENABLED", False)
+            or (getattr(settings, "SSL_CERTFILE", "") and getattr(settings, "SSL_KEYFILE", ""))
+        )
+    )
+    return f"{'https' if tls else 'http'}://127.0.0.1:{port}"
+
+
+def resolve_mcp_proxy_command() -> tuple[str, list[str]] | None:
+    """Command + args that launch the ``rcflow-mcp`` stdio proxy, or None.
+
+    Frozen (PyInstaller) installs ship a single ``rcflow`` executable, so the
+    proxy runs as its ``mcp-proxy`` subcommand; dev/venv installs use the
+    ``rcflow-mcp`` console script next to the interpreter.
+    """
+    from src.paths import is_frozen  # noqa: PLC0415
+
+    if is_frozen():
+        return sys.executable, ["mcp-proxy"]
+    proxy = Path(sys.executable).parent / ("rcflow-mcp.exe" if sys.platform == "win32" else "rcflow-mcp")
+    if proxy.is_file():
+        return str(proxy), []
+    return None
+
+
 # Maps the ACP tool name (the tool definition name, e.g. "opencode") to the
 # per-tool settings key used for env building, auth preflight, and the
 # expose_rcflow_tools toggle. Identity today; kept as a hook for adapter
@@ -80,20 +114,20 @@ class AcpAgent:
         enabled = bool(self._r._get_managed_config_overrides(settings_key).get("expose_rcflow_tools"))
         if not enabled:
             return []
-        proxy_path = Path(sys.executable).parent / ("rcflow-mcp.exe" if sys.platform == "win32" else "rcflow-mcp")
-        if not proxy_path.is_file():
-            logger.warning("rcflow-mcp proxy not found at %s; MCP bridge disabled for ACP agent", proxy_path)
+        proxy = resolve_mcp_proxy_command()
+        if proxy is None:
+            logger.warning("rcflow-mcp proxy not available; MCP bridge disabled for ACP agent")
             return []
+        command, args = proxy
         token = bridge.tokens.issue(session.id)
-        port = self._r._settings.RCFLOW_PORT if self._r._settings else 53890
         return [
             {
                 "name": "rcflow",
-                "command": str(proxy_path),
-                "args": [],
+                "command": command,
+                "args": args,
                 "env": [
                     {"name": "RCFLOW_MCP_TOKEN", "value": token},
-                    {"name": "RCFLOW_MCP_URL", "value": f"http://127.0.0.1:{port}"},
+                    {"name": "RCFLOW_MCP_URL", "value": worker_loopback_url(self._r._settings)},
                 ],
             }
         ]

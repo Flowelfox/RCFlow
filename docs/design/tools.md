@@ -74,6 +74,8 @@ Each file defines one tool. Drop a `.json` file into `tools/` to register a new 
 
 > **Note:** When `shell` is omitted, it defaults to `/bin/bash` on Linux and `powershell.exe` on Windows.
 >
+> **Built-in `{rcflow}` placeholder:** shell command templates may reference `{rcflow}` — it expands to a command prefix that re-invokes the running RCFlow installation (the frozen binary on packaged installs, `python -m src` in dev), so tools can call RCFlow's own subcommands portably. `system_info` uses `{rcflow} system-info {category}`.
+>
 > **Windows shell handling:** On Windows with a PowerShell shell, `ShellExecutor` uses `create_subprocess_exec` with `-NoProfile -Command` instead of `create_subprocess_shell` (which incorrectly passes `/c` to PowerShell). On Windows with a non-PowerShell shell (e.g. `cmd.exe`), it uses `create_subprocess_shell` without an explicit `executable` to let `COMSPEC` resolve the shell.
 
 ## HTTP API Tool Example

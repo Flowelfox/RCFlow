@@ -685,6 +685,32 @@ def _cmd_update(args: argparse.Namespace) -> None:
     sys.exit(run_update(check_only=args.check, assume_yes=args.yes))
 
 
+def _cmd_system_info(args: argparse.Namespace) -> None:
+    """Print host system information as JSON (used by the system_info tool).
+
+    Exists as a subcommand so the tool's shell template works on frozen
+    installs, where ``python3 -m src.tools.scripts.system_info`` has no
+    importable ``src`` package.
+    """
+    from src.tools.scripts.system_info import main as system_info_main  # noqa: PLC0415
+
+    sys.argv = ["system_info", args.category]
+    system_info_main()
+
+
+def _cmd_mcp_proxy(args: argparse.Namespace) -> None:
+    """Run the MCP bridge stdio proxy (spawned by agent subprocesses).
+
+    Equivalent to the ``rcflow-mcp`` console script; exists as a subcommand so
+    frozen (PyInstaller) installs can spawn the proxy through the single
+    ``rcflow`` binary without shipping a second executable.
+    """
+    del args
+    from src.mcp_proxy import main as mcp_proxy_main  # noqa: PLC0415
+
+    mcp_proxy_main()
+
+
 # ── Worker-service control (shared with the GUI via the same controller) ─────
 
 
@@ -858,6 +884,19 @@ def main() -> None:
         help="Skip the confirmation prompt (required for non-interactive use)",
     )
     update_parser.set_defaults(func=_cmd_update)
+
+    mcp_proxy_parser = subparsers.add_parser(
+        "mcp-proxy",
+        help="Run the MCP bridge stdio proxy (used internally by agent subprocesses)",
+    )
+    mcp_proxy_parser.set_defaults(func=_cmd_mcp_proxy)
+
+    system_info_parser = subparsers.add_parser(
+        "system-info",
+        help="Print host system information as JSON (used internally by the system_info tool)",
+    )
+    system_info_parser.add_argument("category", choices=["cpu", "memory", "disk", "network", "os", "all"])
+    system_info_parser.set_defaults(func=_cmd_system_info)
 
     # ── Worker-service control ──────────────────────────────────────────────
     # `run` is the raw foreground worker the service execs; these verbs ask the

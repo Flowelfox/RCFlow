@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from src.executors.shell import ShellExecutor
-from src.tools.loader import load_tool_file
+from src.tools.loader import ToolDefinition, load_tool_file
 
 
 @pytest.fixture
@@ -45,3 +45,20 @@ class TestShellExecutor:
         output = "".join(c.content for c in chunks)
         assert "line1" in output
         assert "line2" in output
+
+
+class TestRcflowPlaceholder:
+    @pytest.mark.asyncio
+    async def test_rcflow_placeholder_resolves_to_self_invocation(self):
+        tool = ToolDefinition(
+            name="selfcall",
+            description="d",
+            session_type="one-shot",
+            llm_context="stateless",
+            executor="shell",
+            parameters={"type": "object", "properties": {}},
+            executor_config={"shell": {"command_template": "{rcflow} system-info os", "stream_output": False}},
+        )
+        result = await ShellExecutor().execute(tool, {})
+        assert result.exit_code == 0, result.error
+        assert '"system"' in result.output

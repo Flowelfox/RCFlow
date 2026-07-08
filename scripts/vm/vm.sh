@@ -175,6 +175,23 @@ cmd_smoke_acp() {
     --base-url "https://127.0.0.1:$local_port" --api-key "$key" "$@")
 }
 
+cmd_smoke_mcp() {
+  # MCP bridge E2E: OpenCode-over-ACP calls mcp__rcflow__system_info through
+  # the rcflow-mcp proxy and the /api/mcp/* endpoints. Needs OpenCode installed
+  # and the "Expose RCFlow tools" setting enabled for opencode on the worker.
+  local port key local_port tunnel_pid
+  port=$(worker_port)
+  key=$(worker_api_key)
+  local_port=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
+  ssh "${SSH_OPTS[@]}" -f -N -o ExitOnForwardFailure=yes \
+    -L "$local_port:localhost:$port" "$VM_HOST"
+  tunnel_pid=$(pgrep -f "ssh.*-L $local_port:localhost:$port" | head -1)
+  trap '[[ -n "${tunnel_pid:-}" ]] && kill "$tunnel_pid" 2>/dev/null || true' EXIT
+  echo "SSH tunnel 127.0.0.1:$local_port → VM:$port (pid $tunnel_pid)"
+  (cd "$REPO_ROOT" && uv run python scripts/vm/mcp_smoke_test.py \
+    --base-url "https://127.0.0.1:$local_port" --api-key "$key" "$@")
+}
+
 cmd_client_start() {
   vssh "pgrep -x '$CLIENT_PROC' >/dev/null" && { echo "client already running"; return 0; }
   vssh "DISPLAY=:0 nohup $CLIENT_BIN >$CLIENT_LOG 2>&1 & echo \"started pid \$!\""
@@ -272,6 +289,8 @@ Worker E2E:
   smoke-acp [--verbose]     OpenCode-over-ACP E2E (#opencode prompt → agent banner →
                             streamed answer → follow-up turn → session end).
                             Needs OpenCode installed on the worker (ACP is the default)
+  smoke-mcp                 MCP bridge E2E (agent calls rcflow system_info via the
+                            rcflow-mcp proxy). Needs OpenCode + expose_rcflow_tools on
 
 Client (GUI on VM display :0):
   client-start | client-stop | client-status
@@ -308,6 +327,7 @@ case "$cmd" in
   worker-logs)    cmd_worker_logs "$@" ;;
   smoke)          cmd_smoke "$@" ;;
   smoke-acp)      cmd_smoke_acp "$@" ;;
+  smoke-mcp)      cmd_smoke_mcp "$@" ;;
   client-start)   cmd_client_start "$@" ;;
   client-stop)    cmd_client_stop "$@" ;;
   client-status)  cmd_client_status "$@" ;;

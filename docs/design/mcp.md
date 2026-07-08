@@ -1,5 +1,5 @@
 ---
-updated: 2026-07-07
+updated: 2026-07-08
 ---
 
 # MCP Agent Bridge
@@ -62,6 +62,8 @@ Permissions: `can_use_tool` short-circuits `mcp__rcflow__*` tools with an allow 
 
 
 ### Codex — stdio proxy + HTTP
+
+Frozen (PyInstaller) installs have no venv console scripts, so the proxy runs as the `rcflow mcp-proxy` subcommand of the single worker binary — `resolve_mcp_proxy_command()` picks the right invocation per install type, and the worker URL handed to the proxy carries the correct scheme (https when TLS is enabled, which is the default; the proxy accepts the worker's self-signed certificate since authentication is the bearer token).
 
 Codex only speaks external MCP servers, so RCFlow ships `rcflow-mcp` (`src/mcp_proxy.py`, console script in `[project.scripts]`): a stdlib-only, newline-delimited JSON-RPC stdio server handling `initialize` / `tools/list` / `tools/call` (+ `ping`) and proxying the tool methods to the worker's `/api/mcp/*` endpoints.
 

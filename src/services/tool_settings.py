@@ -593,7 +593,12 @@ def _strip_codex_mcp_block(text: str) -> str:
     return remainder.rstrip() + "\n"
 
 
-def ensure_codex_mcp_registration(codex_home: Path, enabled: bool, command: str | None) -> None:
+def ensure_codex_mcp_registration(
+    codex_home: Path,
+    enabled: bool,
+    command: str | None,
+    args: list[str] | None = None,
+) -> None:
     """Idempotently add/remove the ``[mcp_servers.rcflow]`` block in the managed ``config.toml``.
 
     The block is marker-delimited and machine-owned; user-added entries
@@ -623,13 +628,13 @@ def ensure_codex_mcp_registration(codex_home: Path, enabled: bool, command: str 
         if "rcflow" in parsed.get("mcp_servers", {}):
             logger.warning("User-owned [mcp_servers.rcflow] found in %s; leaving it untouched", config_path)
         else:
-            # json.dumps produces a valid TOML basic string (handles Windows
-            # backslashes and quotes).
+            # json.dumps produces valid TOML basic strings / arrays of strings
+            # (handles Windows backslashes and quotes).
             block = (
                 f"{_CODEX_MCP_BLOCK_BEGIN}\n"
                 f"[mcp_servers.rcflow]\n"
                 f"command = {json.dumps(command)}\n"
-                f"args = []\n"
+                f"args = {json.dumps(args or [])}\n"
                 f"{_CODEX_MCP_BLOCK_END}\n"
             )
             new_text = (stripped.rstrip() + "\n\n" if stripped.strip() else "") + block

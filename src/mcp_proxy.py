@@ -22,6 +22,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import ssl
 import sys
 import threading
 import urllib.error
@@ -44,6 +45,20 @@ def _token() -> str:
     return os.environ.get("RCFLOW_MCP_TOKEN", "")
 
 
+def _ssl_context() -> ssl.SSLContext | None:
+    """Unverified TLS context for https worker URLs.
+
+    The worker serves a self-signed certificate on loopback by default;
+    authentication is the per-session bearer token, not the certificate.
+    """
+    if not _base_url().startswith("https"):
+        return None
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    return ctx
+
+
 def _worker_request(method: str, path: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
     """Call one worker endpoint; raises ``RuntimeError`` with a readable message."""
     req = urllib.request.Request(
@@ -56,7 +71,7 @@ def _worker_request(method: str, path: str, body: dict[str, Any] | None = None) 
         },
     )
     try:
-        with urllib.request.urlopen(req, timeout=_HTTP_TIMEOUT) as resp:
+        with urllib.request.urlopen(req, timeout=_HTTP_TIMEOUT, context=_ssl_context()) as resp:
             return json.loads(resp.read().decode())
     except urllib.error.HTTPError as e:
         detail = ""

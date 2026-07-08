@@ -45,6 +45,7 @@ Entry point: **`just vm <command> [args]`** (wraps `scripts/vm/vm.sh`). Run `jus
 | `just vm deploy-client [deb]` | Copy newest (or given) client `.deb` to VM, `dpkg -i` |
 | `just vm smoke [--verbose]` | Full WebSocket E2E round-trip through an SSH tunnel (see below) |
 | `just vm smoke-acp [--verbose]` | OpenCode-over-ACP E2E: `#opencode` prompt → agent banner → streamed thinking/answer → follow-up turn on the same live agent process → clean session end. Requires the managed OpenCode binary installed on the VM (ACP is the default executor mode; `RCFLOW_OPENCODE_EXECUTOR=legacy` would opt out) |
+| `just vm smoke-mcp` | MCP bridge E2E: the agent calls `mcp__rcflow__system_info` through the `rcflow-mcp` proxy and `/api/mcp/*`. Needs OpenCode installed and `expose_rcflow_tools` enabled for opencode on the worker |
 | `just vm worker-status/-start/-stop/-restart/-logs [n]` | systemd service control + `journalctl` tail |
 | `just vm client-start/-stop/-status/-logs [n]` | Launch/kill the GUI client on display `:0`; logs go to `/tmp/rcflowclient.log` on the VM |
 | `just vm screenshot [name]` | Capture the VM screen → `logs/vm/<name>.png` locally (gitignored) |

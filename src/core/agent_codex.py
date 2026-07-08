@@ -14,11 +14,11 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from src.core.agent_acp import resolve_mcp_proxy_command, worker_loopback_url
 from src.core.agent_auth import agent_configuration_issue
 from src.core.agents import truncate_tool_output
 from src.core.buffer import MessageType
@@ -138,14 +138,15 @@ class CodexAgent:
             return
 
         enabled = bool(self._r._get_managed_config_overrides("codex").get("expose_rcflow_tools"))
-        proxy_path = Path(sys.executable).parent / ("rcflow-mcp.exe" if sys.platform == "win32" else "rcflow-mcp")
-        if enabled and not proxy_path.is_file():
-            logger.warning("rcflow-mcp proxy not found at %s; MCP bridge disabled for Codex", proxy_path)
+        proxy = resolve_mcp_proxy_command()
+        if enabled and proxy is None:
+            logger.warning("rcflow-mcp proxy not available; MCP bridge disabled for Codex")
             enabled = False
+        command, proxy_args = proxy if proxy is not None else ("", [])
 
         try:
             codex_home = self._r._tool_settings.get_config_dir("codex")
-            ensure_codex_mcp_registration(codex_home, enabled, str(proxy_path))
+            ensure_codex_mcp_registration(codex_home, enabled, command, proxy_args)
         except Exception:
             logger.warning("Failed to sync Codex MCP bridge registration", exc_info=True)
             return
@@ -154,9 +155,8 @@ class CodexAgent:
             return
 
         token = bridge.tokens.issue(session.id)
-        port = self._r._settings.RCFLOW_PORT if self._r._settings else 53890
         executor._extra_env["RCFLOW_MCP_TOKEN"] = token
-        executor._extra_env["RCFLOW_MCP_URL"] = f"http://127.0.0.1:{port}"
+        executor._extra_env["RCFLOW_MCP_URL"] = worker_loopback_url(self._r._settings)
 
     async def _start_codex(
         self,

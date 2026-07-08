@@ -8,7 +8,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.core.agent_acp import AcpAgent
+import src.core.agent_acp as agent_acp_mod
+from src.core.agent_acp import AcpAgent, resolve_mcp_proxy_command, worker_loopback_url
 from src.core.buffer import MessageType
 from src.core.permissions import PermissionDecision
 from src.core.session import ActiveSession, SessionType
@@ -24,7 +25,7 @@ def _router() -> MagicMock:
     router._handle_permission_check = AsyncMock(return_value=PermissionDecision.ALLOW)
     router._mcp_bridge = MagicMock()
     router._mcp_bridge.tokens.issue.return_value = "tok-abc"
-    router._settings = MagicMock(RCFLOW_PORT=53890)
+    router._settings = MagicMock(RCFLOW_PORT=53890, WSS_ENABLED=False, SSL_CERTFILE="", SSL_KEYFILE="")
     router._session_manager = None
     return router
 
@@ -36,6 +37,38 @@ def _buffer_types(session: ActiveSession) -> list[str]:
 async def _chunks(events: list[dict[str, Any]]):
     for e in events:
         yield ExecutionChunk(stream="stdout", content=json.dumps(e))
+
+
+class TestWorkerLoopbackUrl:
+    def test_http_when_no_tls(self) -> None:
+        settings = MagicMock(RCFLOW_PORT=1234, WSS_ENABLED=False, SSL_CERTFILE="", SSL_KEYFILE="")
+        assert worker_loopback_url(settings) == "http://127.0.0.1:1234"
+
+    def test_https_when_wss_enabled(self) -> None:
+        settings = MagicMock(RCFLOW_PORT=1234, WSS_ENABLED=True, SSL_CERTFILE="", SSL_KEYFILE="")
+        assert worker_loopback_url(settings) == "https://127.0.0.1:1234"
+
+    def test_https_when_explicit_certs(self) -> None:
+        settings = MagicMock(RCFLOW_PORT=1234, WSS_ENABLED=False, SSL_CERTFILE="/c.pem", SSL_KEYFILE="/k.pem")
+        assert worker_loopback_url(settings) == "https://127.0.0.1:1234"
+
+
+class TestResolveMcpProxyCommand:
+    def test_frozen_uses_rcflow_subcommand(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("src.paths.is_frozen", lambda: True)
+        monkeypatch.setattr(agent_acp_mod.sys, "executable", "/opt/rcflow/rcflow")
+        assert resolve_mcp_proxy_command() == ("/opt/rcflow/rcflow", ["mcp-proxy"])
+
+    def test_venv_uses_console_script(self, monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+        monkeypatch.setattr("src.paths.is_frozen", lambda: False)
+        (tmp_path / "rcflow-mcp").write_text("#!/bin/sh\n")
+        monkeypatch.setattr(agent_acp_mod.sys, "executable", str(tmp_path / "python"))
+        assert resolve_mcp_proxy_command() == (str(tmp_path / "rcflow-mcp"), [])
+
+    def test_missing_everywhere_returns_none(self, monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+        monkeypatch.setattr("src.paths.is_frozen", lambda: False)
+        monkeypatch.setattr(agent_acp_mod.sys, "executable", str(tmp_path / "python"))
+        assert resolve_mcp_proxy_command() is None
 
 
 class TestPermissionCallback:
