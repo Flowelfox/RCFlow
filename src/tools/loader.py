@@ -20,6 +20,13 @@ VALID_OS = {"windows", "linux", "darwin"}
 # (recursion guard — an agent must not be able to spawn another agent).
 AGENT_EXECUTORS = {"claude_code", "codex", "opencode", "acp"}
 
+# Reserved parameter names a tool definition may not declare: they collide with
+# built-in shell command-template placeholders that the executor substitutes
+# with trusted values (e.g. ``{rcflow}`` → the worker's own invocation prefix).
+# Allowing a tool parameter of the same name would let caller-supplied input
+# occupy a trusted command-position token.
+RESERVED_PARAM_NAMES = {"rcflow"}
+
 _DEFAULT_SHELL = "powershell.exe" if sys.platform == "win32" else "/bin/bash"
 
 # Map sys.platform values to the canonical os names used in tool definitions.
@@ -108,6 +115,10 @@ class ToolDefinition(BaseModel):
     parameters: dict[str, Any]
     executor_config: dict[str, Any]
     expose_to_agents: bool = False
+    # When exposed to agents, whether calls skip the bridge's approval gate.
+    # Reserve for genuinely read-only tools (e.g. system_info); anything that
+    # can mutate the host must leave this False so agent calls are gated.
+    agent_safe: bool = False
 
     @property
     def mention_name(self) -> str:
@@ -171,6 +182,13 @@ def load_tool_file(path: Path) -> ToolDefinition:
     for os_val in tool.os:
         if os_val not in VALID_OS:
             raise ValueError(f"Tool '{tool.name}': invalid os value '{os_val}'. Must be one of {VALID_OS}")
+    declared_params = set((tool.parameters or {}).get("properties", {}))
+    reserved_clash = declared_params & RESERVED_PARAM_NAMES
+    if reserved_clash:
+        raise ValueError(
+            f"Tool '{tool.name}': parameter name(s) {sorted(reserved_clash)} are reserved "
+            f"(built-in command-template placeholders)"
+        )
     if tool.expose_to_agents and tool.executor in AGENT_EXECUTORS:
         logger.warning(
             "Tool '%s': expose_to_agents ignored for agent executor '%s' (recursion guard)",

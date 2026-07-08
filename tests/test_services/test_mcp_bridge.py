@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from src.core.permissions import PermissionDecision
+from src.core.session import SessionStatus
 from src.services.mcp_bridge import McpBridge, McpSessionTokenRegistry
 from src.tools.registry import ToolRegistry
 
@@ -21,7 +22,13 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-def _write_tool(tools_dir: Path, name: str, *, executor: str = "shell", expose: bool = True) -> None:
+def _active_session(session_id: str = "sess-1") -> MagicMock:
+    return MagicMock(id=session_id, status=SessionStatus.ACTIVE)
+
+
+def _write_tool(
+    tools_dir: Path, name: str, *, executor: str = "shell", expose: bool = True, agent_safe: bool = False
+) -> None:
     executor_config = {
         "shell": {"command_template": "echo {value}", "stream_output": False},
         "http": {"url_template": "http://example.com/{value}"},
@@ -39,6 +46,7 @@ def _write_tool(tools_dir: Path, name: str, *, executor: str = "shell", expose: 
                 "llm_context": "stateless",
                 "executor": executor,
                 "expose_to_agents": expose,
+                "agent_safe": agent_safe,
                 "parameters": {
                     "type": "object",
                     "properties": {"value": {"type": "string"}},
@@ -54,7 +62,8 @@ def _write_tool(tools_dir: Path, name: str, *, executor: str = "shell", expose: 
 def registry(tmp_path: Path) -> ToolRegistry:
     tools_dir = tmp_path / "tools"
     tools_dir.mkdir()
-    _write_tool(tools_dir, "synthetic_exposed")
+    _write_tool(tools_dir, "synthetic_exposed", agent_safe=True)
+    _write_tool(tools_dir, "synthetic_unsafe")  # exposed, needs approval (not agent_safe)
     _write_tool(tools_dir, "synthetic_hidden", expose=False)
     _write_tool(tools_dir, "synthetic_agent", executor="claude_code")
     _write_tool(tools_dir, "synthetic_worktree", executor="worktree")
@@ -85,7 +94,7 @@ class TestSeamlessnessContract:
     @pytest.mark.asyncio
     async def test_synthetic_tool_dispatches(self, registry: ToolRegistry) -> None:
         bridge, session_manager, router = _make_bridge(registry)
-        session_manager.get_session.return_value = MagicMock(id="sess-1")
+        session_manager.get_session.return_value = _active_session()
 
         outcome = await bridge.call_tool("sess-1", "synthetic_exposed", {"value": "x"})
 
@@ -112,7 +121,7 @@ class TestFiltering:
     @pytest.mark.asyncio
     async def test_call_unexposed_tool_errors(self, registry: ToolRegistry) -> None:
         bridge, session_manager, router = _make_bridge(registry)
-        session_manager.get_session.return_value = MagicMock(id="sess-1")
+        session_manager.get_session.return_value = _active_session()
 
         for name in ("synthetic_hidden", "synthetic_agent", "no_such_tool"):
             outcome = await bridge.call_tool("sess-1", name, {})
@@ -136,7 +145,7 @@ class TestCallTool:
     @pytest.mark.asyncio
     async def test_executor_error_propagates(self, registry: ToolRegistry) -> None:
         bridge, session_manager, router = _make_bridge(registry)
-        session_manager.get_session.return_value = MagicMock(id="sess-1")
+        session_manager.get_session.return_value = _active_session()
         router.execute_one_shot_tool = AsyncMock(return_value=("boom", True))
 
         outcome = await bridge.call_tool("sess-1", "synthetic_exposed", {"value": "x"})
@@ -150,7 +159,7 @@ class TestWorktreeGate:
 
     def _setup(self, registry: ToolRegistry, decision: PermissionDecision) -> tuple[McpBridge, MagicMock]:
         bridge, session_manager, router = _make_bridge(registry)
-        session_manager.get_session.return_value = MagicMock(id="sess-1")
+        session_manager.get_session.return_value = _active_session()
         router._handle_permission_check = AsyncMock(return_value=decision)
         return bridge, router
 
@@ -185,13 +194,64 @@ class TestWorktreeGate:
         router.execute_one_shot_tool.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_non_worktree_tools_not_gated(self, registry: ToolRegistry) -> None:
+    async def test_agent_safe_tool_not_gated(self, registry: ToolRegistry) -> None:
         bridge, router = self._setup(registry, PermissionDecision.DENY)
 
         outcome = await bridge.call_tool("sess-1", "synthetic_exposed", {"value": "x"})
 
         assert not outcome.is_error
         router._handle_permission_check.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_unsafe_tool_requires_approval(self, registry: ToolRegistry) -> None:
+        # Exposed shell tool without agent_safe must be gated (closes the hole
+        # where any future non-worktree exposed tool would run promptless).
+        bridge, router = self._setup(registry, PermissionDecision.DENY)
+
+        outcome = await bridge.call_tool("sess-1", "synthetic_unsafe", {"value": "x"})
+
+        assert outcome.is_error
+        assert "denied" in outcome.text
+        router._handle_permission_check.assert_awaited_once()
+        router.execute_one_shot_tool.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_unsafe_tool_approved_dispatches(self, registry: ToolRegistry) -> None:
+        bridge, router = self._setup(registry, PermissionDecision.ALLOW)
+
+        outcome = await bridge.call_tool("sess-1", "synthetic_unsafe", {"value": "x"})
+
+        assert not outcome.is_error
+        router._handle_permission_check.assert_awaited_once()
+        router.execute_one_shot_tool.assert_awaited_once()
+
+
+class TestSessionStatusGuard:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "status", [SessionStatus.PAUSED, SessionStatus.CANCELLED, SessionStatus.COMPLETED, SessionStatus.FAILED]
+    )
+    async def test_non_runnable_session_rejected(self, registry: ToolRegistry, status: SessionStatus) -> None:
+        bridge, session_manager, router = _make_bridge(registry)
+        session_manager.get_session.return_value = MagicMock(id="sess-1", status=status)
+
+        outcome = await bridge.call_tool("sess-1", "synthetic_exposed", {"value": "x"})
+
+        assert outcome.is_error
+        assert "not active" in outcome.text
+        router.execute_one_shot_tool.assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("status", [SessionStatus.ACTIVE, SessionStatus.EXECUTING])
+    async def test_runnable_session_allowed(self, registry: ToolRegistry, status: SessionStatus) -> None:
+        # A bridge call normally lands mid-turn (EXECUTING) — must not be blocked.
+        bridge, session_manager, router = _make_bridge(registry)
+        session_manager.get_session.return_value = MagicMock(id="sess-1", status=status)
+
+        outcome = await bridge.call_tool("sess-1", "synthetic_exposed", {"value": "x"})
+
+        assert not outcome.is_error
+        router.execute_one_shot_tool.assert_awaited_once()
 
 
 class TestTokenRegistry:

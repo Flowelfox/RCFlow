@@ -7,6 +7,7 @@
   "llm_context": "stateless",
   "executor": "shell",
   "expose_to_agents": true,
+  "agent_safe": true,
 
   "parameters": {
     "type": "object",

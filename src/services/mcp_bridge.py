@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from src.core.llm import ToolCallRequest
+from src.core.session import SessionStatus
 from src.tools.loader import AGENT_EXECUTORS, ToolDefinition
 from src.tools.registry import ToolRegistry
 
@@ -32,6 +33,25 @@ if TYPE_CHECKING:
     from src.core.session import SessionManager
 
 logger = logging.getLogger(__name__)
+
+# Name of the in-process / proxied MCP server RCFlow exposes to nested agents.
+# Agents surface its tools as ``mcp__<server>__<tool>``. Single source of truth
+# so the SDK server, the stdio proxy, and the Claude Code permission
+# short-circuit never drift.
+RCFLOW_MCP_SERVER_NAME = "rcflow"
+RCFLOW_MCP_TOOL_PREFIX = f"mcp__{RCFLOW_MCP_SERVER_NAME}__"
+
+# Statuses in which a session can no longer run an agent-initiated tool call:
+# terminal states plus PAUSED. EXECUTING/ACTIVE/CREATED remain runnable — a
+# bridge call normally lands mid-turn while the session is EXECUTING.
+_NON_RUNNABLE_STATUSES = frozenset(
+    {
+        SessionStatus.PAUSED,
+        SessionStatus.COMPLETED,
+        SessionStatus.FAILED,
+        SessionStatus.CANCELLED,
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -101,6 +121,19 @@ class McpBridge:
         # flag off) and here, so a hand-constructed definition can't slip through.
         return tool.expose_to_agents and tool.executor not in AGENT_EXECUTORS
 
+    @staticmethod
+    def _requires_agent_approval(tool_def: ToolDefinition, arguments: dict[str, Any]) -> bool:
+        """Whether an agent-initiated call to *tool_def* needs user approval.
+
+        Read-only worktree ``list`` and any tool flagged ``agent_safe`` are
+        exempt; everything else (all mutating operations) requires approval.
+        """
+        if tool_def.agent_safe:
+            return False
+        if tool_def.executor == "worktree":
+            return arguments.get("action") != "list"
+        return True
+
     def list_agent_tools(self) -> list[McpToolSpec]:
         """MCP tool list derived live from the registry — never hardcode names."""
         return [
@@ -119,26 +152,32 @@ class McpBridge:
         session = self._session_manager.get_session(session_id)
         if session is None:
             return ToolCallOutcome(text=f"Unknown or ended session: {session_id}", is_error=True)
+        # A token can outlive its agent (orphaned proxy, or an in-flight call
+        # landing after cancel/pause). Reject only sessions that are no longer
+        # runnable — terminal or paused. A bridge call normally arrives *during*
+        # an agent turn, when the session is EXECUTING, so that must stay valid.
+        if session.status in _NON_RUNNABLE_STATUSES:
+            return ToolCallOutcome(text=f"Session is not active (status: {session.status.value})", is_error=True)
 
         tool_def = self._tool_registry.get(tool_name)
         if tool_def is None or not self._exposable(tool_def):
             return ToolCallOutcome(text=f"Tool not available over the agent bridge: {tool_name}", is_error=True)
 
-        # Mutating worktree operations always require explicit user approval,
-        # same rule as the LLM tool loop (`_execute_tool`). The bridge is the
-        # single gate for both agents — Claude Code's `can_use_tool` waves
-        # `mcp__rcflow__*` through so this prompt is never doubled.
-        if tool_def.executor == "worktree" and arguments.get("action") != "list":
+        # The bridge is the single permission gate for agent-initiated tool
+        # calls (Claude Code's `can_use_tool` waves `mcp__rcflow__*` through so
+        # the prompt is never doubled). Everything that can mutate the host is
+        # gated here; only tools explicitly flagged `agent_safe` (read-only
+        # demonstrators like system_info) skip it. This mirrors the LLM loop's
+        # always-ask rule for worktree ops and closes the gap for any future
+        # exposed shell/http tool.
+        if self._requires_agent_approval(tool_def, arguments):
             if session.permission_manager is None:
                 from src.core.permissions import PermissionManager  # noqa: PLC0415
 
                 session.permission_manager = PermissionManager()
             decision = await self._prompt_router._handle_permission_check(session, tool_def.name, dict(arguments))
             if decision.value == "deny":
-                return ToolCallOutcome(
-                    text=f"Worktree operation '{arguments.get('action')}' denied by user.",
-                    is_error=True,
-                )
+                return ToolCallOutcome(text=f"Tool '{tool_def.name}' denied by user.", is_error=True)
 
         tool_call = ToolCallRequest(
             tool_use_id=f"mcp-{uuid.uuid4().hex[:12]}",

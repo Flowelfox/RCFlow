@@ -86,3 +86,23 @@ class TestExposeToAgents:
         sample_tool_json["executor"] = "claude_code"
         sample_tool_json["executor_config"] = {"claude_code": {}}
         assert self._load(sample_tool_json).expose_to_agents is False
+
+
+class TestReservedParamNames:
+    def _load(self, data: dict):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(data, f)
+            f.flush()
+            return load_tool_file(Path(f.name))
+
+    def test_rcflow_param_rejected(self, sample_tool_json: dict):
+        sample_tool_json["parameters"]["properties"]["rcflow"] = {"type": "string"}
+        with pytest.raises(ValueError, match="reserved"):
+            self._load(sample_tool_json)
+
+    def test_normal_params_ok(self, sample_tool_json: dict):
+        tool = self._load(sample_tool_json)
+        assert "rcflow" not in tool.parameters.get("properties", {})
+
+    def test_agent_safe_defaults_false(self, sample_tool_json: dict):
+        assert self._load(sample_tool_json).agent_safe is False

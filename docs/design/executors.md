@@ -1,5 +1,5 @@
 ---
-updated: 2026-07-07
+updated: 2026-07-08
 ---
 
 # Executors
@@ -177,7 +177,9 @@ The `acp` executor drives any agent that speaks the [Agent Client Protocol](http
 | `args` | `[]` | Arguments (e.g. `["acp"]` for OpenCode's server mode) |
 | `timeout` | `1800` | Per-turn wall-clock timeout in seconds |
 
-**Known limitation (OpenCode):** OpenCode's default policy auto-allows edits, so it rarely asks for permission — matching the legacy path's behaviour. The relay is fully wired; agents that ask (codex-acp does by default) get the interactive widget. Seeding ask-mode into OpenCode's own config needs a verified delivery mechanism first.
+**Known limitations:**
+- OpenCode's default policy auto-allows edits, so it rarely asks for permission — matching the legacy path's behaviour. The relay is fully wired; agents that ask (codex-acp does by default) get the interactive widget. Seeding ask-mode into OpenCode's own config needs a verified delivery mechanism first.
+- **Per-tool `model` / `approval_mode` settings are not applied on the ACP path.** ACP's `session/new` has no standard model parameter, and `AcpExecutor` only forwards `timeout` from the managed config overrides. A user who configured a specific model for OpenCode/Codex gets the agent's own default when the tool runs over ACP (the default mode). Wiring model selection needs the agent's `set_session_mode` / model-enumeration surface; pin the agent to the legacy executor (`RCFLOW_*_EXECUTOR=legacy`) if a specific model is required meanwhile.
 
 ## Worktree Executor
 

@@ -39,6 +39,12 @@ async def _chunks(events: list[dict[str, Any]]):
         yield ExecutionChunk(stream="stdout", content=json.dumps(e))
 
 
+def _mock_executor(acp_session_id: str = "ses-live"):
+    ex = MagicMock()
+    ex.acp_session_id = acp_session_id
+    return ex
+
+
 class TestWorkerLoopbackUrl:
     def test_http_when_no_tls(self) -> None:
         settings = MagicMock(RCFLOW_PORT=1234, WSS_ENABLED=False, SSL_CERTFILE="", SSL_KEYFILE="")
@@ -90,6 +96,34 @@ class TestPermissionCallback:
         assert chosen == "opt-allow"
         router._handle_permission_check.assert_awaited_once_with(session, "write", {"a": 1})
         assert session.permission_manager is not None
+
+    @pytest.mark.asyncio
+    async def test_allow_prefers_once_not_always(self) -> None:
+        # A single Allow must not escalate to allow_always even when the agent
+        # lists it first.
+        router = _router()
+        agent = AcpAgent(router)
+        cb = agent._make_permission_callback(_session())
+
+        chosen = await cb(
+            {"title": "write"},
+            [
+                {"option_id": "opt-always", "name": "Always", "kind": "allow_always"},
+                {"option_id": "opt-once", "name": "Allow", "kind": "allow_once"},
+                {"option_id": "opt-reject", "name": "Reject", "kind": "reject_once"},
+            ],
+        )
+        assert chosen == "opt-once"
+
+    @pytest.mark.asyncio
+    async def test_allow_with_no_allow_option_cancels(self) -> None:
+        # Never turn an Allow into a reject when the agent offered no allow kind.
+        router = _router()
+        agent = AcpAgent(router)
+        cb = agent._make_permission_callback(_session())
+
+        chosen = await cb({"title": "x"}, [{"option_id": "opt-reject", "name": "Reject", "kind": "reject_once"}])
+        assert chosen is None
 
     @pytest.mark.asyncio
     async def test_deny_selects_reject_option(self) -> None:
@@ -159,6 +193,7 @@ class TestRelay:
 
         completed = await agent._relay_acp_stream(
             session,
+            _mock_executor(),
             _chunks(
                 [
                     {"type": "thought", "text": "thinking"},
@@ -202,7 +237,9 @@ class TestRelay:
         agent = AcpAgent(router)
         session = _session()
 
-        completed = await agent._relay_acp_stream(session, _chunks([{"type": "error", "message": "boom"}]))
+        completed = await agent._relay_acp_stream(
+            session, _mock_executor(), _chunks([{"type": "error", "message": "boom"}])
+        )
 
         assert not completed
         errors = [m for m in session.buffer.text_history if m.message_type == MessageType.ERROR]
@@ -214,7 +251,9 @@ class TestRelay:
         agent = AcpAgent(router)
         session = _session()
 
-        completed = await agent._relay_acp_stream(session, _chunks([{"type": "turn_end", "stop_reason": "cancelled"}]))
+        completed = await agent._relay_acp_stream(
+            session, _mock_executor(), _chunks([{"type": "turn_end", "stop_reason": "cancelled"}])
+        )
 
         assert completed
         router._fire_summary_task.assert_not_called()
@@ -225,7 +264,9 @@ class TestRelay:
         agent = AcpAgent(router)
         session = _session()
 
-        completed = await agent._relay_acp_stream(session, _chunks([{"type": "turn_end", "stop_reason": "refusal"}]))
+        completed = await agent._relay_acp_stream(
+            session, _mock_executor(), _chunks([{"type": "turn_end", "stop_reason": "refusal"}])
+        )
 
         assert completed
         errors = [m for m in session.buffer.text_history if m.message_type == MessageType.ERROR]

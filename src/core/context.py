@@ -28,6 +28,7 @@ from src.core.buffer import MessageType
 from src.core.session import ActiveSession, ActivityState
 from src.database.models import Artifact as ArtifactModel
 from src.database.models import Task as TaskModel
+from src.tools.loader import AGENT_EXECUTORS
 
 if TYPE_CHECKING:
     from src.core.prompt_router import PromptRouter
@@ -159,9 +160,9 @@ class ContextBuilder:
         if not resolved:
             return None
 
-        agent_tools = [(n, d) for n, d, e in resolved if e in ("claude_code", "codex", "opencode")]
+        agent_tools = [(n, d) for n, d, e in resolved if e in AGENT_EXECUTORS]
         worktree_tools = [(n, d) for n, d, e in resolved if e == "worktree"]
-        other_tools = [(n, d) for n, d, e in resolved if e not in ("claude_code", "codex", "opencode", "worktree")]
+        other_tools = [(n, d) for n, d, e in resolved if e not in AGENT_EXECUTORS and e != "worktree"]
 
         parts: list[str] = []
 
@@ -456,7 +457,7 @@ class ContextBuilder:
                 tool_def = candidate
                 break
 
-        if tool_def is None or tool_def.executor not in ("claude_code", "codex", "opencode"):
+        if tool_def is None or tool_def.executor not in AGENT_EXECUTORS:
             return False
 
         # Strip all #mentions and @mentions — if nothing meaningful remains,
@@ -481,11 +482,7 @@ class ContextBuilder:
         """
         if session.title is not None:
             return False
-        if (
-            session.claude_code_executor is not None
-            or session.codex_executor is not None
-            or session.opencode_executor is not None
-        ):
+        if session.agent_type is not None:
             return False
         if session.input_tokens or session.output_tokens or session.tool_input_tokens or session.tool_output_tokens:
             return False
@@ -570,7 +567,7 @@ class ContextBuilder:
 
         # Build tool_input based on executor type
         tool_input: dict[str, Any] = {}
-        if tool_def.executor in ("claude_code", "codex", "opencode"):
+        if tool_def.executor in AGENT_EXECUTORS:
             tool_input["prompt"] = display_text or "Ready for instructions."
             if working_dir:
                 tool_input["working_directory"] = working_dir
@@ -630,7 +627,7 @@ class ContextBuilder:
         # to the session's selected project so commands run in the folder the
         # user picked rather than the server's cwd.
         if (
-            tool_def.executor in ("shell", "claude_code", "codex", "opencode")
+            (tool_def.executor == "shell" or tool_def.executor in AGENT_EXECUTORS)
             and "working_directory" not in tool_input
             and session.main_project_path
         ):
@@ -673,13 +670,10 @@ class ContextBuilder:
         # If non-agent tool completed, set IDLE and emit a turn-complete
         # signal so the client can finalize the tool block (switch the
         # spinner to the completed-state icon and stop the stream).
-        # Agent executors (claude_code/codex/opencode) emit their own
-        # terminal messages when their background streams finish.
-        if (
-            session.claude_code_executor is None
-            and session.codex_executor is None
-            and session.opencode_executor is None
-        ):
+        # Agent executors (claude_code/codex/opencode/acp) emit their own
+        # terminal messages when their background streams finish, so a live
+        # agent session must NOT be finalized here.
+        if session.agent_type is None:
             session.set_activity(ActivityState.IDLE)
             session.buffer.push_text(
                 MessageType.TURN_COMPLETE,

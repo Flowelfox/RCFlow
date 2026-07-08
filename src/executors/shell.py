@@ -127,7 +127,10 @@ class ShellExecutor(BaseExecutor):
         config = tool.get_shell_config()
         is_ps = self._is_powershell(config.shell)
         quoted = _quote_params_for_shell(parameters, config.command_template, is_powershell=is_ps)
-        quoted.setdefault("rcflow", _self_invocation())
+        # Built-in placeholder — force the trusted value; RESERVED_PARAM_NAMES
+        # (loader) guarantees no tool parameter can shadow it, but assign
+        # unconditionally so caller input can never occupy this token.
+        quoted["rcflow"] = _self_invocation()
         command = config.command_template.format(**quoted)
         timeout = parameters.get("timeout", 30)
         working_dir = parameters.get("working_directory", ".")
@@ -181,7 +184,10 @@ class ShellExecutor(BaseExecutor):
         config = tool.get_shell_config()
         is_ps = self._is_powershell(config.shell)
         quoted = _quote_params_for_shell(parameters, config.command_template, is_powershell=is_ps)
-        quoted.setdefault("rcflow", _self_invocation())
+        # Built-in placeholder — force the trusted value; RESERVED_PARAM_NAMES
+        # (loader) guarantees no tool parameter can shadow it, but assign
+        # unconditionally so caller input can never occupy this token.
+        quoted["rcflow"] = _self_invocation()
         command = config.command_template.format(**quoted)
         working_dir = parameters.get("working_directory", ".")
 

@@ -42,6 +42,7 @@ from claude_agent_sdk import (
 )
 
 from src.executors.base import BaseExecutor, ExecutionChunk, ExecutionResult
+from src.services.mcp_bridge import RCFLOW_MCP_SERVER_NAME
 
 if TYPE_CHECKING:
     from claude_agent_sdk import Message, PermissionResult, ToolPermissionContext
@@ -298,7 +299,7 @@ class ClaudeCodeSdkExecutor(BaseExecutor):
         mcp_servers: dict[str, Any] = {}
         rcflow_server = self._build_rcflow_mcp_server()
         if rcflow_server is not None:
-            mcp_servers["rcflow"] = rcflow_server
+            mcp_servers[RCFLOW_MCP_SERVER_NAME] = rcflow_server
 
         return ClaudeAgentOptions(
             cli_path=self._binary_path,
@@ -350,7 +351,7 @@ class ClaudeCodeSdkExecutor(BaseExecutor):
         sdk_tools = self._build_rcflow_sdk_tools()
         if not sdk_tools:
             return None
-        return create_sdk_mcp_server(name="rcflow", version="1.0.0", tools=sdk_tools)
+        return create_sdk_mcp_server(name=RCFLOW_MCP_SERVER_NAME, version="1.0.0", tools=sdk_tools)
 
     def _sdk_env(self) -> dict[str, str]:
         """Env overrides passed to the SDK (merged over the worker's env).

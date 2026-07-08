@@ -1,5 +1,5 @@
 ---
-updated: 2026-07-06
+updated: 2026-07-08
 ---
 
 # WebSocket API
@@ -285,6 +285,8 @@ Server sends JSON messages:
   "sequence": 43
 }
 ```
+
+**`origin` field:** `tool_output` and `error` messages carry an optional `"origin": "agent"` field when the tool call was initiated by a nested coding agent through the [MCP bridge](mcp.md) (rather than by the outer LLM tool loop). It is absent for normal LLM-initiated tool calls. Clients can use it to render agent-initiated tool activity distinctly.
 
 Tool output is emitted for all agent executors:
 - **Claude Code**: Captured from `tool_result` content blocks that Claude Code emits inside `{"type":"user", "message":{"content":[{"type":"tool_result",...}]}}` stream-json events. Content may be plain text or extracted from nested content blocks. `is_error` reflects the SDK's `is_error` flag.

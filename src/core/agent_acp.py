@@ -28,6 +28,7 @@ from src.core.cwd_tracking import apply_agent_cwd, infer_cwd_from_tool_paths
 from src.core.permissions import PermissionDecision, PermissionManager
 from src.core.session import ActivityState, SessionStatus, SessionType
 from src.executors.acp import AcpExecutor
+from src.services.mcp_bridge import RCFLOW_MCP_SERVER_NAME
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -122,7 +123,7 @@ class AcpAgent:
         token = bridge.tokens.issue(session.id)
         return [
             {
-                "name": "rcflow",
+                "name": RCFLOW_MCP_SERVER_NAME,
                 "command": command,
                 "args": args,
                 "env": [
@@ -147,11 +148,23 @@ class AcpAgent:
             tool_name = str(tool_call.get("title") or tool_call.get("kind") or "acp_tool")
             tool_input = tool_call.get("raw_input") or {}
             decision = await self._r._handle_permission_check(session, tool_name, tool_input)
+            # Map a one-time RCFlow decision onto the ACP option of matching
+            # scope. Prefer the *_once kind so a single Allow/Deny is not
+            # silently escalated to a permanent allow_always/reject_always
+            # (rule persistence stays on RCFlow's PermissionManager, not the
+            # agent's). Fall back to any option of the wanted polarity, then —
+            # only on allow — to the first offered option.
             wanted = "allow" if decision == PermissionDecision.ALLOW else "reject"
+            preferred = f"{wanted}_once"
+            for opt in options:
+                if str(opt.get("kind", "")) == preferred:
+                    return opt["option_id"]
             for opt in options:
                 if str(opt.get("kind", "")).startswith(wanted):
                     return opt["option_id"]
-            return None if wanted == "reject" else (options[0]["option_id"] if options else None)
+            # No option of the wanted polarity — cancel rather than pick an
+            # opposite-polarity option (never turn an Allow into a reject).
+            return None
 
         return on_permission
 
@@ -280,6 +293,7 @@ class AcpAgent:
     async def _relay_acp_stream(
         self,
         session: ActiveSession,
+        executor: AcpExecutor,
         stream: AsyncGenerator[ExecutionChunk, None],
     ) -> bool:
         """Translate normalised ACP events into RCFlow buffer messages.
@@ -291,6 +305,13 @@ class AcpAgent:
         completed = False
 
         async for chunk in stream:
+            # Persist the agent-issued session id the moment it exists (set
+            # synchronously inside the executor's first ``session/new`` before
+            # any event streams). Writing it here — not only at stream end —
+            # means a pause or worker restart mid-first-turn still leaves the
+            # session resumable instead of falling back to the outer LLM.
+            if executor.acp_session_id and session.metadata.get("acp_session_id") != executor.acp_session_id:
+                session.metadata["acp_session_id"] = executor.acp_session_id
             line = chunk.content.strip()
             if not line:
                 continue
@@ -417,7 +438,7 @@ class AcpAgent:
         """Background task: read ACP events and push to the session buffer."""
         try:
             completed = await self._relay_acp_stream(
-                session, executor.execute_streaming(tool_def, tool_call.tool_input)
+                session, executor, executor.execute_streaming(tool_def, tool_call.tool_input)
             )
         except Exception as e:
             logger.exception("ACP streaming error in session %s", session.id)
@@ -429,10 +450,7 @@ class AcpAgent:
             await self._end_acp_session(session)
             return
 
-        # Persist the ACP session id for resume across worker restarts.
-        if executor.acp_session_id:
-            session.metadata["acp_session_id"] = executor.acp_session_id
-
+        # acp_session_id is persisted incrementally inside _relay_acp_stream.
         session.buffer.push_text(MessageType.AGENT_GROUP_END, {"session_id": session.id})
 
         if not completed:
@@ -484,7 +502,7 @@ class AcpAgent:
     ) -> None:
         """Run a follow-up prompt turn and stream its events."""
         try:
-            completed = await self._relay_acp_stream(session, executor.restart_with_prompt(prompt))
+            completed = await self._relay_acp_stream(session, executor, executor.restart_with_prompt(prompt))
         except Exception as e:
             logger.exception("ACP follow-up error in session %s", session.id)
             session.buffer.push_text(MessageType.AGENT_GROUP_END, {"session_id": session.id})

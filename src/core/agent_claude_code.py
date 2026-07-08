@@ -45,6 +45,7 @@ from src.core.permissions import (
 )
 from src.core.session import ActivityState, MonitorState, SessionStatus, SessionType
 from src.executors.claude_code_sdk import ClaudeCodeSdkExecutor
+from src.services.mcp_bridge import RCFLOW_MCP_TOOL_PREFIX
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -464,10 +465,10 @@ class ClaudeCodeAgent:
                 return await self._handle_enter_plan_mode(session)
             if tool_name == "ExitPlanMode":
                 return await self._handle_exit_plan_mode(session, input_data)
-            if tool_name.startswith("mcp__rcflow__"):
+            if tool_name.startswith(RCFLOW_MCP_TOOL_PREFIX):
                 # RCFlow bridge tools gate themselves in McpBridge.call_tool
-                # (mutating worktree ops always ask, matching the LLM loop) —
-                # gating here as well would double-prompt the user.
+                # (agent_safe tools skip it, everything else asks) — gating here
+                # as well would double-prompt the user.
                 return PermissionResultAllow()
             decision = await self._handle_permission_check(session, tool_name, input_data)
             if decision == PermissionDecision.DENY:
