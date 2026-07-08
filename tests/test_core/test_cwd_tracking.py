@@ -17,11 +17,9 @@ import pytest
 from src.core.cwd_tracking import (
     WorktreeMatch,
     apply_agent_cwd,
-    claude_code_jsonl_path,
     extract_paths_from_tool_input,
     infer_cwd_from_output,
     infer_cwd_from_tool_paths,
-    latest_cwd_from_cc_jsonl,
     looks_like_git_worktree_mutation,
     parse_cwd_change,
     reset_worktree_cache,
@@ -172,48 +170,6 @@ class TestApplyAgentCwd:
 # ---------------------------------------------------------------------------
 # looks_like_git_worktree_mutation
 # ---------------------------------------------------------------------------
-
-
-class TestClaudeCodeJsonl:
-    def test_encoded_path_matches_known_layout(self):
-        p = claude_code_jsonl_path("abc123", "/home/me/Projects/Foo")
-        assert p is not None
-        assert p.name == "abc123.jsonl"
-        assert p.parent.name == "-home-me-Projects-Foo"
-
-    def test_dot_in_path_becomes_dash(self):
-        # Claude Code rewrites both ``/`` and ``.`` to ``-`` when
-        # naming the project directory (matches the layout under
-        # ``~/.claude/projects/``).
-        p = claude_code_jsonl_path("s", "/home/me/Projects/spacegame/.worktrees/foo")
-        assert p is not None
-        assert p.parent.name == "-home-me-Projects-spacegame--worktrees-foo"
-
-    def test_returns_none_on_missing_inputs(self):
-        assert claude_code_jsonl_path("", "/x") is None
-        assert claude_code_jsonl_path("s", "") is None
-
-    def test_latest_cwd_from_jsonl(self, tmp_path):
-        p = tmp_path / "s.jsonl"
-        p.write_text('{"type":"user","cwd":"/a"}\n{"type":"assistant","cwd":"/a"}\n{"type":"user","cwd":"/b"}\n')
-        assert latest_cwd_from_cc_jsonl(p) == "/b"
-
-    def test_latest_cwd_missing_file(self, tmp_path):
-        assert latest_cwd_from_cc_jsonl(tmp_path / "nope.jsonl") is None
-
-    def test_latest_cwd_empty_file(self, tmp_path):
-        p = tmp_path / "empty.jsonl"
-        p.write_text("")
-        assert latest_cwd_from_cc_jsonl(p) is None
-
-    def test_latest_cwd_ignores_lines_without_cwd(self, tmp_path):
-        p = tmp_path / "s.jsonl"
-        p.write_text(
-            '{"type":"last-prompt","leafUuid":"x"}\n'
-            '{"type":"user","cwd":"/a"}\n'
-            '{"type":"permission-mode","permissionMode":"default"}\n'
-        )
-        assert latest_cwd_from_cc_jsonl(p) == "/a"
 
 
 class TestInferCwdFromOutput:

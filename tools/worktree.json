@@ -7,6 +7,7 @@
   "session_type": "one-shot",
   "llm_context": "stateless",
   "executor": "worktree",
+  "expose_to_agents": true,
   "parameters": {
     "type": "object",
     "properties": {

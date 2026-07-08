@@ -158,6 +158,23 @@ cmd_smoke() {
     --base-url "https://127.0.0.1:$local_port" --api-key "$key" "$@")
 }
 
+cmd_smoke_acp() {
+  # ACP E2E: OpenCode-over-ACP prompt round-trip. ACP is the default mode;
+  # needs the managed OpenCode installed on the worker (and the flag not forced
+  # to legacy).
+  local port key local_port tunnel_pid
+  port=$(worker_port)
+  key=$(worker_api_key)
+  local_port=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
+  ssh "${SSH_OPTS[@]}" -f -N -o ExitOnForwardFailure=yes \
+    -L "$local_port:localhost:$port" "$VM_HOST"
+  tunnel_pid=$(pgrep -f "ssh.*-L $local_port:localhost:$port" | head -1)
+  trap '[[ -n "${tunnel_pid:-}" ]] && kill "$tunnel_pid" 2>/dev/null || true' EXIT
+  echo "SSH tunnel 127.0.0.1:$local_port → VM:$port (pid $tunnel_pid)"
+  (cd "$REPO_ROOT" && uv run python scripts/vm/acp_smoke_test.py \
+    --base-url "https://127.0.0.1:$local_port" --api-key "$key" "$@")
+}
+
 cmd_client_start() {
   vssh "pgrep -x '$CLIENT_PROC' >/dev/null" && { echo "client already running"; return 0; }
   vssh "DISPLAY=:0 nohup $CLIENT_BIN >$CLIENT_LOG 2>&1 & echo \"started pid \$!\""
@@ -252,6 +269,9 @@ Worker service:
 Worker E2E:
   smoke [--verbose]         Full WS round-trip test through an SSH tunnel
                             (health → auth → prompt → tool output → session end)
+  smoke-acp [--verbose]     OpenCode-over-ACP E2E (#opencode prompt → agent banner →
+                            streamed answer → follow-up turn → session end).
+                            Needs OpenCode installed on the worker (ACP is the default)
 
 Client (GUI on VM display :0):
   client-start | client-stop | client-status
@@ -287,6 +307,7 @@ case "$cmd" in
   worker-restart) cmd_worker_restart "$@" ;;
   worker-logs)    cmd_worker_logs "$@" ;;
   smoke)          cmd_smoke "$@" ;;
+  smoke-acp)      cmd_smoke_acp "$@" ;;
   client-start)   cmd_client_start "$@" ;;
   client-stop)    cmd_client_stop "$@" ;;
   client-status)  cmd_client_status "$@" ;;

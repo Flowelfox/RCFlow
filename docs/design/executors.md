@@ -1,5 +1,5 @@
 ---
-updated: 2026-07-06
+updated: 2026-07-07
 ---
 
 # Executors
@@ -10,53 +10,25 @@ Per-executor implementation details for the long-running coding agents (Claude C
 - [Tools](tools.md) — JSON tool schema, executor selection field, per-tool settings
 - [Sessions](sessions.md) — long-running session lifecycle
 - [Permissions](permissions.md) — interactive approval relay (Claude Code only)
+- [MCP Agent Bridge](mcp.md) — how both agents list/call RCFlow tools during a session
 
 ---
 
 ## Claude Code Executor
 
-> **Agent SDK (default since the SDK migration).** `claude_code` now drives Claude
-> Code through the **Python Agent SDK** (`claude-agent-sdk`) via
-> `ClaudeCodeSdkExecutor` (`src/executors/claude_code_sdk.py`), which spawns the
-> **managed** `claude` binary (`ClaudeAgentOptions.cli_path`) and yields typed
-> messages. The executor's converter (`sdk_message_to_events`) adapts those back
-> into the legacy stream-json event dicts, so `_relay_claude_code_stream` and all
-> its diff/monitor/cwd/artifact handling are **unchanged**. The decisive win:
-> permissions and **AskUserQuestion** are resolved in-process by the SDK
-> `can_use_tool` callback (`ClaudeCodeAgent._make_can_use_tool`) *before* a tool
-> runs — so AskUserQuestion is genuinely interactive (the widget is shown, the
-> user's selection is returned as the tool's answer via `updated_input.answers`,
-> and the model continues in the same turn). The relay no longer gates questions
-> or permissions; it just records the question's `tool_use_id` to drop the
-> resolved tool_use / tool_result from the chat (the widget shows the answer).
-> **AskUserQuestion as the last action of a turn:** Claude Code emits the
-> turn-boundary `result` while the `can_use_tool` gate is still open, so the
-> relay returns before the user answers. `_drain_question_continuation` (called
-> at relay-end) then waits for the answer and streams the model's follow-up turn
-> so the agent resumes on its own — without it the answer was accepted but the
-> continuation sat unread until a manual pause/resume.
-> `permission_mode="default"` is used (the callback is skipped under
-> `bypassPermissions`). Plan mode (`EnterPlanMode` / `ExitPlanMode`) is gated the
-> same way — through `can_use_tool` (approve → allow; plan-review feedback →
-> deny-with-message so the model revises) — and the relay's legacy plan-mode
-> blocking is skipped for the SDK executor. The legacy raw-CLI executor below is
-> retained as a one-env rollback: set `RCFLOW_CC_EXECUTOR=legacy`. **`Monitor`
-> under the SDK:** the SDK delivers a watch as a "task" — `MONITOR_START` on the
-> tool_use (in-turn), and the **terminal** as a `TaskNotificationMessage`
-> (`status`, `tool_use_id`) *between turns*. The executor uses a single persistent
-> `receive_messages()` reader → queue (so turn streaming and the between-turn
-> drain share one consumer), and `sdk_message_to_events` maps the
-> `TaskNotificationMessage` into a synthesised monitor-terminal `tool_result` →
-> `_process_monitor_event` → `MONITOR_END` (the card clears; no relay changes).
-> The drain yields only monitor `tool_result`s, so the model's per-event wake
-> narration ("Monitor event — no action needed") is suppressed. **Caveat
-> (inherent CC behavior):** under the SDK each Monitor event *wakes the model* (an
-> extra turn + tokens per event) — RCFlow can't change that.
->
-> The remainder of this section describes the **legacy** raw-CLI executor
-> (`RCFLOW_CC_EXECUTOR=legacy`).
+The `claude_code` executor drives Claude Code through the **Python Agent SDK** (`claude-agent-sdk`) via `ClaudeCodeSdkExecutor` (`src/executors/claude_code_sdk.py`), which spawns the **managed** `claude` binary (`ClaudeAgentOptions.cli_path`) and yields typed messages. The executor's converter (`sdk_message_to_events`) adapts those into the stream-json event dicts that `_relay_claude_code_stream` parses, so all diff/monitor/cwd/artifact handling lives in the relay. It enables delegating complex coding tasks to Claude Code while streaming output back to the client in real time.
 
-The `claude_code` executor manages a Claude Code CLI subprocess with bidirectional stream-json communication. It enables delegating complex coding tasks to Claude Code while streaming output back to the client in real time.
+**Permissions and AskUserQuestion** are resolved in-process by the SDK `can_use_tool` callback (`ClaudeCodeAgent._make_can_use_tool`) *before* a tool runs — AskUserQuestion is genuinely interactive (the widget is shown, the user's selection is returned as the tool's answer via `updated_input.answers`, and the model continues in the same turn). The relay does not gate questions or permissions; it just records the question's `tool_use_id` to drop the resolved tool_use / tool_result from the chat (the widget shows the answer). `permission_mode="default"` is always used (the callback would be skipped under `bypassPermissions`). Plan mode (`EnterPlanMode` / `ExitPlanMode`) is gated the same way — approve → allow; plan-review feedback → deny-with-message so the model revises.
+
+**AskUserQuestion as the last action of a turn:** Claude Code emits the turn-boundary `result` while the `can_use_tool` gate is still open, so the relay returns before the user answers. `_drain_question_continuation` (called at relay-end) then waits for the answer and streams the model's follow-up turn so the agent resumes on its own — without it the answer was accepted but the continuation sat unread until a manual pause/resume.
+
+**Monitor under the SDK:** the SDK delivers a watch as a "task" — `MONITOR_START` on the tool_use (in-turn), and the **terminal** as a `TaskNotificationMessage` (`status`, `tool_use_id`) *between turns*. The executor uses a single persistent `receive_messages()` reader → queue (so turn streaming and the between-turn drain share one consumer), and `sdk_message_to_events` maps the `TaskNotificationMessage` into a synthesised monitor-terminal `tool_result` → `_process_monitor_event` → `MONITOR_END` (the card clears; no relay changes). The drain yields only monitor `tool_result`s, so the model's per-event wake narration ("Monitor event — no action needed") is suppressed. **Caveat (inherent CC behavior):** each Monitor event *wakes the model* (an extra turn + tokens per event) — RCFlow can't change that. See the Monitor section below for the relay-side handling.
+
+**RCFlow tools over MCP:** when the per-tool `expose_rcflow_tools` setting is on, `_build_options` attaches an in-process SDK MCP server (`mcp_servers={"rcflow": …}`) built live from the [MCP agent bridge](mcp.md)'s registry tool list, so Claude Code can call agent-exposed RCFlow tools as `mcp__rcflow__<name>`. Handlers dispatch straight into the bridge (same process, no token). `can_use_tool` waves `mcp__rcflow__*` through — the bridge gates these calls itself (mutating worktree ops always ask; see [MCP Agent Bridge](mcp.md)).
+
+**Lifecycle:** the SDK client is persistent — one `ClaudeSDKClient` per session, kept alive between turns. Follow-up user messages bypass the outer LLM ("Claude Code mode") and go to the same client via `query()`. If the client dies unexpectedly, the executor reopens it with `resume=<session_id>` so the conversation continues.
+
+> **History:** a raw-CLI executor (bidirectional stream-json over a PTY, `RCFLOW_CC_EXECUTOR=legacy`) predated the SDK migration. It has been removed; the SDK executor is the only implementation.
 
 **Working directory priority:** The Claude Code executor selects the working directory with the following precedence:
 1. `session.metadata["selected_worktree_path"]` — the active worktree path (set via `PATCH /api/sessions/{id}/worktree`, the `attach` worktree action, auto-selected after `new`, or pre-selected by the client in the first `prompt` WS message via `selected_worktree_path`).
@@ -67,37 +39,6 @@ The `claude_code` executor manages a Claude Code CLI subprocess with bidirection
 **Worktree selection persistence:** `selected_worktree_path` is stored in `session.metadata` and is written to the DB both by the initial `_ensure_session_row_in_db` stub write (on the first prompt) and immediately when set via `PATCH /api/sessions/{id}/worktree` (via `SessionManager.persist_session_metadata`). This ensures the selected worktree survives backend restarts. When the client pre-selects a worktree before the first message (via the worktree chip), `handle_prompt` applies the path to `session.metadata["selected_worktree_path"]` before `_ensure_session_row_in_db`, so the initial DB stub row already contains the selection.
 
 **Working directory validation:** Before spawning the subprocess, the prompt router validates that the specified `working_directory` exists on disk. If it does not, the tool returns an error message to the LLM instead of starting a session. The system prompt also instructs the LLM to verify directory existence via `shell_exec` before calling `claude_code`, and to resolve project names to `~/Projects/<project_name>`.
-
-**How it works:**
-
-1. The outer LLM calls `claude_code(prompt=..., working_directory=...)`.
-2. RCFlow validates that `working_directory` exists; returns an error to the LLM if not.
-3. RCFlow spawns `claude --input-format stream-json --output-format stream-json` as a long-lived subprocess. On Unix the subprocess is backed by a **PTY** (see below); on Windows it uses standard asyncio pipes.
-4. The initial prompt is sent via the PTY master fd (or stdin pipe) in stream-json format.
-5. Output events stream to the client session buffer in real time via `PtyLineReader` (PTY) or `asyncio.StreamReader` (pipe).
-6. The session enters "Claude Code mode" — subsequent user messages bypass the outer LLM and route directly to the Claude Code subprocess via stdin / PTY master.
-7. The process stays alive between turns. Follow-up messages are sent via stdin and responses are read from stdout. If the process unexpectedly crashes, RCFlow restarts it with the same `--session-id` as a fallback.
-
-**PTY-backed execution (Unix):**
-
-By default on Linux and macOS, the Claude Code subprocess is launched with a **pseudoterminal (PTY)** as its stdin and stdout so that `isatty(0)` and `isatty(1)` return `True` inside the child process. This preserves Claude Code's full interactive behaviour:
-
-- **Follow-up questions** (`AskUserQuestion` tool): Claude Code is more likely to ask clarifying questions when it detects a real terminal, rather than silently making assumptions in a headless pipe environment.
-- **Plan mode** (`EnterPlanMode` / `ExitPlanMode`): Flows correctly regardless, but the TTY detection ensures Claude Code does not suppress intermediate prompts.
-- **Tool permission dialogs**: With `default_permission_mode: interactive`, Claude Code's own permission logic is engaged in addition to RCFlow's `PermissionManager` overlay.
-
-Despite using a PTY, the I/O *protocol* remains `stream-json` (`--output-format stream-json`), so all downstream event translation in `_relay_claude_code_stream` is unchanged. The PTY slave is configured in **raw mode** before the child is spawned:
-
-| Setting | Effect |
-|---|---|
-| `~ECHO` | Writes to master fd (our JSON input) are not echoed back as output |
-| `~OPOST` | `\n` is not translated to `\r\n`; JSON lines arrive with clean endings |
-| `~ICANON` | No line buffering; data passes through the discipline immediately |
-| `~ISIG` | Signal generation (Ctrl+C → SIGINT) disabled; `kill_process_tree` handles teardown |
-
-`stderr` is kept as a standard asyncio pipe (not on the PTY) so it can be drained separately without mixing into the JSON stream.
-
-**Disabling PTY mode:** Set `"use_pty": false` in `executor_config.claude_code` to fall back to the original pipe-based I/O (required on Windows, optional on Unix).
 
 **Result completion:** When Claude Code emits a `result` event (turn complete), a `session_end_ask` message is pushed to ask the user whether they want to end the session or continue chatting.
 
@@ -142,8 +83,7 @@ User-initiated cancel from the client sends a `cancel_monitor` ws-input message;
       "binary_path": "claude",
       "default_permission_mode": "interactive",
       "max_turns": 50,
-      "timeout": 600,
-      "use_pty": true
+      "timeout": 600
     }
   }
 }
@@ -167,6 +107,8 @@ The `codex` executor manages an OpenAI Codex CLI subprocess for delegating codin
 8. Follow-up messages spawn a new process: `codex exec --json --full-auto resume THREAD_ID PROMPT`.
 
 **Result summarization:** When Codex emits a `turn.completed` event, the prompt router fires a summary task and pushes a `session_end_ask`, same as Claude Code.
+
+**RCFlow tools over MCP:** when the per-tool `expose_rcflow_tools` setting is on, Codex spawn syncs a machine-owned `[mcp_servers.rcflow]` block into the managed `CODEX_HOME/config.toml` (pointing at the bundled `rcflow-mcp` stdio proxy) and injects a per-session `RCFLOW_MCP_TOKEN` + `RCFLOW_MCP_URL` into the subprocess env. The proxy forwards `tools/list` / `tools/call` to the worker's `/api/mcp/*` endpoints. When the setting is off the block is removed. See [MCP Agent Bridge](mcp.md).
 
 **Authentication:** Codex supports two auth methods, selectable via the per-tool `provider` setting:
 - **OpenAI API key** (`provider: "openai"`): `CODEX_API_KEY` is injected into the subprocess environment from the per-tool settings.
@@ -207,6 +149,35 @@ The `codex` executor manages an OpenAI Codex CLI subprocess for delegating codin
   }
 }
 ```
+
+## ACP Executor
+
+The `acp` executor drives any agent that speaks the [Agent Client Protocol](https://agentclientprotocol.com) as a persistent stdio subprocess — one executor for every ACP agent. RCFlow is the ACP *client*; per-agent differences live entirely in the tool definition's `executor_config.acp` (binary + args) and the per-agent env builders — never in code branches.
+
+**Current agents:** OpenCode (native, `opencode acp`) and Codex (via the `codex-acp` adapter binary). Claude Code deliberately stays on the SDK executor — it migrates only when the PyPI ACP adapter reaches production parity (cwd handling, resume, usage, AskUserQuestion fidelity).
+
+**ACP is the default.** With the rollback flags (`RCFLOW_OPENCODE_EXECUTOR` / `RCFLOW_CODEX_EXECUTOR`, values `acp` | `legacy`) unset, an agent tool runs over ACP whenever its definition carries an `executor_config.acp` block (both `tools/opencode.json` and `tools/codex.json` do) **and** the adapter binary is resolvable (managed ToolManager copy or `PATH`); otherwise it degrades gracefully to the legacy executor — e.g. Codex keeps its legacy JSONL path until the `codex-acp` adapter is installed. An explicit `acp` forces the ACP path (skipping the availability probe, so a missing adapter surfaces in-session); an explicit `legacy` always opts out — same rollback pattern the Claude Code SDK migration used.
+
+**How it works:**
+
+1. `AcpExecutor` (`src/executors/acp.py`) spawns the agent binary and negotiates `initialize` (capability exchange — `load_session` support is recorded for resume).
+2. `session/new` is issued with the working directory and — when the per-tool `expose_rcflow_tools` setting is on — the RCFlow MCP bridge as a client-provided MCP server: the `rcflow-mcp` proxy command plus a per-session token passed as **explicit protocol data** in the `env` entries (no process-env inheritance, no agent config file blocks).
+3. A prompt turn is one `session/prompt` call; `session/update` notifications stream concurrently and are translated by the pure `acp_update_to_event()` into normalised event dicts (`text`, `thought`, `tool_call`/`tool_call_update` with locations + diffs, `plan`, `usage`, `available_commands`, `turn_end`, `error`), which `AcpAgent._relay_acp_stream` (`src/core/agent_acp.py`) maps onto the standard buffer messages (`TEXT_CHUNK`, `THINKING`, `TOOL_START`/`TOOL_OUTPUT`, `TODO_UPDATE`, …). Tool-call `locations` feed the worktree-badge cwd tracking (`infer_cwd_from_tool_paths`).
+4. Follow-up user messages are further `session/prompt` calls on the same live process ("agent mode", mirroring Claude Code). If the process died and the agent advertised `loadSession`, the next turn respawns and resumes via `session/load` (the agent replays the conversation).
+5. `session/request_permission` is relayed to RCFlow's interactive permission flow (`PERMISSION_REQUEST` widget): ALLOW selects the agent's allow-once option — rule caching stays on RCFlow's side — DENY selects reject-once (or cancels the call when the agent offered no reject option). fs and terminal capabilities are declined in this phase; agents use their own filesystem/shell access exactly as on the legacy paths.
+6. Turn completion carries an ACP stop reason: `end_turn` fires the summary/task-update pipeline; `cancelled` ends quietly; `max_tokens` / `max_turn_requests` / `refusal` surface as errors. `usage_update` totals (tokens, context size, cost) land in `session.metadata["acp_usage"]`.
+
+**Resume across pause/restart:** the agent-issued ACP session id is persisted in `session.metadata["acp_session_id"]`; resume reconstructs the executor with `set_resume_target()` so the next turn issues `session/load`.
+
+**Configuration (`AcpExecutorConfig`):**
+
+| Field | Default | Description |
+|---|---|---|
+| `binary_path` | — | ACP agent/adapter binary. Managed ToolManager copies win: resolution keys off the *binary* name (`opencode` → managed opencode, `codex-acp` → managed codex_acp) |
+| `args` | `[]` | Arguments (e.g. `["acp"]` for OpenCode's server mode) |
+| `timeout` | `1800` | Per-turn wall-clock timeout in seconds |
+
+**Known limitation (OpenCode):** OpenCode's default policy auto-allows edits, so it rarely asks for permission — matching the legacy path's behaviour. The relay is fully wired; agents that ask (codex-acp does by default) get the interactive widget. Seeding ask-mode into OpenCode's own config needs a verified delivery mechanism first.
 
 ## Worktree Executor
 
@@ -254,3 +225,7 @@ The `merge` action always passes `auto_commit_changes=True` to `WorktreeManager.
 ### HTTP API
 
 The worktree HTTP routes (`src/api/routes/worktrees.py`) provide the same operations over REST for the Flutter client. See [HTTP API](http-api.md) for endpoint details.
+
+### Agent Exposure (MCP)
+
+The `worktree` tool ships with `"expose_to_agents": true`, so nested agents can call it as `mcp__rcflow__worktree` via the [MCP agent bridge](mcp.md). This is the preferred route over the `wt` CLI (which stays on the agent PATH) because calls run through this executor — session worktree metadata, the client badge, and auto-selection after `new` stay in sync, which raw `wt` invocations bypass. Mutating actions require explicit user approval (the same always-ask rule as the LLM tool loop); `list` is exempt.

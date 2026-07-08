@@ -28,6 +28,7 @@ from src.core.permissions import (
 )
 from src.core.session import ActiveSession, ActivityState, SessionStatus, SessionType
 from src.database.models import TaskSession as TaskSessionModel
+from src.executors.acp import AcpExecutor
 from src.executors.codex import CodexExecutor
 from src.executors.opencode import OpenCodeExecutor
 
@@ -220,6 +221,18 @@ class SessionLifecycle:
                 await session._opencode_stream_task
         session._opencode_stream_task = None
 
+        # Kill the ACP agent subprocess if running
+        had_acp = session.acp_executor is not None
+        if session.acp_executor is not None:
+            await session.acp_executor.stop_process()
+            session.acp_executor = None
+
+        if session._acp_stream_task is not None and not session._acp_stream_task.done():
+            session._acp_stream_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await session._acp_stream_task
+        session._acp_stream_task = None
+
         # Auto-deny any pending permission requests
         if session.permission_manager is not None:
             session.permission_manager.cancel_all_pending()
@@ -246,7 +259,7 @@ class SessionLifecycle:
         session.clear_subprocess_tracking()
 
         # Close any open agent group before ending the session
-        if had_claude_code or had_codex or had_opencode:
+        if had_claude_code or had_codex or had_opencode or had_acp:
             session.buffer.push_text(
                 MessageType.AGENT_GROUP_END,
                 {"session_id": session.id},
@@ -336,11 +349,23 @@ class SessionLifecycle:
                 await session._opencode_stream_task
         session._opencode_stream_task = None
 
+        # Kill the ACP agent subprocess if running
+        had_acp = session.acp_executor is not None
+        if session.acp_executor is not None:
+            await session.acp_executor.stop_process()
+            session.acp_executor = None
+
+        if session._acp_stream_task is not None and not session._acp_stream_task.done():
+            session._acp_stream_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await session._acp_stream_task
+        session._acp_stream_task = None
+
         # Clear subprocess tracking fields and broadcast null status
         session.clear_subprocess_tracking()
 
         # Close any open agent group before ending the session
-        if had_claude_code or had_codex or had_opencode:
+        if had_claude_code or had_codex or had_opencode or had_acp:
             session.buffer.push_text(
                 MessageType.AGENT_GROUP_END,
                 {"session_id": session.id},
@@ -558,7 +583,19 @@ class SessionLifecycle:
                 await session._opencode_stream_task
         session._opencode_stream_task = None
 
-        had_agent = had_claude_code or had_codex or had_opencode
+        # Kill the ACP agent subprocess if running
+        had_acp = session.acp_executor is not None
+        if session.acp_executor is not None:
+            await session.acp_executor.stop_process()
+            session.acp_executor = None
+
+        if session._acp_stream_task is not None and not session._acp_stream_task.done():
+            session._acp_stream_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await session._acp_stream_task
+        session._acp_stream_task = None
+
+        had_agent = had_claude_code or had_codex or had_opencode or had_acp
 
         # Close out any live Monitor watches so they do not appear as still ticking
         # in the UI while the session sits paused.
@@ -668,11 +705,22 @@ class SessionLifecycle:
                 await session._opencode_stream_task
         session._opencode_stream_task = None
 
+        had_acp = session.acp_executor is not None
+        if session.acp_executor is not None:
+            await session.acp_executor.stop_process()
+            session.acp_executor = None
+
+        if session._acp_stream_task is not None and not session._acp_stream_task.done():
+            session._acp_stream_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await session._acp_stream_task
+        session._acp_stream_task = None
+
         # Close out any live Monitor watches before broadcasting interrupt.
         await self._r._terminate_active_monitors(session, reason="cancelled")
 
         # Close any open agent group
-        if had_claude_code or had_codex or had_opencode:
+        if had_claude_code or had_codex or had_opencode or had_acp:
             session.buffer.push_text(
                 MessageType.AGENT_GROUP_END,
                 {"session_id": session.id},
@@ -770,6 +818,8 @@ class SessionLifecycle:
                 await self._r._end_codex_session(session)
             elif session.opencode_executor is not None:
                 await self._r._end_opencode_session(session)
+            elif session.acp_executor is not None:
+                await self._r._end_acp_session(session)
             else:
                 await self._r._end_claude_code_session(session)
             logger.info("Resumed session %s", session_id)
@@ -840,6 +890,24 @@ class SessionLifecycle:
                     oc_params = session.metadata.get("opencode_parameters", {})
                     oc_executor._last_parameters = oc_params
                     session.opencode_executor = oc_executor
+
+        # Reconstruct the ACP executor if this session had one before pause.
+        # The next turn respawns the agent and resumes via ``session/load``
+        # (when the agent supports it — otherwise a fresh ACP session starts).
+        if session.acp_executor is None:
+            acp_session_id = session.metadata.get("acp_session_id")
+            acp_tool_name = session.metadata.get("acp_tool_name")
+            if acp_session_id and acp_tool_name:
+                tool_def = self._r._tool_registry.get(acp_tool_name)
+                if tool_def is not None and "acp" in tool_def.executor_config:
+                    acp_executor = self._r._get_executor("acp", tool_def)
+                    assert isinstance(acp_executor, AcpExecutor)  # noqa: S101
+                    acp_executor.set_resume_target(acp_session_id)
+                    acp_executor._cwd = session.metadata.get("acp_working_directory")
+                    acp_executor.set_permission_callback(self._r._acp._make_permission_callback(session))
+                    acp_executor._mcp_servers = self._r._acp._build_mcp_servers_param(session, tool_def.name)
+                    acp_executor._tool_def = tool_def
+                    session.acp_executor = acp_executor
 
         logger.info("Resumed session %s", session_id)
         # Drain any messages that piled up while the session was paused.

@@ -331,7 +331,6 @@ def test_sync_happy_path(client: TestClient, monkeypatch):
 
 
 def test_sync_throttled(client: TestClient, db_factory, monkeypatch):
-
     async def _seed():
         await _seed_pr(db_factory, _backend_id(client))
 
@@ -366,7 +365,6 @@ def test_sync_service_error(client: TestClient, monkeypatch):
 
 
 def test_list_prs_with_filters(client: TestClient, db_factory):
-
     async def _seed():
         await _seed_pr(db_factory, _backend_id(client), name="web", number=1, role="created", title="Alpha")
         await _seed_pr(db_factory, _backend_id(client), name="api", number=2, role="for_me", title="Beta")
@@ -389,7 +387,6 @@ def test_list_prs_with_filters(client: TestClient, db_factory):
 
 
 def test_get_pr_found(client: TestClient, db_factory):
-
     pr_id = asyncio.get_event_loop().run_until_complete(_seed_pr(db_factory, _backend_id(client)))
     resp = client.get(f"/api/integrations/github/prs/{pr_id}", headers=_auth_headers())
     assert resp.status_code == 200
@@ -413,7 +410,6 @@ def test_get_pr_invalid_uuid(client: TestClient):
 
 @pytest.fixture
 def seeded_pr(client: TestClient, db_factory) -> str:
-
     return asyncio.get_event_loop().run_until_complete(_seed_pr(db_factory, _backend_id(client)))
 
 

@@ -659,14 +659,6 @@ class BackgroundTasks:
                 return parts[0]
         return None
 
-    def _enrich_artifact_dict(self, artifact_data: dict[str, Any]) -> dict[str, Any]:
-        """Add ``project_name`` to an artifact dict based on its file path."""
-        projects_dirs = self._r._settings.projects_dirs if self._r._settings else []
-        artifact_data["project_name"] = self._resolve_artifact_project(
-            artifact_data.get("file_path", ""), projects_dirs
-        )
-        return artifact_data
-
     # --- Plan finalization ---
 
     def _fire_plan_finalization_task(self, session: ActiveSession) -> None:

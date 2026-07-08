@@ -36,6 +36,7 @@ This file is the **index**. Detailed sections live in sibling files (`./architec
 | How does telemetry roll up? | [Telemetry](telemetry.md) |
 | Where do permission prompts come from? | [Permissions](permissions.md) |
 | How is a release built / signed / installed? | [Deployment](deployment.md) |
+| How does a nested agent call RCFlow tools? | [MCP Agent Bridge](mcp.md) |
 | How do I verify a build end-to-end on the Ubuntu VM? | [VM Verification](vm-verification.md) |
 
 ## Index
@@ -53,6 +54,7 @@ This file is the **index**. Detailed sections live in sibling files (`./architec
 | [Direct Tool Mode](direct-tool-mode.md) | `LLM_PROVIDER=none` operating mode |
 | [Tools](tools.md) | Pluggable tool JSON schema, agent prompt format, tool definition fields, tool-management service, per-tool settings isolation |
 | [Executors](executors.md) | Claude Code (PTY/pipe), Codex CLI, Worktree executor implementations |
+| [MCP Agent Bridge](mcp.md) | Exposing registry tools to nested agents over MCP: zero-touch contract, per-agent wiring, token model |
 | [Database](database.md) | All tables (sessions, tasks, artifacts, telemetry, queue, drafts, Linear) with per-table anchors |
 | [Configuration](configuration.md) | All env vars, remote config endpoints, UPnP / NAT-PMP networking |
 | [Linear Integration](linear.md) | Service, REST endpoints, WS messages, client UI |
@@ -74,6 +76,7 @@ This file is the **index**. Detailed sections live in sibling files (`./architec
 | Database             | SQLite (default) or PostgreSQL |
 | LLM                  | Anthropic Messages API, AWS Bedrock, or OpenAI Chat Completions API |
 | Claude Code agent    | claude-agent-sdk (drives the managed `claude` binary; `can_use_tool` powers interactive AskUserQuestion + permissions) |
+| ACP agents (Codex, OpenCode) | agent-client-protocol (official Python ACP SDK — client side; agents run as stdio subprocesses) |
 | Prompt Templates     | Jinja2                        |
 | Linting / Formatting | Ruff                          |
 | Type Checking        | ty                            |

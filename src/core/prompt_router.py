@@ -21,14 +21,19 @@ import asyncio
 import json
 import logging
 import os
+import shutil
 import uuid
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from src.services.mcp_bridge import McpBridge
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from src.config import Settings
+from src.core.agent_acp import AcpAgent
 from src.core.agent_claude_code import ClaudeCodeAgent
 from src.core.agent_codex import CodexAgent
 from src.core.agent_opencode import OpenCodeAgent
@@ -48,6 +53,7 @@ from src.core.wakeup_store import SessionScheduledWakeStore
 from src.database.models import Session as SessionModel
 from src.database.models import Task as TaskModel
 from src.database.models import TaskSession as TaskSessionModel
+from src.executors.acp import AcpExecutor
 from src.executors.base import BaseExecutor, ExecutionChunk
 from src.executors.claude_code_sdk import ClaudeCodeSdkExecutor
 from src.executors.codex import CodexExecutor
@@ -59,10 +65,50 @@ from src.services.artifact_scanner import ArtifactScanner
 from src.services.telemetry_service import InFlightTurn, TelemetryService
 from src.services.tool_manager import ToolManager
 from src.services.tool_settings import ToolSettingsManager
-from src.tools.loader import ToolDefinition
+from src.tools.loader import AGENT_EXECUTORS, ToolDefinition
 from src.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
+
+
+def _acp_mode_enabled(
+    env_var: str,
+    tool_def: ToolDefinition,
+    adapter_resolver: "Callable[[str], str | None] | None" = None,
+) -> bool:
+    """Decide whether an agent tool runs on the ACP executor.
+
+    Rollback flags ``RCFLOW_OPENCODE_EXECUTOR`` / ``RCFLOW_CODEX_EXECUTOR``
+    (values ``acp``/``legacy``). **ACP is the default**: with the flag unset,
+    the tool runs over ACP whenever its definition carries an
+    ``executor_config.acp`` block *and* the adapter binary is resolvable via
+    *adapter_resolver* — otherwise it degrades to the legacy executor (e.g.
+    Codex before the ``codex-acp`` adapter is installed). An explicit ``acp``
+    skips the availability probe (errors then surface in-session); an explicit
+    ``legacy`` always opts out.
+    """
+    mode = os.environ.get(env_var, "").strip().lower()
+    if mode == "legacy":
+        return False
+    if "acp" not in tool_def.executor_config:
+        if mode == "acp":
+            logger.warning("%s=acp but tool '%s' has no executor_config.acp; using legacy path", env_var, tool_def.name)
+        return False
+    if mode == "acp":
+        return True
+    # Default (flag unset): ACP when the adapter binary is actually available.
+    binary = tool_def.get_acp_config().binary_path
+    resolved = adapter_resolver(binary) if adapter_resolver is not None else shutil.which(binary)
+    if resolved is None:
+        logger.info(
+            "ACP adapter '%s' for tool '%s' not available; using legacy executor (set %s=acp to force)",
+            binary,
+            tool_def.name,
+            env_var,
+        )
+        return False
+    return True
+
 
 _MAX_TOOL_OUTPUT_CHARS = MAX_TOOL_OUTPUT_CHARS
 
@@ -152,6 +198,9 @@ class PromptRouter:
         self._telemetry = telemetry_service
         self._pending_store = pending_store
         self._wakeup_store = wakeup_store
+        # MCP agent bridge, injected post-construction by main.py (the bridge
+        # itself needs a router reference for dispatch).
+        self._mcp_bridge: McpBridge | None = None
         # The scheduler is initialised lazily so the ``on_fire`` closure
         # can capture ``self``.  It is created the first time a wake is
         # armed (or on startup-recovery, whichever comes first).
@@ -183,7 +232,17 @@ class PromptRouter:
         self._claude = ClaudeCodeAgent(self)
         self._codex = CodexAgent(self)
         self._opencode = OpenCodeAgent(self)
+        self._acp = AcpAgent(self)
         self._lifecycle = SessionLifecycle(self)
+
+    def set_mcp_bridge(self, bridge: "McpBridge") -> None:
+        """Inject the MCP agent bridge (constructed after the router in main.py)."""
+        self._mcp_bridge = bridge
+
+    @property
+    def mcp_bridge(self) -> "McpBridge | None":
+        """The MCP agent bridge, or None when not wired (e.g. bare unit tests)."""
+        return self._mcp_bridge
 
     # ------------------------------------------------------------------
     # Background-task delegation
@@ -322,6 +381,12 @@ class PromptRouter:
     async def _forward_to_opencode(self, session: ActiveSession, text: str) -> None:
         await self._opencode._forward_to_opencode(session, text)
 
+    async def _end_acp_session(self, session: ActiveSession) -> None:
+        await self._acp._end_acp_session(session)
+
+    async def _forward_to_acp(self, session: ActiveSession, text: str) -> None:
+        await self._acp._forward_to_acp(session, text)
+
     # ------------------------------------------------------------------
     # Session-lifecycle delegation
     #
@@ -427,7 +492,15 @@ class PromptRouter:
             return {}
         # Extract keys relevant to executor config
         overrides: dict[str, Any] = {}
-        for key in ("model", "default_permission_mode", "max_turns", "timeout", "approval_mode", "provider"):
+        for key in (
+            "model",
+            "default_permission_mode",
+            "max_turns",
+            "timeout",
+            "approval_mode",
+            "provider",
+            "expose_rcflow_tools",
+        ):
             val = settings.get(key)
             if val not in (None, "", []):
                 overrides[key] = val
@@ -438,6 +511,18 @@ class PromptRouter:
             overrides.pop("model", None)
 
         return overrides
+
+    def _resolve_acp_adapter(self, binary_name: str) -> str | None:
+        """Resolve an ACP adapter binary: managed ToolManager copy first, then PATH.
+
+        Managed keys use underscores (``codex-acp`` → ``codex_acp``), matching
+        the executor's resolution rule.
+        """
+        if self._tool_manager:
+            resolved = self._tool_manager.get_binary_path(binary_name.replace("-", "_"))
+            if resolved:
+                return resolved
+        return shutil.which(binary_name)
 
     def _get_executor(self, executor_type: str, tool_def: ToolDefinition | None = None) -> BaseExecutor:
         # Claude Code executors are always created fresh (one per session)
@@ -454,6 +539,7 @@ class PromptRouter:
                 binary_path=binary_path,
                 extra_env=self._build_claude_code_extra_env(),
                 config_overrides=self._get_managed_config_overrides("claude_code"),
+                mcp_bridge=self._mcp_bridge,
             )
 
         # Codex executors are always created fresh (one per session)
@@ -470,6 +556,27 @@ class PromptRouter:
                 binary_path=binary_path,
                 extra_env=self._build_codex_extra_env(),
                 config_overrides=self._get_managed_config_overrides("codex"),
+            )
+
+        # ACP executors are always created fresh (one per session). Binary
+        # resolution mirrors the legacy agents: managed ToolManager path wins
+        # over the tool definition's binary_path. Resolution keys off the
+        # *adapter binary* name (e.g. "opencode", "codex-acp"), not the tool
+        # name — the adapter may be a separate managed tool from the agent it
+        # wraps (managed keys use underscores: codex-acp → codex_acp).
+        if executor_type == "acp":
+            acp_config = tool_def.get_acp_config() if tool_def is not None else None
+            binary_path = acp_config.binary_path if acp_config else ""
+            if self._tool_manager and acp_config is not None:
+                resolved = self._tool_manager.get_binary_path(acp_config.binary_path.replace("-", "_"))
+                if resolved:
+                    binary_path = resolved
+            settings_key = tool_def.name if tool_def is not None else "acp"
+            return AcpExecutor(
+                binary_path=binary_path,
+                args=acp_config.args if acp_config else [],
+                extra_env=self._acp._build_acp_extra_env(settings_key),
+                config_overrides=self._get_managed_config_overrides(settings_key),
             )
 
         # OpenCode executors are always created fresh (one per session)
@@ -1336,6 +1443,12 @@ class PromptRouter:
             await self._forward_to_opencode(session, _display)
             return session.id
 
+        # If session has an active ACP executor, forward message directly
+        if session.acp_executor is not None:
+            session.buffer.push_text(MessageType.TEXT_CHUNK, _make_user_buffer_data())
+            await self._forward_to_acp(session, _display)
+            return session.id
+
         # Direct tool mode: bypass LLM entirely. The tool comes from an explicit
         # ``direct_tool`` parameter when provided (e.g. PR-assist passing the
         # agent badge), otherwise it is parsed from the text's #tool_name syntax.
@@ -1466,6 +1579,7 @@ class PromptRouter:
                     session.claude_code_executor is not None
                     or session.codex_executor is not None
                     or session.opencode_executor is not None
+                    or session.acp_executor is not None
                 ):
                     agent_started = True
                 return result
@@ -1581,6 +1695,7 @@ class PromptRouter:
                     session.claude_code_executor is None
                     and session.codex_executor is None
                     and session.opencode_executor is None
+                    and session.acp_executor is None
                 ):
                     session.set_activity(ActivityState.IDLE)
                     # Emit a turn-complete signal so clients know the response
@@ -1637,7 +1752,7 @@ class PromptRouter:
         # message are preserved in the Additional Content section — both the ones
         # the LLM copied into ``tool_input["prompt"]`` and any pending blocks
         # captured from the user's verbatim message that the LLM dropped.
-        if tool_def is not None and tool_def.executor in ("claude_code", "codex", "opencode"):
+        if tool_def is not None and tool_def.executor in AGENT_EXECUTORS:
             raw_prompt = tool_call.tool_input.get("prompt", "")
             extra_blocks = list(session._pending_user_code_blocks)
             session._pending_user_code_blocks = []
@@ -1647,7 +1762,7 @@ class PromptRouter:
         # For agent tools, push AGENT_SESSION_START (visible banner) then
         # AGENT_GROUP_START (collapsible sub-message group) so the frontend
         # shows "Claude Code started" with the prompt before tool output.
-        if tool_def is not None and tool_def.executor in ("claude_code", "codex", "opencode"):
+        if tool_def is not None and tool_def.executor in AGENT_EXECUTORS:
             session.buffer.push_text(
                 MessageType.AGENT_SESSION_START,
                 {
@@ -1696,9 +1811,15 @@ class PromptRouter:
         if tool_def.executor == "claude_code":
             return await self._start_claude_code(session, tool_def, tool_call)
         if tool_def.executor == "codex":
+            if _acp_mode_enabled("RCFLOW_CODEX_EXECUTOR", tool_def, self._resolve_acp_adapter):
+                return await self._acp._start_acp(session, tool_def, tool_call)
             return await self._start_codex(session, tool_def, tool_call)
         if tool_def.executor == "opencode":
+            if _acp_mode_enabled("RCFLOW_OPENCODE_EXECUTOR", tool_def, self._resolve_acp_adapter):
+                return await self._acp._start_acp(session, tool_def, tool_call)
             return await self._start_opencode(session, tool_def, tool_call)
+        if tool_def.executor == "acp":
+            return await self._acp._start_acp(session, tool_def, tool_call)
 
         # Worktree tool always requires explicit user approval before execution,
         # regardless of the session's existing permission mode.  The 'list'
@@ -1725,7 +1846,34 @@ class PromptRouter:
                 session.set_activity(ActivityState.PROCESSING_LLM)
                 return deny_msg
 
+        result_text, _ = await self.execute_one_shot_tool(session, tool_def, tool_call)
+
+        session.set_active()
+        session.set_activity(ActivityState.PROCESSING_LLM)
+
+        return result_text
+
+    async def execute_one_shot_tool(
+        self,
+        session: ActiveSession,
+        tool_def: ToolDefinition,
+        tool_call: ToolCallRequest,
+        *,
+        origin: str = "llm",
+    ) -> tuple[str, bool]:
+        """Execute a one-shot tool (shell / http / worktree) and stream output to the session buffer.
+
+        Shared dispatch used by the LLM tool loop (``_execute_tool``) and the MCP
+        agent bridge. Deliberately excludes LLM-loop concerns: no ``TOOL_START``
+        push, no session state transitions, no permission gating — callers own
+        those. ``origin`` is stamped on buffer payloads for non-LLM callers so
+        the client can distinguish agent-initiated tool calls.
+
+        Returns ``(result_text, is_error)``.
+        """
         executor = self._get_executor(tool_def.executor)
+        origin_fields: dict[str, Any] = {} if origin == "llm" else {"origin": origin}
+        is_error = False
 
         # Telemetry: record start of this tool call.
         _tel_tool_call = None
@@ -1750,13 +1898,14 @@ class PromptRouter:
                             "tool_name": tool_call.tool_name,
                             "content": chunk.content,
                             "stream": chunk.stream,
+                            **origin_fields,
                         },
                     )
                 result_text = "".join(collected_output)
             else:
                 # Non-streaming execution
                 result = await executor.execute(tool_def, tool_call.tool_input)
-                failed = bool(result.exit_code)
+                is_error = bool(result.exit_code)
                 if result.output and result.error:
                     result_text = f"{result.output}\n[error] {result.error}"
                 elif result.error:
@@ -1771,7 +1920,8 @@ class PromptRouter:
                         "tool_name": tool_call.tool_name,
                         "content": result_text,
                         "stream": "stdout",
-                        "is_error": failed,
+                        "is_error": is_error,
+                        **origin_fields,
                     },
                 )
 
@@ -1782,17 +1932,16 @@ class PromptRouter:
             if self._telemetry is not None and _tel_tool_call is not None:
                 await self._telemetry.record_tool_end(_tel_tool_call, status="error", error=str(e))
             result_text = f"Tool execution failed: {e}"
+            is_error = True
             session.buffer.push_text(
                 MessageType.ERROR,
                 {
                     "session_id": session.id,
                     "content": result_text,
                     "code": "TOOL_EXEC_ERROR",
+                    **origin_fields,
                 },
             )
-
-        session.set_active()
-        session.set_activity(ActivityState.PROCESSING_LLM)
 
         # Real-time artifact scan for tool output and input values
         if self._artifact_scanner and self._settings and self._settings.ARTIFACT_AUTO_SCAN:
@@ -1804,7 +1953,7 @@ class PromptRouter:
 
         # Track active worktree context in session metadata so clients can show
         # worktree controls.  Updated on every successful mutating worktree call.
-        if tool_def is not None and tool_def.executor == "worktree":
+        if tool_def.executor == "worktree":
             self._update_session_worktree_meta(session, tool_call, result_text)
 
-        return result_text
+        return result_text, is_error

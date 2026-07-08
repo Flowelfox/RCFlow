@@ -4,7 +4,7 @@ updated: 2026-07-07
 
 # HTTP API
 
-REST endpoints. All except `/api/health` require `X-API-Key` header (same key as `RCFLOW_API_KEY`).
+REST endpoints. All except `/api/health` require the `X-API-Key` header (same key as `RCFLOW_API_KEY`); the `/api/mcp/*` pair instead uses a per-session `X-RCFlow-MCP-Token` (see [MCP Agent Bridge](#mcp-agent-bridge)).
 
 **See also:**
 - [WebSocket API](websocket-api.md) — streaming protocol
@@ -31,6 +31,7 @@ REST endpoints. All except `/api/health` require `X-API-Key` header (same key as
 - [Artifacts](#artifacts)
 - [Telemetry](#telemetry)
 - [Linear Integration](#linear-integration)
+- [MCP Agent Bridge](#mcp-agent-bridge)
 - [Auth header](#auth-header)
 - [Swagger / ReDoc](#api-documentation-swagger--redoc)
 
@@ -206,9 +207,18 @@ All under `/api/integrations/github/`. See [GitHub Integration](github.md).
 | POST | `/api/integrations/github/prs/{id}/merge`    | Yes | Merge the PR (`method` merge/squash/rebase, default squash). Maps GitHub 405 (not mergeable) to 409 |
 | POST | `/api/integrations/github/open-pr`           | Yes | Push a worktree's branch (PAT auth via GIT_ASKPASS) and open a PR (`{selected_worktree_path\|project_name, title, base, head_branch?, commit_message?}`) |
 
+## MCP Agent Bridge
+
+Consumed by the `rcflow-mcp` stdio proxy that Codex spawns — see [MCP Agent Bridge](mcp.md). **Not** authenticated by `X-API-Key`: these two endpoints require the per-session `X-RCFlow-MCP-Token` header (issued at agent spawn, revoked at session end, scoped to that session). The worker API key is deliberately rejected here so it never has to be handed to an agent subprocess.
+
+| Method | Endpoint         | Auth | Description |
+|--------|------------------|------|-------------|
+| GET    | `/api/mcp/tools` | MCP token | Agent-exposed registry tools in MCP shape — `{"tools": [{name, description, inputSchema}]}` |
+| POST   | `/api/mcp/call`  | MCP token | Execute one tool call — body `{"tool", "arguments"}`, returns `{"content", "is_error"}`. Failures (unknown tool, ended session, executor error) return `is_error: true` with HTTP 200 so the proxy relays them as MCP tool errors |
+
 ## Auth header
 
-All authenticated endpoints use `X-API-Key: <RCFLOW_API_KEY>`.
+All authenticated endpoints use `X-API-Key: <RCFLOW_API_KEY>`, except `/api/mcp/*` (per-session `X-RCFlow-MCP-Token`, see above).
 
 ## API Documentation (Swagger / ReDoc)
 

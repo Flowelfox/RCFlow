@@ -10,10 +10,15 @@ from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
-VALID_EXECUTORS = {"shell", "http", "claude_code", "codex", "opencode", "worktree"}
+VALID_EXECUTORS = {"shell", "http", "claude_code", "codex", "opencode", "worktree", "acp"}
 VALID_SESSION_TYPES = {"one-shot", "long-running"}
 VALID_LLM_CONTEXTS = {"stateless", "session-scoped"}
 VALID_OS = {"windows", "linux", "darwin"}
+
+# Executors that spawn a nested coding agent. Tools using these executors are
+# never exposed over the MCP agent bridge, regardless of ``expose_to_agents``
+# (recursion guard — an agent must not be able to spawn another agent).
+AGENT_EXECUTORS = {"claude_code", "codex", "opencode", "acp"}
 
 _DEFAULT_SHELL = "powershell.exe" if sys.platform == "win32" else "/bin/bash"
 
@@ -81,6 +86,14 @@ class WorktreeExecutorConfig(BaseModel):
     validate_branch_type: bool = True
 
 
+class AcpExecutorConfig(BaseModel):
+    """ACP Executor Config — spawn parameters for an ACP-speaking agent binary."""
+
+    binary_path: str
+    args: list[str] = Field(default_factory=list)
+    timeout: int = 1800
+
+
 class ToolDefinition(BaseModel):
     """Tool Definition."""
 
@@ -94,6 +107,7 @@ class ToolDefinition(BaseModel):
     executor: str
     parameters: dict[str, Any]
     executor_config: dict[str, Any]
+    expose_to_agents: bool = False
 
     @property
     def mention_name(self) -> str:
@@ -130,6 +144,10 @@ class ToolDefinition(BaseModel):
         """Get worktree config."""
         return WorktreeExecutorConfig(**self.executor_config.get("worktree", {}))
 
+    def get_acp_config(self) -> AcpExecutorConfig:
+        """Get ACP config."""
+        return AcpExecutorConfig(**self.executor_config["acp"])
+
 
 def load_tool_file(path: Path) -> ToolDefinition:
     """Load tool file."""
@@ -153,6 +171,13 @@ def load_tool_file(path: Path) -> ToolDefinition:
     for os_val in tool.os:
         if os_val not in VALID_OS:
             raise ValueError(f"Tool '{tool.name}': invalid os value '{os_val}'. Must be one of {VALID_OS}")
+    if tool.expose_to_agents and tool.executor in AGENT_EXECUTORS:
+        logger.warning(
+            "Tool '%s': expose_to_agents ignored for agent executor '%s' (recursion guard)",
+            tool.name,
+            tool.executor,
+        )
+        tool.expose_to_agents = False
 
     return tool
 

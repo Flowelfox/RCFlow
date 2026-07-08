@@ -405,6 +405,7 @@ class ClaudeCodeAgent:
             session_id=session_id,
             extra_env=self._build_claude_code_extra_env(),
             config_overrides=self._r._get_managed_config_overrides("claude_code"),
+            mcp_bridge=self._r._mcp_bridge,
         )
         executor.set_can_use_tool(self._make_can_use_tool(session))
         executor._tool_def = tool_def
@@ -463,6 +464,11 @@ class ClaudeCodeAgent:
                 return await self._handle_enter_plan_mode(session)
             if tool_name == "ExitPlanMode":
                 return await self._handle_exit_plan_mode(session, input_data)
+            if tool_name.startswith("mcp__rcflow__"):
+                # RCFlow bridge tools gate themselves in McpBridge.call_tool
+                # (mutating worktree ops always ask, matching the LLM loop) —
+                # gating here as well would double-prompt the user.
+                return PermissionResultAllow()
             decision = await self._handle_permission_check(session, tool_name, input_data)
             if decision == PermissionDecision.DENY:
                 return PermissionResultDeny(message="Denied by user.")
