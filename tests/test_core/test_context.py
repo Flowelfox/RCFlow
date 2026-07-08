@@ -363,9 +363,7 @@ class TestParseDirectToolPrompt:
         # be parsed as a #tool mention — it stays in the prompt.
         tool = _MockTool(name="claude_code", description="agent", executor="claude_code")
         host = _ContextHost(tool_registry=_registry_with(tool))
-        result = host._parse_direct_tool_prompt(
-            "Address the comment on PR #84 @author", explicit_tool="claude_code"
-        )
+        result = host._parse_direct_tool_prompt("Address the comment on PR #84 @author", explicit_tool="claude_code")
         assert isinstance(result, tuple)
         tool_def, tool_input, _ = result
         assert tool_def.name == "claude_code"

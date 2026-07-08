@@ -70,7 +70,11 @@ At Codex spawn (`CodexAgent._configure_mcp_bridge`):
 1. The managed `CODEX_HOME/config.toml` gets a marker-delimited, machine-owned `[mcp_servers.rcflow]` block pointing at the venv's `rcflow-mcp` binary — added when the toggle is on, removed when off (`ensure_codex_mcp_registration` in `src/services/tool_settings.py`). User-added entries — including a hand-written `[mcp_servers.rcflow]` — are never touched. All failures are non-fatal.
 2. A per-session token is issued and injected into the Codex subprocess env as `RCFLOW_MCP_TOKEN`, plus `RCFLOW_MCP_URL` (loopback + `RCFLOW_PORT`). Codex spawns the proxy as its own child, which inherits that env. The config block is static and shared across sessions; all per-session data travels via env.
 
-> **Verification caveat:** env inheritance from the Codex process to its MCP server children is assumed (standard child-process behaviour) but not yet verified against a live Codex run. If Codex sanitises the env, token delivery needs a fallback (worker-lifetime token in the config `env` map).
+> **Verification caveat (legacy Codex path only):** env inheritance from the Codex process to its MCP server children is assumed (standard child-process behaviour) but not yet verified against a live Codex run. The ACP path below does not have this problem.
+
+### ACP agents — `mcp_servers` session parameter
+
+Agents running through the [ACP executor](executors.md#acp-executor) (OpenCode; Codex with `RCFLOW_CODEX_EXECUTOR=acp`) receive the bridge as a standard ACP `session/new` parameter: the `rcflow-mcp` proxy command with the per-session token passed as **explicit protocol data** in the entry's `env` map (verified live in the Phase 0 spike). No config-file blocks, no env-inheritance assumption — this is the preferred delivery path, and legacy Codex's `config.toml` block management retires when the ACP flag becomes the default. Gated by the same per-tool `expose_rcflow_tools` setting (also available for OpenCode).
 
 ## Token Model
 

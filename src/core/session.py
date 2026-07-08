@@ -33,6 +33,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from src.core.permissions import PermissionManager
+    from src.executors.acp import AcpExecutor
     from src.executors.claude_code_sdk import ClaudeCodeSdkExecutor
     from src.executors.codex import CodexExecutor
     from src.executors.opencode import OpenCodeExecutor
@@ -118,6 +119,10 @@ class ActiveSession:
         # OpenCode CLI mode: one-shot processes with session ID continuation
         self.opencode_executor: OpenCodeExecutor | None = None
         self._opencode_stream_task: asyncio.Task[None] | None = None
+        # ACP mode: one persistent stdio subprocess speaking the Agent Client
+        # Protocol (OpenCode natively, Codex via codex-acp) — see agent_acp.py
+        self.acp_executor: AcpExecutor | None = None
+        self._acp_stream_task: asyncio.Task[None] | None = None
         self._prompt_lock: asyncio.Lock = asyncio.Lock()
         # Interactive permission approval manager (None = bypass/auto mode)
         self.permission_manager: PermissionManager | None = None
@@ -378,6 +383,8 @@ class ActiveSession:
             return "codex"
         if self.opencode_executor is not None:
             return "opencode"
+        if self.acp_executor is not None:
+            return self.metadata.get("acp_agent_name") or "acp"
         return None
 
     @property
@@ -453,6 +460,8 @@ class ActiveSession:
             and self._opencode_stream_task is not None
             and not self._opencode_stream_task.done()
         ):
+            return True
+        if self.acp_executor is not None and self._acp_stream_task is not None and not self._acp_stream_task.done():
             return True
         if self._prompt_lock.locked():
             return True

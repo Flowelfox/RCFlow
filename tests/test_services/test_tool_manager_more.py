@@ -75,7 +75,7 @@ def _managed_tool(name: str, **kw) -> ManagedTool:
 
 class TestSimpleAccessors:
     def test_tool_names_always_includes_known(self, tool_manager: ToolManager):
-        assert tool_manager.tool_names == {"claude_code", "codex", "opencode"}
+        assert tool_manager.tool_names == {"claude_code", "codex", "codex_acp", "opencode"}
 
     def test_tool_names_includes_detected(self, tool_manager: ToolManager):
         tool_manager._tools["extra"] = _managed_tool("extra")
@@ -87,6 +87,16 @@ class TestSimpleAccessors:
 
     def test_get_binary_path_missing(self, tool_manager: ToolManager):
         assert tool_manager.get_binary_path("nope") is None
+
+    def test_get_binary_path_codex_acp(self, tool_manager: ToolManager):
+        tool_manager._tools["codex_acp"] = _managed_tool(
+            "codex_acp", binary_name="codex-acp", binary_path="/x/codex-acp"
+        )
+        assert tool_manager.get_binary_path("codex_acp") == "/x/codex-acp"
+
+    def test_managed_binary_path_codex_acp(self, tool_manager: ToolManager):
+        p = tool_manager._managed_binary_path("codex_acp")
+        assert p == tool_manager._base_dir / "codex-acp" / "codex-acp"
 
     def test_managed_binary_path_unknown_raises(self, tool_manager: ToolManager):
         with pytest.raises(ValueError, match="Unknown tool"):
@@ -192,6 +202,7 @@ class TestCheckUpdates:
         tool_manager._tools = {
             "claude_code": _managed_tool("claude_code"),
             "codex": _managed_tool("codex"),
+            "codex_acp": _managed_tool("codex_acp"),
             "opencode": _managed_tool("opencode"),
         }
         with (
@@ -199,12 +210,16 @@ class TestCheckUpdates:
             patch.object(
                 ToolManager, "_get_latest_codex_version", new_callable=AsyncMock, return_value=("8.8.8", "rust-v8.8.8")
             ),
+            patch.object(
+                ToolManager, "_get_latest_codex_acp_version", new_callable=AsyncMock, return_value=("0.16.0", "v0.16.0")
+            ),
             patch.object(ToolManager, "_get_latest_opencode_version", new_callable=AsyncMock, return_value="7.7.7"),
         ):
             result = await tool_manager.check_updates()
 
         assert result["claude_code"].latest_version == "9.9.9"
         assert result["codex"].latest_version == "8.8.8"
+        assert result["codex_acp"].latest_version == "0.16.0"
         assert result["opencode"].latest_version == "7.7.7"
 
     @pytest.mark.asyncio
@@ -433,6 +448,48 @@ class TestUpdateTool:
         assert result is tool
 
     @pytest.mark.asyncio
+    async def test_update_codex_acp_installs_newer(self, tool_manager: ToolManager):
+        tool = _managed_tool("codex_acp", current_version="0.15.0")
+        updated = _managed_tool("codex_acp", current_version="0.16.0")
+        with (
+            patch.object(
+                ToolManager, "_get_latest_codex_acp_version", new_callable=AsyncMock, return_value=("0.16.0", "v0.16.0")
+            ),
+            patch.object(tool_manager, "_install_codex_acp", new_callable=AsyncMock, return_value=updated),
+        ):
+            result = await tool_manager._update_codex_acp(tool)
+        assert result is updated
+        assert tool_manager._tools["codex_acp"] is updated
+
+    @pytest.mark.asyncio
+    async def test_update_codex_acp_latest_none(self, tool_manager: ToolManager):
+        tool = _managed_tool("codex_acp", current_version="0.16.0")
+        with patch.object(
+            ToolManager, "_get_latest_codex_acp_version", new_callable=AsyncMock, return_value=(None, None)
+        ):
+            result = await tool_manager._update_codex_acp(tool)
+        assert result is tool
+
+    @pytest.mark.asyncio
+    async def test_update_codex_acp_up_to_date(self, tool_manager: ToolManager):
+        tool = _managed_tool("codex_acp", current_version="0.16.0")
+        with patch.object(
+            ToolManager, "_get_latest_codex_acp_version", new_callable=AsyncMock, return_value=("0.16.0", "v0.16.0")
+        ):
+            result = await tool_manager._update_codex_acp(tool)
+        assert result is tool
+        assert result.latest_version == "0.16.0"
+
+    @pytest.mark.asyncio
+    async def test_managed_dispatches_codex_acp(self, tool_manager: ToolManager):
+        tool = _managed_tool("codex_acp")
+        tool_manager._tools["codex_acp"] = tool
+        updated = _managed_tool("codex_acp", current_version="2.0.0")
+        with patch.object(tool_manager, "_update_codex_acp", new_callable=AsyncMock, return_value=updated):
+            result = await tool_manager.update_tool("codex_acp")
+        assert result is updated
+
+    @pytest.mark.asyncio
     async def test_update_opencode_installs_newer(self, tool_manager: ToolManager):
         tool = _managed_tool("opencode", current_version="1.0.0")
         updated = _managed_tool("opencode", current_version="2.0.0")
@@ -642,3 +699,54 @@ class TestStreamingInstalls:
         with patch.object(ToolManager, "_get_latest_opencode_version", new_callable=AsyncMock, return_value=None):
             events = [e async for e in tool_manager.install_tool_streaming("opencode")]
         assert events[-1] == {"step": "error", "message": "Could not determine latest OpenCode version"}
+
+    @pytest.mark.asyncio
+    async def test_codex_acp_streaming_full(self, tool_manager: ToolManager, tmp_path: Path):
+        target = _detect_codex_target()
+        bin_src = tmp_path / "codex-acp"
+        bin_src.write_text("#!/bin/sh\necho 'codex-acp 0.16.0'")
+        bin_src.chmod(0o755)
+        tar_path = tmp_path / "codex-acp.tar.gz"
+        with tarfile.open(tar_path, "w:gz") as tf:
+            tf.add(str(bin_src), arcname="codex-acp")
+        tar_content = tar_path.read_bytes()
+
+        def handler(req: httpx.Request) -> httpx.Response:
+            url = str(req.url)
+            if "checksums.txt" in url:
+                # zed-industries/codex-acp releases publish no checksums.txt.
+                return httpx.Response(404)
+            assert f"codex-acp-0.16.0-{target}.tar.gz" in url
+            return httpx.Response(200, content=tar_content, headers={"content-length": str(len(tar_content))})
+
+        with (
+            patch.object(
+                ToolManager,
+                "_get_latest_codex_acp_version",
+                new_callable=AsyncMock,
+                return_value=("0.16.0", "v0.16.0"),
+            ),
+            patch("src.services.tools.manager._verify_binary", new_callable=AsyncMock, return_value=(True, "")),
+            _mock_httpx_transport(handler),
+        ):
+            events = [e async for e in tool_manager.install_tool_streaming("codex_acp")]
+
+        steps = [e["step"] for e in events]
+        assert "downloading" in steps
+        assert "verifying" in steps
+        assert events[-1]["step"] == "done"
+        # _tools must be updated in-process so get_binary_path resolves it.
+        tool = tool_manager._tools["codex_acp"]
+        assert tool.managed is True
+        assert tool.current_version == "0.16.0"
+        assert tool.binary_name == "codex-acp"
+        assert Path(tool.binary_path).exists()
+        assert tool_manager.get_binary_path("codex_acp") == tool.binary_path
+
+    @pytest.mark.asyncio
+    async def test_codex_acp_streaming_version_unavailable(self, tool_manager: ToolManager):
+        with patch.object(
+            ToolManager, "_get_latest_codex_acp_version", new_callable=AsyncMock, return_value=(None, None)
+        ):
+            events = [e async for e in tool_manager.install_tool_streaming("codex_acp")]
+        assert events[-1] == {"step": "error", "message": "Could not determine latest codex-acp version"}

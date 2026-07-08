@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 
 import httpx
 
-from src.services.tools.constants import _CHECK_TIMEOUT, CODEX_RELEASE_BASE
+from src.services.tools.constants import _CHECK_TIMEOUT, CODEX_ACP_RELEASE_BASE, CODEX_RELEASE_BASE
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -174,6 +174,44 @@ def _verify_codex_asset_checksum(content: bytes, asset_name: str, checksums: dic
     if actual != expected:
         raise ValueError(f"Codex checksum mismatch for {asset_name!r}: expected {expected!r}, got {actual!r}")
     logger.debug("Codex asset checksum verified: %s", asset_name)
+
+
+async def _fetch_codex_acp_checksums(client: httpx.AsyncClient, tag: str) -> dict[str, str]:
+    """Download and parse ``checksums.txt`` for a codex-acp GitHub release.
+
+    Returns ``{filename: sha256_hex}``.  Current zed-industries/codex-acp
+    releases (v0.16.0 at the time of writing) publish no ``checksums.txt``,
+    so this normally logs a warning and returns an empty dict — verification
+    is then skipped, matching how Codex releases without checksums are
+    handled.  If upstream adds the file later, verification kicks in
+    automatically.
+    """
+    url = f"{CODEX_ACP_RELEASE_BASE}/{tag}/checksums.txt"
+    try:
+        resp = await client.get(url, timeout=_CHECK_TIMEOUT)
+        resp.raise_for_status()
+        return _parse_codex_checksums(resp.text)
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 404:
+            logger.warning("codex-acp checksums.txt not found for tag %s — skipping integrity check", tag)
+            return {}
+        raise
+
+
+def _find_codex_acp_binary(extract_dir: Path, members: list[str]) -> Path | None:
+    """Find the codex-acp binary among extracted archive members.
+
+    The release archive contains a single root-level file named
+    ``codex-acp`` (``codex-acp.exe`` inside the Windows zip); this helper
+    locates it regardless of directory nesting.
+    """
+    exe = ".exe" if sys.platform == "win32" else ""
+    target_name = f"codex-acp{exe}"
+    for member in members:
+        p = extract_dir / member
+        if p.is_file() and p.name == target_name:
+            return p
+    return None
 
 
 def _find_codex_binary(extract_dir: Path, members: list[str]) -> Path | None:

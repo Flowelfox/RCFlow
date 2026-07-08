@@ -383,6 +383,17 @@ OPENCODE_SETTINGS_SCHEMA: list[dict[str, Any]] = [
         ),
         "managed_only": True,
     },
+    {
+        "key": "expose_rcflow_tools",
+        "label": "Expose RCFlow tools",
+        "type": "boolean",
+        "default": False,
+        "description": (
+            "Let OpenCode list and call RCFlow tools during a session"
+            " (served over MCP; requires the ACP executor mode). Takes effect for new sessions."
+        ),
+        "managed_only": True,
+    },
 ]
 
 _TOOL_SCHEMAS: dict[str, list[dict[str, Any]]] = {

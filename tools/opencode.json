@@ -31,6 +31,11 @@
       "binary_path": "opencode",
       "model": "",
       "timeout": 600
+    },
+    "acp": {
+      "binary_path": "opencode",
+      "args": ["acp"],
+      "timeout": 1800
     }
   }
 }

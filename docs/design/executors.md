@@ -150,6 +150,35 @@ The `codex` executor manages an OpenAI Codex CLI subprocess for delegating codin
 }
 ```
 
+## ACP Executor
+
+The `acp` executor drives any agent that speaks the [Agent Client Protocol](https://agentclientprotocol.com) as a persistent stdio subprocess — one executor for every ACP agent. RCFlow is the ACP *client*; per-agent differences live entirely in the tool definition's `executor_config.acp` (binary + args) and the per-agent env builders — never in code branches.
+
+**Current agents:** OpenCode (native, `opencode acp`) and Codex (via the `codex-acp` adapter binary). Claude Code deliberately stays on the SDK executor — it migrates only when the PyPI ACP adapter reaches production parity (cwd handling, resume, usage, AskUserQuestion fidelity).
+
+**Rollout flags:** `RCFLOW_OPENCODE_EXECUTOR` and `RCFLOW_CODEX_EXECUTOR` (values `legacy` | `acp`, default `legacy`). With `acp`, the prompt router routes the agent's tool through `AcpAgent`/`AcpExecutor` instead of the bespoke legacy executor; the tool definition must carry an `executor_config.acp` block (both `tools/opencode.json` and `tools/codex.json` do). Same rollback pattern the Claude Code SDK migration used.
+
+**How it works:**
+
+1. `AcpExecutor` (`src/executors/acp.py`) spawns the agent binary and negotiates `initialize` (capability exchange — `load_session` support is recorded for resume).
+2. `session/new` is issued with the working directory and — when the per-tool `expose_rcflow_tools` setting is on — the RCFlow MCP bridge as a client-provided MCP server: the `rcflow-mcp` proxy command plus a per-session token passed as **explicit protocol data** in the `env` entries (no process-env inheritance, no agent config file blocks).
+3. A prompt turn is one `session/prompt` call; `session/update` notifications stream concurrently and are translated by the pure `acp_update_to_event()` into normalised event dicts (`text`, `thought`, `tool_call`/`tool_call_update` with locations + diffs, `plan`, `usage`, `available_commands`, `turn_end`, `error`), which `AcpAgent._relay_acp_stream` (`src/core/agent_acp.py`) maps onto the standard buffer messages (`TEXT_CHUNK`, `THINKING`, `TOOL_START`/`TOOL_OUTPUT`, `TODO_UPDATE`, …). Tool-call `locations` feed the worktree-badge cwd tracking (`infer_cwd_from_tool_paths`).
+4. Follow-up user messages are further `session/prompt` calls on the same live process ("agent mode", mirroring Claude Code). If the process died and the agent advertised `loadSession`, the next turn respawns and resumes via `session/load` (the agent replays the conversation).
+5. `session/request_permission` is relayed to RCFlow's interactive permission flow (`PERMISSION_REQUEST` widget): ALLOW selects the agent's allow-once option — rule caching stays on RCFlow's side — DENY selects reject-once (or cancels the call when the agent offered no reject option). fs and terminal capabilities are declined in this phase; agents use their own filesystem/shell access exactly as on the legacy paths.
+6. Turn completion carries an ACP stop reason: `end_turn` fires the summary/task-update pipeline; `cancelled` ends quietly; `max_tokens` / `max_turn_requests` / `refusal` surface as errors. `usage_update` totals (tokens, context size, cost) land in `session.metadata["acp_usage"]`.
+
+**Resume across pause/restart:** the agent-issued ACP session id is persisted in `session.metadata["acp_session_id"]`; resume reconstructs the executor with `set_resume_target()` so the next turn issues `session/load`.
+
+**Configuration (`AcpExecutorConfig`):**
+
+| Field | Default | Description |
+|---|---|---|
+| `binary_path` | — | ACP agent/adapter binary. Managed ToolManager copies win: resolution keys off the *binary* name (`opencode` → managed opencode, `codex-acp` → managed codex_acp) |
+| `args` | `[]` | Arguments (e.g. `["acp"]` for OpenCode's server mode) |
+| `timeout` | `1800` | Per-turn wall-clock timeout in seconds |
+
+**Known limitation (OpenCode):** OpenCode's default policy auto-allows edits, so it rarely asks for permission — matching the legacy path's behaviour. The relay is fully wired; agents that ask (codex-acp does by default) get the interactive widget. Seeding ask-mode into OpenCode's own config needs a verified delivery mechanism first.
+
 ## Worktree Executor
 
 The `worktree` executor wraps the [`wtpython`](https://github.com/Flowelfox/worktree-manager-python) library's `WorktreeManager` class. Unlike `shell` or `http` executors, it calls Python library code directly rather than spawning a subprocess. All blocking git operations run via `asyncio.to_thread` to avoid blocking the event loop.

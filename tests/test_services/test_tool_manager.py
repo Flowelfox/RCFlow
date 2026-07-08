@@ -101,6 +101,16 @@ class TestParseVersion:
         # tolerate "opencode 1.3.7" just in case
         assert _parse_version("opencode", "opencode 1.3.7") == "1.3.7"
 
+    def test_codex_acp_version_bare(self):
+        assert _parse_version("codex_acp", "0.16.0") == "0.16.0"
+
+    def test_codex_acp_version_prefixed(self):
+        assert _parse_version("codex_acp", "codex-acp 0.16.0") == "0.16.0"
+
+    def test_codex_acp_no_version_flag_output(self):
+        # codex-acp rejects --version, so stdout is typically empty.
+        assert _parse_version("codex_acp", "") is None
+
 
 # ---------------------------------------------------------------------------
 # Platform detection
@@ -175,6 +185,29 @@ class TestDetection:
     async def test_detect_not_found(self, tool_manager: ToolManager):
         """When the managed binary is not on disk, return empty tool."""
         tool = await tool_manager.detect_tool("codex")
+        assert tool.binary_path is None
+        assert tool.managed is False
+
+    @pytest.mark.asyncio
+    async def test_detect_codex_acp_managed_dir(self, tool_manager: ToolManager):
+        """codex-acp is detected from the managed dir; version comes from the .version file."""
+        managed_dir = tool_manager._base_dir / "codex-acp"
+        managed_dir.mkdir(parents=True)
+        fake_binary = managed_dir / "codex-acp"
+        # Real codex-acp rejects --version (exit 2, empty stdout) — mimic that.
+        fake_binary.write_text("#!/bin/sh\nexit 2")
+        fake_binary.chmod(0o755)
+        (managed_dir / "codex-acp.version").write_text("0.16.0")
+
+        tool = await tool_manager.detect_tool("codex_acp")
+        assert tool.binary_path == str(fake_binary)
+        assert tool.binary_name == "codex-acp"
+        assert tool.managed is True
+        assert tool.current_version == "0.16.0"
+
+    @pytest.mark.asyncio
+    async def test_detect_codex_acp_not_found(self, tool_manager: ToolManager):
+        tool = await tool_manager.detect_tool("codex_acp")
         assert tool.binary_path is None
         assert tool.managed is False
 
@@ -261,6 +294,72 @@ class TestInstallCodex:
         assert tool.current_version == "0.106.0"
         assert tool.binary_path is not None
         assert Path(tool.binary_path).exists()
+
+
+# ---------------------------------------------------------------------------
+# Installation — codex-acp
+# ---------------------------------------------------------------------------
+
+
+class TestInstallCodexAcp:
+    @pytest.mark.asyncio
+    async def test_install_codex_acp(self, tool_manager: ToolManager, tmp_path: Path):
+        """Test codex-acp installation with mocked HTTP responses."""
+        target = _detect_codex_target()
+
+        # Release tarball contains a single root-level "codex-acp" file.
+        tar_path = tmp_path / "codex-acp.tar.gz"
+        fake_binary = tmp_path / "codex-acp"
+        fake_binary.write_text("#!/bin/sh\necho 'codex-acp 0.16.0'")
+        fake_binary.chmod(0o755)
+
+        with tarfile.open(tar_path, "w:gz") as tf:
+            tf.add(str(fake_binary), arcname="codex-acp")
+
+        tar_content = tar_path.read_bytes()
+
+        def handler(req: httpx.Request) -> httpx.Response:
+            # zed-industries releases publish no checksums.txt (v0.16.0).
+            if "checksums.txt" in str(req.url):
+                return httpx.Response(404)
+            assert f"codex-acp-0.16.0-{target}.tar.gz" in str(req.url)
+            return httpx.Response(200, content=tar_content)
+
+        with (
+            patch.object(
+                ToolManager,
+                "_get_latest_codex_acp_version",
+                new_callable=AsyncMock,
+                return_value=("0.16.0", "v0.16.0"),
+            ),
+            _mock_httpx_transport(handler),
+        ):
+            tool = await tool_manager._install_codex_acp()
+
+        assert tool.managed is True
+        assert tool.current_version == "0.16.0"
+        assert tool.binary_name == "codex-acp"
+        assert tool.binary_path is not None
+        assert Path(tool.binary_path).exists()
+        assert Path(tool.binary_path).name == "codex-acp"
+        assert Path(tool.binary_path).parent.name == "codex-acp"
+        # get_binary_path must resolve it once registered in _tools.
+        tool_manager._tools["codex_acp"] = tool
+        assert tool_manager.get_binary_path("codex_acp") == tool.binary_path
+
+    @pytest.mark.asyncio
+    async def test_install_codex_acp_version_unavailable(self, tool_manager: ToolManager):
+        """Install raises (never silently succeeds) when the version check fails."""
+        with (
+            patch.object(
+                ToolManager,
+                "_get_latest_codex_acp_version",
+                new_callable=AsyncMock,
+                return_value=(None, None),
+            ),
+            pytest.raises(RuntimeError, match="Could not determine latest codex-acp version"),
+        ):
+            await tool_manager._install_codex_acp()
 
 
 # ---------------------------------------------------------------------------
@@ -459,6 +558,20 @@ class TestVersionQueries:
         with _mock_httpx_transport(lambda req: httpx.Response(200, json={"tag_name": "v1.3.7"})):
             version = await ToolManager._get_latest_opencode_version()
         assert version == "1.3.7"
+
+    @pytest.mark.asyncio
+    async def test_get_latest_codex_acp_version(self):
+        with _mock_httpx_transport(lambda req: httpx.Response(200, json={"tag_name": "v0.16.0"})):
+            version, tag = await ToolManager._get_latest_codex_acp_version()
+        assert version == "0.16.0"
+        assert tag == "v0.16.0"
+
+    @pytest.mark.asyncio
+    async def test_get_latest_codex_acp_version_network_error(self):
+        with _mock_httpx_transport(lambda req: httpx.Response(500)):
+            version, tag = await ToolManager._get_latest_codex_acp_version()
+        assert version is None
+        assert tag is None
 
     @pytest.mark.asyncio
     async def test_get_latest_opencode_version_follows_redirect(self):

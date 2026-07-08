@@ -19,7 +19,9 @@ import httpx
 from src.paths import get_managed_cc_plugins_dir, get_managed_tools_dir
 from src.services.tools.binary_install import (
     _atomic_install_binary,
+    _fetch_codex_acp_checksums,
     _fetch_codex_checksums,
+    _find_codex_acp_binary,
     _find_codex_binary,
     _find_opencode_binary,
     _is_executable,
@@ -30,6 +32,8 @@ from src.services.tools.constants import (
     _CHECK_TIMEOUT,
     _DOWNLOAD_TIMEOUT,
     CLAUDE_GCS_BUCKET,
+    CODEX_ACP_GITHUB_RELEASES_API,
+    CODEX_ACP_RELEASE_BASE,
     CODEX_GITHUB_RELEASES_API,
     CODEX_RELEASE_BASE,
     OPENCODE_GITHUB_RELEASES_API,
@@ -73,7 +77,7 @@ class ToolManager:
     @property
     def tool_names(self) -> set[str]:
         """Return the set of known tool names."""
-        return set(self._tools.keys()) | {"claude_code", "codex", "opencode"}
+        return set(self._tools.keys()) | {"claude_code", "codex", "codex_acp", "opencode"}
 
     # ------------------------------------------------------------------
     # Public API
@@ -86,9 +90,9 @@ class ToolManager:
         Use ``install_tool()`` or ``install_tool_streaming()`` to install
         on-demand when the user requests it via the UI.
         """
-        binary_names = {"claude_code": "claude", "codex": "codex", "opencode": "opencode"}
+        binary_names = {"claude_code": "claude", "codex": "codex", "codex_acp": "codex-acp", "opencode": "opencode"}
         results: dict[str, ManagedTool] = {}
-        for name in ("claude_code", "codex", "opencode"):
+        for name in ("claude_code", "codex", "codex_acp", "opencode"):
             try:
                 # Sweep any ``<binary>.<pid>.old`` files left by a previous
                 # in-place update on Windows.  Cheap no-op on POSIX.
@@ -123,6 +127,9 @@ class ToolManager:
                     tool.latest_version = await self._get_latest_claude_version()
                 elif name == "codex":
                     version, _ = await self._get_latest_codex_version()
+                    tool.latest_version = version
+                elif name == "codex_acp":
+                    version, _ = await self._get_latest_codex_acp_version()
                     tool.latest_version = version
                 elif name == "opencode":
                     tool.latest_version = await self._get_latest_opencode_version()
@@ -208,7 +215,7 @@ class ToolManager:
         source.  When no managed binary is on disk, the tool is reported as
         not installed and the UI prompts the user to install it.
         """
-        binary_names = {"claude_code": "claude", "codex": "codex", "opencode": "opencode"}
+        binary_names = {"claude_code": "claude", "codex": "codex", "codex_acp": "codex-acp", "opencode": "opencode"}
         binary_name = binary_names.get(name, name)
 
         mp = self._managed_binary_path(name)
@@ -248,6 +255,8 @@ class ToolManager:
                 tool = await self._install_claude_code()
             elif name == "codex":
                 tool = await self._install_codex()
+            elif name == "codex_acp":
+                tool = await self._install_codex_acp()
             elif name == "opencode":
                 tool = await self._install_opencode()
             else:
@@ -409,6 +418,109 @@ class ToolManager:
                         extracted.chmod(0o755)
                         shutil.move(str(extracted), str(binary_path))
 
+    async def _install_codex_acp(self) -> ManagedTool:
+        """Download and install codex-acp native binary from GitHub Releases.
+
+        codex-acp is the ACP (Agent Client Protocol) adapter for OpenAI
+        Codex.  Binaries come from the zed-industries/codex-acp releases —
+        see :mod:`src.services.tools.constants` for why that repo was chosen
+        over agentclientprotocol/codex-acp.
+        """
+        install_dir = self._base_dir / "codex-acp"
+        install_dir.mkdir(parents=True, exist_ok=True)
+
+        exe = ".exe" if sys.platform == "win32" else ""
+        binary_path = install_dir / f"codex-acp{exe}"
+
+        version, tag = await self._get_latest_codex_acp_version()
+        if not version or not tag:
+            raise RuntimeError("Could not determine latest codex-acp version")
+
+        # codex-acp release assets use the same Rust target triples as Codex
+        # (verified against the v0.16.0 asset list via the GitHub API).
+        target = _detect_codex_target()
+        await self._download_codex_acp_binary(install_dir, binary_path, tag, version, target)
+
+        # Verify the binary can actually run on this system.  Note codex-acp
+        # rejects ``--version`` (exit code 2), so a healthy install still
+        # reports ok=False here — the check only serves as a glibc probe,
+        # which surfaces in stderr as a loader error mentioning GLIBC.
+        if sys.platform != "win32":
+            ok, err = await _verify_binary(str(binary_path))
+            if not ok and "GLIBC" in err and "musl" not in target:
+                musl_target = target.replace("-gnu", "-musl")
+                logger.warning(
+                    "codex-acp gnu binary requires newer glibc (%s), retrying with musl variant",
+                    err.splitlines()[0] if err else "unknown",
+                )
+                await self._download_codex_acp_binary(install_dir, binary_path, tag, version, musl_target)
+
+        logger.info("Installed codex-acp %s to %s", version, binary_path)
+        self._write_version_file("codex_acp", version)
+        which_str = shutil.which("codex-acp")
+        if which_str and Path(which_str).resolve() == binary_path.resolve():
+            which_str = None
+        return ManagedTool(
+            name="codex_acp",
+            binary_name="codex-acp",
+            binary_path=str(binary_path),
+            current_version=version,
+            latest_version=version,
+            managed=True,
+            managed_path=str(binary_path),
+            external_path=which_str,
+        )
+
+    @staticmethod
+    async def _download_codex_acp_binary(
+        install_dir: Path, binary_path: Path, tag: str, version: str, target: str
+    ) -> None:
+        """Download and place the codex-acp binary for a specific target triple."""
+        ext = ".zip" if sys.platform == "win32" else ".tar.gz"
+        asset_name = f"codex-acp-{version}-{target}{ext}"
+        download_url = f"{CODEX_ACP_RELEASE_BASE}/{tag}/{asset_name}"
+
+        async with httpx.AsyncClient(follow_redirects=True) as client:
+            checksums = await _fetch_codex_acp_checksums(client, tag)
+            resp = await client.get(download_url, timeout=_DOWNLOAD_TIMEOUT)
+            resp.raise_for_status()
+            _verify_codex_asset_checksum(resp.content, asset_name, checksums)
+
+            with tempfile.TemporaryDirectory(dir=str(install_dir)) as tmp_dir:
+                archive_path = Path(tmp_dir) / asset_name
+                archive_path.write_bytes(resp.content)
+                ToolManager._extract_codex_acp_archive(archive_path, Path(tmp_dir), binary_path)
+
+    @staticmethod
+    def _extract_codex_acp_archive(archive_path: Path, tmp_dir: Path, binary_path: Path) -> None:
+        """Extract the codex-acp binary from a release archive into place.
+
+        Linux/macOS assets are ``.tar.gz`` with a single root-level
+        ``codex-acp`` file; Windows assets are ``.zip`` with a single
+        root-level ``codex-acp.exe``.
+        """
+        if archive_path.name.endswith(".tar.gz"):
+            with tarfile.open(archive_path, "r:gz") as tf:
+                members = tf.getnames()
+                if not members:
+                    raise RuntimeError("codex-acp tarball is empty")
+                tf.extractall(tmp_dir, filter="data")
+                extracted = _find_codex_acp_binary(tmp_dir, members)
+                if not extracted:
+                    raise RuntimeError(f"Could not find codex-acp binary in tarball: {members}")
+                extracted.chmod(0o755)
+                shutil.move(str(extracted), str(binary_path))
+        else:
+            with zipfile.ZipFile(archive_path) as zf:
+                names = zf.namelist()
+                zf.extractall(tmp_dir)  # noqa: S202
+                extracted = _find_codex_acp_binary(tmp_dir, names)
+                if not extracted:
+                    raise RuntimeError(f"Could not find codex-acp binary in zip: {names}")
+                if sys.platform != "win32":
+                    extracted.chmod(0o755)
+                shutil.move(str(extracted), str(binary_path))
+
     async def _install_opencode(self) -> ManagedTool:
         """Download and install OpenCode native binary from GitHub Releases."""
         install_dir = self._base_dir / "opencode"
@@ -509,6 +621,9 @@ class ToolManager:
                     yield event
             elif name == "codex":
                 async for event in self._install_codex_streaming():
+                    yield event
+            elif name == "codex_acp":
+                async for event in self._install_codex_acp_streaming():
                     yield event
             elif name == "opencode":
                 async for event in self._install_opencode_streaming():
@@ -758,6 +873,99 @@ class ToolManager:
                     extracted.chmod(0o755)
                     shutil.move(str(extracted), str(binary_path))
 
+    async def _install_codex_acp_streaming(self) -> AsyncGenerator[dict[str, Any], None]:
+        """Download codex-acp with streaming progress."""
+        install_dir = self._base_dir / "codex-acp"
+        install_dir.mkdir(parents=True, exist_ok=True)
+
+        exe = ".exe" if sys.platform == "win32" else ""
+        binary_path = install_dir / f"codex-acp{exe}"
+
+        yield {"step": "checking_version", "message": "Checking latest version..."}
+        version, tag = await self._get_latest_codex_acp_version()
+        if not version or not tag:
+            yield {"step": "error", "message": "Could not determine latest codex-acp version"}
+            return
+
+        yield {"step": "checking_version", "message": f"Found version {version}"}
+
+        target = _detect_codex_target()
+
+        async for event in self._stream_codex_acp_download(install_dir, binary_path, tag, version, target):
+            yield event
+
+        # Verify the binary can actually run on this system (glibc compat).
+        # codex-acp rejects ``--version`` so ok=False is expected even for a
+        # healthy install — only a GLIBC loader error triggers the retry.
+        if sys.platform != "win32":
+            ok, err = await _verify_binary(str(binary_path))
+            if not ok and "GLIBC" in err and "musl" not in target:
+                musl_target = target.replace("-gnu", "-musl")
+                logger.warning("codex-acp gnu binary requires newer glibc, retrying with musl")
+                yield {"step": "installing", "message": "Incompatible glibc, downloading musl variant..."}
+                async for event in self._stream_codex_acp_download(install_dir, binary_path, tag, version, musl_target):
+                    yield event
+
+        self._write_version_file("codex_acp", version)
+        which_str = shutil.which("codex-acp")
+        if which_str and Path(which_str).resolve() == binary_path.resolve():
+            which_str = None
+        tool = ManagedTool(
+            name="codex_acp",
+            binary_name="codex-acp",
+            binary_path=str(binary_path),
+            current_version=version,
+            latest_version=version,
+            managed=True,
+            managed_path=str(binary_path),
+            external_path=which_str,
+        )
+        self._tools["codex_acp"] = tool
+        logger.info("Installed codex-acp %s to %s", version, binary_path)
+        yield {"step": "done", "message": f"Installed v{version}"}
+
+    @staticmethod
+    async def _stream_codex_acp_download(
+        install_dir: Path, binary_path: Path, tag: str, version: str, target: str
+    ) -> AsyncGenerator[dict[str, Any], None]:
+        """Download and install codex-acp for a target triple, yielding progress events."""
+        ext = ".zip" if sys.platform == "win32" else ".tar.gz"
+        asset_name = f"codex-acp-{version}-{target}{ext}"
+        download_url = f"{CODEX_ACP_RELEASE_BASE}/{tag}/{asset_name}"
+
+        yield {"step": "downloading", "progress": 0.0, "message": "Starting download..."}
+
+        async with httpx.AsyncClient(follow_redirects=True) as client:
+            checksums = await _fetch_codex_acp_checksums(client, tag)
+            total = 0
+            received = 0
+            chunks: list[bytes] = []
+            async with client.stream("GET", download_url, timeout=_DOWNLOAD_TIMEOUT) as stream:
+                total = int(stream.headers.get("content-length", 0))
+                async for chunk in stream.aiter_bytes(65536):
+                    chunks.append(chunk)
+                    received += len(chunk)
+                    if total > 0:
+                        pct = received / total
+                        mb_recv = received / 1_048_576
+                        mb_total = total / 1_048_576
+                        yield {
+                            "step": "downloading",
+                            "progress": round(pct, 3),
+                            "message": f"Downloading... {mb_recv:.1f} / {mb_total:.1f} MB",
+                        }
+
+        content = b"".join(chunks)
+        yield {"step": "verifying", "message": "Verifying checksum..."}
+        _verify_codex_asset_checksum(content, asset_name, checksums)
+
+        yield {"step": "installing", "message": "Installing..."}
+
+        with tempfile.TemporaryDirectory(dir=str(install_dir)) as tmp_dir:
+            archive_path = Path(tmp_dir) / asset_name
+            archive_path.write_bytes(content)
+            ToolManager._extract_codex_acp_archive(archive_path, Path(tmp_dir), binary_path)
+
     async def _install_opencode_streaming(self) -> AsyncGenerator[dict[str, Any], None]:
         """Download and install OpenCode from GitHub Releases, yielding progress events."""
         install_dir = self._base_dir / "opencode"
@@ -893,6 +1101,8 @@ class ToolManager:
             latest = await self._get_latest_claude_version()
         elif name == "codex":
             latest, _ = await self._get_latest_codex_version()
+        elif name == "codex_acp":
+            latest, _ = await self._get_latest_codex_acp_version()
         elif name == "opencode":
             latest = await self._get_latest_opencode_version()
         else:
@@ -925,6 +1135,8 @@ class ToolManager:
                 latest = await self._get_latest_claude_version()
             elif name == "codex":
                 latest, _ = await self._get_latest_codex_version()
+            elif name == "codex_acp":
+                latest, _ = await self._get_latest_codex_acp_version()
             elif name == "opencode":
                 latest = await self._get_latest_opencode_version()
             else:
@@ -943,6 +1155,8 @@ class ToolManager:
             return await self._update_claude_code(tool)
         if name == "codex":
             return await self._update_codex(tool)
+        if name == "codex_acp":
+            return await self._update_codex_acp(tool)
         if name == "opencode":
             return await self._update_opencode(tool)
         return tool
@@ -979,6 +1193,23 @@ class ToolManager:
         async with self._lock:
             updated = await self._install_codex()
         self._tools["codex"] = updated
+        return updated
+
+    async def _update_codex_acp(self, tool: ManagedTool) -> ManagedTool:
+        """Re-download codex-acp if a newer version is available."""
+        latest, _ = await self._get_latest_codex_acp_version()
+        if not latest:
+            return tool
+
+        tool.latest_version = latest
+        if tool.current_version == latest:
+            logger.debug("codex-acp is up to date (%s)", latest)
+            return tool
+
+        logger.info("Updating codex-acp: %s -> %s", tool.current_version, latest)
+        async with self._lock:
+            updated = await self._install_codex_acp()
+        self._tools["codex_acp"] = updated
         return updated
 
     async def _update_opencode(self, tool: ManagedTool) -> ManagedTool:
@@ -1049,6 +1280,24 @@ class ToolManager:
             return None, None
 
     @staticmethod
+    async def _get_latest_codex_acp_version() -> tuple[str | None, str | None]:
+        """Fetch latest codex-acp version from GitHub Releases API.
+
+        Returns ``(version, tag_name)`` — e.g. ``("0.16.0", "v0.16.0")``.
+        """
+        try:
+            async with httpx.AsyncClient(follow_redirects=True) as client:
+                resp = await client.get(CODEX_ACP_GITHUB_RELEASES_API, timeout=_CHECK_TIMEOUT)
+                resp.raise_for_status()
+                data = resp.json()
+                tag: str = data["tag_name"]
+                version = tag.removeprefix("v")
+                return version, tag
+        except Exception:
+            logger.warning("Failed to check latest codex-acp version", exc_info=True)
+            return None, None
+
+    @staticmethod
     async def _get_latest_opencode_version() -> str | None:
         """Fetch latest OpenCode version from GitHub Releases API."""
         try:
@@ -1078,6 +1327,8 @@ class ToolManager:
             return self._base_dir / "claude-code" / f"claude{exe}"
         if name == "codex":
             return self._base_dir / "codex" / f"codex{exe}"
+        if name == "codex_acp":
+            return self._base_dir / "codex-acp" / f"codex-acp{exe}"
         if name == "opencode":
             return self._base_dir / "opencode" / f"opencode{exe}"
         raise ValueError(f"Unknown tool: {name}")

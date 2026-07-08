@@ -76,6 +76,7 @@ This file is the **index**. Detailed sections live in sibling files (`./architec
 | Database             | SQLite (default) or PostgreSQL |
 | LLM                  | Anthropic Messages API, AWS Bedrock, or OpenAI Chat Completions API |
 | Claude Code agent    | claude-agent-sdk (drives the managed `claude` binary; `can_use_tool` powers interactive AskUserQuestion + permissions) |
+| ACP agents (Codex, OpenCode) | agent-client-protocol (official Python ACP SDK — client side; agents run as stdio subprocesses) |
 | Prompt Templates     | Jinja2                        |
 | Linting / Formatting | Ruff                          |
 | Type Checking        | ty                            |
