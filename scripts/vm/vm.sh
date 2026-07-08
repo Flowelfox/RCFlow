@@ -159,8 +159,9 @@ cmd_smoke() {
 }
 
 cmd_smoke_acp() {
-  # ACP E2E: OpenCode-over-ACP prompt round-trip. Requires the VM worker to
-  # run with RCFLOW_OPENCODE_EXECUTOR=acp and the managed OpenCode installed.
+  # ACP E2E: OpenCode-over-ACP prompt round-trip. ACP is the default mode;
+  # needs the managed OpenCode installed on the worker (and the flag not forced
+  # to legacy).
   local port key local_port tunnel_pid
   port=$(worker_port)
   key=$(worker_api_key)
@@ -270,7 +271,7 @@ Worker E2E:
                             (health → auth → prompt → tool output → session end)
   smoke-acp [--verbose]     OpenCode-over-ACP E2E (#opencode prompt → agent banner →
                             streamed answer → follow-up turn → session end).
-                            Needs RCFLOW_OPENCODE_EXECUTOR=acp + OpenCode on the worker
+                            Needs OpenCode installed on the worker (ACP is the default)
 
 Client (GUI on VM display :0):
   client-start | client-stop | client-status

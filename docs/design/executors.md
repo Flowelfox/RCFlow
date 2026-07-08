@@ -156,7 +156,7 @@ The `acp` executor drives any agent that speaks the [Agent Client Protocol](http
 
 **Current agents:** OpenCode (native, `opencode acp`) and Codex (via the `codex-acp` adapter binary). Claude Code deliberately stays on the SDK executor — it migrates only when the PyPI ACP adapter reaches production parity (cwd handling, resume, usage, AskUserQuestion fidelity).
 
-**Rollout flags:** `RCFLOW_OPENCODE_EXECUTOR` and `RCFLOW_CODEX_EXECUTOR` (values `legacy` | `acp`, default `legacy`). With `acp`, the prompt router routes the agent's tool through `AcpAgent`/`AcpExecutor` instead of the bespoke legacy executor; the tool definition must carry an `executor_config.acp` block (both `tools/opencode.json` and `tools/codex.json` do). Same rollback pattern the Claude Code SDK migration used.
+**ACP is the default.** With the rollback flags (`RCFLOW_OPENCODE_EXECUTOR` / `RCFLOW_CODEX_EXECUTOR`, values `acp` | `legacy`) unset, an agent tool runs over ACP whenever its definition carries an `executor_config.acp` block (both `tools/opencode.json` and `tools/codex.json` do) **and** the adapter binary is resolvable (managed ToolManager copy or `PATH`); otherwise it degrades gracefully to the legacy executor — e.g. Codex keeps its legacy JSONL path until the `codex-acp` adapter is installed. An explicit `acp` forces the ACP path (skipping the availability probe, so a missing adapter surfaces in-session); an explicit `legacy` always opts out — same rollback pattern the Claude Code SDK migration used.
 
 **How it works:**
 

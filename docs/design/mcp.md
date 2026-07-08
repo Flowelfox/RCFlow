@@ -74,7 +74,7 @@ At Codex spawn (`CodexAgent._configure_mcp_bridge`):
 
 ### ACP agents — `mcp_servers` session parameter
 
-Agents running through the [ACP executor](executors.md#acp-executor) (OpenCode; Codex with `RCFLOW_CODEX_EXECUTOR=acp`) receive the bridge as a standard ACP `session/new` parameter: the `rcflow-mcp` proxy command with the per-session token passed as **explicit protocol data** in the entry's `env` map (verified live in the Phase 0 spike). No config-file blocks, no env-inheritance assumption — this is the preferred delivery path, and legacy Codex's `config.toml` block management retires when the ACP flag becomes the default. Gated by the same per-tool `expose_rcflow_tools` setting (also available for OpenCode).
+Agents running through the [ACP executor](executors.md#acp-executor) — the **default** mode for OpenCode and Codex whenever the agent/adapter binary is available — receive the bridge as a standard ACP `session/new` parameter: the `rcflow-mcp` proxy command with the per-session token passed as **explicit protocol data** in the entry's `env` map (verified live in the Phase 0 spike). No config-file blocks, no env-inheritance assumption — this is the preferred delivery path; legacy Codex's `config.toml` block management now only applies when Codex falls back to (or is forced onto) the legacy executor. Gated by the same per-tool `expose_rcflow_tools` setting (also available for OpenCode).
 
 ## Token Model
 

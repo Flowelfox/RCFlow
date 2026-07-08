@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """ACP E2E smoke against a live RCFlow worker (VM).
 
-Drives a `#opencode` direct-tool prompt with RCFLOW_OPENCODE_EXECUTOR=acp on
-the worker and asserts the ACP relay path end-to-end: agent session banner,
+Drives a `#opencode` direct-tool prompt over the ACP executor (the default
+mode when OpenCode is installed) on the worker and asserts the ACP relay path end-to-end: agent session banner,
 streamed text through the ACP translation, turn completion, clean session end.
 """
 

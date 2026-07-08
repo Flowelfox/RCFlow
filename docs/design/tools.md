@@ -311,7 +311,7 @@ When the tool has a non-empty `provider`, `PromptRouter._build_claude_code_extra
 | `caveman_mode`   | boolean| yes          | Inject caveman terse-mode instruction (experimental — hook delivery unverified) |
 | `expose_rcflow_tools` | boolean | yes     | Serve agent-exposed RCFlow tools to Codex (default false, new sessions only). Legacy path: `rcflow-mcp` proxy registered in `config.toml` + env token; ACP path: standard `mcp_servers` session parameter — see [MCP bridge](mcp.md) |
 
-The OpenCode settings schema carries the same `expose_rcflow_tools` boolean (managed-only, default false); it takes effect only in the ACP executor mode (`RCFLOW_OPENCODE_EXECUTOR=acp`).
+The OpenCode settings schema carries the same `expose_rcflow_tools` boolean (managed-only, default false); it takes effect only in the ACP executor mode (the default; `RCFLOW_OPENCODE_EXECUTOR=legacy` opts out).
 
 Provider sync behavior:
 - **OpenAI** (`provider=openai`): sets `env.CODEX_API_KEY` from `codex_api_key`. RCFlow injects this into the subprocess environment.

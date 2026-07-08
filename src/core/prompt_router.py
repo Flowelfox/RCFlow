@@ -21,8 +21,9 @@ import asyncio
 import json
 import logging
 import os
+import shutil
 import uuid
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -70,18 +71,41 @@ from src.tools.registry import ToolRegistry
 logger = logging.getLogger(__name__)
 
 
-def _acp_mode_enabled(env_var: str, tool_def: ToolDefinition) -> bool:
-    """Route a legacy agent tool onto the ACP executor when its env flag says so.
+def _acp_mode_enabled(
+    env_var: str,
+    tool_def: ToolDefinition,
+    adapter_resolver: "Callable[[str], str | None] | None" = None,
+) -> bool:
+    """Decide whether an agent tool runs on the ACP executor.
 
-    Rollout flags (``RCFLOW_OPENCODE_EXECUTOR`` / ``RCFLOW_CODEX_EXECUTOR``,
-    values ``legacy``/``acp``, default ``legacy``) — same pattern the SDK
-    migration used for Claude Code. Requires the tool definition to carry an
-    ``executor_config.acp`` block; falls back to legacy with a warning if not.
+    Rollback flags ``RCFLOW_OPENCODE_EXECUTOR`` / ``RCFLOW_CODEX_EXECUTOR``
+    (values ``acp``/``legacy``). **ACP is the default**: with the flag unset,
+    the tool runs over ACP whenever its definition carries an
+    ``executor_config.acp`` block *and* the adapter binary is resolvable via
+    *adapter_resolver* — otherwise it degrades to the legacy executor (e.g.
+    Codex before the ``codex-acp`` adapter is installed). An explicit ``acp``
+    skips the availability probe (errors then surface in-session); an explicit
+    ``legacy`` always opts out.
     """
-    if os.environ.get(env_var, "legacy").strip().lower() != "acp":
+    mode = os.environ.get(env_var, "").strip().lower()
+    if mode == "legacy":
         return False
     if "acp" not in tool_def.executor_config:
-        logger.warning("%s=acp but tool '%s' has no executor_config.acp; using legacy path", env_var, tool_def.name)
+        if mode == "acp":
+            logger.warning("%s=acp but tool '%s' has no executor_config.acp; using legacy path", env_var, tool_def.name)
+        return False
+    if mode == "acp":
+        return True
+    # Default (flag unset): ACP when the adapter binary is actually available.
+    binary = tool_def.get_acp_config().binary_path
+    resolved = adapter_resolver(binary) if adapter_resolver is not None else shutil.which(binary)
+    if resolved is None:
+        logger.info(
+            "ACP adapter '%s' for tool '%s' not available; using legacy executor (set %s=acp to force)",
+            binary,
+            tool_def.name,
+            env_var,
+        )
         return False
     return True
 
@@ -487,6 +511,18 @@ class PromptRouter:
             overrides.pop("model", None)
 
         return overrides
+
+    def _resolve_acp_adapter(self, binary_name: str) -> str | None:
+        """Resolve an ACP adapter binary: managed ToolManager copy first, then PATH.
+
+        Managed keys use underscores (``codex-acp`` → ``codex_acp``), matching
+        the executor's resolution rule.
+        """
+        if self._tool_manager:
+            resolved = self._tool_manager.get_binary_path(binary_name.replace("-", "_"))
+            if resolved:
+                return resolved
+        return shutil.which(binary_name)
 
     def _get_executor(self, executor_type: str, tool_def: ToolDefinition | None = None) -> BaseExecutor:
         # Claude Code executors are always created fresh (one per session)
@@ -1775,11 +1811,11 @@ class PromptRouter:
         if tool_def.executor == "claude_code":
             return await self._start_claude_code(session, tool_def, tool_call)
         if tool_def.executor == "codex":
-            if _acp_mode_enabled("RCFLOW_CODEX_EXECUTOR", tool_def):
+            if _acp_mode_enabled("RCFLOW_CODEX_EXECUTOR", tool_def, self._resolve_acp_adapter):
                 return await self._acp._start_acp(session, tool_def, tool_call)
             return await self._start_codex(session, tool_def, tool_call)
         if tool_def.executor == "opencode":
-            if _acp_mode_enabled("RCFLOW_OPENCODE_EXECUTOR", tool_def):
+            if _acp_mode_enabled("RCFLOW_OPENCODE_EXECUTOR", tool_def, self._resolve_acp_adapter):
                 return await self._acp._start_acp(session, tool_def, tool_call)
             return await self._start_opencode(session, tool_def, tool_call)
         if tool_def.executor == "acp":
