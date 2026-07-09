@@ -95,9 +95,16 @@ Per-tool boolean `expose_rcflow_tools` (default off, managed-only) in both the C
 
 ## Initial Exposure
 
-Two tools ship with `expose_to_agents: true`:
+Exposed with `expose_to_agents: true`:
 
-- **`system_info`** — safe read-only demonstrator of the pipeline.
-- **`worktree`** — worktree operations as a *worker-managed* tool. Agents could already shell out to the `wt` CLI, but the bridge route runs through RCFlow's worktree executor, so the session's worktree state stays in sync: `_update_session_worktree_meta` fires on mutating calls (selected worktree, badge broadcast, auto-select after `new`), which raw `wt` invocations bypass. Mutating actions hit the always-ask permission gate; `list` is exempt. The `wt` CLI remains available on the agent PATH, but the MCP tool is the preferred route precisely because the worker sees it. Unix-only (the tool definition carries `"os": ["linux", "darwin"]`).
+- **`system_info`** (`agent_safe`) — read-only host info demonstrator.
+- **`worktree`** — worktree operations as a *worker-managed* tool. Agents could already shell out to the `wt` CLI, but the bridge route runs through RCFlow's worktree executor, so the session's worktree state stays in sync: `_update_session_worktree_meta` fires on mutating calls (selected worktree, badge broadcast, auto-select after `new`), which raw `wt` invocations bypass. All wtpython actions are available (`new`/`list`/`attach`/`detach`/`get`/`init`/`merge`/`rm`); read-only `list` and `get` are exempt from the approval gate, everything else asks. The `wt` CLI remains available on the agent PATH, but the MCP tool is the preferred route precisely because the worker sees it. Unix-only (the tool definition carries `"os": ["linux", "darwin"]`).
+- **Native tools** (`python` executor — see [Tools → python executor](tools.md#python-executor-native-tools)):
+  - `rcflow_notify` (`agent_safe`) — push a client notification.
+  - `rcflow_session_status` (`agent_safe`) — read the agent's own session context (worktree, project, todos, queued messages, tasks, tokens).
+  - `rcflow_rename_session` (`agent_safe`) — set the session title.
+  - `rcflow_register_artifact` (`agent_safe`) — mark a produced file as a session artifact.
+  - `rcflow_task_list` (`agent_safe`) — list tasks.
+  - `rcflow_task_create`, `rcflow_task_update` — create/update tasks (mutating → gated; agents may not mark a task done).
 
-`shell_exec` stays unexposed (agents have their own shell). The bridge's value grows further with RCFlow-native tools (notify user, register artifact, session status) — planned as a `python` callable executor type so they ride the same registry pipeline (see Future Considerations in [README](README.md)).
+`shell_exec` stays unexposed (agents have their own shell).

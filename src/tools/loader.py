@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
-VALID_EXECUTORS = {"shell", "http", "claude_code", "codex", "opencode", "worktree", "acp"}
+VALID_EXECUTORS = {"shell", "http", "claude_code", "codex", "opencode", "worktree", "acp", "python"}
 VALID_SESSION_TYPES = {"one-shot", "long-running"}
 VALID_LLM_CONTEXTS = {"stateless", "session-scoped"}
 VALID_OS = {"windows", "linux", "darwin"}
@@ -101,6 +101,17 @@ class AcpExecutorConfig(BaseModel):
     timeout: int = 1800
 
 
+class PythonExecutorConfig(BaseModel):
+    """Python Executor Config — a session-aware in-worker native tool callable.
+
+    ``callable`` is a dotted ``"module:function"`` reference resolved at
+    dispatch time; the function runs in-process with a ``NativeToolContext``
+    (session + router), so native tools can touch RCFlow state directly.
+    """
+
+    callable: str
+
+
 class ToolDefinition(BaseModel):
     """Tool Definition."""
 
@@ -158,6 +169,10 @@ class ToolDefinition(BaseModel):
     def get_acp_config(self) -> AcpExecutorConfig:
         """Get ACP config."""
         return AcpExecutorConfig(**self.executor_config["acp"])
+
+    def get_python_config(self) -> PythonExecutorConfig:
+        """Get Python native-tool config."""
+        return PythonExecutorConfig(**self.executor_config["python"])
 
 
 def load_tool_file(path: Path) -> ToolDefinition:

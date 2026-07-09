@@ -194,10 +194,13 @@ A single `worktree` tool definition (display name **Worktree**) covers all opera
 | `new`         | Create a new worktree on a new branch        | `branch`, `base` (default `"main"`), `repo_path`   |
 | `list`        | List all active worktrees for a repository   | `repo_path`                                         |
 | `attach`      | Select an existing worktree as the session's active working directory | `repo_path`, `name` or `path` (one required) |
+| `detach`      | Return the session to the main repo (deselect the worktree) | `repo_path`                          |
+| `get`         | Return details for a single worktree by name | `name`, `repo_path`                                 |
+| `init`        | Initialise the repo's `.worktrees` convention and return its config | `repo_path`                          |
 | `merge`       | Squash-merge a worktree branch and clean up  | `name`, `message`, `repo_path`                      |
 | `rm`          | Remove a worktree and its branch             | `name`, `repo_path`                                 |
 
-All five actions share `repo_path` (required) and live in a single `tools/worktree.json`.
+All actions share `repo_path` (required) and live in a single `tools/worktree.json`; each maps to the matching `wtpython.WorktreeManager` method. Read-only `list` and `get` skip the always-ask approval gate.
 
 `attach` validates that a matching worktree exists, then sets `session.metadata["selected_worktree_path"]` via the prompt router's `_update_session_worktree_meta` hook — the same path that Claude Code and Codex agents use as their `cwd`. Unlike `new`, `attach` never creates anything; it is a pure selection operation.
 

@@ -1,5 +1,5 @@
 ---
-updated: 2026-07-07
+updated: 2026-07-08
 ---
 
 # Project Structure
@@ -74,6 +74,7 @@ RCFlow/
 │   │   ├── agent_codex.py       # Codex CLI agent lifecycle (mixin)
 │   │   ├── agent_opencode.py    # OpenCode CLI agent lifecycle (mixin)
 │   │   ├── agent_acp.py         # ACP agent lifecycle (OpenCode/Codex over ACP) (mixin)
+│   │   ├── native_tools/       # Session-aware native tools (python executor: notify, tasks, …)
 │   │   ├── background_tasks.py  # Fire-and-forget background tasks (mixin)
 │   │   ├── llm.py               # LLM client (Anthropic, Bedrock, OpenAI)
 │   │   └── buffer.py            # Output buffer for session history

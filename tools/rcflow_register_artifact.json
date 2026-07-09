@@ -1,0 +1,17 @@
+{
+  "name": "rcflow_register_artifact",
+  "display_name": "Register Artifact",
+  "description": "Mark a file you produced as a session artifact so it appears in the user's RCFlow artifacts panel. The file must exist on disk and match the worker's artifact include/exclude patterns.",
+  "version": "1.0.0",
+  "session_type": "one-shot",
+  "llm_context": "stateless",
+  "executor": "python",
+  "expose_to_agents": true,
+  "agent_safe": true,
+  "parameters": {
+    "type": "object",
+    "properties": {"file_path": {"type": "string", "description": "Absolute or project-relative path of the file to register."}},
+    "required": ["file_path"]
+  },
+  "executor_config": {"python": {"callable": "src.core.native_tools.register_artifact:run"}}
+}

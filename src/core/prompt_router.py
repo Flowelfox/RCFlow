@@ -44,6 +44,7 @@ from src.core.background_tasks import BackgroundTasks
 from src.core.buffer import MessageType
 from src.core.context import ContextBuilder
 from src.core.llm import LLMClient, StreamDone, TextChunk, ToolCallRequest, TurnUsage, llm_configuration_issue
+from src.core.native_tools import NativeToolRegistry
 from src.core.pending_store import SessionPendingMessageStore
 from src.core.permissions import PermissionDecision
 from src.core.session import ActiveSession, ActivityState, SessionManager, SessionStatus, SessionType
@@ -69,6 +70,9 @@ from src.tools.loader import AGENT_EXECUTORS, ToolDefinition
 from src.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
+
+# Read-only worktree actions exempt from the always-ask approval gate.
+_WORKTREE_READONLY_ACTIONS = frozenset({"list", "get"})
 
 
 def _acp_mode_enabled(
@@ -234,6 +238,7 @@ class PromptRouter:
         self._opencode = OpenCodeAgent(self)
         self._acp = AcpAgent(self)
         self._lifecycle = SessionLifecycle(self)
+        self._native_tools = NativeToolRegistry(self)
 
     def set_mcp_bridge(self, bridge: "McpBridge") -> None:
         """Inject the MCP agent bridge (constructed after the router in main.py)."""
@@ -1822,9 +1827,9 @@ class PromptRouter:
             return await self._acp._start_acp(session, tool_def, tool_call)
 
         # Worktree tool always requires explicit user approval before execution,
-        # regardless of the session's existing permission mode.  The 'list'
-        # action is read-only and is exempted from the approval gate.
-        if tool_def.executor == "worktree" and tool_call.tool_input.get("action") != "list":
+        # regardless of the session's existing permission mode.  The read-only
+        # 'list' and 'get' actions are exempted from the approval gate.
+        if tool_def.executor == "worktree" and tool_call.tool_input.get("action") not in _WORKTREE_READONLY_ACTIONS:
             if session.permission_manager is None:
                 from src.core.permissions import PermissionManager  # noqa: PLC0415
 
@@ -1871,7 +1876,6 @@ class PromptRouter:
 
         Returns ``(result_text, is_error)``.
         """
-        executor = self._get_executor(tool_def.executor)
         origin_fields: dict[str, Any] = {} if origin == "llm" else {"origin": origin}
         is_error = False
 
@@ -1885,8 +1889,26 @@ class PromptRouter:
             )
 
         try:
-            if tool_def.get_shell_config().stream_output if tool_def.executor == "shell" else False:
+            if tool_def.executor == "python":
+                # Native in-worker tool: runs with a NativeToolContext (session
+                # + router). Raises on failure → caught below as is_error.
+                result_text = await self._native_tools.dispatch(
+                    session, tool_def.get_python_config().callable, dict(tool_call.tool_input)
+                )
+                session.buffer.push_text(
+                    MessageType.TOOL_OUTPUT,
+                    {
+                        "session_id": session.id,
+                        "tool_name": tool_call.tool_name,
+                        "content": result_text,
+                        "stream": "stdout",
+                        "is_error": False,
+                        **origin_fields,
+                    },
+                )
+            elif tool_def.get_shell_config().stream_output if tool_def.executor == "shell" else False:
                 # Streaming execution
+                executor = self._get_executor(tool_def.executor)
                 collected_output: list[str] = []
                 chunk: ExecutionChunk
                 async for chunk in executor.execute_streaming(tool_def, tool_call.tool_input):
@@ -1904,6 +1926,7 @@ class PromptRouter:
                 result_text = "".join(collected_output)
             else:
                 # Non-streaming execution
+                executor = self._get_executor(tool_def.executor)
                 result = await executor.execute(tool_def, tool_call.tool_input)
                 is_error = bool(result.exit_code)
                 if result.output and result.error:

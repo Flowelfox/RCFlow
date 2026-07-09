@@ -1,0 +1,20 @@
+{
+  "name": "rcflow_task_update",
+  "display_name": "Update Task",
+  "description": "Update an RCFlow task's status (todo, in_progress, review) or title. Agents cannot mark a task done — that stays a human decision.",
+  "version": "1.0.0",
+  "session_type": "one-shot",
+  "llm_context": "stateless",
+  "executor": "python",
+  "expose_to_agents": true,
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "task_id": {"type": "string", "description": "ID of the task to update."},
+      "status": {"type": "string", "enum": ["todo", "in_progress", "review"], "description": "New status."},
+      "subject": {"type": "string", "description": "New title."}
+    },
+    "required": ["task_id"]
+  },
+  "executor_config": {"python": {"callable": "src.core.native_tools.tasks:update_task"}}
+}

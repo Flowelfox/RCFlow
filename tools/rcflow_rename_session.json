@@ -1,0 +1,17 @@
+{
+  "name": "rcflow_rename_session",
+  "display_name": "Rename Session",
+  "description": "Set a descriptive title for the current RCFlow session so the user can identify it in the session list.",
+  "version": "1.0.0",
+  "session_type": "one-shot",
+  "llm_context": "stateless",
+  "executor": "python",
+  "expose_to_agents": true,
+  "agent_safe": true,
+  "parameters": {
+    "type": "object",
+    "properties": {"title": {"type": "string", "description": "The new session title (max 120 chars)."}},
+    "required": ["title"]
+  },
+  "executor_config": {"python": {"callable": "src.core.native_tools.rename_session:run"}}
+}

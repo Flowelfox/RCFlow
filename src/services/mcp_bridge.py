@@ -41,6 +41,9 @@ logger = logging.getLogger(__name__)
 RCFLOW_MCP_SERVER_NAME = "rcflow"
 RCFLOW_MCP_TOOL_PREFIX = f"mcp__{RCFLOW_MCP_SERVER_NAME}__"
 
+# Read-only worktree actions that skip the always-ask approval gate.
+_WORKTREE_READONLY_ACTIONS = frozenset({"list", "get"})
+
 # Statuses in which a session can no longer run an agent-initiated tool call:
 # terminal states plus PAUSED. EXECUTING/ACTIVE/CREATED remain runnable — a
 # bridge call normally lands mid-turn while the session is EXECUTING.
@@ -131,7 +134,7 @@ class McpBridge:
         if tool_def.agent_safe:
             return False
         if tool_def.executor == "worktree":
-            return arguments.get("action") != "list"
+            return arguments.get("action") not in _WORKTREE_READONLY_ACTIONS
         return True
 
     def list_agent_tools(self) -> list[McpToolSpec]:

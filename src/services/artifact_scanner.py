@@ -263,6 +263,26 @@ class ArtifactScanner:
         )
         return new_count
 
+    async def register_paths(
+        self,
+        session_id: str | uuid.UUID,
+        paths: list[str],
+        project_path: Path | None = None,
+    ) -> tuple[int, int]:
+        """Register explicit file paths as artifacts for *session_id*.
+
+        Unlike :meth:`scan_texts`, the paths are used verbatim (no extraction)
+        — for callers that already know which files to register, e.g. the
+        ``rcflow_register_artifact`` native tool. Returns (new, updated) counts.
+        """
+        if isinstance(session_id, str):
+            session_id = uuid.UUID(session_id)
+        candidate_paths = {p for p in paths if p}
+        if not candidate_paths:
+            return 0, 0
+        async with self.db_session_factory() as db:
+            return await self._upsert_artifacts(db, candidate_paths, session_id, project_path)
+
     async def scan_texts(
         self,
         session_id: str | uuid.UUID,

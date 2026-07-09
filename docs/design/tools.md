@@ -185,10 +185,15 @@ Every prompt dispatched to a coding agent (Claude Code, Codex, OpenCode) is norm
 | `os`              | list   | no       | OS restriction: subset of `["windows","linux","darwin"]`. Empty = all platforms. Tools are skipped at load time if the current OS is not in the list. |
 | `session_type`    | enum   | yes      | `one-shot` or `long-running`                          |
 | `llm_context`     | enum   | yes      | `stateless` or `session-scoped`                       |
-| `executor`        | enum   | yes      | `shell`, `http`, `claude_code`, `codex`, `opencode`, `worktree`, or `acp` (see [Executors → ACP](executors.md#acp-executor)) |
-| `parameters`      | object | yes      | JSON Schema describing the tool's input parameters    |
+| `executor`        | enum   | yes      | `shell`, `http`, `claude_code`, `codex`, `opencode`, `worktree`, `acp` (see [Executors → ACP](executors.md#acp-executor)), or `python` (session-aware native tool) |
+| `parameters`      | object | yes      | JSON Schema describing the tool's input parameters. Parameter names in `RESERVED_PARAM_NAMES` (currently `rcflow`) are rejected at load time — they collide with built-in command-template placeholders. |
 | `executor_config` | object | yes      | Executor-specific configuration                       |
 | `expose_to_agents`| bool   | no       | Offer this tool to nested coding agents over the [MCP agent bridge](mcp.md) (default `false`). Ignored (forced off, with a load-time warning) for agent executors — recursion guard. |
+| `agent_safe`      | bool   | no       | When exposed to agents, whether calls skip the bridge's approval gate (default `false`). Set only for genuinely read-only tools; anything that mutates the host stays gated. |
+
+### `python` executor (native tools)
+
+`executor: "python"` runs an in-worker async callable with a `NativeToolContext` (the live session + the `PromptRouter`), so a tool can touch RCFlow state directly — push notifications, read session status, register artifacts, manage tasks. Config: `executor_config.python.callable = "module:function"`, where the function is `async def run(ctx, params) -> str` and raises on error. Dispatch happens inside `PromptRouter.execute_one_shot_tool`, the shared path used by both the LLM tool loop and the [MCP agent bridge](mcp.md), so a native tool is exposed to agents by the same registry-driven flow as any other.
 
 ## Tool Management Service
 

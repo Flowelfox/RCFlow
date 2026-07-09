@@ -223,4 +223,4 @@ class TestExecuteIntegration:
 
 
 def test_module_constants() -> None:
-    assert frozenset({"new", "list", "attach", "merge", "rm"}) == _VALID_ACTIONS
+    assert frozenset({"new", "list", "attach", "detach", "get", "init", "merge", "rm"}) == _VALID_ACTIONS
