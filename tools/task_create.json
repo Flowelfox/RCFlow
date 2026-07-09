@@ -1,5 +1,5 @@
 {
-  "name": "rcflow_task_create",
+  "name": "task_create",
   "display_name": "Create Task",
   "description": "Create a new RCFlow task and attach it to the current session. Use to record follow-up work or break a request into trackable items.",
   "version": "1.0.0",
@@ -10,10 +10,22 @@
   "parameters": {
     "type": "object",
     "properties": {
-      "subject": {"type": "string", "description": "Short task title."},
-      "description": {"type": "string", "description": "Optional longer description."}
+      "subject": {
+        "type": "string",
+        "description": "Short task title."
+      },
+      "description": {
+        "type": "string",
+        "description": "Optional longer description."
+      }
     },
-    "required": ["subject"]
+    "required": [
+      "subject"
+    ]
   },
-  "executor_config": {"python": {"callable": "src.core.native_tools.tasks:create_task"}}
+  "executor_config": {
+    "python": {
+      "callable": "src.core.native_tools.tasks:create_task"
+    }
+  }
 }

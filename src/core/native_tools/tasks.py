@@ -1,4 +1,4 @@
-"""Native task tools: ``rcflow_task_list`` / ``rcflow_task_create`` / ``rcflow_task_update``.
+"""Native task tools: ``task_list`` / ``task_create`` / ``task_update`` (exposed as ``rcflow_task_*``).
 
 Agents manage RCFlow tasks (the Tasks tab / Linear-synced board) from inside a
 session. Create/update mutate the board — the bridge gates them (not

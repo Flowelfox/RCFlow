@@ -1,0 +1,38 @@
+{
+  "name": "notify",
+  "display_name": "Notify User",
+  "description": "Push a notification message to the user's RCFlow client. Use to surface progress updates, ask for attention, or report a milestone while you work.",
+  "version": "1.0.0",
+  "session_type": "one-shot",
+  "llm_context": "stateless",
+  "executor": "python",
+  "expose_to_agents": true,
+  "agent_safe": true,
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "message": {
+        "type": "string",
+        "description": "The notification text to show the user."
+      },
+      "level": {
+        "type": "string",
+        "enum": [
+          "info",
+          "success",
+          "warning",
+          "error"
+        ],
+        "description": "Severity/style of the notification. Defaults to info."
+      }
+    },
+    "required": [
+      "message"
+    ]
+  },
+  "executor_config": {
+    "python": {
+      "callable": "src.core.native_tools.notify:run"
+    }
+  }
+}

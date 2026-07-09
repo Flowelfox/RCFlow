@@ -1,5 +1,5 @@
 {
-  "name": "rcflow_session_status",
+  "name": "session_status",
   "display_name": "Session Status",
   "description": "Read your own RCFlow session context: current worktree, project path, working directory, todo list, queued user messages, attached tasks, and token usage. Returns JSON.",
   "version": "1.0.0",
@@ -8,6 +8,13 @@
   "executor": "python",
   "expose_to_agents": true,
   "agent_safe": true,
-  "parameters": {"type": "object", "properties": {}},
-  "executor_config": {"python": {"callable": "src.core.native_tools.session_status:run"}}
+  "parameters": {
+    "type": "object",
+    "properties": {}
+  },
+  "executor_config": {
+    "python": {
+      "callable": "src.core.native_tools.session_status:run"
+    }
+  }
 }

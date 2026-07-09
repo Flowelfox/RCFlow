@@ -1,4 +1,4 @@
-"""``rcflow_rename_session`` — set the current session's title."""
+"""``rename_session`` (exposed to agents as ``rcflow_rename_session``) — set the session title."""
 
 from __future__ import annotations
 

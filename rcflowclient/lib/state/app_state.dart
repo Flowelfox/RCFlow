@@ -1249,6 +1249,37 @@ class AppState extends ChangeNotifier implements PaneHost {
     _notificationService.show(level: level, title: title, body: body);
   }
 
+  /// Handle an agent-pushed `notification` message (the `rcflow_notify` native
+  /// tool). Routes it through [NotificationService] like any other app
+  /// notification instead of rendering it in the session transcript.
+  void _handleAgentNotification(Map<String, dynamic> msg) {
+    final content = (msg['content'] as String?)?.trim() ?? '';
+    if (content.isEmpty) return;
+    final level = switch (msg['level'] as String?) {
+      'success' => NotificationLevel.success,
+      'warning' => NotificationLevel.warning,
+      'error' => NotificationLevel.error,
+      _ => NotificationLevel.info,
+    };
+    // Prefer the originating session's title so the user knows which agent
+    // spoke; fall back to a generic label.
+    final sessionId = msg['session_id'] as String?;
+    var title = 'Agent';
+    if (sessionId != null) {
+      final worker = _registry.workerForSession(sessionId);
+      if (worker != null) {
+        for (final s in worker.sessions) {
+          if (s.sessionId == sessionId) {
+            final t = s.title?.trim();
+            if (t != null && t.isNotEmpty) title = t;
+            break;
+          }
+        }
+      }
+    }
+    showNotification(level: level, title: title, body: content);
+  }
+
   @override
   bool workerSupportsAttachments(String? workerId) {
     final id = workerId ?? defaultWorkerId;
@@ -2010,6 +2041,9 @@ class AppState extends ChangeNotifier implements PaneHost {
         return;
       case WsOutputType.githubPrDeleted:
         _handleGithubPrDeleted(msg);
+        return;
+      case WsOutputType.notification:
+        _handleAgentNotification(msg);
         return;
       default:
         break; // fall through to per-pane dispatch

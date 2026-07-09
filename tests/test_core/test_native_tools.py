@@ -52,14 +52,33 @@ class TestRegistry:
             reg._resolve("src.core.native_tools.notify:nonexistent")
 
 
+def _drain_notifications(queue) -> list:
+    """Pull NOTIFICATION messages already queued for a live subscriber (ephemeral)."""
+    out = []
+    while not queue.empty():
+        msg = queue.get_nowait()
+        if msg is not None and msg.message_type == MessageType.NOTIFICATION:
+            out.append(msg)
+    return out
+
+
 class TestNotify:
     @pytest.mark.asyncio
     async def test_pushes_notification(self) -> None:
         ctx = _ctx()
+        # Subscribe first: notify is ephemeral — it reaches live subscribers only.
+        queue = ctx.session.buffer.subscribe_text("sub")
         out = await notify_mod.run(ctx, {"message": "done", "level": "success"})
         assert "done" in out
-        msgs = [m for m in ctx.session.buffer.text_history if m.message_type == MessageType.NOTIFICATION]
+        msgs = _drain_notifications(queue)
         assert msgs and msgs[0].data["content"] == "done" and msgs[0].data["level"] == "success"
+
+    @pytest.mark.asyncio
+    async def test_not_persisted_to_history(self) -> None:
+        ctx = _ctx()
+        await notify_mod.run(ctx, {"message": "ephemeral", "level": "info"})
+        # Ephemeral → never archived, so it must not replay into the transcript.
+        assert not [m for m in ctx.session.buffer.text_history if m.message_type == MessageType.NOTIFICATION]
 
     @pytest.mark.asyncio
     async def test_empty_message_rejected(self) -> None:
@@ -69,9 +88,10 @@ class TestNotify:
     @pytest.mark.asyncio
     async def test_bad_level_defaults_info(self) -> None:
         ctx = _ctx()
+        queue = ctx.session.buffer.subscribe_text("sub")
         await notify_mod.run(ctx, {"message": "x", "level": "bogus"})
-        msg = next(m for m in ctx.session.buffer.text_history if m.message_type == MessageType.NOTIFICATION)
-        assert msg.data["level"] == "info"
+        msgs = _drain_notifications(queue)
+        assert msgs and msgs[0].data["level"] == "info"
 
 
 class TestSessionStatus:

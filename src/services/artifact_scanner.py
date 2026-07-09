@@ -273,7 +273,7 @@ class ArtifactScanner:
 
         Unlike :meth:`scan_texts`, the paths are used verbatim (no extraction)
         — for callers that already know which files to register, e.g. the
-        ``rcflow_register_artifact`` native tool. Returns (new, updated) counts.
+        ``register_artifact`` native tool. Returns (new, updated) counts.
         """
         if isinstance(session_id, str):
             session_id = uuid.UUID(session_id)

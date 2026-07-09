@@ -1,4 +1,4 @@
-"""``rcflow_session_status`` — report the agent's own session context."""
+"""``session_status`` (exposed to agents as ``rcflow_session_status``) — report session context."""
 
 from __future__ import annotations
 

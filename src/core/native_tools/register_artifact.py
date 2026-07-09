@@ -1,4 +1,4 @@
-"""``rcflow_register_artifact`` — mark a produced file as a session artifact."""
+"""``register_artifact`` (exposed to agents as ``rcflow_register_artifact``) — mark a produced file as an artifact."""
 
 from __future__ import annotations
 

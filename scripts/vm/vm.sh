@@ -192,6 +192,29 @@ cmd_smoke_mcp() {
     --base-url "https://127.0.0.1:$local_port" --api-key "$key" "$@")
 }
 
+cmd_smoke_native() {
+  # Native RCFlow tools E2E: OpenCode-over-ACP drives each python-executor
+  # native tool (session_status, notify, rename_session, task CRUD,
+  # register_artifact) through the MCP bridge, auto-approving gated calls.
+  # Needs OpenCode installed + "Expose RCFlow tools" enabled for opencode.
+  local port key local_port tunnel_pid
+  port=$(worker_port)
+  key=$(worker_api_key)
+  # register_artifact needs a real *.md file the worker can see (default include
+  # pattern *.md). The service runs with systemd PrivateTmp=yes, so a file in the
+  # system /tmp is invisible to it — place the fixture under /opt/rcflow (the
+  # worker's ReadWritePaths, not namespaced) instead.
+  vssh "printf '# RCFlow native tools E2E\n\nfixture\n' | sudo tee /opt/rcflow/rcflow_native_e2e.md >/dev/null && sudo chmod 644 /opt/rcflow/rcflow_native_e2e.md"
+  local_port=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
+  ssh "${SSH_OPTS[@]}" -f -N -o ExitOnForwardFailure=yes \
+    -L "$local_port:localhost:$port" "$VM_HOST"
+  tunnel_pid=$(pgrep -f "ssh.*-L $local_port:localhost:$port" | head -1)
+  trap '[[ -n "${tunnel_pid:-}" ]] && kill "$tunnel_pid" 2>/dev/null || true' EXIT
+  echo "SSH tunnel 127.0.0.1:$local_port → VM:$port (pid $tunnel_pid)"
+  (cd "$REPO_ROOT" && uv run python scripts/vm/native_tools_smoke_test.py \
+    --base-url "https://127.0.0.1:$local_port" --api-key "$key" "$@")
+}
+
 cmd_client_start() {
   vssh "pgrep -x '$CLIENT_PROC' >/dev/null" && { echo "client already running"; return 0; }
   vssh "DISPLAY=:0 nohup $CLIENT_BIN >$CLIENT_LOG 2>&1 & echo \"started pid \$!\""
@@ -291,6 +314,9 @@ Worker E2E:
                             Needs OpenCode installed on the worker (ACP is the default)
   smoke-mcp                 MCP bridge E2E (agent calls rcflow system_info via the
                             rcflow-mcp proxy). Needs OpenCode + expose_rcflow_tools on
+  smoke-native [--verbose]  Native RCFlow tools E2E (agent drives session_status,
+                            notify, rename, task CRUD, register_artifact through the
+                            bridge; gated calls auto-approved). Same prereqs as smoke-mcp
 
 Client (GUI on VM display :0):
   client-start | client-stop | client-status
@@ -328,6 +354,7 @@ case "$cmd" in
   smoke)          cmd_smoke "$@" ;;
   smoke-acp)      cmd_smoke_acp "$@" ;;
   smoke-mcp)      cmd_smoke_mcp "$@" ;;
+  smoke-native)   cmd_smoke_native "$@" ;;
   client-start)   cmd_client_start "$@" ;;
   client-stop)    cmd_client_stop "$@" ;;
   client-status)  cmd_client_status "$@" ;;

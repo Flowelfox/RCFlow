@@ -1,5 +1,5 @@
 {
-  "name": "rcflow_task_list",
+  "name": "task_list",
   "display_name": "List Tasks",
   "description": "List RCFlow tasks for this worker, optionally filtered by status (todo, in_progress, review, done). Returns JSON.",
   "version": "1.0.0",
@@ -10,7 +10,22 @@
   "agent_safe": true,
   "parameters": {
     "type": "object",
-    "properties": {"status": {"type": "string", "enum": ["todo", "in_progress", "review", "done"], "description": "Optional status filter."}}
+    "properties": {
+      "status": {
+        "type": "string",
+        "enum": [
+          "todo",
+          "in_progress",
+          "review",
+          "done"
+        ],
+        "description": "Optional status filter."
+      }
+    }
   },
-  "executor_config": {"python": {"callable": "src.core.native_tools.tasks:list_tasks"}}
+  "executor_config": {
+    "python": {
+      "callable": "src.core.native_tools.tasks:list_tasks"
+    }
+  }
 }
