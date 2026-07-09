@@ -1,5 +1,5 @@
 ---
-updated: 2026-07-08
+updated: 2026-07-09
 ---
 
 # WebSocket API
@@ -665,6 +665,8 @@ Clients control which sessions they receive output for by sending subscribe/unsu
 ```
 
 When subscribing to an existing session, the server sends the **full buffered history** for that session, then continues with live streaming. This allows pause/resume and session switching without data loss.
+
+Each replayed history message carries `"replay": true`; the final one is followed by a `{"type": "history_replayed", "session_id": "uuid"}` boundary marker (sent immediately when the session has no history to replay). Clients use the marker to batch the whole replayed history into a single render pinned to the newest message, instead of animating it in message-by-message. `history_replayed` is a transient control signal — not archived, and only meaningful live.
 
 **Ephemeral messages** are broadcast to live subscribers only via `SessionBuffer.push_ephemeral()`. They are never appended to `text_history` and are never replayed on reconnect. The sequence counter is still incremented so ordering is preserved for live subscribers. `subprocess_status` is the only current ephemeral message type.
 

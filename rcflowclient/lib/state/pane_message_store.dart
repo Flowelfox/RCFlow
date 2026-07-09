@@ -18,7 +18,47 @@ class PaneMessageStore {
 
   String? get _sessionId => _pane._sessionId;
   WebSocketService? get _ws => _pane._ws;
-  void _notify() => _pane.notifyListeners();
+
+  // History-replay batching. While the worker replays a session's buffered
+  // history on subscribe (each message flagged `replay: true`, terminated by a
+  // `history_replayed` marker), the store suppresses per-message rebuilds so the
+  // whole conversation renders in a single frame pinned to the bottom, instead
+  // of animating in message-by-message.
+  bool _batching = false;
+  bool _batchDirty = false;
+  Timer? _batchSafetyTimer;
+
+  void _notify() {
+    if (_batching) {
+      _batchDirty = true;
+      return;
+    }
+    _pane.notifyListeners();
+  }
+
+  /// Enter history-replay batch mode (idempotent). Called on the first replayed
+  /// message of a session's history burst.
+  void beginHistoryReplay() {
+    if (_batching) return;
+    _batching = true;
+    _batchDirty = false;
+    // Safety flush: if the `history_replayed` marker never arrives (e.g. an
+    // older worker), the batch must still resolve so the UI can't stay blank.
+    _batchSafetyTimer?.cancel();
+    _batchSafetyTimer = Timer(const Duration(seconds: 3), endHistoryReplay);
+  }
+
+  /// Leave batch mode and render the accumulated history in one frame.
+  void endHistoryReplay() {
+    _batchSafetyTimer?.cancel();
+    _batchSafetyTimer = null;
+    if (!_batching) return;
+    _batching = false;
+    if (_batchDirty) {
+      _batchDirty = false;
+      _pane.notifyListeners();
+    }
+  }
 
   static const _tickMs = 16;
   static const _pageSize = 50;
@@ -584,6 +624,7 @@ class PaneMessageStore {
   /// the owning [PaneState] separately resets its own (session/panel) state.
   void resetForSwitch() {
     finalizeStream();
+    _resetBatchState();
     _inAgentMode = false;
     _agentToolGroupIndex = null;
     _messages.clear();
@@ -591,6 +632,15 @@ class PaneMessageStore {
     resetPagination();
     _pendingLocalUserMessages = 0;
     _queue.clear();
+  }
+
+  /// Drop any in-flight history-replay batch without flushing (used on session
+  /// switch / dispose, where the new content replaces the old outright).
+  void _resetBatchState() {
+    _batchSafetyTimer?.cancel();
+    _batchSafetyTimer = null;
+    _batching = false;
+    _batchDirty = false;
   }
 
   // --- Pagination ---
@@ -804,5 +854,6 @@ class PaneMessageStore {
   /// Cancel the streaming-coalesce timer (called from [PaneState.dispose]).
   void disposeTimers() {
     _streamingTimer?.cancel();
+    _batchSafetyTimer?.cancel();
   }
 }

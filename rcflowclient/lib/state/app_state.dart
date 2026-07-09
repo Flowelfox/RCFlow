@@ -606,7 +606,8 @@ class AppState extends ChangeNotifier implements PaneHost {
     final groups = <String, List<GithubPrInfo>>{};
     for (final pr in githubPrs) {
       final worker = getWorker(pr.workerId);
-      if (worker == null || !worker.isConnected) continue; // online sources only
+      if (worker == null || !worker.isConnected)
+        continue; // online sources only
       final key = pr.githubId.isNotEmpty ? pr.githubId : pr.id;
       (groups[key] ??= []).add(pr);
     }
@@ -2211,6 +2212,20 @@ class AppState extends ChangeNotifier implements PaneHost {
       return;
     }
 
+    // History-replay batching: the worker replays a session's buffered history
+    // on subscribe (each message flagged `replay: true`) and closes it with a
+    // `history_replayed` marker. Coalesce the burst so the whole conversation
+    // renders in one frame pinned to the bottom, not animated in one-by-one.
+    if (wsType == WsOutputType.historyReplayed) {
+      if (sessionId != null) {
+        for (final pane in _findPanesForSession(sessionId)) {
+          pane.endHistoryReplay();
+        }
+      }
+      return;
+    }
+    final isReplay = msg['replay'] == true;
+
     final handler = wsType != null ? typedOutputHandlerRegistry[wsType] : null;
     if (handler == null) {
       activePane.addSystemMessage(msg.toString());
@@ -2220,6 +2235,7 @@ class AppState extends ChangeNotifier implements PaneHost {
     if (sessionId != null) {
       final targetPanes = _findPanesForSession(sessionId);
       for (final pane in targetPanes) {
+        if (isReplay) pane.beginHistoryReplay();
         handler(msg, pane);
       }
       return;

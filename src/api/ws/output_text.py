@@ -30,7 +30,8 @@ async def ws_output_text(
 
     Clients send subscribe/unsubscribe messages to control which sessions
     they receive output from. On subscribe, the full buffered history is
-    replayed, then live updates follow.
+    replayed (each message carrying ``"replay": true``), followed by a
+    ``{"type": "history_replayed"}`` boundary marker, then live updates.
 
     Query Parameters:
         api_key: API key for authentication.
@@ -97,8 +98,19 @@ async def ws_output_text(
         history_count = len(session.buffer.text_history)
         queue = session.buffer.subscribe_text(subscriber_id)
 
+        async def send_history_replayed() -> None:
+            await websocket.send_json({"type": "history_replayed", "session_id": session_id})
+
         try:
             replayed = 0
+            # Boundary marker so the client can batch the replayed history into a
+            # single render (see docs/design/websocket-api.md). Sent right after
+            # the last replayed message and before the first live one; sent
+            # immediately when the session has no history to replay.
+            history_marker_sent = False
+            if history_count == 0:
+                await send_history_replayed()
+                history_marker_sent = True
             while True:
                 msg = await queue.get()
                 if msg is None:
@@ -113,6 +125,9 @@ async def ws_output_text(
                     payload["replay"] = True
                     replayed += 1
                 await websocket.send_json(payload)
+                if not history_marker_sent and replayed >= history_count:
+                    await send_history_replayed()
+                    history_marker_sent = True
         except (WebSocketDisconnect, RuntimeError):
             pass
         finally:

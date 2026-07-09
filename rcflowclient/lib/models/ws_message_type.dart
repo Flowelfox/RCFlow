@@ -59,6 +59,10 @@ enum WsOutputType {
   // session transcript.
   notification,
 
+  // Boundary marker after the worker finishes replaying a session's buffered
+  // history on subscribe. Ends client-side history-replay batching.
+  historyReplayed,
+
   // --- Diagnostic / log (silently consumed, not rendered) ---
   agentLog,
 
@@ -116,6 +120,7 @@ enum WsOutputType {
       'github_pr_update' => WsOutputType.githubPrUpdate,
       'github_pr_deleted' => WsOutputType.githubPrDeleted,
       'notification' => WsOutputType.notification,
+      'history_replayed' => WsOutputType.historyReplayed,
       'agent_log' => WsOutputType.agentLog,
       'session_list' => WsOutputType.sessionList,
       'session_update' => WsOutputType.sessionUpdate,
