@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 
 import '../../../models/app_notification.dart';
 import '../../../models/linear_issue_info.dart';
+import '../../../models/task_filter.dart';
 import '../../../models/task_info.dart';
 import '../../../state/app_state.dart';
 import '../../../theme.dart';
@@ -113,6 +114,22 @@ class _TaskListPanelState extends State<TaskListPanel> {
   final Set<String> _activeStatusFilters = {};
   final Set<String> _activeSourceFilters = {};
 
+  // Issue-level filter dimensions (Linear), surfaced through the Filters
+  // popover. Assignee ids may include the [kAssigneeMe]/[kAssigneeUnassigned]
+  // sentinels; priorities use Linear's 0..4 scale.
+  final Set<String> _activeAssignees = {};
+  final Set<int> _activePriorities = {};
+  final Set<String> _activeLabels = {};
+
+  static const _priorityOrder = [1, 2, 3, 4, 0];
+  static const _priorityLabels = {
+    0: 'No priority',
+    1: 'Urgent',
+    2: 'High',
+    3: 'Medium',
+    4: 'Low',
+  };
+
   // ---- Multi-select state ----
   final Set<String> _selectedTaskIds = {};
 
@@ -157,6 +174,9 @@ class _TaskListPanelState extends State<TaskListPanel> {
     _searchController.text = _searchQuery;
     _activeStatusFilters.addAll(settings.tasksFilterStatus);
     _activeSourceFilters.addAll(settings.tasksFilterSource);
+    _activeAssignees.addAll(settings.tasksFilterAssignees);
+    _activePriorities.addAll(settings.tasksFilterPriorities);
+    _activeLabels.addAll(settings.tasksFilterLabels);
     _groupByWorker = settings.tasksGroupByWorker;
     final savedCollapsed = settings.tasksCollapsedGroups;
     if (savedCollapsed != null) {
@@ -189,52 +209,50 @@ class _TaskListPanelState extends State<TaskListPanel> {
     settings.tasksFilterSearch = _searchQuery;
     settings.tasksFilterStatus = _activeStatusFilters.toList();
     settings.tasksFilterSource = _activeSourceFilters.toList();
+    settings.tasksFilterAssignees = _activeAssignees.toList();
+    settings.tasksFilterPriorities = _activePriorities.toList();
+    settings.tasksFilterLabels = _activeLabels.toList();
   }
+
+  /// Assemble the current filter state into an immutable [TaskFilter].
+  TaskFilter _buildFilter() => TaskFilter(
+    search: _searchQuery,
+    statuses: _activeStatusFilters,
+    sources: _activeSourceFilters,
+    assigneeIds: _activeAssignees,
+    priorities: _activePriorities,
+    labels: _activeLabels,
+  );
 
   void _saveCollapsedGroups() {
     final settings = Provider.of<AppState>(context, listen: false).settings;
     settings.tasksCollapsedGroups = _collapsedGroups.toList();
   }
 
-  List<TaskInfo> _filterTasks(List<TaskInfo> tasks, AppState state) {
-    var filtered = tasks;
+  List<TaskInfo> _filterTasks(List<TaskInfo> tasks, AppState state) =>
+      filterTasks(
+        tasks: tasks,
+        filter: _buildFilter(),
+        showCompletedTasks: state.settings.showCompletedTasks,
+        issuesForTask: state.linearIssuesForTask,
+        viewerIdByWorker: state.linearViewerIdByWorker,
+      );
 
-    // Hide completed tasks by default unless the setting is on or
-    // the user explicitly filtered for 'done'.
-    if (!state.settings.showCompletedTasks &&
-        !_activeStatusFilters.contains('done')) {
-      filtered = filtered.where((t) => t.status != 'done').toList();
-    }
+  List<LinearIssueInfo> _filterUnlinkedIssues(
+    List<LinearIssueInfo> issues,
+    AppState state,
+  ) => filterLinearIssues(
+    issues,
+    _buildFilter(),
+    viewerIdByWorker: state.linearViewerIdByWorker,
+  );
 
-    if (_activeStatusFilters.isNotEmpty) {
-      filtered = filtered
-          .where((t) => _activeStatusFilters.contains(t.status))
-          .toList();
-    }
-    if (_activeSourceFilters.isNotEmpty) {
-      filtered = filtered
-          .where((t) => _activeSourceFilters.contains(t.source))
-          .toList();
-    }
-    if (_searchQuery.isNotEmpty) {
-      final query = _searchQuery.toLowerCase();
-      filtered = filtered.where((t) {
-        return t.title.toLowerCase().contains(query) ||
-            (t.description?.toLowerCase().contains(query) ?? false) ||
-            t.source.toLowerCase().contains(query) ||
-            t.workerName.toLowerCase().contains(query);
-      }).toList();
-    }
-    return filtered;
-  }
+  bool get _hasActiveFilters => !_buildFilter().isEmpty;
 
-  List<LinearIssueInfo> _filterUnlinkedIssues(List<LinearIssueInfo> issues) =>
-      filterLinearIssuesByQuery(issues, _searchQuery);
-
-  bool get _hasActiveFilters =>
-      _searchQuery.isNotEmpty ||
-      _activeStatusFilters.isNotEmpty ||
-      _activeSourceFilters.isNotEmpty;
+  /// Number of active issue-level selections (assignee/priority/label), shown
+  /// as a badge on the Filters button.
+  int get _popoverFilterCount =>
+      _activeAssignees.length + _activePriorities.length + _activeLabels.length;
 
   void _clearFilters() {
     setState(() {
@@ -242,6 +260,9 @@ class _TaskListPanelState extends State<TaskListPanel> {
       _searchQuery = '';
       _activeStatusFilters.clear();
       _activeSourceFilters.clear();
+      _activeAssignees.clear();
+      _activePriorities.clear();
+      _activeLabels.clear();
       _selectedTaskIds.clear();
     });
     _saveFilters();
@@ -590,7 +611,9 @@ class _TaskListPanelState extends State<TaskListPanel> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: context.appColors.bgSurface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(kRadiusLarge)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(kRadiusLarge),
+        ),
         title: Text(
           'Delete $count task${count == 1 ? '' : 's'}',
           style: TextStyle(color: context.appColors.textPrimary, fontSize: 16),
@@ -679,7 +702,10 @@ class _TaskListPanelState extends State<TaskListPanel> {
         }
 
         final filtered = _filterTasks(tasks, state);
-        final filteredUnlinked = _filterUnlinkedIssues(allUnlinkedIssues);
+        final filteredUnlinked = _filterUnlinkedIssues(
+          allUnlinkedIssues,
+          state,
+        );
 
         // Compute and cache the flat visible list for range-selection.
         _currentFlatList = computeFlatVisibleList(
@@ -796,7 +822,10 @@ class _TaskListPanelState extends State<TaskListPanel> {
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(kRadiusMedium),
               ),
-              padding: const EdgeInsets.symmetric(horizontal: kSpace4, vertical: 10),
+              padding: const EdgeInsets.symmetric(
+                horizontal: kSpace4,
+                vertical: 10,
+              ),
             ),
           ),
           if (state.anyWorkerHasLinear) ...[
@@ -887,6 +916,8 @@ class _TaskListPanelState extends State<TaskListPanel> {
                 ),
               ),
               if (state.anyWorkerHasLinear) ...[
+                const SizedBox(width: 2),
+                _buildFiltersButton(context, state),
                 const SizedBox(width: 2),
                 SizedBox(
                   width: 30,
@@ -988,6 +1019,223 @@ class _TaskListPanelState extends State<TaskListPanel> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  /// The Filters popover trigger — a `tune` icon with a count badge for the
+  /// active issue-level selections (assignee/priority/label).
+  Widget _buildFiltersButton(BuildContext context, AppState state) {
+    final options = buildTaskFilterOptions(
+      state.linearIssues,
+      meKnown: state.linearViewerKnown,
+    );
+    final count = _popoverFilterCount;
+    final colors = context.appColors;
+    return MenuAnchor(
+      alignmentOffset: const Offset(0, 4),
+      style: MenuStyle(
+        backgroundColor: WidgetStatePropertyAll(colors.bgElevated),
+        surfaceTintColor: const WidgetStatePropertyAll(Colors.transparent),
+        padding: const WidgetStatePropertyAll(EdgeInsets.zero),
+        shape: WidgetStatePropertyAll(
+          RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+            side: BorderSide(color: colors.divider),
+          ),
+        ),
+      ),
+      menuChildren: [_buildFilterPopover(context, state, options)],
+      builder: (context, controller, _) => SizedBox(
+        width: 30,
+        height: 30,
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            IconButton(
+              padding: EdgeInsets.zero,
+              icon: Icon(
+                Icons.tune_rounded,
+                color: count > 0 ? colors.accent : colors.textSecondary,
+                size: 18,
+              ),
+              tooltip: 'Filters',
+              onPressed: () =>
+                  controller.isOpen ? controller.close() : controller.open(),
+            ),
+            if (count > 0)
+              Positioned(
+                right: 1,
+                top: 1,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 3),
+                  constraints: const BoxConstraints(
+                    minWidth: 12,
+                    minHeight: 12,
+                  ),
+                  decoration: BoxDecoration(
+                    color: colors.accent,
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    '$count',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 8,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFilterPopover(
+    BuildContext context,
+    AppState state,
+    TaskFilterOptions options,
+  ) {
+    final colors = context.appColors;
+
+    Widget header(String title) => Padding(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
+      child: Text(
+        title.toUpperCase(),
+        style: TextStyle(
+          color: colors.textMuted,
+          fontSize: 10,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0.5,
+        ),
+      ),
+    );
+
+    Widget checkRow({
+      required String label,
+      required bool selected,
+      required VoidCallback onTap,
+      bool enabled = true,
+    }) => InkWell(
+      onTap: enabled ? onTap : null,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+        child: Row(
+          children: [
+            Icon(
+              selected
+                  ? Icons.check_box_rounded
+                  : Icons.check_box_outline_blank_rounded,
+              size: 16,
+              color: !enabled
+                  ? colors.textMuted.withAlpha(70)
+                  : selected
+                  ? colors.accent
+                  : colors.textMuted,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                label,
+                style: TextStyle(
+                  color: enabled ? colors.textPrimary : colors.textMuted,
+                  fontSize: 12.5,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    void toggle<T>(Set<T> set, T value) {
+      setState(() {
+        if (!set.remove(value)) set.add(value);
+      });
+      _saveFilters();
+    }
+
+    return ConstrainedBox(
+      constraints: const BoxConstraints(
+        minWidth: 220,
+        maxWidth: 260,
+        maxHeight: 440,
+      ),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            header('Assignee'),
+            for (final a in options.assignees)
+              checkRow(
+                label: a.id == kAssigneeMe && !a.enabled
+                    ? 'Me (connect Linear)'
+                    : a.label,
+                selected: _activeAssignees.contains(a.id),
+                enabled: a.enabled,
+                onTap: () => toggle(_activeAssignees, a.id),
+              ),
+            Divider(height: 1, color: colors.divider),
+            header('Priority'),
+            for (final p in _priorityOrder)
+              checkRow(
+                label: _priorityLabels[p]!,
+                selected: _activePriorities.contains(p),
+                onTap: () => toggle(_activePriorities, p),
+              ),
+            if (options.labels.isNotEmpty) ...[
+              Divider(height: 1, color: colors.divider),
+              header('Labels'),
+              for (final l in options.labels)
+                checkRow(
+                  label: l,
+                  selected: _activeLabels.contains(l),
+                  onTap: () => toggle(_activeLabels, l),
+                ),
+            ],
+            if (_popoverFilterCount > 0) ...[
+              Divider(height: 1, color: colors.divider),
+              InkWell(
+                onTap: () {
+                  setState(() {
+                    _activeAssignees.clear();
+                    _activePriorities.clear();
+                    _activeLabels.clear();
+                  });
+                  _saveFilters();
+                },
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 9,
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.clear_all_rounded,
+                        size: 15,
+                        color: colors.textMuted,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Clear filters',
+                        style: TextStyle(
+                          color: colors.textSecondary,
+                          fontSize: 12.5,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+            const SizedBox(height: 4),
+          ],
+        ),
       ),
     );
   }
@@ -1198,17 +1446,13 @@ class _TaskListPanelState extends State<TaskListPanel> {
   /// immediately.
   Widget _buildLoadMoreRow(BuildContext context, int remaining) {
     return InkWell(
-      onTap: () =>
-          setState(() => _unlinkedVisibleCount += _unlinkedPageSize),
+      onTap: () => setState(() => _unlinkedVisibleCount += _unlinkedPageSize),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: kSpace2),
         child: Center(
           child: Text(
             '$remaining more — scroll to load',
-            style: TextStyle(
-              color: context.appColors.textMuted,
-              fontSize: 11,
-            ),
+            style: TextStyle(color: context.appColors.textMuted, fontSize: 11),
           ),
         ),
       ),

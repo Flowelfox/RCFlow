@@ -521,6 +521,24 @@ class AppState extends ChangeNotifier implements PaneHost {
   /// All Linear issues not yet linked to any task, sorted by updatedAt descending.
   List<LinearIssueInfo> get unlinkedLinearIssues => _linearStore.unlinked();
 
+  /// Map of workerId → the Linear account id that worker is connected as.
+  /// Powers the Tasks-tab "Me" assignee filter (a worker is absent until its
+  /// viewer identity is fetched). See [WorkerConnection.linearViewerId].
+  Map<String, String> get linearViewerIdByWorker {
+    final out = <String, String>{};
+    for (final w in _registry.all) {
+      final id = w.linearViewerId;
+      if (id != null && id.isNotEmpty) {
+        out[w.config.id] = id;
+      }
+    }
+    return out;
+  }
+
+  /// True when at least one connected worker's Linear viewer identity is known
+  /// (so the "Me" filter can resolve to a real account).
+  bool get linearViewerKnown => linearViewerIdByWorker.isNotEmpty;
+
   void _handleLinearIssueList(List<dynamic> list, String workerId) {
     _linearStore.replaceWorker(workerId, _workerName(workerId), list);
     notifyListeners();
@@ -606,8 +624,9 @@ class AppState extends ChangeNotifier implements PaneHost {
     final groups = <String, List<GithubPrInfo>>{};
     for (final pr in githubPrs) {
       final worker = getWorker(pr.workerId);
-      if (worker == null || !worker.isConnected)
+      if (worker == null || !worker.isConnected) {
         continue; // online sources only
+      }
       final key = pr.githubId.isNotEmpty ? pr.githubId : pr.id;
       (groups[key] ??= []).add(pr);
     }
