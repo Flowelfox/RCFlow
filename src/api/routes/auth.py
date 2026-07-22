@@ -404,6 +404,33 @@ async def claude_code_login(request: Request) -> dict[str, Any]:
     return {"auth_url": auth_url}
 
 
+def _clear_claude_keychain(config_dir: Path) -> None:
+    """Delete the macOS login-Keychain Claude Code credential for *config_dir*.
+
+    No-op off macOS or if the item is absent. Best-effort — failures (locked
+    keychain, permissions) are logged and ignored; the file-based credential
+    still works.
+    """
+    import sys  # noqa: PLC0415
+
+    if sys.platform != "darwin":
+        return
+    import subprocess  # noqa: PLC0415
+
+    from src.services.usage_service import _keychain_service  # noqa: PLC0415
+
+    service = _keychain_service(config_dir)
+    try:
+        subprocess.run(
+            ["/usr/bin/security", "delete-generic-password", "-s", service],
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        logger.warning("Could not clear stale Claude Code keychain item", exc_info=True)
+
+
 @router.post(
     "/tools/claude_code/login/code",
     summary="Submit OAuth code to complete Claude Code login",
@@ -498,6 +525,14 @@ async def claude_code_login_code(request: Request, body: _ClaudeCodeLoginBody) -
     cred_path.chmod(0o600)
 
     logger.info("Claude Code OAuth credentials saved to %s", cred_path)
+
+    # macOS: the `claude` binary prefers the login Keychain over
+    # .credentials.json. We just wrote fresh creds to the file but never touch
+    # the Keychain, so a stale Keychain entry (from a prior `claude` login)
+    # would shadow the new file and report logged-out. Delete it so the file we
+    # control becomes authoritative; `claude` re-persists to the Keychain with
+    # its own ACL on next use.
+    _clear_claude_keychain(config_dir)
 
     # Auto-set provider to anthropic_login on successful login
     tool_settings.update_settings("claude_code", {"provider": "anthropic_login"})

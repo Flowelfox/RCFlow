@@ -1,5 +1,5 @@
 ---
-updated: 2026-07-08
+updated: 2026-07-22
 ---
 
 # Pluggable Tool Definitions
@@ -338,7 +338,7 @@ Provider sync behavior:
 Two-step PKCE OAuth flow (no CLI interaction required):
 
 1. `POST /api/tools/claude_code/login` — Generates a PKCE code_verifier/challenge, builds the Anthropic OAuth URL (`https://claude.ai/oauth/authorize`), stores the verifier, and returns `{"auth_url": "https://claude.ai/oauth/..."}`. The client opens this URL in a browser.
-2. `POST /api/tools/claude_code/login/code` — Accepts `{"code": "..."}`. Exchanges the authorization code for tokens at `https://platform.claude.com/v1/oauth/token` using the stored PKCE verifier. Writes credentials to `.credentials.json` in the managed config directory. Verifies via `claude auth status --json`. Returns `{"logged_in": true/false, "email": "..."|null, "subscription": "max"|"pro"|null}`.
+2. `POST /api/tools/claude_code/login/code` — Accepts `{"code": "..."}`. Exchanges the authorization code for tokens at `https://platform.claude.com/v1/oauth/token` using the stored PKCE verifier. Writes credentials to `.credentials.json` in the managed config directory. On macOS it then deletes any stale login-Keychain item (`Claude Code-credentials-<hash>`): the `claude` binary prefers the Keychain over the file, so a leftover entry from a prior CLI login would shadow the freshly-written file and report logged-out. Verifies via `claude auth status --json`. Returns `{"logged_in": true/false, "email": "..."|null, "subscription": "max"|"pro"|null}`.
 
 Supporting endpoints:
 

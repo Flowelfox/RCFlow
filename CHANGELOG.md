@@ -25,6 +25,7 @@ and note which component is affected where it matters.
 - **Cleaner notification sound settings** — each sound toggle now shows its picker inline as a compact dropdown with a preview button, instead of a long shared list (Client)
 
 ### Fixed
+- **Claude Code login now sticks on macOS** — after logging in with your Anthropic account, the worker could still show Claude Code as logged out because a leftover macOS Keychain entry from an earlier login shadowed the new credentials. The login now clears that stale entry so it takes effect immediately (Backend)
 - **Opening a session no longer replays its whole history** — reopening or switching to a running session now shows the full conversation instantly, pinned to the latest message, instead of animating every past message in from the top and scrolling through them (Backend + Client)
 - **"Make plan" no longer fails in direct tool mode** — starting a plan from a task used to error with "Unknown tool ##" because the generated planning text was scanned for a #tool mention and its Markdown headings were misread as tool names; the plan now runs with the coding agent you chose as the worker's default, and clearly asks you to pick one if none is set (Backend + Client)
 - **Linear sync available when the Tasks tab is empty** — the Tasks tab's empty state now offers a "Sync from Linear" button, so you can pull in your Linear issues before any tasks exist instead of having no way to trigger the first sync (Client)
