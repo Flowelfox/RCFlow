@@ -12,6 +12,8 @@ and note which component is affected where it matters.
 
 ## [Unreleased]
 
+## [Backend 0.45.0 / Client 1.60.0] — 2026-07-23
+
 ### Added
 - **Codex and OpenCode now run over the open Agent Client Protocol by default** — sessions gain richer streaming (visible reasoning, live plan/todo updates, token and cost reporting) and Codex gains interactive permission prompts it never had before. Each agent falls back to its previous integration automatically when the ACP adapter isn't available, and can be pinned to the old behaviour explicitly. Claude Code is unaffected (Backend)
 - **Coding agents can now use RCFlow tools mid-session** — with the new "Expose RCFlow tools" setting enabled (per agent, off by default), Claude Code and Codex sessions can discover and call RCFlow's tools while they work, with results shown in the session chat. Worktree operations done this way keep the session's worktree selection and badge in sync, and destructive ones still ask for your approval first. Tool authors opt a tool in with a single flag in its definition file — no other changes needed (Backend)
@@ -363,7 +365,8 @@ and note which component is affected where it matters.
 - Linux systemd install/uninstall scripts
 - `justfile` with dev, test, lint, format, and bundle targets
 
-[Unreleased]: https://github.com/Flowelfox/RCFlow/compare/v0.42.1...HEAD
+[Unreleased]: https://github.com/Flowelfox/RCFlow/compare/v0.45.0...HEAD
+[Backend 0.45.0 / Client 1.60.0]: https://github.com/Flowelfox/RCFlow/compare/v0.44.1...v0.45.0
 [Backend 0.42.1]: https://github.com/Flowelfox/RCFlow/compare/v0.42.0...v0.42.1
 [Backend 0.42.0 / Client 1.45.0]: https://github.com/Flowelfox/RCFlow/compare/v0.41.0...v0.42.0
 [Backend 0.41.0 / Client 1.44.0]: https://github.com/Flowelfox/RCFlow/compare/v0.40.1...v0.41.0
