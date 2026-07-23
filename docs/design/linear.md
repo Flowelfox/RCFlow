@@ -1,5 +1,5 @@
 ---
-updated: 2026-04-26
+updated: 2026-07-07
 ---
 
 # Linear Integration
@@ -30,6 +30,7 @@ An async HTTP client wrapper around the Linear GraphQL API. Uses `httpx.AsyncCli
 | Method | Description |
 |--------|-------------|
 | `fetch_teams()` | Query all teams accessible to the API key |
+| `fetch_viewer()` | Query the identity (GraphQL `viewer`) of the API key's Linear user |
 | `fetch_issues(team_id)` | Query all issues for a specific team (paginated) |
 | `fetch_all_issues()` | Query all issues across all accessible teams (paginated) |
 | `get_issue(linear_id)` | Fetch a single issue by its Linear ID |
@@ -47,7 +48,8 @@ All endpoints are under `/api/integrations/linear/` and require bearer-token aut
 |--------|------|-------------|
 | `POST` | `/api/integrations/linear/test` | Validate an API key and return accessible teams — no prior config required |
 | `GET`  | `/api/integrations/linear/teams` | List teams accessible via the configured `LINEAR_API_KEY` |
-| `GET`  | `/api/integrations/linear/issues` | List all cached issues for this backend |
+| `GET`  | `/api/integrations/linear/viewer` | Identity of the configured API key's Linear user (for the client's "Me" assignee filter). Cached in memory per process, keyed by API key; `?refresh=true` bypasses the cache. 503 without `LINEAR_API_KEY`, 502 when Linear is unreachable |
+| `GET`  | `/api/integrations/linear/issues` | List all cached issues for this backend. Optional filters: `state_type`, `priority`, `assignee_id`, `q` (title/identifier search) |
 | `GET`  | `/api/integrations/linear/issues/{id}` | Get a single cached issue by UUID |
 | `POST` | `/api/integrations/linear/sync` | Sync issues from Linear API; uses `LINEAR_TEAM_ID` if set, otherwise syncs all teams |
 | `POST` | `/api/integrations/linear/issues` | Create an issue in Linear; uses `LINEAR_TEAM_ID` or `team_id` from request body |
@@ -176,7 +178,9 @@ The sidebar `SessionListPanel` has a **3-tab layout**: **Workers**, **Tasks**, *
 - Search bar, status filter chips, source filter chips
 - Tasks grouped by status with collapsible sections
 - **Sync button** (⟳) in the filter bar — calls `worker.ws.syncLinearIssues()` then `listLinearIssues()`
+- **Empty state** (no tasks and no issues) also shows a **"Sync from Linear"** button (when any worker has Linear configured), so the first sync can be triggered before anything is cached
 - **"Unlinked Issues" section** at the bottom — collapsible list of `LinearIssueTile` for all issues where `taskId == null`
+- **Lazy rendering + scroll pagination**: the panel renders a flat row list via `ListView.builder` (each header/tile is its own row, so off-screen rows aren't laid out). The unlinked-issues section renders 50 issues at a time; scrolling near the bottom (or tapping the "N more — scroll to load" footer row) loads the next page
 - **Multi-select**: Shift+click selects a range, Ctrl/Meta+click toggles individual tasks, plain click while a selection exists toggles the clicked task; plain click with no selection opens the task in a pane (unchanged). Escape clears the selection.
 - **Selection toolbar**: thin bar shown below the filter bar when ≥1 task is selected, displaying the count and a clear button.
 - **Bulk right-click context menu**: when tasks are selected and the user right-clicks any tile (adding the clicked tile to the selection if not already in it), a bulk menu appears with: *Mark all → In Progress / To Do / Review / Done*, *Delete N tasks…* (with confirmation dialog), and *Clear selection*. When no selection is active the per-tile single-task menu is used instead.

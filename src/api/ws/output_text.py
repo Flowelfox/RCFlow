@@ -30,7 +30,8 @@ async def ws_output_text(
 
     Clients send subscribe/unsubscribe messages to control which sessions
     they receive output from. On subscribe, the full buffered history is
-    replayed, then live updates follow.
+    replayed (each message carrying ``"replay": true``), followed by a
+    ``{"type": "history_replayed"}`` boundary marker, then live updates.
 
     Query Parameters:
         api_key: API key for authentication.
@@ -97,8 +98,19 @@ async def ws_output_text(
         history_count = len(session.buffer.text_history)
         queue = session.buffer.subscribe_text(subscriber_id)
 
+        async def send_history_replayed() -> None:
+            await websocket.send_json({"type": "history_replayed", "session_id": session_id})
+
         try:
             replayed = 0
+            # Boundary marker so the client can batch the replayed history into a
+            # single render (see docs/design/websocket-api.md). Sent right after
+            # the last replayed message and before the first live one; sent
+            # immediately when the session has no history to replay.
+            history_marker_sent = False
+            if history_count == 0:
+                await send_history_replayed()
+                history_marker_sent = True
             while True:
                 msg = await queue.get()
                 if msg is None:
@@ -113,6 +125,9 @@ async def ws_output_text(
                     payload["replay"] = True
                     replayed += 1
                 await websocket.send_json(payload)
+                if not history_marker_sent and replayed >= history_count:
+                    await send_history_replayed()
+                    history_marker_sent = True
         except (WebSocketDisconnect, RuntimeError):
             pass
         finally:
@@ -307,7 +322,7 @@ async def ws_output_text(
                     await websocket.send_json({"type": "artifact_list", "artifacts": []})
 
             elif msg_type == "list_linear_issues":
-                import json as _json  # noqa: PLC0415
+                from src.api.integrations.linear import _issue_to_dict  # noqa: PLC0415
 
                 db_session_factory = websocket.app.state.db_session_factory
                 if db_session_factory is not None:
@@ -320,29 +335,7 @@ async def ws_output_text(
                         )
                         result = await db.execute(stmt)
                         issue_rows = result.scalars().all()
-                        issues_out = [
-                            {
-                                "id": str(i.id),
-                                "linear_id": i.linear_id,
-                                "identifier": i.identifier,
-                                "title": i.title,
-                                "description": i.description,
-                                "priority": i.priority,
-                                "state_name": i.state_name,
-                                "state_type": i.state_type,
-                                "assignee_id": i.assignee_id,
-                                "assignee_name": i.assignee_name,
-                                "team_id": i.team_id,
-                                "team_name": i.team_name,
-                                "url": i.url,
-                                "labels": _json.loads(i.labels or "[]"),
-                                "created_at": i.created_at.isoformat() if i.created_at else "",
-                                "updated_at": i.updated_at.isoformat() if i.updated_at else "",
-                                "synced_at": i.synced_at.isoformat() if i.synced_at else "",
-                                "task_id": str(i.task_id) if i.task_id else None,
-                            }
-                            for i in issue_rows
-                        ]
+                        issues_out = [_issue_to_dict(i) for i in issue_rows]
                     await websocket.send_json({"type": "linear_issue_list", "issues": issues_out})
                 else:
                     await websocket.send_json({"type": "linear_issue_list", "issues": []})

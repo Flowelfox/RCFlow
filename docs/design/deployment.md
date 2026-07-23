@@ -1,5 +1,5 @@
 ---
-updated: 2026-06-18
+updated: 2026-07-07
 ---
 
 # Platform Support, Deployment & Bundling
@@ -44,14 +44,7 @@ Process creation and termination are abstracted in `src/utils/process.py`:
 - `new_session_kwargs()` — returns the correct kwargs to isolate child process trees (`start_new_session` on POSIX, `CREATE_NEW_PROCESS_GROUP` on Windows).
 - `kill_process_tree()` — kills a process and all its children (`os.killpg` on POSIX, `taskkill /T /F` on Windows).
 
-Both `ClaudeCodeExecutor` and `CodexExecutor` use these helpers.
-
-`src/utils/pty_utils.py` (Unix-only) provides PTY helpers used by `ClaudeCodeExecutor` in PTY mode:
-
-- `configure_raw(fd)` — sets a PTY slave fd to raw mode (no echo, no `OPOST`, no `ICANON`).
-- `set_winsize(fd, rows, cols)` — configures terminal dimensions via `TIOCSWINSZ`.
-- `PtyLineReader` — async line reader over a PTY master fd using `loop.add_reader`.
-- `strip_ansi(text)` — strips ANSI/VT100 escape sequences from decoded output.
+The agent executors use these helpers for subprocess teardown. (The former `src/utils/pty_utils.py` served the removed raw-CLI Claude Code executor's PTY mode and has been deleted; the client terminal feature has its own PTY handling in `src/terminal/`.)
 
 ---
 
@@ -207,9 +200,9 @@ sudo systemctl start rcflow
 sudo journalctl -u rcflow -f     # View logs
 ```
 
-### Auto-Update (Worker GUI Only)
+### Auto-Update
 
-The worker GUI (Windows tray, macOS menu bar, future Linux dashboard) polls the GitHub Releases API on launch to surface newer versions. The headless `rcflow run` entry point — including systemd, Docker, and any other non-GUI deployment — never instantiates the updater and never makes outbound HTTP calls for update discovery; package managers handle those installs.
+The worker GUI (Windows tray, macOS menu bar, future Linux dashboard) polls the GitHub Releases API on launch to surface newer versions. The headless `rcflow run` entry point — including systemd, Docker, and any other non-GUI deployment — never instantiates the updater and never makes outbound HTTP calls for update discovery; headless installs update explicitly via the `rcflow update` CLI verb (below) or their package manager.
 
 **How it works:**
 
@@ -223,6 +216,12 @@ The worker GUI (Windows tray, macOS menu bar, future Linux dashboard) polls the 
 - Dev (unfrozen) builds skip the auto-check on launch when no `rcflow` package version is resolvable, but the manual "Check for Updates" button still works for testing.
 
 No checksum or signature verification is performed beyond TLS — the user-facing install flow matches the existing Flutter client. Stalled `*.partial` downloads older than one day are garbage-collected on each GUI startup.
+
+**CLI self-update (`rcflow update`)** — the headless counterpart (`src/services/cli_update.py`, reusing the same fetch/compare/download logic from `src/gui/updater.py`):
+
+- `rcflow update` checks GitHub, prints current vs latest, asks `Install RCFlow vX.Y.Z? [y/N]` (skipped with `-y/--yes`; a non-interactive terminal without `--yes` aborts), downloads with progress to the same per-platform cache dir, then installs: on **Linux** it runs `dpkg -i` on the `.deb` (prefixed with `sudo` when not root) — the package's prerm/postinst stop the service, migrate, and restart it, so the update is complete in place; on **Windows/macOS** it launches the downloaded installer and the user finishes there (same hand-off as the GUI).
+- `rcflow update --check` only reports. Exit codes: `0` up-to-date/updated/installer-launched, `1` failure (network, download, dpkg, declined, non-tty without `--yes`), `2` unsupported (dev checkout — use `git pull && uv sync` — or no release asset for the platform/arch), `3` (`--check` only) update available. Scripting idiom: `rcflow update --check; [ $? -eq 3 ] && rcflow update -y`.
+- The CLI bypasses the GUI's `UpdateService`: it always hits the network and ignores the 24-hour cache and dismissed-version state. Complete cached downloads with a matching size are reused; for unattended Linux updates run as root (a sudo password prompt cannot be answered without a tty).
 
 ---
 
@@ -370,6 +369,7 @@ The `rcflow` entry point supports subcommands relevant to bundled operation:
 - `rcflow info` — Print server configuration (bind address, port, WSS status)
 - `rcflow api-key` — Print the current API key
 - `rcflow set-api-key <value>` — Save a new API key
+- `rcflow update [--check] [-y|--yes]` — Self-update from the latest GitHub release (`--check` exits 0 up-to-date / 3 update available; see [Auto-Update](#auto-update))
 
 **Worker-service control** (manage the OS-supervised worker — see [Worker Service Control](#worker-service-control)):
 

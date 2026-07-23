@@ -360,7 +360,7 @@ async def ws_input_text(
                 continue
 
             if msg_type == "list_linear_issues":
-                import json as _json  # noqa: PLC0415
+                from src.api.integrations.linear import _issue_to_dict  # noqa: PLC0415
 
                 db_session_factory = websocket.app.state.db_session_factory
                 if db_session_factory is not None:
@@ -373,29 +373,7 @@ async def ws_input_text(
                         )
                         result = await db.execute(stmt)
                         issue_rows = result.scalars().all()
-                        issues_out = [
-                            {
-                                "id": str(i.id),
-                                "linear_id": i.linear_id,
-                                "identifier": i.identifier,
-                                "title": i.title,
-                                "description": i.description,
-                                "priority": i.priority,
-                                "state_name": i.state_name,
-                                "state_type": i.state_type,
-                                "assignee_id": i.assignee_id,
-                                "assignee_name": i.assignee_name,
-                                "team_id": i.team_id,
-                                "team_name": i.team_name,
-                                "url": i.url,
-                                "labels": _json.loads(i.labels or "[]"),
-                                "created_at": i.created_at.isoformat() if i.created_at else "",
-                                "updated_at": i.updated_at.isoformat() if i.updated_at else "",
-                                "synced_at": i.synced_at.isoformat() if i.synced_at else "",
-                                "task_id": str(i.task_id) if i.task_id else None,
-                            }
-                            for i in issue_rows
-                        ]
+                        issues_out = [_issue_to_dict(i) for i in issue_rows]
                     await websocket.send_json({"type": "linear_issue_list", "issues": issues_out})
                 else:
                     await websocket.send_json({"type": "linear_issue_list", "issues": []})
@@ -424,12 +402,33 @@ async def ws_input_text(
                 task_id_str = message.get("task_id")
                 plan_project_name: str | None = message.get("project_name") or None
                 plan_worktree_path: str | None = message.get("selected_worktree_path") or None
+                # The coding agent to run (claude_code/codex/opencode); required
+                # in direct-tool mode where the prompt would otherwise be parsed
+                # for a #tool mention (and markdown "## " headings in the
+                # generated planning prompt would be misread as tool names).
+                # There is no server-side default: the agent is the per-worker
+                # setting chosen in the client, so when it is missing in
+                # direct-tool mode the user must pick one rather than silently
+                # getting an agent they never selected (or don't have installed).
+                plan_agent: str | None = message.get("agent") or None
                 if not task_id_str:
                     await websocket.send_json(
                         {
                             "type": "error",
                             "content": "Missing task_id",
                             "code": "MISSING_TASK_ID",
+                        }
+                    )
+                    continue
+                if not plan_agent and prompt_router.is_direct_tool_mode:
+                    await websocket.send_json(
+                        {
+                            "type": "error",
+                            "content": (
+                                "No coding agent selected for this worker. "
+                                "Set a default agent in the worker settings to use Make plan."
+                            ),
+                            "code": "MISSING_AGENT",
                         }
                     )
                     continue
@@ -454,6 +453,7 @@ async def ws_input_text(
                             project_name=plan_project_name,
                             selected_worktree_path=plan_worktree_path,
                             task_id=task_id_str,
+                            direct_tool=plan_agent,
                         )
                     )
                     background_tasks.add(plan_task)

@@ -12,13 +12,17 @@ Covers:
 - ``unsubscribe``: unknown session_id silently ignored
 """
 
-from unittest.mock import patch
+import uuid
+from contextlib import asynccontextmanager
+from datetime import UTC, datetime
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from src.core.session import SessionType
+from src.database.models import LinearIssue as LinearIssueModel
 
 API_KEY = "test-api-key"
 
@@ -89,6 +93,78 @@ class TestOutputWsListLinearIssues:
         assert data["type"] == "error"
         assert data["code"] == "UNKNOWN_MESSAGE_TYPE"
         assert "totally_unknown_xyz" in data["content"]
+
+    def test_issue_payload_shape(self, client: TestClient, test_app: FastAPI) -> None:
+        """Pins the exact wire shape of linear_issue_list issue dicts.
+
+        Regression guard for the shared ``_issue_to_dict`` serializer: the key
+        set must stay stable and ``labels`` must arrive JSON-decoded.
+        """
+        now = datetime(2024, 3, 1, tzinfo=UTC)
+        row = LinearIssueModel(
+            id=uuid.UUID("00000000-0000-0000-0000-000000000001"),
+            backend_id=test_app.state.settings.RCFLOW_BACKEND_ID,
+            linear_id="lin-abc-001",
+            identifier="ENG-1",
+            title="Test Issue",
+            description="A test description",
+            priority=2,
+            state_name="In Progress",
+            state_type="started",
+            assignee_id="user-1",
+            assignee_name="Alice",
+            team_id="team-abc123",
+            team_name="Engineering",
+            url="https://linear.app/eng/issue/ENG-1",
+            labels='["bug", "auth"]',
+            created_at=now,
+            updated_at=now,
+            synced_at=now,
+            task_id=None,
+        )
+        result = MagicMock()
+        scalars = MagicMock()
+        scalars.all.return_value = [row]
+        result.scalars.return_value = scalars
+        mock_db = AsyncMock()
+        mock_db.execute = AsyncMock(return_value=result)
+
+        @asynccontextmanager
+        async def _factory():
+            yield mock_db
+
+        test_app.state.db_session_factory = _factory
+
+        with client.websocket_connect(_ws_url()) as ws:
+            ws.send_json({"type": "list_linear_issues"})
+            data = ws.receive_json()
+
+        assert data["type"] == "linear_issue_list"
+        assert len(data["issues"]) == 1
+        issue = data["issues"][0]
+        assert set(issue.keys()) == {
+            "id",
+            "linear_id",
+            "identifier",
+            "title",
+            "description",
+            "priority",
+            "state_name",
+            "state_type",
+            "assignee_id",
+            "assignee_name",
+            "team_id",
+            "team_name",
+            "url",
+            "labels",
+            "created_at",
+            "updated_at",
+            "synced_at",
+            "task_id",
+        }
+        assert issue["labels"] == ["bug", "auth"]
+        assert issue["assignee_id"] == "user-1"
+        assert issue["created_at"] == now.isoformat()
 
 
 # ---------------------------------------------------------------------------

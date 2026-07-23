@@ -13,18 +13,35 @@ and note which component is affected where it matters.
 ## [Unreleased]
 
 ### Added
-- **Sessions now show a PR badge** — a session tied to a pull request displays a PR badge you can tap to jump straight to that PR's review pane. It appears when you start a session from the Pull requests view, and also lights up automatically when a PR is opened for the branch a session is already working on (Backend + Client)
+- **Codex and OpenCode now run over the open Agent Client Protocol by default** — sessions gain richer streaming (visible reasoning, live plan/todo updates, token and cost reporting) and Codex gains interactive permission prompts it never had before. Each agent falls back to its previous integration automatically when the ACP adapter isn't available, and can be pinned to the old behaviour explicitly. Claude Code is unaffected (Backend)
+- **Coding agents can now use RCFlow tools mid-session** — with the new "Expose RCFlow tools" setting enabled (per agent, off by default), Claude Code and Codex sessions can discover and call RCFlow's tools while they work, with results shown in the session chat. Worktree operations done this way keep the session's worktree selection and badge in sync, and destructive ones still ask for your approval first. Tool authors opt a tool in with a single flag in its definition file — no other changes needed (Backend)
+- **Agents can drive RCFlow features directly** — when tool access is enabled, agents can now notify you, read their own session context, rename the session, register files they produced as artifacts, and create/update tasks, plus run any git-worktree operation through the worker. Actions that change tasks or worktrees still ask for your approval; read-only ones don't (Backend)
+- **Update the worker from the terminal** — new `rcflow update` command checks GitHub for the latest release and installs it: on Linux it installs the package and restarts the service in place, on Windows/macOS it downloads and launches the installer. `rcflow update --check` only reports whether an update is available (scriptable exit codes), and `-y` runs unattended (Backend)
+- **Sessions now show a PR badge** — a session tied to a pull request displays a PR badge you can tap to jump straight to that PR's review pane. It appears when you start a session from the Pull requests view, and lights up automatically whenever the session's branch has an open PR: when you start a session on a branch (or switch branch/worktree) that already has one, and when the agent opens a PR itself (e.g. runs `gh pr create`) during the session — no manual sync needed (Backend + Client)
 - **Separate notification sounds for "when done" and "on each message"** — the two sound toggles now each have their own sound picker, so you can choose the same sound or a different one for turn completion vs. each new message, preview either with one tap, and pick a custom `.wav` per slot (Windows). Each toggle still turns on and off independently (Client)
 
 ### Changed
+- **Worktree branch names are no longer forced into a naming convention** — new worktrees accept any branch name by default. Repositories that want the `type/description` convention (e.g. `feature/add-auth`) can opt in by listing allowed types in the repo's worktree config file (Backend + Client)
 - **Cleaner notification sound settings** — each sound toggle now shows its picker inline as a compact dropdown with a preview button, instead of a long shared list (Client)
 
 ### Fixed
+- **Claude Code showed "logged in" while sessions failed to authenticate** — with Anthropic Login selected, a stray API key in the worker's environment made the login-status check report logged-in via that key, even though coding sessions correctly use your Anthropic subscription and were failing with "OAuth session expired". The status check now ignores the stray key, so it honestly reflects your subscription login and matches what sessions actually use (Backend)
+- **The Codex ACP adapter now has a readable name** — the internal adapter appeared as `codex_acp` in the Tools menu and setup wizard; it's now labelled "Codex ACP Adapter" (Client)
+- **Claude Code login now sticks on macOS** — after logging in with your Anthropic account, the worker could still show Claude Code as logged out because a leftover macOS Keychain entry from an earlier login shadowed the new credentials. The login now clears that stale entry so it takes effect immediately (Backend)
+- **Opening a session no longer replays its whole history** — reopening or switching to a running session now shows the full conversation instantly, pinned to the latest message, instead of animating every past message in from the top and scrolling through them (Backend + Client)
+- **"Make plan" no longer fails in direct tool mode** — starting a plan from a task used to error with "Unknown tool ##" because the generated planning text was scanned for a #tool mention and its Markdown headings were misread as tool names; the plan now runs with the coding agent you chose as the worker's default, and clearly asks you to pick one if none is set (Backend + Client)
+- **Linear sync available when the Tasks tab is empty** — the Tasks tab's empty state now offers a "Sync from Linear" button, so you can pull in your Linear issues before any tasks exist instead of having no way to trigger the first sync (Client)
 - **"Sound on message" now dings once per message** — it fires on each new assistant message rather than on every streamed fragment or tool step, so a turn with several replies no longer produces a burst of sounds, and tool calls stay silent (Client)
 - **"Sound when done" never played** — the completion sound was listening for the wrong event, so no sound played when an agent finished a turn and was waiting for input. It now plays on every turn completion (Client)
 - **Notification sounds were silent on Windows** — the first sound (and the Settings preview button) produced no audio because of a faulty playback shortcut; sounds now play reliably the first time and every time (Client)
 - **Highlight on selected sessions, tasks, PRs and other list items rendered correctly** — the coloured background and tap ripple on highlighted sidebar items no longer trigger a stream of internal warnings (Client)
 - **Spurious keyboard warnings on Windows** — using a global dictation/hotkey tool (e.g. Wispr Flow) that intercepts modifier keys no longer floods the logs with harmless "key down" warnings; keyboard shortcuts are unaffected (Client)
+
+### Performance
+- **Tasks tab no longer lags with many Linear issues** — the task list now renders only what's on screen and loads unlinked Linear issues in pages of 50 as you scroll, so large synced issue sets no longer freeze the sidebar (Client)
+
+### Security
+- **Patched known vulnerabilities in bundled libraries** — updated third-party dependencies to versions that fix reported issues in image decoding (Pillow), the Model Context Protocol library, the settings loader, and the packaging toolchain. No behaviour change for users (Backend)
 
 ## [Backend 0.44.1 / Client 1.59.1] — 2026-06-18
 

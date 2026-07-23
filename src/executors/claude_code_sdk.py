@@ -37,13 +37,18 @@ from claude_agent_sdk import (
     ToolResultBlock,
     ToolUseBlock,
     UserMessage,
+    create_sdk_mcp_server,
+    tool,
 )
 
 from src.executors.base import BaseExecutor, ExecutionChunk, ExecutionResult
+from src.services.mcp_bridge import RCFLOW_MCP_SERVER_NAME
 
 if TYPE_CHECKING:
     from claude_agent_sdk import Message, PermissionResult, ToolPermissionContext
+    from claude_agent_sdk.types import McpSdkServerConfig
 
+    from src.services.mcp_bridge import McpBridge
     from src.tools.loader import ToolDefinition
 
 logger = logging.getLogger(__name__)
@@ -57,6 +62,7 @@ _DEBUG_SDK = os.environ.get("RCFLOW_DEBUG_SDK", "") not in ("", "0", "false", "F
 def _sdk_trace(msg: str) -> None:
     if _DEBUG_SDK:
         logger.warning("SDK_TRACE %.3f %s", time.monotonic(), msg)
+
 
 # Callback type the agent layer supplies to handle AskUserQuestion + permissions.
 CanUseTool = Callable[[str, dict[str, Any], "ToolPermissionContext"], Awaitable["PermissionResult"]]
@@ -208,12 +214,14 @@ class ClaudeCodeSdkExecutor(BaseExecutor):
         extra_env: dict[str, str] | None = None,
         config_overrides: dict[str, Any] | None = None,
         can_use_tool: CanUseTool | None = None,
+        mcp_bridge: McpBridge | None = None,
     ) -> None:
         self._binary_path = binary_path
         self._session_id: str = session_id or str(uuid.uuid4())
         self._extra_env: dict[str, str] = extra_env or {}
         self._config_overrides: dict[str, Any] = config_overrides or {}
         self._can_use_tool: CanUseTool | None = can_use_tool
+        self._mcp_bridge: McpBridge | None = mcp_bridge
 
         self._client: ClaudeSDKClient | None = None
         self._connected: bool = False
@@ -284,6 +292,15 @@ class ClaudeCodeSdkExecutor(BaseExecutor):
             [t.strip() for t in allowed.split(",") if t.strip()] if isinstance(allowed, str) else (allowed or [])
         )
 
+        # RCFlow tool exposure over MCP (in-process SDK server). Gated on the
+        # per-tool ``expose_rcflow_tools`` setting; the server is rebuilt from
+        # the live registry on every connect, so new agent-exposed tool
+        # definitions appear without code changes here.
+        mcp_servers: dict[str, Any] = {}
+        rcflow_server = self._build_rcflow_mcp_server()
+        if rcflow_server is not None:
+            mcp_servers[RCFLOW_MCP_SERVER_NAME] = rcflow_server
+
         return ClaudeAgentOptions(
             cli_path=self._binary_path,
             env=env,
@@ -293,11 +310,48 @@ class ClaudeCodeSdkExecutor(BaseExecutor):
             max_turns=max_turns,
             cwd=cwd,
             allowed_tools=allowed_list,
+            mcp_servers=mcp_servers,
             resume=resume,
             # Persist the same session id the rest of RCFlow tracks so resume
             # across worker restarts lines up.
             extra_args={"session-id": self._session_id} if resume is None else {},
         )
+
+    def _build_rcflow_sdk_tools(self) -> list[Any]:
+        """Build the SDK MCP tools from the bridge's live tool list.
+
+        Registry-driven: one SDK tool per bridge spec, schema passed through
+        verbatim. Handlers dispatch through the bridge back into RCFlow's
+        executor layer, bound to this executor's session id.
+        """
+        bridge = self._mcp_bridge
+        if bridge is None:
+            return []
+        sdk_tools = []
+        for spec in bridge.list_agent_tools():
+
+            async def handler(args: dict[str, Any], _name: str = spec.name) -> dict[str, Any]:
+                outcome = await bridge.call_tool(self._session_id, _name, args or {})
+                return {
+                    "content": [{"type": "text", "text": outcome.text}],
+                    "is_error": outcome.is_error,
+                }
+
+            sdk_tools.append(tool(spec.name, spec.description, spec.input_schema)(handler))
+        return sdk_tools
+
+    def _build_rcflow_mcp_server(self) -> McpSdkServerConfig | None:
+        """Build the in-process ``rcflow`` MCP server (or None when disabled/empty).
+
+        Disabled when the bridge is absent or the ``expose_rcflow_tools``
+        setting is off; empty when no registry tool is agent-exposed.
+        """
+        if self._mcp_bridge is None or not self._config_overrides.get("expose_rcflow_tools"):
+            return None
+        sdk_tools = self._build_rcflow_sdk_tools()
+        if not sdk_tools:
+            return None
+        return create_sdk_mcp_server(name=RCFLOW_MCP_SERVER_NAME, version="1.0.0", tools=sdk_tools)
 
     def _sdk_env(self) -> dict[str, str]:
         """Env overrides passed to the SDK (merged over the worker's env).

@@ -404,6 +404,53 @@ async def claude_code_login(request: Request) -> dict[str, Any]:
     return {"auth_url": auth_url}
 
 
+def _managed_claude_env(tool_settings: ToolSettingsManager, config_dir: Path) -> dict[str, str]:
+    """Environment for a managed ``claude`` subprocess (status/login/logout).
+
+    Mirrors the executor (:meth:`AgentClaudeCode._build_extra_env`): when the
+    provider is ``anthropic_login`` it blanks any ``ANTHROPIC_API_KEY`` leaking
+    from the server process so ``claude auth status`` reflects the OAuth login
+    state. Without this a stray API key makes status falsely report
+    ``logged_in`` via ``method: api_key`` while real sessions (which do clear
+    it) force OAuth and fail with "OAuth session expired".
+    """
+    env = dict(os.environ)
+    env["CLAUDE_CONFIG_DIR"] = str(config_dir)
+    try:
+        if tool_settings.get_settings("claude_code").get("provider") == "anthropic_login":
+            env["ANTHROPIC_API_KEY"] = ""
+    except Exception:
+        logger.debug("Could not read claude_code provider for env; leaving ANTHROPIC_API_KEY as-is")
+    return env
+
+
+def _clear_claude_keychain(config_dir: Path) -> None:
+    """Delete the macOS login-Keychain Claude Code credential for *config_dir*.
+
+    No-op off macOS or if the item is absent. Best-effort — failures (locked
+    keychain, permissions) are logged and ignored; the file-based credential
+    still works.
+    """
+    import sys  # noqa: PLC0415
+
+    if sys.platform != "darwin":
+        return
+    import subprocess  # noqa: PLC0415
+
+    from src.services.usage_service import _keychain_service  # noqa: PLC0415
+
+    service = _keychain_service(config_dir)
+    try:
+        subprocess.run(
+            ["/usr/bin/security", "delete-generic-password", "-s", service],
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        logger.warning("Could not clear stale Claude Code keychain item", exc_info=True)
+
+
 @router.post(
     "/tools/claude_code/login/code",
     summary="Submit OAuth code to complete Claude Code login",
@@ -499,6 +546,14 @@ async def claude_code_login_code(request: Request, body: _ClaudeCodeLoginBody) -
 
     logger.info("Claude Code OAuth credentials saved to %s", cred_path)
 
+    # macOS: the `claude` binary prefers the login Keychain over
+    # .credentials.json. We just wrote fresh creds to the file but never touch
+    # the Keychain, so a stale Keychain entry (from a prior `claude` login)
+    # would shadow the new file and report logged-out. Delete it so the file we
+    # control becomes authoritative; `claude` re-persists to the Keychain with
+    # its own ACL on next use.
+    _clear_claude_keychain(config_dir)
+
     # Auto-set provider to anthropic_login on successful login
     tool_settings.update_settings("claude_code", {"provider": "anthropic_login"})
 
@@ -513,8 +568,7 @@ async def claude_code_login_code(request: Request, body: _ClaudeCodeLoginBody) -
     tool_manager: ToolManager = request.app.state.tool_manager
     binary_path = tool_manager.get_binary_path("claude_code")
     if binary_path:
-        env = dict(os.environ)
-        env["CLAUDE_CONFIG_DIR"] = str(config_dir)
+        env = _managed_claude_env(tool_settings, config_dir)
         try:
             verify_proc = await asyncio.create_subprocess_exec(
                 binary_path,
@@ -565,8 +619,7 @@ async def claude_code_login_status(request: Request) -> dict[str, Any]:
     config_dir = tool_settings.get_config_dir("claude_code")
     config_dir.mkdir(parents=True, exist_ok=True)
 
-    env = dict(os.environ)
-    env["CLAUDE_CONFIG_DIR"] = str(config_dir)
+    env = _managed_claude_env(tool_settings, config_dir)
 
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -617,8 +670,7 @@ async def claude_code_logout(request: Request) -> dict[str, Any]:
 
     config_dir = tool_settings.get_config_dir("claude_code")
 
-    env = dict(os.environ)
-    env["CLAUDE_CONFIG_DIR"] = str(config_dir)
+    env = _managed_claude_env(tool_settings, config_dir)
 
     try:
         proc = await asyncio.create_subprocess_exec(

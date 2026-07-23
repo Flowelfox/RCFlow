@@ -520,10 +520,7 @@ class UpdateService:
         threading.Thread(target=_run, daemon=True, name="rcflow-updater-dl").start()
 
     def _download_path(self, info: UpdateInfo) -> Path:
-        cache_dir = _download_cache_dir()
-        cache_dir.mkdir(parents=True, exist_ok=True)
-        name = info.asset_name or f"rcflow-update-{info.version}{_default_ext(self._plat)}"
-        return cache_dir / name
+        return download_path(info, self._plat)
 
     def _stream_download(
         self,
@@ -531,57 +528,87 @@ class UpdateService:
         dest: Path,
         on_progress: Callable[[int, int], None] | None,
     ) -> None:
-        partial = dest.with_suffix(dest.suffix + ".partial")
-        with contextlib.suppress(OSError):
-            partial.unlink()
-
-        req = urllib.request.Request(info.download_url or "", headers={"User-Agent": "rcflow-worker"})
-        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_S) as resp:
-            total = info.asset_size
-            if total is None:
-                length = resp.headers.get("Content-Length")
-                if length and length.isdigit():
-                    total = int(length)
-            received = 0
-            with partial.open("wb") as out:
-                while True:
-                    chunk = resp.read(DOWNLOAD_CHUNK)
-                    if not chunk:
-                        break
-                    out.write(chunk)
-                    received += len(chunk)
-                    if on_progress is not None and total:
-                        try:
-                            on_progress(received, total)
-                        except Exception:
-                            logger.exception("download progress callback raised")
-
-        if total is not None and received != total:
-            with contextlib.suppress(OSError):
-                partial.unlink()
-            raise RuntimeError(f"Download truncated: got {received} bytes, expected {total}")
-        partial.replace(dest)
+        stream_download(info, dest, on_progress)
 
     def launch_installer(self, path: Path) -> None:
-        """Hand the downloaded artifact to the OS installer.
+        """Hand the downloaded artifact to the OS installer (see :func:`launch_installer`)."""
+        launch_installer(path, self._plat)
 
-        - Windows: ``os.startfile`` runs the NSIS bootstrapper.
-        - macOS: ``open`` mounts the DMG in Finder.
-        - Linux: ``xdg-open`` invokes the distro package GUI (gdebi, gnome-software).
 
-        The worker process keeps running — the installer prompts the user to
-        close the worker when it needs to overwrite the binary.
-        """
-        if not path.exists():
-            raise FileNotFoundError(str(path))
-        if self._plat == "windows":
-            import os  # noqa: PLC0415
+# ── Download / install helpers (also used by the ``rcflow update`` CLI) ─────
 
-            os.startfile(str(path))  # ty:ignore[unresolved-attribute]  # Windows-only
-        elif self._plat == "darwin":
-            subprocess.Popen(["open", str(path)])
-        else:
-            subprocess.Popen(["xdg-open", str(path)])
+
+def download_path(info: UpdateInfo, plat: str) -> Path:
+    """Return the cache-dir destination for *info*'s installer, creating the dir."""
+    cache_dir = _download_cache_dir()
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    name = info.asset_name or f"rcflow-update-{info.version}{_default_ext(plat)}"
+    return cache_dir / name
+
+
+def stream_download(
+    info: UpdateInfo,
+    dest: Path,
+    on_progress: Callable[[int, int], None] | None = None,
+) -> None:
+    """Stream *info*'s asset to *dest* atomically (``<dest>.partial`` then rename).
+
+    ``on_progress(received, total)`` fires per 64 KiB chunk when the total size
+    is known. Raises ``RuntimeError`` on a truncated download (partial removed).
+    """
+    partial = dest.with_suffix(dest.suffix + ".partial")
+    with contextlib.suppress(OSError):
+        partial.unlink()
+
+    req = urllib.request.Request(info.download_url or "", headers={"User-Agent": "rcflow-worker"})
+    with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_S) as resp:
+        total = info.asset_size
+        if total is None:
+            length = resp.headers.get("Content-Length")
+            if length and length.isdigit():
+                total = int(length)
+        received = 0
+        with partial.open("wb") as out:
+            while True:
+                chunk = resp.read(DOWNLOAD_CHUNK)
+                if not chunk:
+                    break
+                out.write(chunk)
+                received += len(chunk)
+                if on_progress is not None and total:
+                    try:
+                        on_progress(received, total)
+                    except Exception:
+                        logger.exception("download progress callback raised")
+
+    if total is not None and received != total:
+        with contextlib.suppress(OSError):
+            partial.unlink()
+        raise RuntimeError(f"Download truncated: got {received} bytes, expected {total}")
+    partial.replace(dest)
+
+
+def launch_installer(path: Path, plat: str | None = None) -> None:
+    """Hand the downloaded artifact to the OS installer.
+
+    - Windows: ``os.startfile`` runs the NSIS bootstrapper.
+    - macOS: ``open`` mounts the DMG in Finder.
+    - Linux: ``xdg-open`` invokes the distro package GUI (gdebi, gnome-software).
+
+    The worker process keeps running — the installer prompts the user to
+    close the worker when it needs to overwrite the binary.
+    """
+    plat = plat or detect_platform()
+    if not path.exists():
+        raise FileNotFoundError(str(path))
+    if plat == "windows":
+        import os  # noqa: PLC0415
+
+        os.startfile(str(path))  # ty:ignore[unresolved-attribute]  # Windows-only
+    elif plat == "darwin":
+        subprocess.Popen(["open", str(path)])
+    else:
+        subprocess.Popen(["xdg-open", str(path)])
 
 
 # ── Settings I/O helpers ────────────────────────────────────────────────────

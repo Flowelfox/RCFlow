@@ -1,10 +1,10 @@
 ---
-updated: 2026-06-11
+updated: 2026-07-07
 ---
 
 # HTTP API
 
-REST endpoints. All except `/api/health` require `X-API-Key` header (same key as `RCFLOW_API_KEY`).
+REST endpoints. All except `/api/health` require the `X-API-Key` header (same key as `RCFLOW_API_KEY`); the `/api/mcp/*` pair instead uses a per-session `X-RCFlow-MCP-Token` (see [MCP Agent Bridge](#mcp-agent-bridge)).
 
 **See also:**
 - [WebSocket API](websocket-api.md) — streaming protocol
@@ -31,6 +31,7 @@ REST endpoints. All except `/api/health` require `X-API-Key` header (same key as
 - [Artifacts](#artifacts)
 - [Telemetry](#telemetry)
 - [Linear Integration](#linear-integration)
+- [MCP Agent Bridge](#mcp-agent-bridge)
 - [Auth header](#auth-header)
 - [Swagger / ReDoc](#api-documentation-swagger--redoc)
 
@@ -135,7 +136,7 @@ See [Tools — Per-Tool Settings Isolation](tools.md#per-tool-settings-isolation
 | DELETE | `/api/tasks/{task_id}`                  | Yes  | Delete task + all session associations. |
 | POST   | `/api/tasks/{task_id}/sessions`         | Yes  | Attach session to task. Body: `{"session_id": "..."}`. Returns 201. |
 | DELETE | `/api/tasks/{task_id}/sessions/{sid}`   | Yes  | Detach session from task. |
-| POST   | `/api/tasks/{task_id}/plan`             | Yes  | Start a read-only planning session for a task. Body: `{"project_name"?, "selected_worktree_path"?}`. Returns `{"session_id", "task_id"}`. Plan saved as Markdown artifact + linked via `plan_artifact_id` when session ends. See [Pre-Planning Sessions](sessions.md#pre-planning-sessions). |
+| POST   | `/api/tasks/{task_id}/plan`             | Yes  | Start a read-only planning session for a task. Body: `{"project_name"?, "selected_worktree_path"?, "agent"?}`. `agent` (`claude_code`/`codex`/`opencode`) is passed through as `direct_tool` — required in direct-tool mode (422 without it; no server-side default), optional in LLM mode. Returns `{"session_id", "task_id"}`. Plan saved as Markdown artifact + linked via `plan_artifact_id` when session ends. See [Pre-Planning Sessions](sessions.md#pre-planning-sessions). |
 
 ## Uploads / Attachments
 
@@ -150,7 +151,7 @@ Linux/macOS only.
 | Method | Endpoint                              | Auth | Description |
 |--------|---------------------------------------|------|-------------|
 | GET    | `/api/worktrees`                      | Yes  | List worktrees for a repo. Required `?repo_path=`. Returns `{"worktrees": [{name, branch, base, path, created_at}]}`. |
-| POST   | `/api/worktrees`                      | Yes  | Create. Body: `{"branch", "base"="main", "repo_path"}`. Branch must follow `type/ticket/description`. Returns 201 with `{"worktree": {...}}`. |
+| POST   | `/api/worktrees`                      | Yes  | Create. Body: `{"branch", "base"="main", "repo_path"}`. Any branch name accepted unless the repo's `.worktrees/.wt-config` defines `valid_branch_types` (then 422 on mismatch). Returns 201 with `{"worktree": {...}}`. |
 | POST   | `/api/worktrees/{name}/merge`         | Yes  | Squash-merge into base + clean up. Body: `{"message", "repo_path", "into"?, "no_ff"?, "keep"?}`. |
 | DELETE | `/api/worktrees/{name}`               | Yes  | Remove worktree + branch without merging. Required `?repo_path=`. |
 
@@ -206,9 +207,18 @@ All under `/api/integrations/github/`. See [GitHub Integration](github.md).
 | POST | `/api/integrations/github/prs/{id}/merge`    | Yes | Merge the PR (`method` merge/squash/rebase, default squash). Maps GitHub 405 (not mergeable) to 409 |
 | POST | `/api/integrations/github/open-pr`           | Yes | Push a worktree's branch (PAT auth via GIT_ASKPASS) and open a PR (`{selected_worktree_path\|project_name, title, base, head_branch?, commit_message?}`) |
 
+## MCP Agent Bridge
+
+Consumed by the `rcflow-mcp` stdio proxy that Codex spawns — see [MCP Agent Bridge](mcp.md). **Not** authenticated by `X-API-Key`: these two endpoints require the per-session `X-RCFlow-MCP-Token` header (issued at agent spawn, revoked at session end, scoped to that session). The worker API key is deliberately rejected here so it never has to be handed to an agent subprocess.
+
+| Method | Endpoint         | Auth | Description |
+|--------|------------------|------|-------------|
+| GET    | `/api/mcp/tools` | MCP token | Agent-exposed registry tools in MCP shape — `{"tools": [{name, description, inputSchema}]}` |
+| POST   | `/api/mcp/call`  | MCP token | Execute one tool call — body `{"tool", "arguments"}`, returns `{"content", "is_error"}`. Failures (unknown tool, ended session, executor error) return `is_error: true` with HTTP 200 so the proxy relays them as MCP tool errors |
+
 ## Auth header
 
-All authenticated endpoints use `X-API-Key: <RCFLOW_API_KEY>`.
+All authenticated endpoints use `X-API-Key: <RCFLOW_API_KEY>`, except `/api/mcp/*` (per-session `X-RCFlow-MCP-Token`, see above).
 
 ## API Documentation (Swagger / ReDoc)
 

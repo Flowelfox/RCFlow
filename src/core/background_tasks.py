@@ -617,6 +617,35 @@ class BackgroundTasks:
         except Exception:
             logger.exception("Real-time artifact scan failed for session %s", session_id)
 
+    def _fire_pr_detect(self, session: ActiveSession) -> None:
+        """Attach a PR badge if an open GitHub PR exists for a session's branch.
+
+        Fire-and-forget, triggered when a session starts on a branch or switches
+        branch/worktree. The sync matches every active session, so ``session`` is
+        only a gate to skip work when nothing is configured. No-op without a
+        GitHub token or DB.
+        """
+        settings = self._r._settings
+        if (
+            settings is None
+            or self._r._db_session_factory is None
+            or self._r._session_manager is None
+            or not getattr(settings, "GITHUB_TOKEN", "")
+        ):
+            return
+        task = asyncio.create_task(self._pr_detect())
+        self._r._pending_archive_tasks.add(task)
+        task.add_done_callback(self._r._pending_archive_tasks.discard)
+
+    async def _pr_detect(self) -> None:
+        """Sync open PRs and attach badges to matching live sessions. Never raises."""
+        try:
+            from src.api.integrations.github import sync_and_attach_prs  # noqa: PLC0415
+
+            await sync_and_attach_prs(self._r._settings, self._r._session_manager, self._r._db_session_factory)
+        except Exception:
+            logger.exception("Background PR detection failed")
+
     def _fire_text_artifact_scan(self, session: ActiveSession, texts: list[str]) -> None:
         """Schedule a fire-and-forget background task to scan text strings for artifacts."""
         if self._r._artifact_scanner is None or not self._r._settings or not self._r._settings.ARTIFACT_AUTO_SCAN:
@@ -658,14 +687,6 @@ class BackgroundTasks:
             if parts:
                 return parts[0]
         return None
-
-    def _enrich_artifact_dict(self, artifact_data: dict[str, Any]) -> dict[str, Any]:
-        """Add ``project_name`` to an artifact dict based on its file path."""
-        projects_dirs = self._r._settings.projects_dirs if self._r._settings else []
-        artifact_data["project_name"] = self._resolve_artifact_project(
-            artifact_data.get("file_path", ""), projects_dirs
-        )
-        return artifact_data
 
     # --- Plan finalization ---
 

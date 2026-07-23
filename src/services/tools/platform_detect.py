@@ -104,6 +104,13 @@ def _parse_version(name: str, raw: str) -> str | None:
         # "1.3.7" → "1.3.7"
         match = re.search(r"([\d]+\.[\d]+\.[\d]+)", raw)
         return match.group(1) if match else None
+    if name == "codex_acp":
+        # codex-acp (as of v0.16.0) rejects ``--version`` entirely, so this
+        # branch normally sees empty output and returns None — detection then
+        # falls back to the persisted ``.version`` file.  Parse a semver
+        # anyway in case a future release adds the flag.
+        match = re.search(r"([\d]+\.[\d]+\.[\d]+)", raw)
+        return match.group(1) if match else None
     return None
 
 

@@ -134,8 +134,10 @@ async def list_worktrees(
     status_code=201,
     summary="Create a worktree",
     description=(
-        "Create a new git worktree. Branch name must follow the ``type/ticket/description`` "
-        "convention (e.g. ``feature/PROJ-123/add-auth``). The default base branch is ``main``."
+        "Create a new git worktree. Any branch name is accepted by default; a repository can "
+        "opt into a ``<type>/...`` naming convention via ``valid_branch_types`` in its "
+        "``.worktrees/.wt-config`` file, which is then enforced (422 on mismatch). "
+        "The default base branch is ``main``."
     ),
     dependencies=[Depends(verify_http_api_key)],
 )

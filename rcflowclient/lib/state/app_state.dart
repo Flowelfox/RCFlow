@@ -521,6 +521,24 @@ class AppState extends ChangeNotifier implements PaneHost {
   /// All Linear issues not yet linked to any task, sorted by updatedAt descending.
   List<LinearIssueInfo> get unlinkedLinearIssues => _linearStore.unlinked();
 
+  /// Map of workerId → the Linear account id that worker is connected as.
+  /// Powers the Tasks-tab "Me" assignee filter (a worker is absent until its
+  /// viewer identity is fetched). See [WorkerConnection.linearViewerId].
+  Map<String, String> get linearViewerIdByWorker {
+    final out = <String, String>{};
+    for (final w in _registry.all) {
+      final id = w.linearViewerId;
+      if (id != null && id.isNotEmpty) {
+        out[w.config.id] = id;
+      }
+    }
+    return out;
+  }
+
+  /// True when at least one connected worker's Linear viewer identity is known
+  /// (so the "Me" filter can resolve to a real account).
+  bool get linearViewerKnown => linearViewerIdByWorker.isNotEmpty;
+
   void _handleLinearIssueList(List<dynamic> list, String workerId) {
     _linearStore.replaceWorker(workerId, _workerName(workerId), list);
     notifyListeners();
@@ -606,7 +624,9 @@ class AppState extends ChangeNotifier implements PaneHost {
     final groups = <String, List<GithubPrInfo>>{};
     for (final pr in githubPrs) {
       final worker = getWorker(pr.workerId);
-      if (worker == null || !worker.isConnected) continue; // online sources only
+      if (worker == null || !worker.isConnected) {
+        continue; // online sources only
+      }
       final key = pr.githubId.isNotEmpty ? pr.githubId : pr.id;
       (groups[key] ??= []).add(pr);
     }
@@ -899,6 +919,18 @@ class AppState extends ChangeNotifier implements PaneHost {
       return;
     }
 
+    // Direct-tool mode runs the plan on the worker's default agent; there is
+    // no server-side fallback, so require the user to pick one up front.
+    final agent = defaultAgentForWorker(task.workerId);
+    if (agent == null && !worker.hasLlmConfigured) {
+      addSystemMessage(
+        'No default coding agent set for this worker. '
+        'Choose one in the worker settings to use Make plan.',
+        isError: true,
+      );
+      return;
+    }
+
     // Save project name and worktree before startNewChat clears them.
     final projectName = pane.selectedProjectName;
     final worktreePath = pane.pendingWorktreePath;
@@ -916,6 +948,8 @@ class AppState extends ChangeNotifier implements PaneHost {
       task.taskId,
       projectName: projectName,
       selectedWorktreePath: worktreePath,
+      // The coding agent the worker should run (direct-tool mode needs it).
+      agent: agent,
     );
   }
 
@@ -1233,6 +1267,37 @@ class AppState extends ChangeNotifier implements PaneHost {
     String? body,
   }) {
     _notificationService.show(level: level, title: title, body: body);
+  }
+
+  /// Handle an agent-pushed `notification` message (the `rcflow_notify` native
+  /// tool). Routes it through [NotificationService] like any other app
+  /// notification instead of rendering it in the session transcript.
+  void _handleAgentNotification(Map<String, dynamic> msg) {
+    final content = (msg['content'] as String?)?.trim() ?? '';
+    if (content.isEmpty) return;
+    final level = switch (msg['level'] as String?) {
+      'success' => NotificationLevel.success,
+      'warning' => NotificationLevel.warning,
+      'error' => NotificationLevel.error,
+      _ => NotificationLevel.info,
+    };
+    // Prefer the originating session's title so the user knows which agent
+    // spoke; fall back to a generic label.
+    final sessionId = msg['session_id'] as String?;
+    var title = 'Agent';
+    if (sessionId != null) {
+      final worker = _registry.workerForSession(sessionId);
+      if (worker != null) {
+        for (final s in worker.sessions) {
+          if (s.sessionId == sessionId) {
+            final t = s.title?.trim();
+            if (t != null && t.isNotEmpty) title = t;
+            break;
+          }
+        }
+      }
+    }
+    showNotification(level: level, title: title, body: content);
   }
 
   @override
@@ -1997,6 +2062,9 @@ class AppState extends ChangeNotifier implements PaneHost {
       case WsOutputType.githubPrDeleted:
         _handleGithubPrDeleted(msg);
         return;
+      case WsOutputType.notification:
+        _handleAgentNotification(msg);
+        return;
       default:
         break; // fall through to per-pane dispatch
     }
@@ -2163,6 +2231,20 @@ class AppState extends ChangeNotifier implements PaneHost {
       return;
     }
 
+    // History-replay batching: the worker replays a session's buffered history
+    // on subscribe (each message flagged `replay: true`) and closes it with a
+    // `history_replayed` marker. Coalesce the burst so the whole conversation
+    // renders in one frame pinned to the bottom, not animated in one-by-one.
+    if (wsType == WsOutputType.historyReplayed) {
+      if (sessionId != null) {
+        for (final pane in _findPanesForSession(sessionId)) {
+          pane.endHistoryReplay();
+        }
+      }
+      return;
+    }
+    final isReplay = msg['replay'] == true;
+
     final handler = wsType != null ? typedOutputHandlerRegistry[wsType] : null;
     if (handler == null) {
       activePane.addSystemMessage(msg.toString());
@@ -2172,6 +2254,7 @@ class AppState extends ChangeNotifier implements PaneHost {
     if (sessionId != null) {
       final targetPanes = _findPanesForSession(sessionId);
       for (final pane in targetPanes) {
+        if (isReplay) pane.beginHistoryReplay();
         handler(msg, pane);
       }
       return;

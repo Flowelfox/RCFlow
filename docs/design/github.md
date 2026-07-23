@@ -1,5 +1,5 @@
 ---
-updated: 2026-06-21
+updated: 2026-07-23
 ---
 
 # GitHub Integration — PR Reviews
@@ -197,6 +197,18 @@ The badge attaches in two ways:
    resolved `project_path` (boundary-safe path compare), and the open-PR flow —
    where a freshly-opened PR has no resolved `project_path` yet — scopes
    matching to the exact worktree that was pushed.
+3. **A session starts on / switches to a branch or worktree.** `PromptRouter._fire_pr_detect`
+   fires a background `sync_and_attach_prs` when a session's branch context
+   changes — starting a session on a pre-selected existing worktree
+   (`handle_prompt` stamps `selected_worktree_path`), a worktree `new`/`attach`
+   (`_update_session_worktree_meta`), an agent `cd` into a different branch
+   (`apply_agent_cwd` in every agent relay), or a coding-agent turn completing
+   (which may have run `gh pr create`). It
+   fetches open PRs (throttled to one GitHub round-trip per 60s; a throttled
+   call still re-attaches against PRs already in the DB, so moving onto an
+   already-synced branch badges instantly) and runs `attach_pr_to_sessions`.
+   This is what catches a PR the agent opens itself, or an existing PR on a
+   branch the user starts a session on — without waiting for a manual `/sync`.
 
 ## Configuration
 

@@ -1,5 +1,5 @@
 ---
-updated: 2026-04-27
+updated: 2026-07-23
 ---
 
 # Pluggable Tool Definitions
@@ -73,6 +73,8 @@ Each file defines one tool. Drop a `.json` file into `tools/` to register a new 
 ```
 
 > **Note:** When `shell` is omitted, it defaults to `/bin/bash` on Linux and `powershell.exe` on Windows.
+>
+> **Built-in `{rcflow}` placeholder:** shell command templates may reference `{rcflow}` — it expands to a command prefix that re-invokes the running RCFlow installation (the frozen binary on packaged installs, `python -m src` in dev), so tools can call RCFlow's own subcommands portably. `system_info` uses `{rcflow} system-info {category}`.
 >
 > **Windows shell handling:** On Windows with a PowerShell shell, `ShellExecutor` uses `create_subprocess_exec` with `-NoProfile -Command` instead of `create_subprocess_shell` (which incorrectly passes `/c` to PowerShell). On Windows with a non-PowerShell shell (e.g. `cmd.exe`), it uses `create_subprocess_shell` without an explicit `executable` to let `COMSPEC` resolve the shell.
 
@@ -183,13 +185,19 @@ Every prompt dispatched to a coding agent (Claude Code, Codex, OpenCode) is norm
 | `os`              | list   | no       | OS restriction: subset of `["windows","linux","darwin"]`. Empty = all platforms. Tools are skipped at load time if the current OS is not in the list. |
 | `session_type`    | enum   | yes      | `one-shot` or `long-running`                          |
 | `llm_context`     | enum   | yes      | `stateless` or `session-scoped`                       |
-| `executor`        | enum   | yes      | `shell`, `http`, `claude_code`, `codex`, or `worktree` |
-| `parameters`      | object | yes      | JSON Schema describing the tool's input parameters    |
+| `executor`        | enum   | yes      | `shell`, `http`, `claude_code`, `codex`, `opencode`, `worktree`, `acp` (see [Executors → ACP](executors.md#acp-executor)), or `python` (session-aware native tool) |
+| `parameters`      | object | yes      | JSON Schema describing the tool's input parameters. Parameter names in `RESERVED_PARAM_NAMES` (currently `rcflow`) are rejected at load time — they collide with built-in command-template placeholders. |
 | `executor_config` | object | yes      | Executor-specific configuration                       |
+| `expose_to_agents`| bool   | no       | Offer this tool to nested coding agents over the [MCP agent bridge](mcp.md) (default `false`). Ignored (forced off, with a load-time warning) for agent executors — recursion guard. |
+| `agent_safe`      | bool   | no       | When exposed to agents, whether calls skip the bridge's approval gate (default `false`). Set only for genuinely read-only tools; anything that mutates the host stays gated. |
+
+### `python` executor (native tools)
+
+`executor: "python"` runs an in-worker async callable with a `NativeToolContext` (the live session + the `PromptRouter`), so a tool can touch RCFlow state directly — push notifications, read session status, register artifacts, manage tasks. Config: `executor_config.python.callable = "module:function"`, where the function is `async def run(ctx, params) -> str` and raises on error. Dispatch happens inside `PromptRouter.execute_one_shot_tool`, the shared path used by both the LLM tool loop and the [MCP agent bridge](mcp.md), so a native tool is exposed to agents by the same registry-driven flow as any other.
 
 ## Tool Management Service
 
-RCFlow automatically manages the installation and updating of external CLI tools (Claude Code, Codex, and OpenCode). The `ToolManager` service (`src/services/tool_manager.py`) handles detection, installation, and periodic updates using **native binary downloads** — no Node.js or npm required.
+RCFlow automatically manages the installation and updating of external CLI tools (Claude Code, Codex, OpenCode, and the `codex-acp` adapter). The `ToolManager` service (`src/services/tool_manager.py`) handles detection, installation, and periodic updates using **native binary downloads** — no Node.js or npm required.
 
 **How it works:**
 
@@ -204,6 +212,7 @@ RCFlow automatically manages the installation and updating of external CLI tools
 - **Claude Code**: Native binary downloaded from Anthropic's GCS bucket (`storage.googleapis.com/claude-code-dist-.../claude-code-releases`). SHA256 checksum verified against the official manifest. Binary placed at `~/.local/share/rcflow/tools/claude-code/claude` (Linux) or `%LOCALAPPDATA%\rcflow\tools\claude-code\claude.exe` (Windows).
 - **Codex**: Native binary downloaded from GitHub Releases (`github.com/openai/codex/releases`). The release tarball contains a single binary named `codex-<target>` (e.g. `codex-x86_64-unknown-linux-gnu`) which is extracted and renamed to `codex`. On Windows, the `.exe` is downloaded directly and renamed to `codex.exe`. The responses API proxy is built into the main binary as a subcommand. Binary placed at `~/.local/share/rcflow/tools/codex/codex` (Linux) or `%LOCALAPPDATA%\rcflow\tools\codex\codex.exe` (Windows).
 - **OpenCode**: Native binary downloaded from GitHub Releases (`github.com/sst/opencode/releases`). Linux releases ship as `.tar.gz` archives containing a single `opencode` binary; macOS and Windows releases ship as `.zip` archives. The binary is extracted and placed at `~/.local/share/rcflow/tools/opencode/opencode` (Linux/macOS) or `%LOCALAPPDATA%\rcflow\tools\opencode\opencode.exe` (Windows). On glibc-too-old Linux systems the installer automatically retries with the `-musl` variant. Version is checked via the GitHub Releases API (`api.github.com/repos/sst/opencode/releases/latest`).
+- **codex-acp** (tool key `codex_acp`): the ACP adapter for Codex, used by the [ACP executor](executors.md#acp-executor). Native Rust binary downloaded from GitHub Releases (`github.com/zed-industries/codex-acp/releases` — the `agentclientprotocol/codex-acp` repo publishes no binary assets as of 2026-07). Archives (`codex-acp-<version>-<target>.tar.gz`, `.zip` on Windows) contain a single root-level binary, extracted to `~/.local/share/rcflow/tools/codex-acp/codex-acp`. Reuses Codex's Rust target triples including the musl GLIBC fallback. The binary rejects `--version` (as of v0.16.0), so version reporting relies on a `.version` file written at install time.
 
 **Platform strings:**
 
@@ -286,6 +295,7 @@ Schema fields may include `"coming_soon": true` — the flag is forwarded in the
 | `timeout`                  | string      | yes          | —                      | Process timeout in seconds (default 1800)          |
 | `caveman_mode`             | boolean     | yes          | —                      | Inject caveman terse-mode instruction via CLAUDE.md (new sessions only) |
 | `undercover`               | boolean     | yes          | —                      | Strip AI attribution from commits and PRs (default false) — **coming soon**, disabled in client and rejected by PATCH |
+| `expose_rcflow_tools`      | boolean     | yes          | —                      | Serve agent-exposed RCFlow tools to Claude Code over the in-process [MCP bridge](mcp.md) (default false, new sessions only) |
 
 **Provider env sync:** When `provider` or any credential field is updated, `ToolSettingsManager` automatically rebuilds the `env` section of the Claude Code `settings.json`:
 
@@ -306,6 +316,9 @@ When the tool has a non-empty `provider`, `PromptRouter._build_claude_code_extra
 | `approval_mode`  | select | no           | Tool-call approval (full-auto / yolo)      |
 | `timeout`        | string | yes          | Process timeout in seconds (default 600)   |
 | `caveman_mode`   | boolean| yes          | Inject caveman terse-mode instruction (experimental — hook delivery unverified) |
+| `expose_rcflow_tools` | boolean | yes     | Serve agent-exposed RCFlow tools to Codex (default false, new sessions only). Legacy path: `rcflow-mcp` proxy registered in `config.toml` + env token; ACP path: standard `mcp_servers` session parameter — see [MCP bridge](mcp.md) |
+
+The OpenCode settings schema carries the same `expose_rcflow_tools` boolean (managed-only, default false); it takes effect only in the ACP executor mode (the default; `RCFLOW_OPENCODE_EXECUTOR=legacy` opts out).
 
 Provider sync behavior:
 - **OpenAI** (`provider=openai`): sets `env.CODEX_API_KEY` from `codex_api_key`. RCFlow injects this into the subprocess environment.
@@ -325,11 +338,11 @@ Provider sync behavior:
 Two-step PKCE OAuth flow (no CLI interaction required):
 
 1. `POST /api/tools/claude_code/login` — Generates a PKCE code_verifier/challenge, builds the Anthropic OAuth URL (`https://claude.ai/oauth/authorize`), stores the verifier, and returns `{"auth_url": "https://claude.ai/oauth/..."}`. The client opens this URL in a browser.
-2. `POST /api/tools/claude_code/login/code` — Accepts `{"code": "..."}`. Exchanges the authorization code for tokens at `https://platform.claude.com/v1/oauth/token` using the stored PKCE verifier. Writes credentials to `.credentials.json` in the managed config directory. Verifies via `claude auth status --json`. Returns `{"logged_in": true/false, "email": "..."|null, "subscription": "max"|"pro"|null}`.
+2. `POST /api/tools/claude_code/login/code` — Accepts `{"code": "..."}`. Exchanges the authorization code for tokens at `https://platform.claude.com/v1/oauth/token` using the stored PKCE verifier. Writes credentials to `.credentials.json` in the managed config directory. On macOS it then deletes any stale login-Keychain item (`Claude Code-credentials-<hash>`): the `claude` binary prefers the Keychain over the file, so a leftover entry from a prior CLI login would shadow the freshly-written file and report logged-out. Verifies via `claude auth status --json`. Returns `{"logged_in": true/false, "email": "..."|null, "subscription": "max"|"pro"|null}`.
 
 Supporting endpoints:
 
-- `GET /api/tools/claude_code/login/status` — Runs `claude auth status --json` with managed `CLAUDE_CONFIG_DIR`. Returns `{"logged_in": true/false, "method": "claude.ai"|null, "email": "..."|null, "subscription": "max"|"pro"|null}`.
+- `GET /api/tools/claude_code/login/status` — Runs `claude auth status --json` with managed `CLAUDE_CONFIG_DIR`. Returns `{"logged_in": true/false, "method": "claude.ai"|null, "email": "..."|null, "subscription": "max"|"pro"|null}`. Like the executor, when the provider is `anthropic_login` it blanks any `ANTHROPIC_API_KEY` inherited from the server process before running the CLI — otherwise a stray key makes `claude auth status` report logged-in via `method: api_key` while OAuth sessions (which do clear it) fail. This env handling is shared by login/status, the login/code verify step, and logout via `_managed_claude_env`.
 - `POST /api/tools/claude_code/logout` — Runs `claude auth logout` with managed `CLAUDE_CONFIG_DIR`. Returns `{"logged_out": true}`.
 
 **Config overrides:** When a managed tool has settings configured, `PromptRouter` reads them at executor creation time and passes non-empty values as `config_overrides` to the executor constructor. These overrides are merged on top of the tool definition's `executor_config` when building subprocess commands.

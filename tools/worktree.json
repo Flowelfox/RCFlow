@@ -1,19 +1,20 @@
 {
   "name": "worktree",
   "display_name": "Worktree",
-  "description": "Manage git worktrees — create, list, merge, and remove isolated branches.",
+  "description": "Manage git worktrees — create, list, attach, detach, get, init, merge, and remove isolated branches.",
   "version": "1.0.0",
   "os": ["linux", "darwin"],
   "session_type": "one-shot",
   "llm_context": "stateless",
   "executor": "worktree",
+  "expose_to_agents": true,
   "parameters": {
     "type": "object",
     "properties": {
       "action": {
         "type": "string",
-        "enum": ["new", "list", "merge", "rm"],
-        "description": "Operation: 'new' creates a worktree, 'list' shows all, 'merge' squash-merges into base, 'rm' removes a worktree."
+        "enum": ["new", "list", "attach", "detach", "get", "init", "merge", "rm"],
+        "description": "Operation: 'new' creates a worktree; 'list' shows all; 'attach' selects an existing worktree as the session's working directory; 'detach' returns to the main repo; 'get' shows details for one worktree; 'init' sets up the repo's .worktrees convention; 'merge' squash-merges into base; 'rm' removes a worktree."
       },
       "repo_path": {
         "type": "string",
@@ -29,7 +30,11 @@
       },
       "name": {
         "type": "string",
-        "description": "(merge / rm) Name of the worktree to act on."
+        "description": "(attach / get / merge / rm) Name of the worktree to act on."
+      },
+      "path": {
+        "type": "string",
+        "description": "(attach) Filesystem path of the worktree to select, as an alternative to 'name'."
       },
       "message": {
         "type": "string",

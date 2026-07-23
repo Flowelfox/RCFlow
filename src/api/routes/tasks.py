@@ -141,6 +141,11 @@ class StartPlanRequest(BaseModel):
 
     project_name: str | None = None
     selected_worktree_path: str | None = None
+    # Coding agent to run the plan (claude_code/codex/opencode). Required in
+    # direct-tool mode — there is no server-side default; without it the
+    # generated planning prompt would be parsed for #tool mentions and its
+    # markdown "## " headings misread as tool names.
+    agent: str | None = None
 
 
 class AttachSessionRequest(BaseModel):
@@ -362,6 +367,14 @@ async def start_task_plan(
 ) -> dict[str, str]:
     """Trigger a planning session for a task."""
     prompt_router = request.app.state.prompt_router
+    if not body.agent and prompt_router.is_direct_tool_mode:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "No coding agent selected. Direct tool mode requires 'agent' "
+                "(claude_code/codex/opencode) in the request body."
+            ),
+        )
     try:
         plan_session_id, planning_prompt = await prompt_router.prepare_plan_session(
             task_id=task_id,
@@ -381,6 +394,7 @@ async def start_task_plan(
             project_name=body.project_name,
             selected_worktree_path=body.selected_worktree_path,
             task_id=task_id,
+            direct_tool=body.agent,
         )
     )
     return {"session_id": plan_session_id}

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from wtpython import (
@@ -17,6 +17,7 @@ from wtpython import (
     WtException,
 )
 
+import src.executors.worktree as wtmod
 from src.executors.worktree import WorktreeExecutor
 from src.tools.loader import ToolDefinition
 
@@ -228,3 +229,43 @@ async def test_cancel_is_noop(executor: WorktreeExecutor) -> None:
 async def test_send_input_raises(executor: WorktreeExecutor) -> None:
     with pytest.raises(NotImplementedError):
         await executor.send_input("data")
+
+
+class TestNewWorktreeActions:
+    """detach/get/init dispatch to the wtpython manager."""
+
+    @pytest.mark.asyncio
+    async def test_detach_get_init_dispatch(self, tmp_path, monkeypatch):
+        manager = MagicMock()
+        manager.detach.return_value = tmp_path / "repo"
+        wt = MagicMock()
+        wt.name = "feat"
+        wt.path = tmp_path / "wt"
+        wt.branch = "feature/x"
+        wt.base = "main"
+        wt.meta = None
+        manager.get.return_value = wt
+        cfg = MagicMock()
+        cfg.valid_branch_types = ["feature", "fix"]
+        manager.init.return_value = cfg
+        monkeypatch.setattr(wtmod, "WorktreeManager", lambda repo_path: manager)
+
+        ex = wtmod.WorktreeExecutor()
+
+        def _tool(action, **props):
+            return ToolDefinition(
+                name="worktree",
+                description="d",
+                session_type="one-shot",
+                llm_context="stateless",
+                executor="worktree",
+                parameters={"type": "object", "properties": {}},
+                executor_config={"worktree": {"default_base_branch": "main"}},
+            )
+
+        r = await ex.execute(_tool("detach"), {"action": "detach", "repo_path": str(tmp_path)})
+        assert '"detached": true' in r.output
+        r = await ex.execute(_tool("get"), {"action": "get", "repo_path": str(tmp_path), "name": "feat"})
+        assert '"name": "feat"' in r.output
+        r = await ex.execute(_tool("init"), {"action": "init", "repo_path": str(tmp_path)})
+        assert '"initialized": true' in r.output and "feature" in r.output

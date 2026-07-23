@@ -1,5 +1,5 @@
 ---
-updated: 2026-06-17
+updated: 2026-07-08
 ---
 
 # Configuration
@@ -71,6 +71,11 @@ All configuration is via environment variables, loaded from a `settings.json` fi
 | `RCFLOW_UPDATE_CACHED_DOWNLOAD_URL` | no |         | Worker GUI internal: platform-matched asset download URL for the cached version. |
 | `RCFLOW_UPDATE_CACHED_ASSET_NAME` | no |           | Worker GUI internal: asset filename used to derive the local download path. |
 | `RCFLOW_UPDATE_DISMISSED_VERSION` | no |           | Worker GUI internal: most recently dismissed version. The "Update available" banner stays hidden until a strictly newer version is observed. |
+| `RCFLOW_OPENCODE_EXECUTOR` | no | `acp`\* | Executor mode for the OpenCode agent: `acp` (default when the OpenCode binary resolves) or `legacy` (bespoke JSONL integration). See [Executors → ACP](executors.md#acp-executor). Read from the process environment only, not `settings.json`. |
+| `RCFLOW_CODEX_EXECUTOR` | no | `acp`\* | Executor mode for the Codex agent: `acp` (default when the `codex-acp` adapter resolves) or `legacy`. \*With the flag unset, ACP is used only when the adapter binary is available, otherwise the legacy executor. Read from the process environment only, not `settings.json`. |
+| `RCFLOW_CC_EXECUTOR` | no | `sdk` | Claude Code executor mode: `sdk` (Agent SDK, default) or `legacy` (removed). |
+
+> **Note:** `RCFLOW_MCP_URL` / `RCFLOW_MCP_TOKEN` are **not** worker configuration — they are injected by the worker into the environment of the `rcflow-mcp` proxy that agent subprocesses spawn (see [MCP Agent Bridge](mcp.md)). Do not set them yourself.
 
 ## Remote Configuration (Client-Side Editing)
 

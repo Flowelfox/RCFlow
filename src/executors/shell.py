@@ -17,6 +17,20 @@ _IS_WINDOWS = sys.platform == "win32"
 _POWERSHELL_NAMES = {"powershell.exe", "powershell", "pwsh.exe", "pwsh"}
 
 
+def _self_invocation() -> str:
+    """Shell command prefix that re-invokes this RCFlow installation.
+
+    Substituted for the built-in ``{rcflow}`` placeholder in shell
+    command templates, so a tool like system_info can call back into
+    RCFlow's own code on any install type: the single frozen binary on
+    PyInstaller installs, ``python -m src`` in dev/venv runs.
+    """
+    from src.paths import is_frozen  # noqa: PLC0415
+
+    exe = f'"{sys.executable}"' if _IS_WINDOWS else shlex.quote(sys.executable)
+    return exe if is_frozen() else f"{exe} -m src"
+
+
 def _quote_params_for_shell(
     parameters: dict[str, Any],
     template: str,
@@ -113,6 +127,10 @@ class ShellExecutor(BaseExecutor):
         config = tool.get_shell_config()
         is_ps = self._is_powershell(config.shell)
         quoted = _quote_params_for_shell(parameters, config.command_template, is_powershell=is_ps)
+        # Built-in placeholder — force the trusted value; RESERVED_PARAM_NAMES
+        # (loader) guarantees no tool parameter can shadow it, but assign
+        # unconditionally so caller input can never occupy this token.
+        quoted["rcflow"] = _self_invocation()
         command = config.command_template.format(**quoted)
         timeout = parameters.get("timeout", 30)
         working_dir = parameters.get("working_directory", ".")
@@ -166,6 +184,10 @@ class ShellExecutor(BaseExecutor):
         config = tool.get_shell_config()
         is_ps = self._is_powershell(config.shell)
         quoted = _quote_params_for_shell(parameters, config.command_template, is_powershell=is_ps)
+        # Built-in placeholder — force the trusted value; RESERVED_PARAM_NAMES
+        # (loader) guarantees no tool parameter can shadow it, but assign
+        # unconditionally so caller input can never occupy this token.
+        quoted["rcflow"] = _self_invocation()
         command = config.command_template.format(**quoted)
         working_dir = parameters.get("working_directory", ".")
 

@@ -50,6 +50,7 @@ def _mock_router(
     session_id: str = "plan-sess-1",
     prompt: str = "# Plan",
     prepare_side_effect=None,
+    direct_tool_mode: bool = False,
 ) -> MagicMock:
     router = MagicMock()
     if prepare_side_effect is not None:
@@ -57,6 +58,7 @@ def _mock_router(
     else:
         router.prepare_plan_session = AsyncMock(return_value=(session_id, prompt))
     router.handle_prompt = AsyncMock()
+    router.is_direct_tool_mode = direct_tool_mode
     return router
 
 
@@ -139,3 +141,65 @@ class TestStartPlanSessionWsHandler:
             project_name="my-project",
             selected_worktree_path="/repo/.wt/feat",
         )
+
+    def test_agent_forwarded_as_direct_tool(self, client: TestClient, test_app: FastAPI) -> None:
+        router = _mock_router()
+        test_app.state.prompt_router = router
+
+        with client.websocket_connect(_ws_url()) as ws:
+            ws.send_json(
+                {
+                    "type": "start_plan_session",
+                    "task_id": "task-agent",
+                    "agent": "codex",
+                }
+            )
+            ws.receive_json()
+
+        router.handle_prompt.assert_awaited_once()
+        assert router.handle_prompt.call_args.kwargs["direct_tool"] == "codex"
+
+    def test_direct_mode_without_agent_errors(self, client: TestClient, test_app: FastAPI) -> None:
+        """In direct-tool mode there is no server-side agent fallback: without a
+        per-worker agent choice the plan must fail fast instead of parsing the
+        markdown planning prompt for #tool mentions (its "## " headings would
+        be misread as tool names) or silently picking an agent the user never
+        selected.
+        """
+        router = _mock_router(direct_tool_mode=True)
+        test_app.state.prompt_router = router
+
+        with client.websocket_connect(_ws_url()) as ws:
+            ws.send_json({"type": "start_plan_session", "task_id": "task-noagent"})
+            data = ws.receive_json()
+
+        assert data["type"] == "error"
+        assert data["code"] == "MISSING_AGENT"
+        router.prepare_plan_session.assert_not_awaited()
+        router.handle_prompt.assert_not_awaited()
+
+    def test_direct_mode_with_agent_succeeds(self, client: TestClient, test_app: FastAPI) -> None:
+        router = _mock_router(direct_tool_mode=True)
+        test_app.state.prompt_router = router
+
+        with client.websocket_connect(_ws_url()) as ws:
+            ws.send_json({"type": "start_plan_session", "task_id": "task-da", "agent": "opencode"})
+            data = ws.receive_json()
+
+        assert data["type"] == "ack"
+        assert router.handle_prompt.call_args.kwargs["direct_tool"] == "opencode"
+
+    def test_llm_mode_without_agent_allowed(self, client: TestClient, test_app: FastAPI) -> None:
+        """With an LLM configured the agent choice is optional — the LLM routes
+        the prompt, so direct_tool is simply None.
+        """
+        router = _mock_router(direct_tool_mode=False)
+        test_app.state.prompt_router = router
+
+        with client.websocket_connect(_ws_url()) as ws:
+            ws.send_json({"type": "start_plan_session", "task_id": "task-llm"})
+            data = ws.receive_json()
+
+        assert data["type"] == "ack"
+        router.handle_prompt.assert_awaited_once()
+        assert router.handle_prompt.call_args.kwargs["direct_tool"] is None

@@ -1015,6 +1015,12 @@ class PaneState extends ChangeNotifier {
   /// Does not affect the server-side session or database history.
   void clearMessages() => _msg.clearMessages();
 
+  /// Enter/leave history-replay batch mode. While replaying a session's
+  /// buffered history the pane coalesces rebuilds so the conversation renders
+  /// in one frame at the bottom instead of animating in message-by-message.
+  void beginHistoryReplay() => _msg.beginHistoryReplay();
+  void endHistoryReplay() => _msg.endHistoryReplay();
+
   // --- Ack handling ---
 
   void handleAck(

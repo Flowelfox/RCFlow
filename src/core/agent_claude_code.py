@@ -45,6 +45,7 @@ from src.core.permissions import (
 )
 from src.core.session import ActivityState, MonitorState, SessionStatus, SessionType
 from src.executors.claude_code_sdk import ClaudeCodeSdkExecutor
+from src.services.mcp_bridge import RCFLOW_MCP_TOOL_PREFIX
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -405,6 +406,7 @@ class ClaudeCodeAgent:
             session_id=session_id,
             extra_env=self._build_claude_code_extra_env(),
             config_overrides=self._r._get_managed_config_overrides("claude_code"),
+            mcp_bridge=self._r._mcp_bridge,
         )
         executor.set_can_use_tool(self._make_can_use_tool(session))
         executor._tool_def = tool_def
@@ -463,6 +465,11 @@ class ClaudeCodeAgent:
                 return await self._handle_enter_plan_mode(session)
             if tool_name == "ExitPlanMode":
                 return await self._handle_exit_plan_mode(session, input_data)
+            if tool_name.startswith(RCFLOW_MCP_TOOL_PREFIX):
+                # RCFlow bridge tools gate themselves in McpBridge.call_tool
+                # (agent_safe tools skip it, everything else asks) — gating here
+                # as well would double-prompt the user.
+                return PermissionResultAllow()
             decision = await self._handle_permission_check(session, tool_name, input_data)
             if decision == PermissionDecision.DENY:
                 return PermissionResultDeny(message="Denied by user.")
@@ -842,6 +849,7 @@ class ClaudeCodeAgent:
                                     and self._r._session_manager is not None
                                 ):
                                     self._r._session_manager.broadcast_session_update(session)
+                                    self._r._fire_pr_detect(session)
                         # Collect tool input values for scanning
                         for v in tool_input.values():
                             if isinstance(v, str):
@@ -892,6 +900,9 @@ class ClaudeCodeAgent:
 
             elif event_type == "result":
                 session.set_activity(ActivityState.IDLE)
+                # A turn may have opened a PR (e.g. `gh pr create`) for the
+                # session's branch — detect it and attach the badge.
+                self._r._fire_pr_detect(session)
                 result_text = event.get("result", "")
                 result_subtype = event.get("subtype", "")
                 # Extract cost and token data from Claude Code result
@@ -1158,6 +1169,7 @@ class ClaudeCodeAgent:
         inferred = infer_cwd_from_output(content, session.main_project_path)
         if inferred and apply_agent_cwd(session, inferred) and self._r._session_manager is not None:
             self._r._session_manager.broadcast_session_update(session)
+            self._r._fire_pr_detect(session)
 
     async def _process_monitor_event(
         self,

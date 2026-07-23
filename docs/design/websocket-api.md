@@ -1,5 +1,5 @@
 ---
-updated: 2026-06-18
+updated: 2026-07-09
 ---
 
 # WebSocket API
@@ -133,9 +133,12 @@ Start a read-only pre-planning session for a task (ONE_SHOT, write-restricted):
   "type": "start_plan_session",
   "task_id": "uuid",
   "project_name": "my-project",
-  "selected_worktree_path": "/path/to/worktree"
+  "selected_worktree_path": "/path/to/worktree",
+  "agent": "claude_code"
 }
 ```
+
+`agent` is the coding agent to run (`claude_code`/`codex`/`opencode`), sent by the client from the worker's per-worker default-agent setting. It is passed through as `direct_tool` so that in direct-tool mode the generated planning prompt is used verbatim instead of being parsed for a `#tool` mention (whose markdown `## ` headings would otherwise be misread as tool names). There is no server-side default: in direct-tool mode a missing `agent` is rejected with a `MISSING_AGENT` error (the client also guards this before sending); in LLM mode `agent` is optional and the LLM routes the prompt.
 
 The server calls `prepare_plan_session()`, fires the planning prompt as a background task, and immediately sends a `session_update` ack. When the session ends (for any reason) the plan file is upserted as an artifact and linked to the task via `plan_artifact_id`, which triggers a `task_update` broadcast.
 
@@ -282,6 +285,8 @@ Server sends JSON messages:
   "sequence": 43
 }
 ```
+
+**`origin` field:** `tool_output` and `error` messages carry an optional `"origin": "agent"` field when the tool call was initiated by a nested coding agent through the [MCP bridge](mcp.md) (rather than by the outer LLM tool loop). It is absent for normal LLM-initiated tool calls. Clients can use it to render agent-initiated tool activity distinctly.
 
 Tool output is emitted for all agent executors:
 - **Claude Code**: Captured from `tool_result` content blocks that Claude Code emits inside `{"type":"user", "message":{"content":[{"type":"tool_result",...}]}}` stream-json events. Content may be plain text or extracted from nested content blocks. `is_error` reflects the SDK's `is_error` flag.
@@ -660,6 +665,8 @@ Clients control which sessions they receive output for by sending subscribe/unsu
 ```
 
 When subscribing to an existing session, the server sends the **full buffered history** for that session, then continues with live streaming. This allows pause/resume and session switching without data loss.
+
+Each replayed history message carries `"replay": true`; the final one is followed by a `{"type": "history_replayed", "session_id": "uuid"}` boundary marker (sent immediately when the session has no history to replay). Clients use the marker to batch the whole replayed history into a single render pinned to the newest message, instead of animating it in message-by-message. `history_replayed` is a transient control signal — not archived, and only meaningful live.
 
 **Ephemeral messages** are broadcast to live subscribers only via `SessionBuffer.push_ephemeral()`. They are never appended to `text_history` and are never replayed on reconnect. The sequence counter is still incremented so ordering is preserved for live subscribers. `subprocess_status` is the only current ephemeral message type.
 

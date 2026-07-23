@@ -46,7 +46,7 @@ logger = logging.getLogger(__name__)
 # Helpers
 # ---------------------------------------------------------------------------
 
-_VALID_ACTIONS: frozenset[str] = frozenset({"new", "list", "attach", "merge", "rm"})
+_VALID_ACTIONS: frozenset[str] = frozenset({"new", "list", "attach", "detach", "get", "init", "merge", "rm"})
 
 
 def _worktree_to_dict(wt: Any) -> dict[str, Any]:
@@ -122,6 +122,26 @@ def _run_attach(manager: WorktreeManager, params: dict[str, Any]) -> str:
         raise WorktreeNotFound(f"No worktree found matching '{identifier}'")
 
     return json.dumps({"attached": _worktree_to_dict(matched)}, indent=2)
+
+
+def _run_detach(manager: WorktreeManager) -> str:
+    """Detach the session from any selected worktree (return to the main repo)."""
+    path = manager.detach()
+    return json.dumps({"detached": True, "path": str(path)}, indent=2)
+
+
+def _run_get(manager: WorktreeManager, params: dict[str, Any]) -> str:
+    """Return details for a single worktree by name."""
+    name: str = params["name"]
+    wt = manager.get(name)
+    return json.dumps({"worktree": _worktree_to_dict(wt)}, indent=2)
+
+
+def _run_init(manager: WorktreeManager) -> str:
+    """Initialise the repo's ``.worktrees`` convention and return the config."""
+    config = manager.init()
+    valid_types = getattr(config, "valid_branch_types", None)
+    return json.dumps({"initialized": True, "valid_branch_types": valid_types}, indent=2)
 
 
 # ---------------------------------------------------------------------------
@@ -203,6 +223,12 @@ class WorktreeExecutor(BaseExecutor):
                 return _run_list(manager)
             case "attach":
                 return _run_attach(manager, params)
+            case "detach":
+                return _run_detach(manager)
+            case "get":
+                return _run_get(manager, params)
+            case "init":
+                return _run_init(manager)
             case "merge":
                 return _run_merge(manager, params)
             case "rm":

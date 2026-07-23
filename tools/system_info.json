@@ -6,6 +6,8 @@
   "session_type": "one-shot",
   "llm_context": "stateless",
   "executor": "shell",
+  "expose_to_agents": true,
+  "agent_safe": true,
 
   "parameters": {
     "type": "object",
@@ -21,7 +23,7 @@
 
   "executor_config": {
     "shell": {
-      "command_template": "python3 -m src.tools.scripts.system_info {category}",
+      "command_template": "{rcflow} system-info {category}",
       "capture_stderr": true,
       "stream_output": false
     }

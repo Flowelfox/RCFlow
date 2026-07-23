@@ -32,6 +32,11 @@
       "approval_mode": "full-auto",
       "model": "",
       "timeout": 600
+    },
+    "acp": {
+      "binary_path": "codex-acp",
+      "args": [],
+      "timeout": 1800
     }
   }
 }

@@ -1134,6 +1134,7 @@ class ServerConfigContentState extends State<ServerConfigContent> {
     'claude_code': 'Claude Code',
     'codex': 'Codex',
     'opencode': 'Opencode',
+    'codex_acp': 'Codex ACP Adapter',
   };
 
   static const _kManagedTooltip =

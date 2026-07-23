@@ -678,6 +678,39 @@ def _cmd_set_api_key(args: argparse.Namespace) -> None:
     print("API key updated successfully.")
 
 
+def _cmd_update(args: argparse.Namespace) -> None:
+    """Self-update the worker from the latest GitHub release."""
+    from src.services.cli_update import run_update  # noqa: PLC0415
+
+    sys.exit(run_update(check_only=args.check, assume_yes=args.yes))
+
+
+def _cmd_system_info(args: argparse.Namespace) -> None:
+    """Print host system information as JSON (used by the system_info tool).
+
+    Exists as a subcommand so the tool's shell template works on frozen
+    installs, where ``python3 -m src.tools.scripts.system_info`` has no
+    importable ``src`` package.
+    """
+    from src.tools.scripts.system_info import main as system_info_main  # noqa: PLC0415
+
+    sys.argv = ["system_info", args.category]
+    system_info_main()
+
+
+def _cmd_mcp_proxy(args: argparse.Namespace) -> None:
+    """Run the MCP bridge stdio proxy (spawned by agent subprocesses).
+
+    Equivalent to the ``rcflow-mcp`` console script; exists as a subcommand so
+    frozen (PyInstaller) installs can spawn the proxy through the single
+    ``rcflow`` binary without shipping a second executable.
+    """
+    del args
+    from src.mcp_proxy import main as mcp_proxy_main  # noqa: PLC0415
+
+    mcp_proxy_main()
+
+
 # ── Worker-service control (shared with the GUI via the same controller) ─────
 
 
@@ -836,6 +869,34 @@ def main() -> None:
     set_api_key_parser = subparsers.add_parser("set-api-key", help="Set a new API key")
     set_api_key_parser.add_argument("value", help="The new API key value")
     set_api_key_parser.set_defaults(func=_cmd_set_api_key)
+
+    # rcflow update
+    update_parser = subparsers.add_parser("update", help="Update the worker to the latest GitHub release")
+    update_parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Only check: print current vs latest and exit (0 up-to-date, 3 update available)",
+    )
+    update_parser.add_argument(
+        "-y",
+        "--yes",
+        action="store_true",
+        help="Skip the confirmation prompt (required for non-interactive use)",
+    )
+    update_parser.set_defaults(func=_cmd_update)
+
+    mcp_proxy_parser = subparsers.add_parser(
+        "mcp-proxy",
+        help="Run the MCP bridge stdio proxy (used internally by agent subprocesses)",
+    )
+    mcp_proxy_parser.set_defaults(func=_cmd_mcp_proxy)
+
+    system_info_parser = subparsers.add_parser(
+        "system-info",
+        help="Print host system information as JSON (used internally by the system_info tool)",
+    )
+    system_info_parser.add_argument("category", choices=["cpu", "memory", "disk", "network", "os", "all"])
+    system_info_parser.set_defaults(func=_cmd_system_info)
 
     # ── Worker-service control ──────────────────────────────────────────────
     # `run` is the raw foreground worker the service execs; these verbs ask the

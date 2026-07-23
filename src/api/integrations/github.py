@@ -259,6 +259,84 @@ async def _attach_pr_badges(
                 await session_manager.persist_session_metadata(session, db)
 
 
+async def sync_and_attach_prs(
+    settings: Any,
+    session_manager: Any,
+    db_factory: Any,
+    *,
+    throttle_seconds: int = 60,
+) -> int:
+    """Fetch open PRs, persist/broadcast them, and attach PR badges to sessions.
+
+    Used by background triggers when a session starts on / switches to a branch
+    or worktree, so an existing open PR for that branch shows up as a session
+    badge (see :meth:`SessionManager.attach_pr_to_sessions`). No-op without a
+    GitHub token.
+
+    A recency throttle skips the GitHub fetch when a sync ran within
+    ``throttle_seconds`` — but the badge attach still runs against PRs already in
+    the DB, so a session moving onto an already-synced branch gets its badge with
+    no network round-trip. Returns the number of PRs upserted (0 when throttled
+    or token-less). Never raises.
+    """
+    token = getattr(settings, "GITHUB_TOKEN", "")
+    if not token:
+        return 0
+    backend_id = settings.RCFLOW_BACKEND_ID
+    default_repo = settings.GITHUB_DEFAULT_REPO or None
+
+    async with db_factory() as db:
+        latest = (
+            await db.execute(select(func.max(GitHubPRModel.synced_at)).where(GitHubPRModel.backend_id == backend_id))
+        ).scalar_one_or_none()
+    # SQLite returns naive datetimes; treat a naive value as UTC before diffing.
+    if latest is not None and latest.tzinfo is None:
+        latest = latest.replace(tzinfo=UTC)
+    stale = latest is None or (datetime.now(UTC) - latest).total_seconds() >= throttle_seconds
+
+    upserted: list[GitHubPRModel] = []
+    fetched = False
+    if stale:
+        try:
+            svc = GitHubService(token=token)
+            try:
+                parsed: list[dict[str, Any]] = []
+                for role in ("for_me", "created"):
+                    parsed.extend(await svc.list_pull_requests(role, repo=default_repo))
+            finally:
+                await svc.aclose()
+            async with db_factory() as db:
+                upserted, deleted_ids = await _persist_synced_prs(db, backend_id, parsed, list(settings.projects_dirs))
+            fetched = True
+            for row in upserted:
+                session_manager.broadcast_github_pr_update(_pr_to_dict(row))
+            for pr_id in deleted_ids:
+                session_manager.broadcast_github_pr_deleted(pr_id)
+        except (GitHubServiceError, Exception) as exc:
+            logger.warning("Background PR sync failed: %s", exc)
+
+    # Attach badges. When we fetched, match the fresh set; otherwise match open
+    # PRs already in the DB (cheap path for throttled calls / already-synced PRs).
+    if fetched:
+        pr_dicts = [_pr_to_dict(row) for row in upserted]
+    else:
+        async with db_factory() as db:
+            rows = (
+                (
+                    await db.execute(
+                        select(GitHubPRModel).where(
+                            GitHubPRModel.backend_id == backend_id, GitHubPRModel.state == "open"
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        pr_dicts = [_pr_to_dict(row) for row in rows]
+    await _attach_pr_badges(session_manager, db_factory, pr_dicts)
+    return len(upserted)
+
+
 async def _cached_repo_slugs(db: AsyncSession, backend_id: str) -> list[str]:
     """Distinct ``owner/name`` repo slugs already cached for this worker.
 

@@ -10,10 +10,22 @@ from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
-VALID_EXECUTORS = {"shell", "http", "claude_code", "codex", "opencode", "worktree"}
+VALID_EXECUTORS = {"shell", "http", "claude_code", "codex", "opencode", "worktree", "acp", "python"}
 VALID_SESSION_TYPES = {"one-shot", "long-running"}
 VALID_LLM_CONTEXTS = {"stateless", "session-scoped"}
 VALID_OS = {"windows", "linux", "darwin"}
+
+# Executors that spawn a nested coding agent. Tools using these executors are
+# never exposed over the MCP agent bridge, regardless of ``expose_to_agents``
+# (recursion guard — an agent must not be able to spawn another agent).
+AGENT_EXECUTORS = {"claude_code", "codex", "opencode", "acp"}
+
+# Reserved parameter names a tool definition may not declare: they collide with
+# built-in shell command-template placeholders that the executor substitutes
+# with trusted values (e.g. ``{rcflow}`` → the worker's own invocation prefix).
+# Allowing a tool parameter of the same name would let caller-supplied input
+# occupy a trusted command-position token.
+RESERVED_PARAM_NAMES = {"rcflow"}
 
 _DEFAULT_SHELL = "powershell.exe" if sys.platform == "win32" else "/bin/bash"
 
@@ -81,6 +93,25 @@ class WorktreeExecutorConfig(BaseModel):
     validate_branch_type: bool = True
 
 
+class AcpExecutorConfig(BaseModel):
+    """ACP Executor Config — spawn parameters for an ACP-speaking agent binary."""
+
+    binary_path: str
+    args: list[str] = Field(default_factory=list)
+    timeout: int = 1800
+
+
+class PythonExecutorConfig(BaseModel):
+    """Python Executor Config — a session-aware in-worker native tool callable.
+
+    ``callable`` is a dotted ``"module:function"`` reference resolved at
+    dispatch time; the function runs in-process with a ``NativeToolContext``
+    (session + router), so native tools can touch RCFlow state directly.
+    """
+
+    callable: str
+
+
 class ToolDefinition(BaseModel):
     """Tool Definition."""
 
@@ -94,6 +125,11 @@ class ToolDefinition(BaseModel):
     executor: str
     parameters: dict[str, Any]
     executor_config: dict[str, Any]
+    expose_to_agents: bool = False
+    # When exposed to agents, whether calls skip the bridge's approval gate.
+    # Reserve for genuinely read-only tools (e.g. system_info); anything that
+    # can mutate the host must leave this False so agent calls are gated.
+    agent_safe: bool = False
 
     @property
     def mention_name(self) -> str:
@@ -130,6 +166,14 @@ class ToolDefinition(BaseModel):
         """Get worktree config."""
         return WorktreeExecutorConfig(**self.executor_config.get("worktree", {}))
 
+    def get_acp_config(self) -> AcpExecutorConfig:
+        """Get ACP config."""
+        return AcpExecutorConfig(**self.executor_config["acp"])
+
+    def get_python_config(self) -> PythonExecutorConfig:
+        """Get Python native-tool config."""
+        return PythonExecutorConfig(**self.executor_config["python"])
+
 
 def load_tool_file(path: Path) -> ToolDefinition:
     """Load tool file."""
@@ -153,6 +197,20 @@ def load_tool_file(path: Path) -> ToolDefinition:
     for os_val in tool.os:
         if os_val not in VALID_OS:
             raise ValueError(f"Tool '{tool.name}': invalid os value '{os_val}'. Must be one of {VALID_OS}")
+    declared_params = set((tool.parameters or {}).get("properties", {}))
+    reserved_clash = declared_params & RESERVED_PARAM_NAMES
+    if reserved_clash:
+        raise ValueError(
+            f"Tool '{tool.name}': parameter name(s) {sorted(reserved_clash)} are reserved "
+            f"(built-in command-template placeholders)"
+        )
+    if tool.expose_to_agents and tool.executor in AGENT_EXECUTORS:
+        logger.warning(
+            "Tool '%s': expose_to_agents ignored for agent executor '%s' (recursion guard)",
+            tool.name,
+            tool.executor,
+        )
+        tool.expose_to_agents = False
 
     return tool
 

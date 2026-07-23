@@ -1,5 +1,5 @@
 ---
-updated: 2026-04-26
+updated: 2026-07-08
 ---
 
 # Project Structure
@@ -72,6 +72,9 @@ RCFlow/
 │   │   ├── context.py           # Mention extraction & context building (mixin)
 │   │   ├── agent_claude_code.py # Claude Code agent lifecycle (mixin)
 │   │   ├── agent_codex.py       # Codex CLI agent lifecycle (mixin)
+│   │   ├── agent_opencode.py    # OpenCode CLI agent lifecycle (mixin)
+│   │   ├── agent_acp.py         # ACP agent lifecycle (OpenCode/Codex over ACP) (mixin)
+│   │   ├── native_tools/       # Session-aware native tools (python executor: notify, tasks, …)
 │   │   ├── background_tasks.py  # Fire-and-forget background tasks (mixin)
 │   │   ├── llm.py               # LLM client (Anthropic, Bedrock, OpenAI)
 │   │   └── buffer.py            # Output buffer for session history
@@ -81,12 +84,18 @@ RCFlow/
 │   │   ├── base.py              # Base executor interface
 │   │   ├── shell.py             # Shell command executor
 │   │   ├── http.py              # HTTP API executor
-│   │   ├── claude_code.py       # Claude Code CLI executor
-│   │   └── codex.py             # Codex CLI executor (OpenAI)
+│   │   ├── claude_code_sdk.py   # Claude Code executor (Agent SDK)
+│   │   ├── codex.py             # Codex CLI executor (OpenAI, legacy JSONL)
+│   │   ├── opencode.py          # OpenCode CLI executor (legacy JSONL)
+│   │   ├── acp.py               # ACP executor (any Agent Client Protocol agent)
+│   │   └── worktree.py          # Worktree executor (wtpython)
+│   │
+│   ├── mcp_proxy.py             # rcflow-mcp stdio proxy (MCP bridge for agent subprocesses)
 │   │
 │   ├── services/
 │   │   ├── __init__.py
 │   │   ├── tool_manager.py      # Auto-install/update for Claude Code, Codex & OpenCode CLIs
+│   │   ├── mcp_bridge.py        # MCP agent bridge (registry-driven tool exposure + tokens)
 │   │   └── linear_service.py    # Linear GraphQL API client
 │   │
 │   ├── prompts/

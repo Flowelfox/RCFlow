@@ -32,7 +32,7 @@ Future<CreateWorktreeParams?> showCreateWorktreeDialog(
               controller: branchCtrl,
               decoration: const InputDecoration(
                 labelText: 'Branch',
-                hintText: 'feature/PROJ-123/description',
+                hintText: 'branch-name (e.g. feature/add-auth)',
               ),
               validator: (v) =>
                   (v == null || v.trim().isEmpty) ? 'Required' : null,

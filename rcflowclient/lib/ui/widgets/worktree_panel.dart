@@ -513,7 +513,7 @@ class _WorktreePanelState extends State<WorktreePanel> {
                 controller: branchCtrl,
                 decoration: const InputDecoration(
                     labelText: 'Branch',
-                    hintText: 'feature/PROJ-123/description'),
+                    hintText: 'branch-name (e.g. feature/add-auth)'),
                 validator: (v) =>
                     (v == null || v.trim().isEmpty) ? 'Required' : null,
                 autofocus: true,

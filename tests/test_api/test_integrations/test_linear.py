@@ -163,6 +163,7 @@ def linear_settings() -> Settings:
 def linear_app(test_app: FastAPI, linear_settings: Settings) -> FastAPI:
     """Extend test_app with Linear settings on app.state."""
     test_app.state.settings = linear_settings
+    test_app.state.linear_viewer_cache = None
     return test_app
 
 
@@ -272,6 +273,101 @@ class TestListLinearTeams:
 
 
 # ---------------------------------------------------------------------------
+# TestGetLinearViewer
+# ---------------------------------------------------------------------------
+
+
+def _make_viewer_dict(**overrides: Any) -> dict[str, Any]:
+    base = {
+        "id": "user-1",
+        "name": "Jane Doe",
+        "display_name": "jane",
+        "email": "jane@example.com",
+        "avatar_url": "https://cdn.linear.app/jane.png",
+    }
+    base.update(overrides)
+    return base
+
+
+class TestGetLinearViewer:
+    def _mock_service(self, viewer: dict[str, Any] | Exception) -> AsyncMock:
+        mock_svc = AsyncMock()
+        if isinstance(viewer, Exception):
+            mock_svc.fetch_viewer = AsyncMock(side_effect=viewer)
+        else:
+            mock_svc.fetch_viewer = AsyncMock(return_value=viewer)
+        mock_svc.aclose = AsyncMock()
+        return mock_svc
+
+    def test_returns_viewer(self, client: TestClient, linear_app: FastAPI) -> None:
+        mock_svc = self._mock_service(_make_viewer_dict())
+
+        with patch("src.api.integrations.linear._get_linear_service", return_value=mock_svc):
+            resp = client.get("/api/integrations/linear/viewer", headers=_auth_headers())
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body == _make_viewer_dict()
+
+    def test_second_call_served_from_cache(self, client: TestClient, linear_app: FastAPI) -> None:
+        mock_svc = self._mock_service(_make_viewer_dict())
+
+        with patch("src.api.integrations.linear._get_linear_service", return_value=mock_svc) as mock_get:
+            resp1 = client.get("/api/integrations/linear/viewer", headers=_auth_headers())
+            resp2 = client.get("/api/integrations/linear/viewer", headers=_auth_headers())
+
+        assert resp1.status_code == 200
+        assert resp2.status_code == 200
+        assert mock_get.call_count == 1
+        assert mock_svc.fetch_viewer.await_count == 1
+
+    def test_key_rotation_invalidates_cache(self, client: TestClient, linear_app: FastAPI) -> None:
+        mock_svc = self._mock_service(_make_viewer_dict())
+
+        with patch("src.api.integrations.linear._get_linear_service", return_value=mock_svc) as mock_get:
+            client.get("/api/integrations/linear/viewer", headers=_auth_headers())
+            linear_app.state.settings = _make_linear_settings(LINEAR_API_KEY="lin_api_other")
+            resp = client.get("/api/integrations/linear/viewer", headers=_auth_headers())
+
+        assert resp.status_code == 200
+        assert mock_get.call_count == 2
+
+    def test_refresh_param_bypasses_cache(self, client: TestClient, linear_app: FastAPI) -> None:
+        mock_svc = self._mock_service(_make_viewer_dict())
+
+        with patch("src.api.integrations.linear._get_linear_service", return_value=mock_svc) as mock_get:
+            client.get("/api/integrations/linear/viewer", headers=_auth_headers())
+            resp = client.get("/api/integrations/linear/viewer?refresh=true", headers=_auth_headers())
+
+        assert resp.status_code == 200
+        assert mock_get.call_count == 2
+
+    def test_missing_api_key_returns_503(self, client: TestClient, linear_app: FastAPI) -> None:
+        linear_app.state.settings = _make_linear_settings(LINEAR_API_KEY="")
+
+        resp = client.get("/api/integrations/linear/viewer", headers=_auth_headers())
+
+        assert resp.status_code == 503
+
+    def test_linear_api_error_returns_502_and_is_not_cached(self, client: TestClient, linear_app: FastAPI) -> None:
+        failing = self._mock_service(LinearServiceError("rate limited"))
+        working = self._mock_service(_make_viewer_dict())
+
+        with patch("src.api.integrations.linear._get_linear_service", return_value=failing):
+            resp1 = client.get("/api/integrations/linear/viewer", headers=_auth_headers())
+        with patch("src.api.integrations.linear._get_linear_service", return_value=working):
+            resp2 = client.get("/api/integrations/linear/viewer", headers=_auth_headers())
+
+        assert resp1.status_code == 502
+        assert resp2.status_code == 200
+        assert resp2.json()["id"] == "user-1"
+
+    def test_requires_auth(self, client: TestClient) -> None:
+        resp = client.get("/api/integrations/linear/viewer")
+        assert resp.status_code in (401, 403, 422)
+
+
+# ---------------------------------------------------------------------------
 # TestListLinearIssues
 # ---------------------------------------------------------------------------
 
@@ -313,6 +409,18 @@ class TestListLinearIssues:
 
         assert resp.status_code == 200
         assert resp.json()["total"] == 1
+
+    def test_filter_by_assignee_id_adds_where_clause(self, client: TestClient, linear_app: FastAPI) -> None:
+        issue = _make_issue_row(assignee_id="user-1", assignee_name="Alice")
+        mock_db = AsyncMock()
+        mock_db.execute = AsyncMock(return_value=_scalar_result([issue]))
+        linear_app.state.db_session_factory = _make_db_factory(mock_db)
+
+        resp = client.get("/api/integrations/linear/issues?assignee_id=user-1", headers=_auth_headers())
+
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 1
+        assert resp.json()["issues"][0]["assignee_id"] == "user-1"
 
     def test_search_by_title(self, client: TestClient, linear_app: FastAPI) -> None:
         issue1 = _make_issue_row(title="Fix login bug")

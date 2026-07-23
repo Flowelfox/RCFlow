@@ -105,7 +105,10 @@ class _SetupWizardState extends State<_SetupWizard> {
     return Dialog(
       backgroundColor: context.appColors.bgSurface,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      insetPadding: const EdgeInsets.symmetric(horizontal: 40, vertical: kSpace5),
+      insetPadding: const EdgeInsets.symmetric(
+        horizontal: 40,
+        vertical: kSpace5,
+      ),
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 600, maxHeight: 620),
         child: Column(
@@ -413,22 +416,23 @@ class _SetupWizardState extends State<_SetupWizard> {
               color: context.appColors.textPrimary,
               fontSize: 15,
             ),
-            decoration: _inputDecoration(
-              hint: 'Enter API key',
-              icon: Icons.key_outlined,
-              error: _fieldError(_apiKeyCtrl),
-            ).copyWith(
-              suffixIcon: IconButton(
-                icon: Icon(
-                  _vm.obscureKey
-                      ? Icons.visibility_off_outlined
-                      : Icons.visibility_outlined,
-                  color: context.appColors.textMuted,
-                  size: 20,
+            decoration:
+                _inputDecoration(
+                  hint: 'Enter API key',
+                  icon: Icons.key_outlined,
+                  error: _fieldError(_apiKeyCtrl),
+                ).copyWith(
+                  suffixIcon: IconButton(
+                    icon: Icon(
+                      _vm.obscureKey
+                          ? Icons.visibility_off_outlined
+                          : Icons.visibility_outlined,
+                      color: context.appColors.textMuted,
+                      size: 20,
+                    ),
+                    onPressed: () => _vm.setObscureKey(!_vm.obscureKey),
+                  ),
                 ),
-                onPressed: () => _vm.setObscureKey(!_vm.obscureKey),
-              ),
-            ),
             onChanged: (_) {
               if (_vm.submitted) setState(() {});
             },
@@ -481,10 +485,10 @@ class _SetupWizardState extends State<_SetupWizard> {
                 onPressed: _vm.testStatus == SetupTestStatus.testing
                     ? null
                     : () => _vm.testConnection(
-                          host: _hostCtrl.text.trim(),
-                          portStr: _portCtrl.text.trim(),
-                          apiKey: _apiKeyCtrl.text.trim(),
-                        ),
+                        host: _hostCtrl.text.trim(),
+                        portStr: _portCtrl.text.trim(),
+                        apiKey: _apiKeyCtrl.text.trim(),
+                      ),
                 icon: const Icon(Icons.wifi_tethering_rounded, size: 18),
                 label: const Text('Test'),
                 style: OutlinedButton.styleFrom(
@@ -693,10 +697,7 @@ class _SetupWizardState extends State<_SetupWizard> {
             ),
             decoration: _inputDecoration(icon: Icons.smart_toy_outlined),
             items: const [
-              DropdownMenuItem(
-                value: null,
-                child: Text('No preference'),
-              ),
+              DropdownMenuItem(value: null, child: Text('No preference')),
               DropdownMenuItem(
                 value: 'claude_code',
                 child: Text('Claude Code'),
@@ -716,6 +717,7 @@ class _SetupWizardState extends State<_SetupWizard> {
       'claude_code': 'Claude Code',
       'codex': 'Codex',
       'opencode': 'OpenCode',
+      'codex_acp': 'Codex ACP Adapter',
     };
     final displayName = displayNames[toolKey] ?? toolKey;
     final installed = info['installed'] == true;
