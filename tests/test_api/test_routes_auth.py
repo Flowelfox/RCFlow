@@ -449,3 +449,24 @@ class TestClaudeCodeLogout:
         monkeypatch.setattr(auth_mod.asyncio, "create_subprocess_exec", _boom)
         resp = client.post("/api/tools/claude_code/logout", headers=_auth())
         assert resp.status_code == 500
+
+
+class TestManagedClaudeEnv:
+    """The status/login/logout endpoints must mirror the executor and blank a
+    stray ANTHROPIC_API_KEY for the anthropic_login provider — otherwise
+    `claude auth status` reports logged-in via api_key while OAuth sessions fail.
+    """
+
+    def _ts(self, provider: str) -> object:
+        return type("TS", (), {"get_settings": lambda self, name: {"provider": provider}})()
+
+    def test_blanks_api_key_for_anthropic_login(self, monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-leaked")
+        env = auth_mod._managed_claude_env(self._ts("anthropic_login"), tmp_path)
+        assert env["ANTHROPIC_API_KEY"] == ""
+        assert env["CLAUDE_CONFIG_DIR"] == str(tmp_path)
+
+    def test_keeps_api_key_for_other_provider(self, monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-real")
+        env = auth_mod._managed_claude_env(self._ts(""), tmp_path)
+        assert env["ANTHROPIC_API_KEY"] == "sk-real"

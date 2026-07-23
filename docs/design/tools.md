@@ -1,5 +1,5 @@
 ---
-updated: 2026-07-22
+updated: 2026-07-23
 ---
 
 # Pluggable Tool Definitions
@@ -342,7 +342,7 @@ Two-step PKCE OAuth flow (no CLI interaction required):
 
 Supporting endpoints:
 
-- `GET /api/tools/claude_code/login/status` — Runs `claude auth status --json` with managed `CLAUDE_CONFIG_DIR`. Returns `{"logged_in": true/false, "method": "claude.ai"|null, "email": "..."|null, "subscription": "max"|"pro"|null}`.
+- `GET /api/tools/claude_code/login/status` — Runs `claude auth status --json` with managed `CLAUDE_CONFIG_DIR`. Returns `{"logged_in": true/false, "method": "claude.ai"|null, "email": "..."|null, "subscription": "max"|"pro"|null}`. Like the executor, when the provider is `anthropic_login` it blanks any `ANTHROPIC_API_KEY` inherited from the server process before running the CLI — otherwise a stray key makes `claude auth status` report logged-in via `method: api_key` while OAuth sessions (which do clear it) fail. This env handling is shared by login/status, the login/code verify step, and logout via `_managed_claude_env`.
 - `POST /api/tools/claude_code/logout` — Runs `claude auth logout` with managed `CLAUDE_CONFIG_DIR`. Returns `{"logged_out": true}`.
 
 **Config overrides:** When a managed tool has settings configured, `PromptRouter` reads them at executor creation time and passes non-empty values as `config_overrides` to the executor constructor. These overrides are merged on top of the tool definition's `executor_config` when building subprocess commands.
