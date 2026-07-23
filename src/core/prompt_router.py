@@ -300,6 +300,9 @@ class PromptRouter:
     def _fire_task_update_on_session_end(self, session: ActiveSession) -> None:
         self._background._fire_task_update_on_session_end(session)
 
+    def _fire_pr_detect(self, session: ActiveSession) -> None:
+        self._background._fire_pr_detect(session)
+
     def _fire_realtime_artifact_scan(self, session: ActiveSession) -> None:
         self._background._fire_realtime_artifact_scan(session)
 
@@ -847,6 +850,11 @@ class PromptRouter:
         # Broadcast so the client can update the worktree panel immediately
         if self._session_manager:
             self._session_manager.broadcast_session_update(session)
+
+        # Switching to a worktree changes the session's branch context — check
+        # whether an open PR already exists for that branch and attach its badge.
+        if action in ("new", "attach"):
+            self._fire_pr_detect(session)
 
     # ------------------------------------------------------------------
     # Project name validation

@@ -268,6 +268,7 @@ class OpenCodeAgent:
                     )
                     if new_cwd and apply_agent_cwd(session, new_cwd) and self._r._session_manager is not None:
                         self._r._session_manager.broadcast_session_update(session)
+                        self._r._fire_pr_detect(session)
 
                 if tool_status == "completed":
                     output = state.get("output") or ""

@@ -289,6 +289,7 @@ class AcpAgent:
         new_cwd = infer_cwd_from_tool_paths(locations, spawn_cwd, repo_path)
         if new_cwd and apply_agent_cwd(session, new_cwd) and self._r._session_manager is not None:
             self._r._session_manager.broadcast_session_update(session)
+            self._r._fire_pr_detect(session)
 
     async def _relay_acp_stream(
         self,

@@ -849,6 +849,7 @@ class ClaudeCodeAgent:
                                     and self._r._session_manager is not None
                                 ):
                                     self._r._session_manager.broadcast_session_update(session)
+                                    self._r._fire_pr_detect(session)
                         # Collect tool input values for scanning
                         for v in tool_input.values():
                             if isinstance(v, str):
@@ -899,6 +900,9 @@ class ClaudeCodeAgent:
 
             elif event_type == "result":
                 session.set_activity(ActivityState.IDLE)
+                # A turn may have opened a PR (e.g. `gh pr create`) for the
+                # session's branch — detect it and attach the badge.
+                self._r._fire_pr_detect(session)
                 result_text = event.get("result", "")
                 result_subtype = event.get("subtype", "")
                 # Extract cost and token data from Claude Code result
@@ -1165,6 +1169,7 @@ class ClaudeCodeAgent:
         inferred = infer_cwd_from_output(content, session.main_project_path)
         if inferred and apply_agent_cwd(session, inferred) and self._r._session_manager is not None:
             self._r._session_manager.broadcast_session_update(session)
+            self._r._fire_pr_detect(session)
 
     async def _process_monitor_event(
         self,

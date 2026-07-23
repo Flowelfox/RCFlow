@@ -10,6 +10,7 @@ from __future__ import annotations
 import subprocess
 import uuid
 from datetime import UTC, datetime
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from sqlalchemy import func, select
@@ -363,3 +364,53 @@ async def test_build_token_status_fine_grained_token(monkeypatch):
     assert status["fine_grained"] is True
     # Fine-grained tokens can't enumerate scopes → satisfied is null.
     assert all(s["satisfied"] is None for s in status["scopes"])
+
+
+@pytest.fixture
+async def db_factory():
+    engine = create_async_engine(
+        "sqlite+aiosqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    yield async_sessionmaker(engine, expire_on_commit=False)
+    await engine.dispose()
+
+
+def _sa_settings(token: str = "ght") -> object:  # noqa: S107 — test dummy
+    s = MagicMock()
+    s.GITHUB_TOKEN = token
+    s.RCFLOW_BACKEND_ID = _BACKEND_ID
+    s.GITHUB_DEFAULT_REPO = None
+    s.projects_dirs = []
+    return s
+
+
+@pytest.mark.asyncio
+async def test_sync_and_attach_no_token_noop(db_factory):
+    sm = MagicMock()
+    n = await gh_mod.sync_and_attach_prs(_sa_settings(token=""), sm, db_factory)
+    assert n == 0
+    sm.broadcast_github_pr_update.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_sync_and_attach_throttled_uses_db(db_factory, monkeypatch):
+    # Seed an open PR synced 'now' → within the throttle window → no GitHub fetch.
+    async with db_factory() as db:
+        await _upsert_prs(db, _BACKEND_ID, [_parsed("acme", "web", 1)])
+
+    def _boom(*_a, **_k):
+        raise AssertionError("GitHubService must not be built when throttled")
+
+    monkeypatch.setattr(gh_mod, "GitHubService", _boom)
+    sm = MagicMock()
+    sm.attach_pr_to_sessions = AsyncMock(return_value=[])
+
+    n = await gh_mod.sync_and_attach_prs(_sa_settings(), sm, db_factory, throttle_seconds=3600)
+
+    assert n == 0  # throttled → nothing upserted
+    assert sm.attach_pr_to_sessions.await_count == 1  # still attaches from DB
+    assert sm.attach_pr_to_sessions.await_args.args[0]["head_ref"] == "feature-1"
