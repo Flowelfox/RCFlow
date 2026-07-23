@@ -40,6 +40,9 @@ and note which component is affected where it matters.
 ### Performance
 - **Tasks tab no longer lags with many Linear issues** — the task list now renders only what's on screen and loads unlinked Linear issues in pages of 50 as you scroll, so large synced issue sets no longer freeze the sidebar (Client)
 
+### Security
+- **Patched known vulnerabilities in bundled libraries** — updated third-party dependencies to versions that fix reported issues in image decoding (Pillow), the Model Context Protocol library, the settings loader, and the packaging toolchain. No behaviour change for users (Backend)
+
 ## [Backend 0.44.1 / Client 1.59.1] — 2026-06-18
 
 ### Security
