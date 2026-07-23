@@ -980,6 +980,7 @@ class PromptRouter:
             self._apply_project_name(session, project_name)
         if selected_worktree_path:
             session.metadata["selected_worktree_path"] = selected_worktree_path
+            self._fire_pr_detect(session)
 
         # Determine the plan output path.
         project_root = session.main_project_path
@@ -1368,6 +1369,8 @@ class PromptRouter:
             session.metadata["selected_worktree_path"] = selected_worktree_path
             if self._session_manager:
                 self._session_manager.broadcast_session_update(session)
+            # Starting on an existing worktree: check for an open PR on its branch.
+            self._fire_pr_detect(session)
 
         # Ensure the sessions row exists in the DB before any telemetry inserts
         # (session_turns and tool_calls FK-reference sessions.id, but sessions are

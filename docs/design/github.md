@@ -199,9 +199,11 @@ The badge attaches in two ways:
    matching to the exact worktree that was pushed.
 3. **A session starts on / switches to a branch or worktree.** `PromptRouter._fire_pr_detect`
    fires a background `sync_and_attach_prs` when a session's branch context
-   changes — a worktree `new`/`attach` (`_update_session_worktree_meta`), an
-   agent `cd` into a different branch (`apply_agent_cwd` in every agent relay),
-   or a coding-agent turn completing (which may have run `gh pr create`). It
+   changes — starting a session on a pre-selected existing worktree
+   (`handle_prompt` stamps `selected_worktree_path`), a worktree `new`/`attach`
+   (`_update_session_worktree_meta`), an agent `cd` into a different branch
+   (`apply_agent_cwd` in every agent relay), or a coding-agent turn completing
+   (which may have run `gh pr create`). It
    fetches open PRs (throttled to one GitHub round-trip per 60s; a throttled
    call still re-attaches against PRs already in the DB, so moving onto an
    already-synced branch badges instantly) and runs `attach_pr_to_sessions`.
