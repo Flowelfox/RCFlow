@@ -18,6 +18,11 @@ new code's measured coverage.
 
 Current floors: Python **64%**, Flutter **14%**.
 
+## Consolidation refactors (in progress)
+
+- **Executor teardown** ✅ — the four lifecycle kill paths (cancel / end / pause / interrupt) now share one `SessionLifecycle._teardown_executors(session) -> bool` instead of hand-copying the 4-executor cancel+stream-cancel block, which had drifted.
+- **Pending** (recommended as a follow-up): managed-agent base class (agent_* siblings share ~60–80% skeleton), unified tool-install pipeline (plain+streaming twins), session row↔object mapping helper, PR/issue listing dedup + moving domain logic out of route modules (see the `.importlinter` `ignore_imports` debt list).
+
 ## Quality gates (enforced)
 
 - **Complexity**: `[tool.ruff.lint.mccabe] max-complexity = 15`. The ~21 functions that already exceed it are frozen with a per-function `# noqa: C901`; that list only shrinks. Do not raise the ceiling to silence a new offender — split the function.

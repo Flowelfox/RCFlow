@@ -794,3 +794,31 @@ class TestDrainGuard:
         for t in list(router._drain_tasks):
             t.cancel()
         await asyncio.gather(*router._drain_tasks, return_exceptions=True)
+
+
+class TestTeardownExecutors:
+    """The shared executor-teardown helper cancels + nulls every agent."""
+
+    async def test_teardown_nulls_executors_and_reports_active(self, session_manager: SessionManager) -> None:
+        router = _make_router(session_manager)
+        session = session_manager.create_session(SessionType.CONVERSATIONAL)
+        session.set_active()
+        # Attach a Claude Code executor + a live stream task.
+        cc = AsyncMock()
+        session.claude_code_executor = cc
+        task = asyncio.create_task(asyncio.sleep(3600))
+        session._claude_code_stream_task = task
+
+        had_any = await router._lifecycle._teardown_executors(session)
+
+        assert had_any is True
+        cc.cancel.assert_awaited_once()
+        assert session.claude_code_executor is None
+        assert session._claude_code_stream_task is None
+        assert task.cancelled() or task.done()
+
+    async def test_teardown_reports_none_active_when_idle(self, session_manager: SessionManager) -> None:
+        router = _make_router(session_manager)
+        session = session_manager.create_session(SessionType.CONVERSATIONAL)
+        session.set_active()
+        assert await router._lifecycle._teardown_executors(session) is False
