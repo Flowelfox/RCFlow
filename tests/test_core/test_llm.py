@@ -21,8 +21,47 @@ from src.core.llm import (
     StreamDone,
     TextChunk,
     ToolCallRequest,
+    finalize_messages_for_provider,
     llm_configuration_issue,
 )
+
+
+def _msg(*texts_with_cache: tuple[str, bool]) -> dict:
+    """Build a user message whose text blocks optionally carry cache_control."""
+    content = []
+    for text, cached in texts_with_cache:
+        block = {"type": "text", "text": text}
+        if cached:
+            block["cache_control"] = {"type": "ephemeral"}
+        content.append(block)
+    return {"role": "user", "content": content}
+
+
+class TestFinalizeMessagesForProvider:
+    def test_openai_strips_all_cache_control(self) -> None:
+        messages = [_msg(("a", True), ("b", False)), _msg(("c", True))]
+        out = finalize_messages_for_provider(messages, "openai")
+        for m in out:
+            for block in m["content"]:
+                assert "cache_control" not in block
+        # original history is not mutated
+        assert messages[0]["content"][0]["cache_control"] == {"type": "ephemeral"}
+
+    def test_anthropic_caps_breakpoints_at_four(self) -> None:
+        # Six cache_control blocks across messages → only the last 4 survive.
+        messages = [_msg((f"m{i}", True)) for i in range(6)]
+        out = finalize_messages_for_provider(messages, "anthropic")
+        cached = sum(1 for m in out for block in m["content"] if "cache_control" in block)
+        assert cached == 4
+        # the four kept are the most recent
+        assert "cache_control" not in out[0]["content"][0]
+        assert "cache_control" in out[5]["content"][0]
+
+    def test_anthropic_leaves_four_or_fewer_untouched(self) -> None:
+        messages = [_msg((f"m{i}", True)) for i in range(3)]
+        out = finalize_messages_for_provider(messages, "anthropic")
+        assert out is messages  # no copy when already within the limit
+
 
 # ---------------------------------------------------------------------------
 # Helpers

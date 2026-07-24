@@ -165,7 +165,7 @@ class OpenCodeAgent:
 
         return f"OpenCode session started in {working_path}"
 
-    async def _relay_opencode_stream(
+    async def _relay_opencode_stream(  # noqa: C901
         self,
         session: ActiveSession,
         stream: AsyncGenerator[ExecutionChunk, None],

@@ -4,12 +4,13 @@ import asyncio
 import logging
 import shlex
 import sys
-from collections.abc import AsyncGenerator, AsyncIterator
+from collections.abc import AsyncGenerator
 from pathlib import PurePath
 from typing import Any
 
 from src.executors.base import BaseExecutor, ExecutionChunk, ExecutionResult
 from src.tools.loader import ToolDefinition
+from src.utils.process import kill_process_tree, new_session_kwargs
 
 logger = logging.getLogger(__name__)
 
@@ -60,8 +61,11 @@ def _quote_params_for_shell(
         else:
             s = str(v)
             if is_powershell:
-                # PowerShell: wrap in double-quotes and escape internal double-quotes.
-                quoted[k] = '"' + s.replace('"', '""') + '"'
+                # PowerShell single-quoted strings are literal — no $(...) subexpression,
+                # $var, or backtick expansion — so single-quoting (doubling embedded
+                # single-quotes) is what actually blocks injection. Double-quoted strings
+                # would still evaluate $(...) even with the quotes escaped.
+                quoted[k] = "'" + s.replace("'", "''") + "'"
             else:
                 quoted[k] = shlex.quote(s)
     return quoted
@@ -107,6 +111,7 @@ class ShellExecutor(BaseExecutor):
                 stderr=stderr,
                 stdin=stdin,
                 cwd=cwd,
+                **new_session_kwargs(),
             )
 
         return await asyncio.create_subprocess_shell(
@@ -116,6 +121,7 @@ class ShellExecutor(BaseExecutor):
             stdin=stdin,
             cwd=cwd,
             executable=shell if not _IS_WINDOWS else None,
+            **new_session_kwargs(),
         )
 
     async def execute(
@@ -160,7 +166,7 @@ class ShellExecutor(BaseExecutor):
             )
         except TimeoutError:
             if self._process:
-                self._process.kill()
+                await kill_process_tree(self._process)
             return ExecutionResult(
                 output="",
                 exit_code=-1,
@@ -191,6 +197,7 @@ class ShellExecutor(BaseExecutor):
         command = config.command_template.format(**quoted)
         working_dir = parameters.get("working_directory", ".")
 
+        timeout = parameters.get("timeout")
         process = await self._create_process(
             command,
             config.shell,
@@ -200,25 +207,55 @@ class ShellExecutor(BaseExecutor):
         )
         self._process = process
 
-        async def _read_stream(stream: asyncio.StreamReader, name: str) -> AsyncIterator[ExecutionChunk]:
+        # Read stdout and stderr CONCURRENTLY via a merged queue. Reading one to
+        # EOF before the other deadlocks: a child that fills the stderr pipe
+        # buffer while stdout is still open blocks forever (neither side drains).
+        queue: asyncio.Queue[ExecutionChunk | None] = asyncio.Queue()
+
+        async def _pump(stream: asyncio.StreamReader, name: str) -> None:
+            # Fixed-size reads (not readline) — a single line larger than the
+            # StreamReader limit (64 KiB) would make readline raise; chunked
+            # reads stream arbitrary output without that ceiling.
             while True:
-                line = await stream.readline()
-                if not line:
+                data = await stream.read(65536)
+                if not data:
                     break
-                yield ExecutionChunk(
-                    stream=name,
-                    content=line.decode("utf-8", errors="replace"),
-                )
+                await queue.put(ExecutionChunk(stream=name, content=data.decode("utf-8", errors="replace")))
+
+        readers = [
+            asyncio.create_task(_pump(s, name))
+            for s, name in ((process.stdout, "stdout"), (process.stderr, "stderr"))
+            if s is not None
+        ]
+
+        async def _sentinel_when_eof() -> None:
+            await asyncio.gather(*readers)
+            await queue.put(None)  # all streams hit EOF
+
+        sentinel = asyncio.create_task(_sentinel_when_eof())
+
+        loop = asyncio.get_running_loop()
+        deadline = (loop.time() + timeout) if timeout else None
 
         try:
-            if process.stdout:
-                async for chunk in _read_stream(process.stdout, "stdout"):
-                    yield chunk
-            if process.stderr:
-                async for chunk in _read_stream(process.stderr, "stderr"):
-                    yield chunk
-            await process.wait()
+            while True:
+                remaining = None if deadline is None else deadline - loop.time()
+                if remaining is not None and remaining <= 0:
+                    break  # overall timeout exceeded
+                try:
+                    chunk = await asyncio.wait_for(queue.get(), timeout=remaining)
+                except TimeoutError:
+                    break  # timed out waiting for more output
+                if chunk is None:
+                    break  # EOF sentinel — command finished
+                yield chunk
         finally:
+            for t in (*readers, sentinel):
+                t.cancel()
+            # Reap the child; kill the whole tree if it is still running (timeout
+            # or consumer cancellation) so no orphan keeps executing after we stop.
+            if process.returncode is None:
+                await kill_process_tree(process)
             self._process = None
 
     async def send_input(self, data: str) -> None:
@@ -232,6 +269,5 @@ class ShellExecutor(BaseExecutor):
     async def cancel(self) -> None:
         """Cancel."""
         if self._process:
-            self._process.kill()
-            await self._process.wait()
+            await kill_process_tree(self._process)
             self._process = None

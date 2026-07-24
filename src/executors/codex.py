@@ -182,8 +182,10 @@ class CodexExecutor(BaseExecutor):
                 if len(self._stderr_output) > self._STDERR_MAX_BYTES:
                     self._stderr_output = self._stderr_output[-self._STDERR_MAX_BYTES :]
                 logger.debug("Codex stderr [thread=%s]: %s", self._thread_id, decoded)
-        except (asyncio.CancelledError, ConnectionResetError):
+        except ConnectionResetError:
             pass
+        # CancelledError deliberately propagates: swallowing it defeats the
+        # task.cancel() the session lifecycle uses to tear this reader down.
 
     async def _wait_and_log_exit(self) -> None:
         """Wait for process to exit and log diagnostics."""
@@ -270,8 +272,10 @@ class CodexExecutor(BaseExecutor):
             while True:
                 try:
                     line = await self._process.stdout.readline()
-                except (asyncio.CancelledError, ConnectionResetError):
+                except ConnectionResetError:
                     break
+                # CancelledError propagates (not caught): the lifecycle cancels
+                # this task to interrupt the turn, and swallowing it would hang.
 
                 if not line:
                     # EOF — process exited

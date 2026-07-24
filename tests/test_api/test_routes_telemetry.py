@@ -47,7 +47,15 @@ def client(test_app: FastAPI, db_factory: async_sessionmaker[AsyncSession]) -> T
             yield session
 
     test_app.dependency_overrides[get_db_session] = _override
-    return TestClient(test_app)
+    # Telemetry endpoints require the worker API key (router-level dependency);
+    # send it by default so the per-endpoint tests exercise the real handlers.
+    return TestClient(test_app, headers={"X-API-Key": "test-api-key"})
+
+
+class TestTelemetryAuth:
+    def test_summary_requires_api_key(self, client: TestClient) -> None:
+        resp = client.get("/api/telemetry/summary", headers={"X-API-Key": ""})
+        assert resp.status_code == 401
 
 
 class TestGlobalSummary:

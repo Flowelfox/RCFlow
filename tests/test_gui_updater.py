@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import threading
@@ -21,6 +22,7 @@ from src.gui.updater import (
     is_newer,
     normalize_version,
     stream_download,
+    verify_sha256,
 )
 
 if TYPE_CHECKING:
@@ -132,6 +134,69 @@ def test_is_newer(a: str, b: str, expected: bool) -> None:
 )
 def test_asset_suffix(plat: str, arch: str, expected: str | None) -> None:
     assert asset_suffix(plat, arch) == expected
+
+
+# ── verify_sha256 ───────────────────────────────────────────────────────────
+
+
+def _info_with_checksums(url: str, asset_name: str = "rcflow-worker.deb") -> UpdateInfo:
+    return UpdateInfo(
+        version="9.9.9",
+        release_url="https://example/releases",
+        download_url="https://example/rcflow-worker.deb",
+        asset_name=asset_name,
+        asset_size=None,
+        checksums_url=url,
+    )
+
+
+class _FakeUrlopen:
+    """Context-manager stand-in for urllib.request.urlopen returning fixed bytes."""
+
+    def __init__(self, body: bytes) -> None:
+        self._body = body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def read(self) -> bytes:
+        return self._body
+
+
+def test_verify_sha256_accepts_matching_digest(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    dest = tmp_path / "rcflow-worker.deb"
+    dest.write_bytes(b"installer-bytes")
+    digest = hashlib.sha256(b"installer-bytes").hexdigest()
+    monkeypatch.setattr(
+        updater.urllib.request,
+        "urlopen",
+        lambda *a, **k: _FakeUrlopen(f"{digest}  rcflow-worker.deb\n".encode()),
+    )
+    verify_sha256(dest, _info_with_checksums("https://example/SHA256SUMS"))  # no raise
+    assert dest.exists()
+
+
+def test_verify_sha256_rejects_and_deletes_on_mismatch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    dest = tmp_path / "rcflow-worker.deb"
+    dest.write_bytes(b"tampered")
+    monkeypatch.setattr(
+        updater.urllib.request,
+        "urlopen",
+        lambda *a, **k: _FakeUrlopen(b"0" * 64 + b"  rcflow-worker.deb\n"),
+    )
+    with pytest.raises(RuntimeError, match="Checksum mismatch"):
+        verify_sha256(dest, _info_with_checksums("https://example/SHA256SUMS"))
+    assert not dest.exists()  # tampered file removed
+
+
+def test_verify_sha256_fails_closed_without_checksums(tmp_path: Path) -> None:
+    dest = tmp_path / "rcflow-worker.deb"
+    dest.write_bytes(b"x")
+    with pytest.raises(RuntimeError, match="no published checksums"):
+        verify_sha256(dest, _info_with_checksums(""))
 
 
 # ── UpdateService — restore_cached_state ────────────────────────────────────

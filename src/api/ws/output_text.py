@@ -22,7 +22,7 @@ router = APIRouter()
 
 
 @router.websocket("/ws/output/text")
-async def ws_output_text(
+async def ws_output_text(  # noqa: C901
     websocket: WebSocket,
     api_key: str | None = Query(None),
 ) -> None:
@@ -141,6 +141,12 @@ async def ws_output_text(
                 message = json.loads(raw)
             except json.JSONDecodeError:
                 await websocket.send_json({"type": "error", "content": "Invalid JSON", "code": "INVALID_JSON"})
+                continue
+
+            if not isinstance(message, dict):
+                await websocket.send_json(
+                    {"type": "error", "content": "Message must be a JSON object", "code": "INVALID_JSON"}
+                )
                 continue
 
             msg_type = message.get("type")

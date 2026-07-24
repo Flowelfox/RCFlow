@@ -128,6 +128,68 @@ class ConversationTurn:
     stop_reason: str = ""
 
 
+# Anthropic accepts at most 4 content blocks carrying ``cache_control`` per request.
+_MAX_CACHE_CONTROL_BLOCKS = 4
+
+
+def _strip_cache_control_from_message(message: dict[str, Any]) -> dict[str, Any]:
+    """Return *message* with ``cache_control`` removed from every content block.
+
+    Returns the original object unchanged when there is nothing to strip so the
+    common case allocates nothing.
+    """
+    content = message.get("content")
+    if not isinstance(content, list):
+        return message
+    changed = False
+    new_content: list[Any] = []
+    for block in content:
+        if isinstance(block, dict) and "cache_control" in block:
+            block = {k: v for k, v in block.items() if k != "cache_control"}
+            changed = True
+        new_content.append(block)
+    return {**message, "content": new_content} if changed else message
+
+
+def finalize_messages_for_provider(messages: list[dict[str, Any]], provider: str) -> list[dict[str, Any]]:
+    """Make *messages* safe for *provider*'s content-block rules.
+
+    Context blocks (project/#tool/$file/worktree/plan) are tagged with Anthropic's
+    ``cache_control`` and persisted in ``conversation_history``. OpenAI rejects the
+    unknown field outright, and Anthropic 400s once more than four blocks carry it,
+    so this returns a request-only view: OpenAI gets it stripped everywhere;
+    Anthropic keeps only the four most-recent breakpoints. The stored history is
+    never mutated.
+    """
+    if provider == "openai":
+        return [_strip_cache_control_from_message(m) for m in messages]
+
+    positions = [
+        (mi, bi)
+        for mi, m in enumerate(messages)
+        if isinstance(m.get("content"), list)
+        for bi, block in enumerate(m["content"])
+        if isinstance(block, dict) and "cache_control" in block
+    ]
+    if len(positions) <= _MAX_CACHE_CONTROL_BLOCKS:
+        return messages
+    drop = set(positions[:-_MAX_CACHE_CONTROL_BLOCKS])
+    result: list[dict[str, Any]] = []
+    for mi, m in enumerate(messages):
+        content = m.get("content")
+        if not isinstance(content, list) or not any((mi, bi) in drop for bi in range(len(content))):
+            result.append(m)
+            continue
+        new_content = [
+            {k: v for k, v in block.items() if k != "cache_control"}
+            if (mi, bi) in drop and isinstance(block, dict)
+            else block
+            for bi, block in enumerate(content)
+        ]
+        result.append({**m, "content": new_content})
+    return result
+
+
 class LLMClient:
     """L L M Client."""
 
@@ -242,6 +304,10 @@ class LLMClient:
         system: str | None = None,
     ) -> AsyncIterator[LLMStreamEvent]:
         """Stream a single LLM turn, yielding text chunks and tool call requests."""
+        # Reconcile persisted cache_control markers with the target provider's
+        # content-block rules (see finalize_messages_for_provider). Request-only;
+        # the caller's conversation_history is left untouched.
+        messages = finalize_messages_for_provider(messages, self._provider)
         if self._provider == "openai":
             async for event in self._stream_turn_openai(messages, system):
                 yield event
@@ -340,7 +406,7 @@ class LLMClient:
     # OpenAI streaming
     # ------------------------------------------------------------------
 
-    async def _stream_turn_openai(
+    async def _stream_turn_openai(  # noqa: C901
         self,
         messages: list[dict[str, Any]],
         system: str | None = None,

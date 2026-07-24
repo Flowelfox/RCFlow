@@ -640,7 +640,7 @@ class ClaudeCodeAgent:
 
         return resolved.decision if resolved.decision else PermissionDecision.DENY
 
-    async def _relay_claude_code_stream(
+    async def _relay_claude_code_stream(  # noqa: C901
         self,
         session: ActiveSession,
         stream: AsyncGenerator[ExecutionChunk, None],
@@ -1076,7 +1076,7 @@ class ClaudeCodeAgent:
         )
         _ = block  # placeholder — kept for future tool_use_id linkage.
 
-    async def _process_tool_result(
+    async def _process_tool_result(  # noqa: C901
         self,
         session: ActiveSession,
         raw_content: Any,
@@ -1733,6 +1733,9 @@ class ClaudeCodeAgent:
                         "code": "CLAUDE_CODE_UNEXPECTED_EXIT",
                     },
                 )
+            # Tear down the dead SDK client (matches _stream_claude_code_events)
+            # so the next restart_with_prompt reconnects instead of reusing it.
+            await executor.stop_process()
             return
 
         session.buffer.push_text(

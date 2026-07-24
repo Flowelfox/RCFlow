@@ -1,4 +1,3 @@
-import asyncio
 import hmac
 from pathlib import Path
 
@@ -15,20 +14,16 @@ from src.main import create_app
 from src.tools.registry import ToolRegistry
 
 
-@pytest.fixture(scope="session")
-def event_loop():
-    loop = asyncio.new_event_loop()
-    yield loop
-    loop.close()
-
-
 @pytest.fixture
 def test_settings() -> Settings:
     return Settings(
         RCFLOW_HOST="127.0.0.1",
         RCFLOW_PORT=8765,
         RCFLOW_API_KEY="test-api-key",
-        DATABASE_URL="postgresql+asyncpg://test:test@localhost:5432/rcflow_test",
+        # In-memory SQLite: route tests use their own db_factory; this just needs
+        # to be a valid URL the app accepts (the phantom Postgres URL required a
+        # dep + live DB no test actually used).
+        DATABASE_URL="sqlite+aiosqlite://",
         LLM_PROVIDER="anthropic",
         ANTHROPIC_API_KEY="test-anthropic-key",
         ANTHROPIC_MODEL="claude-sonnet-4-6",

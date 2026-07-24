@@ -58,7 +58,16 @@ class WakeupScheduler:
         delay = max(0.0, (wake.fire_at - datetime.now(UTC)).total_seconds())
         task = asyncio.create_task(self._sleep_then_fire(session_id, wake, delay))
         self._tasks[wake.wake_id] = task
-        task.add_done_callback(lambda _t: self._tasks.pop(wake.wake_id, None))
+
+        # Identity-check on cleanup: a re-arm cancels the old task and stores a
+        # new one under the same key. The old task's done-callback must NOT pop
+        # the replacement — otherwise the live timer becomes untracked and
+        # ``cancel(wake_id)`` silently no-ops.
+        def _cleanup(t: asyncio.Task[None], wid: str = wake.wake_id) -> None:
+            if self._tasks.get(wid) is t:
+                del self._tasks[wid]
+
+        task.add_done_callback(_cleanup)
 
     def cancel(self, wake_id: str) -> None:
         """Cancel the timer for *wake_id* (no-op if not armed)."""

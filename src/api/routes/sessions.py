@@ -454,7 +454,7 @@ _SORT_ORDER_GAP = 1000
     ),
     dependencies=[Depends(verify_http_api_key)],
 )
-async def reorder_session(
+async def reorder_session(  # noqa: C901
     session_id: str,
     body: ReorderSessionRequest,
     request: Request,

@@ -28,10 +28,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession  # noqa: TC002
 
+from src.api.deps import verify_http_api_key
 from src.database.engine import get_db_session
 from src.database.models import SessionTurn, TelemetryMinutely, ToolCall
 
-router = APIRouter(prefix="/telemetry", tags=["Telemetry"])
+router = APIRouter(prefix="/telemetry", tags=["Telemetry"], dependencies=[Depends(verify_http_api_key)])
 
 
 def _backend_id(request: Request) -> str:
@@ -101,9 +102,9 @@ async def get_global_summary(
         SessionTurn.interrupted.is_(False),
     )
     llm_durations = [r[0] for r in (await db.execute(llm_dur_stmt)).all()]
-    avg_llm_ms = _p95_ms(llm_durations[: max(0, len(llm_durations) - int(len(llm_durations) * 0.05))])
-    if llm_durations:
-        avg_llm_ms = round(sum(llm_durations) / len(llm_durations), 2)
+    # Plain average; the previous _p95_ms(...) line was dead — always overwritten
+    # here when non-empty, and _p95_ms([]) is None for the empty case anyway.
+    avg_llm_ms = round(sum(llm_durations) / len(llm_durations), 2) if llm_durations else None
 
     # Tool stats
     tool_stmt = (

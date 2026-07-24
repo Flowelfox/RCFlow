@@ -196,8 +196,10 @@ class OpenCodeExecutor(BaseExecutor):
                 if len(self._stderr_output) > self._STDERR_MAX_BYTES:
                     self._stderr_output = self._stderr_output[-self._STDERR_MAX_BYTES :]
                 logger.debug("OpenCode stderr [session=%s]: %s", self._session_id, decoded)
-        except (asyncio.CancelledError, ConnectionResetError):
+        except ConnectionResetError:
             pass
+        # CancelledError deliberately propagates so task.cancel() tears the
+        # reader down instead of being silently swallowed.
 
     async def _wait_and_log_exit(self) -> None:
         """Wait for process to exit and log diagnostics."""
@@ -281,8 +283,9 @@ class OpenCodeExecutor(BaseExecutor):
             while True:
                 try:
                     line = await self._process.stdout.readline()
-                except (asyncio.CancelledError, ConnectionResetError):
+                except ConnectionResetError:
                     break
+                # CancelledError propagates so the lifecycle can interrupt the turn.
 
                 if not line:
                     self._done = True

@@ -212,6 +212,11 @@ class PromptRouter:
             WakeupScheduler(self._fire_pending_wakeup) if wakeup_store is not None else None
         )
         self._drain_tasks: set[asyncio.Task[None]] = set()
+        # Session ids with a drain loop currently in flight. Guarantees at most
+        # one ``_drain_one`` per session so two schedule calls (e.g. the turn-end
+        # hook plus a concurrent enqueue) can't both deliver the same queued
+        # message. The running loop drains the whole queue, so nothing is missed.
+        self._draining_sessions: set[str] = set()
         # Holds strong references to in-flight ``handle_prompt`` tasks created
         # by the WebSocket input handler. Without this, the only reference to
         # the task is a local set in the handler — if the client disconnects
@@ -532,7 +537,7 @@ class PromptRouter:
                 return resolved
         return shutil.which(binary_name)
 
-    def _get_executor(self, executor_type: str, tool_def: ToolDefinition | None = None) -> BaseExecutor:
+    def _get_executor(self, executor_type: str, tool_def: ToolDefinition | None = None) -> BaseExecutor:  # noqa: C901
         # Claude Code executors are always created fresh (one per session)
         if executor_type == "claude_code":
             binary_path = "claude"
@@ -1204,73 +1209,75 @@ class PromptRouter:
                 len(session.pending_user_messages),
             )
             return
+        if session.id in self._draining_sessions:
+            # A drain loop is already running for this session; it drains the
+            # whole queue, so a second task would only race to double-deliver.
+            return
         logger.info(
             "schedule_pending_drain: dispatching drain (session=%s, queue_len=%d)",
             session.id,
             len(session.pending_user_messages),
         )
+        self._draining_sessions.add(session.id)
         task = asyncio.create_task(self._drain_one(session))
         self._drain_tasks.add(task)
         task.add_done_callback(self._drain_tasks.discard)
+        task.add_done_callback(lambda _t, sid=session.id: self._draining_sessions.discard(sid))
 
     async def _drain_one(self, session: ActiveSession) -> None:
-        """Deliver a single queued message (internal — called by ``schedule_pending_drain``)."""
-        if self._pending_store is None or not session.pending_user_messages:
-            return
-        head = session.pending_user_messages[0]
-        logger.info("_drain_one: start (session=%s, queued_id=%s)", session.id, head.queued_id)
-        try:
-            attachments = await asyncio.to_thread(SessionPendingMessageStore.rehydrate_attachments, head)
-        except OSError as e:
-            logger.warning("Failed to rehydrate queued attachments for %s: %s", head.queued_id, e)
-            attachments = []
-        # Remove the row + disk bytes; emits ``message_dequeued``.
-        await self._pending_store.pop_head(session)
-        logger.info("_drain_one: popped head (session=%s, queued_id=%s)", session.id, head.queued_id)
-        try:
-            await self.handle_prompt(
-                text=head.content,
-                session_id=session.id,
-                attachments=attachments or None,
-                project_name=head.project_name,
-                selected_worktree_path=head.selected_worktree_path,
-                task_id=head.task_id,
-                display_text=head.display_content,
-                queued_id=head.queued_id,
-            )
-        except Exception:
-            logger.exception(
-                "Failed to deliver drained queued message %s for session %s",
-                head.queued_id,
-                session.id,
-            )
-            # Surface the failure to the user instead of leaving the message
-            # silently disappeared from the queue.
-            session.buffer.push_text(
-                MessageType.ERROR,
-                {
-                    "session_id": session.id,
-                    "content": (
-                        "Failed to deliver a queued message — please resend it. Backend logs have the full traceback."
-                    ),
-                    "code": "QUEUED_MESSAGE_DELIVERY_FAILED",
-                },
-            )
-            return
+        """Deliver queued messages one at a time until the queue drains or the session is busy.
 
-        logger.info("_drain_one: handle_prompt done (session=%s, queued_id=%s)", session.id, head.queued_id)
-
-        # Self-propel through multi-message queues: if more messages are still
-        # queued and the session is now idle, schedule the next drain instead
-        # of waiting for the next turn-end hook.  Single-message case (the one
-        # this fix targets) is unaffected — the queue is empty after one pop.
-        if session.pending_user_messages and not session.is_busy_for_queue():
-            logger.info(
-                "_drain_one: scheduling follow-up drain (session=%s, queue_len=%d)",
-                session.id,
-                len(session.pending_user_messages),
-            )
-            self.schedule_pending_drain(session)
+        Guarded by ``_draining_sessions`` so exactly one of these runs per
+        session. Each iteration delivers *exactly the message it pops* — the
+        pop is the atomic claim, so a message is never delivered twice nor
+        silently dropped even if a second drain were somehow scheduled.
+        """
+        if self._pending_store is None:
+            return
+        while session.pending_user_messages and not session.is_busy_for_queue():
+            # Remove the row + disk bytes first; emits ``message_dequeued`` and
+            # returns exactly the message removed (None if the queue emptied).
+            head = await self._pending_store.pop_head(session)
+            if head is None:
+                break
+            logger.info("_drain_one: popped head (session=%s, queued_id=%s)", session.id, head.queued_id)
+            try:
+                attachments = await asyncio.to_thread(SessionPendingMessageStore.rehydrate_attachments, head)
+            except OSError as e:
+                logger.warning("Failed to rehydrate queued attachments for %s: %s", head.queued_id, e)
+                attachments = []
+            try:
+                await self.handle_prompt(
+                    text=head.content,
+                    session_id=session.id,
+                    attachments=attachments or None,
+                    project_name=head.project_name,
+                    selected_worktree_path=head.selected_worktree_path,
+                    task_id=head.task_id,
+                    display_text=head.display_content,
+                    queued_id=head.queued_id,
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to deliver drained queued message %s for session %s",
+                    head.queued_id,
+                    session.id,
+                )
+                # Surface the failure to the user instead of leaving the message
+                # silently disappeared from the queue.
+                session.buffer.push_text(
+                    MessageType.ERROR,
+                    {
+                        "session_id": session.id,
+                        "content": (
+                            "Failed to deliver a queued message — please resend it. "
+                            "Backend logs have the full traceback."
+                        ),
+                        "code": "QUEUED_MESSAGE_DELIVERY_FAILED",
+                    },
+                )
+                return
+            logger.info("_drain_one: handle_prompt done (session=%s, queued_id=%s)", session.id, head.queued_id)
 
     async def _fire_pending_wakeup(self, session_id: str, wake) -> None:
         """Handle a pending wake fired by the :class:`WakeupScheduler`.
@@ -1304,7 +1311,7 @@ class PromptRouter:
                 wake.wake_id,
             )
 
-    async def handle_prompt(
+    async def handle_prompt(  # noqa: C901
         self,
         text: str,
         session_id: str | None = None,
@@ -1403,6 +1410,28 @@ class PromptRouter:
             # legacy "just resume and proceed" path so we don't drop the
             # prompt entirely.
             await self.resume_session(resolved_id)
+
+        # Busy short-circuit (sessions.md): if a turn is already in flight for
+        # this session and this is NOT a drain delivery, enqueue instead of
+        # forwarding. Forwarding to a live Claude Code executor cancels its
+        # streaming turn (a ScheduleWakeup firing mid-turn), and two concurrent
+        # LLM turns would interleave. This is the root-cause guard covering both
+        # WS callers (whose pre-check races) and internal callers (wake, e2e)
+        # that bypass the WS enqueue path. Drain deliveries (queued_id set) and
+        # paused sessions (handled above) are exempt.
+        if queued_id is None and session.status != SessionStatus.PAUSED and session.is_busy_for_queue():
+            qid = await self.enqueue_user_prompt(
+                session,
+                text=text,
+                display_text=display_text,
+                attachments=attachments,
+                project_name=project_name,
+                selected_worktree_path=selected_worktree_path,
+                task_id=task_id,
+            )
+            if qid is not None:
+                return session.id
+            # Pending store unavailable — fall through to legacy direct handling.
 
         # Check session token limits before processing
         if self._check_token_limit_exceeded(session):

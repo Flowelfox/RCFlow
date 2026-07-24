@@ -38,7 +38,7 @@ def _build_pr_assist_title(pr_info: dict, kind: str) -> str:
 
 
 @router.websocket("/ws/input/text")
-async def ws_input_text(
+async def ws_input_text(  # noqa: C901
     websocket: WebSocket,
     api_key: str | None = Query(None),
 ) -> None:
@@ -95,6 +95,14 @@ async def ws_input_text(
                 message = json.loads(raw)
             except json.JSONDecodeError:
                 await websocket.send_json({"type": "error", "content": "Invalid JSON", "code": "INVALID_JSON"})
+                continue
+
+            if not isinstance(message, dict):
+                # Valid JSON but not an object (bare string/array/number) — reject
+                # instead of crashing the connection on the .get() calls below.
+                await websocket.send_json(
+                    {"type": "error", "content": "Message must be a JSON object", "code": "INVALID_JSON"}
+                )
                 continue
 
             msg_type = message.get("type")
@@ -197,7 +205,7 @@ async def ws_input_text(
                 # AskUserQuestion tool answer.
                 answers = message.get("answers")
                 answers_map = {str(k): str(v) for k, v in answers.items()} if isinstance(answers, dict) else None
-                answer_text = message.get("text", "")
+                answer_text = message.get("text") or ""
                 if not answer_text and answers_map:
                     answer_text = "\n".join(f"{k}: {v}" for k, v in answers_map.items())
                 if not answer_text and not answers_map:
@@ -219,7 +227,7 @@ async def ws_input_text(
                         {"type": "error", "content": "Missing session_id", "code": "MISSING_SESSION_ID"}
                     )
                     continue
-                ir_text = message.get("text", "").strip()
+                ir_text = (message.get("text") or "").strip()
                 if not ir_text:
                     await websocket.send_json({"type": "error", "content": "Empty response", "code": "EMPTY_RESPONSE"})
                     continue
@@ -568,7 +576,7 @@ async def ws_input_text(
                 )
                 continue
 
-            text = message.get("text", "").strip()
+            text = (message.get("text") or "").strip()
             if not text:
                 await websocket.send_json({"type": "error", "content": "Empty prompt", "code": "EMPTY_PROMPT"})
                 continue

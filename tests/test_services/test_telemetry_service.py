@@ -14,9 +14,14 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
 
 from src.api.routes.telemetry import router as telemetry_router
 from src.database.engine import get_db_session
+from src.database.models import Base, SessionTurn, TelemetryMinutely
+from src.database.models import Session as SessionModel
 from src.services.telemetry_service import TelemetryService
 
 # ---------------------------------------------------------------------------
@@ -238,6 +243,11 @@ def _make_telemetry_app(backend_id: str = "test-backend") -> FastAPI:
     settings.RCFLOW_API_KEY = "test-key"
     app.state.settings = settings
     app.include_router(telemetry_router, prefix="/api")
+    # These tests exercise the aggregation logic, not auth — bypass the
+    # router-level API-key dependency the telemetry router now carries.
+    from src.api.deps import verify_http_api_key  # noqa: PLC0415
+
+    app.dependency_overrides[verify_http_api_key] = lambda: "test-key"
     return app
 
 
@@ -591,3 +601,88 @@ class TestRecordToolStartFKGuard:
             executor_type="direct",
         )
         assert tc.session_id == SESSION_ID
+
+
+# ---------------------------------------------------------------------------
+# Aggregation watermark: persistence + idempotency across restart
+# ---------------------------------------------------------------------------
+
+
+class TestAggregationIdempotency:
+    """The minutely rollup must not re-count history when the worker restarts."""
+
+    async def _seed_and_factory(self, tmp_path):
+        engine = create_async_engine(
+            "sqlite+aiosqlite://",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        factory = async_sessionmaker(engine, expire_on_commit=False)
+
+        sid = uuid.uuid4()
+        start = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
+        end = datetime(2026, 1, 1, 12, 0, 30, tzinfo=UTC)
+        async with factory() as db:
+            db.add(
+                SessionModel(
+                    id=sid,
+                    backend_id="be-1",
+                    created_at=start,
+                    session_type="conversational",
+                    status="completed",
+                    metadata_={},
+                )
+            )
+            db.add(
+                SessionTurn(
+                    id=uuid.uuid4(),
+                    session_id=sid,
+                    backend_id="be-1",
+                    turn_index=0,
+                    ts_start=start,
+                    ts_end=end,
+                    llm_duration_ms=30_000,
+                    input_tokens=1000,
+                    output_tokens=500,
+                    interrupted=False,
+                )
+            )
+            await db.commit()
+        return engine, factory
+
+    async def _global_totals(self, factory) -> tuple[int, int, int]:
+        async with factory() as db:
+            rows = (
+                (await db.execute(select(TelemetryMinutely).where(TelemetryMinutely.session_id.is_(None))))
+                .scalars()
+                .all()
+            )
+        return (
+            sum(r.tokens_sent for r in rows),
+            sum(r.tokens_received for r in rows),
+            sum(r.turn_count for r in rows),
+        )
+
+    @pytest.mark.asyncio
+    async def test_restart_does_not_double_count(self, tmp_path):
+        engine, factory = await self._seed_and_factory(tmp_path)
+        try:
+            # First worker: aggregate the one completed turn.
+            svc1 = TelemetryService(db_factory=factory, backend_id="be-1")
+            await svc1.aggregate_pending()
+            assert await self._global_totals(factory) == (1000, 500, 1)
+
+            # Simulate a restart: a brand-new service (fresh in-memory watermark)
+            # sharing the same database. Without the persisted watermark this
+            # re-adds the same turn's deltas.
+            svc2 = TelemetryService(db_factory=factory, backend_id="be-1")
+            await svc2.aggregate_pending()
+            assert await self._global_totals(factory) == (1000, 500, 1)
+
+            # And a second pass in the same process is still idempotent.
+            await svc2.aggregate_pending()
+            assert await self._global_totals(factory) == (1000, 500, 1)
+        finally:
+            await engine.dispose()

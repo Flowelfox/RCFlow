@@ -1,12 +1,15 @@
 """Application entry point: builds the FastAPI app and wires services."""
 
 import asyncio
+import hmac
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 
+from src.api.deps import verify_http_api_key
 from src.api.http import router as http_router
 from src.api.integrations.github import router as github_router
 from src.api.integrations.linear import router as linear_router
@@ -37,7 +40,7 @@ logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
+async def lifespan(app: FastAPI) -> AsyncGenerator[None]:  # noqa: C901
     """Application lifespan: startup and shutdown logic."""
     settings = get_settings()
     setup_logging(settings)
@@ -448,14 +451,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     yield
 
     # Shutdown
-    telemetry_task.cancel()
-    update_task.cancel()
-    reaper_task.cancel()
-    if flush_task is not None:
-        flush_task.cancel()
-    if usage_task is not None:
-        usage_task.cancel()
     logger.info("Shutting down RCFlow server")
+    # Cancel the periodic loops AND await them before touching the DB: the flush
+    # loop can be mid-flush holding an AsyncSession, and any in-flight task that
+    # keeps writing after we dispose the engine would raise. Cancellation is only
+    # delivered at the task's next await, so we must actually wait for them.
+    shutdown_tasks = [telemetry_task, update_task, reaper_task, flush_task, usage_task, *_bg_tasks]
+    for _task in shutdown_tasks:
+        if _task is not None:
+            _task.cancel()
+    await asyncio.gather(*(t for t in shutdown_tasks if t is not None), return_exceptions=True)
     await terminal_manager.close_all()
     await prompt_router.cancel_pending_tasks()
     if llm_client is not None:
@@ -480,6 +485,25 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     logger.info("RCFlow server stopped")
 
 
+def _resolve_app_version() -> str:
+    """Resolve the backend version for the OpenAPI schema.
+
+    Reads the installed package metadata, falling back to the frozen build's
+    VERSION file, then a placeholder — so the docs never report a stale hardcode.
+    """
+    from importlib.metadata import PackageNotFoundError, version  # noqa: PLC0415
+
+    from src.paths import get_install_dir  # noqa: PLC0415
+
+    try:
+        return version("rcflow")
+    except PackageNotFoundError:
+        version_file = get_install_dir() / "VERSION"
+        if version_file.exists():
+            return version_file.read_text(encoding="utf-8").strip()
+        return "0.0.0"
+
+
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application.
 
@@ -491,7 +515,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="RCFlow",
         description="WebSocket action server: natural language prompts to tool executions via LLM",
-        version="0.1.0",
+        version=_resolve_app_version(),
         lifespan=lifespan,
         docs_url="/docs" if docs_enabled else None,
         redoc_url="/redoc" if docs_enabled else None,
@@ -505,6 +529,34 @@ def create_app() -> FastAPI:
     app.include_router(input_text_router)
     app.include_router(output_text_router)
     app.include_router(terminal_router)
+
+    # Default-deny auth for the REST surface. Per-route ``verify_http_api_key``
+    # dependencies remain (defense in depth), but this middleware guarantees a
+    # forgotten decorator can never ship an open endpoint — the class of bug
+    # that shipped the unauthenticated telemetry router.
+    #
+    # Public exceptions: /api/health (liveness), /api/mcp/* (own per-session
+    # X-RCFlow-MCP-Token). WebSocket handshakes use a "websocket" ASGI scope
+    # and bypass HTTP middleware, so they keep their existing WS auth.
+    _public_paths = frozenset({"/api/health"})
+    _public_prefixes = ("/api/mcp",)
+
+    @app.middleware("http")
+    async def _enforce_api_key(request: Request, call_next):  # type: ignore[no-untyped-def]
+        path = request.url.path
+        if (
+            request.method != "OPTIONS"
+            and path.startswith("/api/")
+            and path not in _public_paths
+            and not path.startswith(_public_prefixes)
+            # Tests disable auth by overriding this dependency — honour that here.
+            and verify_http_api_key not in app.dependency_overrides
+        ):
+            settings = getattr(request.app.state, "settings", None) or get_settings()
+            key = request.headers.get("X-API-Key", "")
+            if not hmac.compare_digest(key, settings.RCFLOW_API_KEY):
+                return JSONResponse({"detail": "Invalid API key"}, status_code=401)
+        return await call_next(request)
 
     return app
 

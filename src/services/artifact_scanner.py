@@ -141,18 +141,26 @@ class ArtifactScanner:
         session_row = await db.get(SessionModel, session_id)
         safe_session_id: uuid.UUID | None = session_id if session_row is not None else None
 
-        art_stmt = select(Artifact).where(Artifact.backend_id == self.backend_id)
-        art_result = await db.execute(art_stmt)
-        existing_artifacts = {a.file_path: a for a in art_result.scalars()}
-
+        # Resolve candidates first, then load ONLY the matching artifact rows.
+        # The previous ``select(Artifact).where(backend_id == ...)`` materialised
+        # the entire backend's artifact table on every per-turn scan — an
+        # O(total-artifacts-ever) query for what is usually a handful of paths.
+        resolved_paths: list[Path] = []
         for raw_path in candidate_paths:
             file_path = self._resolve_path(raw_path, project_path)
-            if file_path is None:
+            if file_path is None or not self._should_include_file(file_path):
                 continue
+            resolved_paths.append(file_path)
+        if not resolved_paths:
+            return 0, 0
 
-            if not self._should_include_file(file_path):
-                continue
+        art_stmt = select(Artifact).where(
+            Artifact.backend_id == self.backend_id,
+            Artifact.file_path.in_([str(p) for p in resolved_paths]),
+        )
+        existing_artifacts = {a.file_path: a for a in (await db.execute(art_stmt)).scalars()}
 
+        for file_path in resolved_paths:
             try:
                 stat = file_path.stat()
                 file_size = stat.st_size

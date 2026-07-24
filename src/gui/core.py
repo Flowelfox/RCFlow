@@ -682,7 +682,7 @@ class ServerManager:
                 line = raw.rstrip("\n\r")
                 if line:
                     self._log.append(line)
-        except Exception:
+        except Exception:  # noqa: S110 best-effort cleanup
             pass
 
 

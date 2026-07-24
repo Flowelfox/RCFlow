@@ -315,6 +315,20 @@ class TestClaudeCodeLoginCode:
         assert resp.status_code == 502
         assert "no access_token" in resp.json()["detail"]
 
+    def test_state_mismatch_rejected(self, client: TestClient, test_app: FastAPI) -> None:
+        # A returned state that does not match the issued state is a CSRF signal:
+        # reject before exchanging the code, and do not consume the verifier.
+        test_app.state._claude_login_verifier = "v"
+        test_app.state._claude_login_state = "s"
+        resp = client.post(
+            "/api/tools/claude_code/login/code",
+            json={"code": "thecode#wrongstate"},
+            headers=_auth(),
+        )
+        assert resp.status_code == 400
+        assert "state mismatch" in resp.json()["detail"].lower()
+        assert test_app.state._claude_login_verifier == "v"
+
     def test_success_writes_credentials(
         self, client: TestClient, test_app: FastAPI, monkeypatch: pytest.MonkeyPatch, tmp_path
     ) -> None:
@@ -331,7 +345,7 @@ class TestClaudeCodeLoginCode:
 
         resp = client.post(
             "/api/tools/claude_code/login/code",
-            json={"code": "thecode#thestate"},
+            json={"code": "thecode#s"},  # returned state must match the stored state
             headers=_auth(),
         )
         assert resp.status_code == 200

@@ -128,6 +128,27 @@ class TestInvalidJson:
 
         assert data["type"] == "linear_issue_list"
 
+    def test_valid_json_non_object_returns_error(self, client: TestClient) -> None:
+        """Valid JSON that is not an object (array/number/string) must not crash the socket."""
+        with client.websocket_connect(_ws_url()) as ws:
+            ws.send_text("[1, 2, 3]")
+            data = ws.receive_json()
+            assert data["type"] == "error"
+            assert data["code"] == "INVALID_JSON"
+            # connection still alive
+            ws.send_json({"type": "list_linear_issues"})
+            assert ws.receive_json()["type"] == "linear_issue_list"
+
+    def test_prompt_with_null_text_does_not_crash(self, client: TestClient) -> None:
+        """A prompt whose text is explicitly null must not raise None.strip()."""
+        with client.websocket_connect(_ws_url()) as ws:
+            ws.send_json({"type": "prompt", "text": None})
+            data = ws.receive_json()
+            # Empty text → EMPTY_PROMPT error, not a torn-down connection.
+            assert data["type"] == "error"
+            ws.send_json({"type": "list_linear_issues"})
+            assert ws.receive_json()["type"] == "linear_issue_list"
+
 
 # ---------------------------------------------------------------------------
 # Empty prompt

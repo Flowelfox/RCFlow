@@ -382,6 +382,11 @@ class ClaudeCodeSdkExecutor(BaseExecutor):
     # -- streaming ------------------------------------------------------
 
     async def _ensure_client(self, options: ClaudeAgentOptions) -> ClaudeSDKClient:
+        # If the previous client died (stream ended / EOF set _connected=False
+        # without clearing _client), tear it down first — otherwise this returned
+        # the dead client and the next turn hung forever, breaking crash-resume.
+        if self._client is not None and not self._connected:
+            await self._disconnect()
         if self._client is None:
             self._client = ClaudeSDKClient(options=options)
             await self._client.connect()

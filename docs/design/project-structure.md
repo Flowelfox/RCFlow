@@ -1,5 +1,5 @@
 ---
-updated: 2026-07-08
+updated: 2026-07-23
 ---
 
 # Project Structure
@@ -40,9 +40,7 @@ RCFlow/
 │   ├── __init__.py
 │   ├── main.py                  # Entry point, FastAPI app, lifespan
 │   ├── config.py                # Settings loaded from env vars
-│   │
-│   ├── cli/
-│   │   └── __init__.py
+│   ├── __main__.py              # `rcflow` CLI entry point (run/gui/service/api-key/…)
 │   │
 │   ├── api/
 │   │   ├── __init__.py
@@ -104,14 +102,14 @@ RCFlow/
 │   │   └── templates/
 │   │       └── system_prompt.j2    # System prompt in Jinja2 format
 │   │
-│   ├── models/
-│   │   ├── __init__.py
-│   │   └── db.py                # SQLAlchemy models
-│   │
-│   ├── db/
+│   ├── database/
 │   │   ├── __init__.py
 │   │   ├── engine.py            # Async engine and session factory
+│   │   ├── models/              # One file per SQLAlchemy model (session, task, telemetry, …)
 │   │   └── migrations/          # Alembic migrations
+│   │
+│   ├── terminal/                # PTY session manager (/ws/terminal)
+│   ├── gui/                     # Worker dashboard + tray (CustomTkinter; macOS/Linux/Windows)
 │   │
 │   └── tools/
 │       ├── __init__.py

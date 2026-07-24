@@ -20,6 +20,29 @@ from src.paths import get_managed_tools_dir
 
 logger = logging.getLogger(__name__)
 
+
+def _atomic_write_secret_json(settings_path: Path, data: dict[str, Any]) -> None:
+    """Atomically write *data* as JSON to *settings_path* with owner-only perms.
+
+    Managed tool settings files hold provider API keys, so the parent directory
+    is created 0700 and the file 0600 — a default umask (022) would otherwise
+    leave secrets world-readable.
+    """
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    os.chmod(settings_path.parent, 0o700)
+    tmp_path = settings_path.with_suffix(".tmp")
+    payload = json.dumps(data, indent=2) + "\n"
+    tmp_path.unlink(missing_ok=True)
+    fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(payload)
+        os.replace(tmp_path, settings_path)
+    except Exception:
+        tmp_path.unlink(missing_ok=True)
+        raise
+
+
 # Keys related to provider configuration (used for env sync detection).
 _PROVIDER_KEYS = frozenset(
     {
@@ -40,10 +63,14 @@ _CODEX_PROVIDER_KEYS = frozenset(
 )
 
 # Keys related to OpenCode provider configuration (used for env sync detection).
+# ``openai_api_key`` MUST be here: the OpenCode schema and env sync both use it,
+# and without it a key-only update never rebuilds the ``env`` section, so a fresh
+# or rotated key never reaches the OpenCode subprocess.
 _OPENCODE_PROVIDER_KEYS = frozenset(
     {
         "provider",
         "opencode_api_key",
+        "openai_api_key",
     }
 )
 
@@ -800,17 +827,10 @@ class ToolSettingsManager:
 
         rel = _TOOL_CONFIG_PATHS[tool_name]
         settings_path = self._base_dir / rel
-        settings_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp_path = settings_path.with_suffix(".tmp")
-        try:
-            tmp_path.write_text(json.dumps(current, indent=2) + "\n")
-            tmp_path.replace(settings_path)
-            logger.info("Seeded default permissions into managed Claude Code settings")
-        except Exception:
-            tmp_path.unlink(missing_ok=True)
-            raise
+        _atomic_write_secret_json(settings_path, current)
+        logger.info("Seeded default permissions into managed Claude Code settings")
 
-    def update_settings(self, tool_name: str, updates: dict[str, Any], *, managed: bool = True) -> dict[str, Any]:
+    def update_settings(self, tool_name: str, updates: dict[str, Any], *, managed: bool = True) -> dict[str, Any]:  # noqa: C901
         """Validate keys, apply updates, write atomically, return schema+values.
 
         When *managed* is False, keys marked ``managed_only`` are rejected.
@@ -889,14 +909,6 @@ class ToolSettingsManager:
         rel = _TOOL_CONFIG_PATHS.get(tool_name)
         assert rel is not None  # noqa: S101
         settings_path = self._base_dir / rel
-        settings_path.parent.mkdir(parents=True, exist_ok=True)
-
-        tmp_path = settings_path.with_suffix(".tmp")
-        try:
-            tmp_path.write_text(json.dumps(current, indent=2) + "\n")
-            tmp_path.replace(settings_path)
-        except Exception:
-            tmp_path.unlink(missing_ok=True)
-            raise
+        _atomic_write_secret_json(settings_path, current)
 
         return self.get_settings_with_schema(tool_name, managed=managed)

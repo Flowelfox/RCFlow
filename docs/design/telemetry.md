@@ -1,5 +1,5 @@
 ---
-updated: 2026-04-26
+updated: 2026-07-23
 ---
 
 # Telemetry Subsystem
@@ -30,7 +30,11 @@ All calls are best-effort: exceptions are logged but never propagated so telemet
 
 ## Phase 2 — Minutely Aggregation
 
-A background task (`_run_telemetry_loop` in `main.py`) calls `aggregate_pending()` every 60 seconds. The aggregator reads all `session_turns` and `tool_calls` rows with `ts_start > watermark` and upserts into `telemetry_minutely` — one row per `(backend_id, bucket, session_id)` pair plus a global `session_id=NULL` rollup. Sums maintained per bucket: `tokens_sent`, `tokens_received`, `cache_creation`, `cache_read`, `llm_duration_sum_us`, `llm_duration_count`, `tool_duration_sum_us`, `tool_duration_count`, `turn_count`, `tool_call_count`, `error_count`, `parallel_tool_calls`. The watermark is an in-memory datetime; on restart, aggregation re-processes all completed rows (idempotent upserts prevent duplicate inflation).
+A background task (`_run_telemetry_loop` in `main.py`) calls `aggregate_pending()` every 60 seconds. The aggregator reads `session_turns` and `tool_calls` rows with `ts_end > watermark` and upserts into `telemetry_minutely` — one row per `(backend_id, bucket, session_id)` pair plus a global `session_id=NULL` rollup. Sums maintained per bucket: `tokens_sent`, `tokens_received`, `cache_creation`, `cache_read`, `llm_duration_sum_us`, `llm_duration_count`, `tool_duration_sum_us`, `tool_duration_count`, `turn_count`, `tool_call_count`, `error_count`, `parallel_tool_calls`.
+
+The `telemetry_minutely` upserts are **additive** (not idempotent), so the aggregation watermark is **persisted** in the `telemetry_state` table (one row per backend, `aggregation_watermark`) and loaded on startup. This prevents a restart from re-adding already-counted history. The watermark is advanced on `ts_end` (the completion time) — not `ts_start` — so a turn that began before the watermark but finished after it is still counted exactly once.
+
+All four `/api/telemetry/*` endpoints require the worker API key (router-level dependency).
 
 ## Phase 3 — Retention Cleanup
 

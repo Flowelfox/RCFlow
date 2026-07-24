@@ -77,7 +77,10 @@ class SessionLifecycle:
 
     async def _drop_pending_on_session_end(self, session: ActiveSession, *, reason: str) -> None:
         """Drop any queued user messages when the session reaches a terminal state."""
-        store = getattr(self, "_pending_store", None)
+        # The stores live on the router, not on this collaborator (which only
+        # holds ``self._r``); reading them off ``self`` silently returned None,
+        # making clear-on-end a no-op that leaked queued messages and wakes.
+        store = self._r._pending_store
         if store is None or not session.pending_user_messages:
             return
         try:
@@ -87,8 +90,8 @@ class SessionLifecycle:
 
     async def _drop_wakes_on_session_end(self, session: ActiveSession, *, reason: str) -> None:
         """Cancel any pending ``ScheduleWakeup`` callbacks on session end."""
-        store = getattr(self, "_wakeup_store", None)
-        scheduler = getattr(self, "_wakeup_scheduler", None)
+        store = self._r._wakeup_store
+        scheduler = self._r._wakeup_scheduler
         if store is None or not session.scheduled_wakes:
             return
         wake_ids = [w.wake_id for w in session.scheduled_wakes]
@@ -179,7 +182,7 @@ class SessionLifecycle:
             session = self._r._session_manager.create_session(SessionType.CONVERSATIONAL)
         return session.id
 
-    async def cancel_session(self, session_id: str) -> ActiveSession:
+    async def cancel_session(self, session_id: str) -> ActiveSession:  # noqa: C901
         """Cancel a running session, killing any active subprocess.
 
         Returns the cancelled session.
@@ -781,7 +784,7 @@ class SessionLifecycle:
             session._question_tool_use_id = None
             session._question_event.set()
 
-    async def resume_session(self, session_id: str) -> ActiveSession:
+    async def resume_session(self, session_id: str) -> ActiveSession:  # noqa: C901
         """Resume a paused session.
 
         The client can subscribe to the session's output channel to receive

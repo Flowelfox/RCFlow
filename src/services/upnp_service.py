@@ -125,12 +125,36 @@ def _ssdp_search_igd(timeout_seconds: float) -> list[str]:
     return locations
 
 
+def _is_safe_ssdp_location(url: str) -> bool:
+    """Return True only for an http(s) URL whose host is a private/LAN IP literal.
+
+    SSDP responses arrive as unauthenticated UDP from any device on the LAN and
+    are trivially spoofable, so a hostile responder controls the ``LOCATION`` we
+    subsequently fetch. Restricting to http(s) with a private/loopback/link-local
+    IP literal blocks ``file://`` reads and SSRF to arbitrary external hosts.
+    """
+    import ipaddress  # noqa: PLC0415
+    from urllib.parse import urlsplit  # noqa: PLC0415
+
+    parts = urlsplit(url)
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        return False
+    try:
+        ip = ipaddress.ip_address(parts.hostname)
+    except ValueError:
+        # A LAN gateway's SSDP LOCATION is an IP literal; a hostname would force
+        # a DNS lookup that is itself an SSRF vector, so reject it.
+        return False
+    return ip.is_private or ip.is_loopback or ip.is_link_local
+
+
 def _parse_ssdp_location(raw: bytes) -> str | None:
-    """Extract the ``LOCATION`` header from a raw SSDP response datagram."""
+    """Extract a validated ``LOCATION`` header from a raw SSDP response datagram."""
     text = raw.decode("utf-8", errors="replace")
     for line in text.splitlines():
         if line.lower().startswith("location:"):
-            return line.split(":", 1)[1].strip()
+            location = line.split(":", 1)[1].strip()
+            return location if _is_safe_ssdp_location(location) else None
     return None
 
 
@@ -623,7 +647,7 @@ class UpnpService:
 
     # ── Internal (blocking) helpers — all invoked via asyncio.to_thread ──
 
-    def _discover_and_map(self) -> tuple[Any, str | None, int] | None:
+    def _discover_and_map(self) -> tuple[Any, str | None, int] | None:  # noqa: C901
         """Blocking: discover IGD and create the mapping.
 
         Returns ``(upnp_obj, external_ip, external_port)`` on success, or None

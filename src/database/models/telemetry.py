@@ -44,3 +44,18 @@ class TelemetryMinutely(Base):
     tool_call_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     error_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     parallel_tool_calls: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
+class TelemetryState(Base):
+    """Durable aggregation cursor so restarts don't re-count history.
+
+    Holds the high-water mark (max ``ts_end`` already folded into
+    ``telemetry_minutely``) per backend. Without it the in-memory watermark
+    resets on restart and the additive minutely upserts re-add every completed
+    turn/tool row inside the retention window — inflating all history.
+    """
+
+    __tablename__ = "telemetry_state"
+
+    backend_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    aggregation_watermark: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

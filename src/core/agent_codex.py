@@ -259,21 +259,23 @@ class CodexAgent:
 
         return f"Codex session started in {working_path}"
 
-    async def _relay_codex_stream(
+    async def _relay_codex_stream(  # noqa: C901
         self,
         session: ActiveSession,
         stream: AsyncGenerator[ExecutionChunk, None],
-    ) -> None:
+    ) -> bool:
         """Parse Codex CLI JSONL events and push structured buffer messages.
 
         Translates Codex event types (item.started/updated/completed,
         turn.completed/failed) into the same message types used by the
-        RCFlow LLM pipeline.
+        RCFlow LLM pipeline. Returns True only if the turn completed
+        successfully; callers end the session when it did not.
         """
         # Track last emitted text for agent_message items to enable incremental updates
         last_agent_text: dict[str, str] = {}
         # Collect agent_message text after the last tool call for the summary
         post_tool_text_chunks: list[str] = []
+        completed_successfully = False
 
         async for chunk in stream:
             line = chunk.content.strip()
@@ -522,6 +524,7 @@ class CodexAgent:
                         )
 
             elif event_type == "turn.completed":
+                completed_successfully = True
                 session.set_activity(ActivityState.IDLE)
                 # Extract token usage from Codex turn
                 codex_usage = event.get("usage") or {}
@@ -537,6 +540,10 @@ class CodexAgent:
                 self._r._fire_task_update_task(session, summary_text)
 
             elif event_type == "turn.failed":
+                # A failed turn is terminal: settle the UI state (idle + clear the
+                # running indicator) so the client isn't left showing a live turn.
+                session.set_activity(ActivityState.IDLE)
+                session.clear_subprocess_tracking()
                 error = event.get("error", {})
                 session.buffer.push_text(
                     MessageType.ERROR,
@@ -548,6 +555,8 @@ class CodexAgent:
                 )
 
             elif event_type == "error":
+                session.set_activity(ActivityState.IDLE)
+                session.clear_subprocess_tracking()
                 session.buffer.push_text(
                     MessageType.ERROR,
                     {
@@ -560,6 +569,8 @@ class CodexAgent:
             else:
                 logger.debug("Skipping unknown Codex event type: %s", event_type)
 
+        return completed_successfully
+
     async def _stream_codex_events(
         self,
         session: ActiveSession,
@@ -569,7 +580,9 @@ class CodexAgent:
     ) -> None:
         """Background task: read Codex CLI events and push to session buffer."""
         try:
-            await self._relay_codex_stream(session, executor.execute_streaming(tool_def, tool_call.tool_input))
+            completed = await self._relay_codex_stream(
+                session, executor.execute_streaming(tool_def, tool_call.tool_input)
+            )
         except Exception as e:
             logger.exception("Codex streaming error in session %s", session.id)
             session.buffer.push_text(
@@ -587,12 +600,23 @@ class CodexAgent:
             await self._end_codex_session(session)
             return
 
-        await executor.stop_process()
-
         session.buffer.push_text(
             MessageType.AGENT_GROUP_END,
             {"session_id": session.id},
         )
+
+        if not completed:
+            # Stream ended without turn.completed (turn.failed or crash/EOF).
+            # End the session so the user isn't left with a stuck subprocess and
+            # a pinned running indicator (mirrors the OpenCode/ACP relays).
+            logger.info(
+                "Codex stream ended without completion (session=%s), ending session",
+                session.id,
+            )
+            await self._end_codex_session(session)
+            return
+
+        await executor.stop_process()
 
         # Codex process exits after each turn (one-shot model).
         # Follow-up messages use restart_with_prompt (codex exec resume) to respawn.
@@ -687,7 +711,7 @@ class CodexAgent:
     ) -> None:
         """Spawn a new Codex resume process and stream events for a follow-up."""
         try:
-            await self._relay_codex_stream(session, executor.restart_with_prompt(prompt))
+            completed = await self._relay_codex_stream(session, executor.restart_with_prompt(prompt))
         except Exception as e:
             logger.exception("Codex restart error in session %s", session.id)
             session.buffer.push_text(
@@ -705,10 +729,18 @@ class CodexAgent:
             await self._end_codex_session(session)
             return
 
-        await executor.stop_process()
-
         session.buffer.push_text(
             MessageType.AGENT_GROUP_END,
             {"session_id": session.id},
         )
+
+        if not completed:
+            logger.info(
+                "Codex follow-up stream ended without completion (session=%s), ending session",
+                session.id,
+            )
+            await self._end_codex_session(session)
+            return
+
+        await executor.stop_process()
         self._r.schedule_pending_drain(session)

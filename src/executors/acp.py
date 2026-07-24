@@ -35,6 +35,7 @@ from acp import Client, spawn_agent_process, text_block
 from acp.schema import AllowedOutcome, DeniedOutcome, EnvVariable, McpServerStdio, RequestPermissionResponse
 
 from src.executors.base import BaseExecutor, ExecutionChunk, ExecutionResult
+from src.utils.process import kill_process_tree
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -297,6 +298,14 @@ class AcpExecutor(BaseExecutor):
         if self._conn is not None and self.is_running:
             return
 
+        # Respawn-after-death: the previous connection is dead but its
+        # AsyncExitStack + subprocess resources are still open. Tear them down
+        # (and drop any stale queued events) before spawning a replacement,
+        # otherwise the old transport/pipes leak on every reconnect.
+        if self._conn is not None or self._stack is not None:
+            await self.stop_process()
+        self._drain_queue()
+
         import acp as acp_sdk  # noqa: PLC0415 — module-level name kept light for tests
 
         env = {**os.environ, **self._extra_env}
@@ -462,6 +471,12 @@ class AcpExecutor(BaseExecutor):
             except Exception:
                 logger.debug("ACP cancel failed", exc_info=True)
 
+    def _drain_queue(self) -> None:
+        """Discard any events left over from a previous (dead) connection."""
+        while not self._queue.empty():
+            with contextlib.suppress(asyncio.QueueEmpty):
+                self._queue.get_nowait()
+
     async def stop_process(self) -> None:
         """Tear down the connection and subprocess."""
         stack = self._stack
@@ -472,10 +487,17 @@ class AcpExecutor(BaseExecutor):
                 await stack.aclose()
             except Exception:
                 logger.debug("ACP teardown error", exc_info=True)
-        if self._proc is not None and self._proc.returncode is None:
-            with contextlib.suppress(ProcessLookupError):
-                self._proc.terminate()
+        proc = self._proc
         self._proc = None
+        if proc is not None and proc.returncode is None:
+            with contextlib.suppress(ProcessLookupError):
+                proc.terminate()
+            # Escalate to a tree kill if the agent ignores SIGTERM, so no
+            # orphaned agent/MCP child keeps running.
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=5)
+            except TimeoutError:
+                await kill_process_tree(proc)
 
 
 def _event_chunk(event: dict[str, Any]) -> ExecutionChunk:

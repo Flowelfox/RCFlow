@@ -45,6 +45,11 @@ class Session(Base):
     tool_cost_usd: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     sort_order: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
+    # Present in the schema since 0001 but previously unmapped, so alembic
+    # autogenerate would try to DROP them. Mapped here to keep model == DB.
+    interrupted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    restart_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False, server_default="0")
+
     messages: Mapped[list[SessionMessage]] = relationship(back_populates="session", order_by="SessionMessage.sequence")
     tool_executions: Mapped[list[ToolExecution]] = relationship(back_populates="session")
     tasks: Mapped[list[Task]] = relationship(secondary="task_sessions", back_populates="sessions")

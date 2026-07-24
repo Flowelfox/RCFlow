@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -35,6 +35,10 @@ async def _empty_db():
     """Mock DB session that finds no artifact."""
     db = AsyncMock()
     db.get.return_value = None
+    # By-id endpoints load via a backend-scoped ``select(...).scalar_one_or_none()``.
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = None
+    db.execute.return_value = result
     yield db
 
 

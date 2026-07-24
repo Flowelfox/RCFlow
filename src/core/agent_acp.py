@@ -291,7 +291,7 @@ class AcpAgent:
             self._r._session_manager.broadcast_session_update(session)
             self._r._fire_pr_detect(session)
 
-    async def _relay_acp_stream(
+    async def _relay_acp_stream(  # noqa: C901
         self,
         session: ActiveSession,
         executor: AcpExecutor,

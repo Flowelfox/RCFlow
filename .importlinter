@@ -1,0 +1,42 @@
+[importlinter]
+root_package = src
+
+# Enforce the intended dependency direction: api (transport) -> core
+# (orchestration) -> services (integrations) -> database. A lower layer must
+# never import a higher one. The ignore_imports list below FREEZES the handful
+# of pre-existing upward imports; it is a shrinking debt list — each is removed
+# by the layering refactor (see docs/design/refactoring.md), never added to.
+[importlinter:contract:layers]
+name = api -> core -> services -> database layering
+type = layers
+layers =
+    src.api
+    src.core
+    src.services
+    src.database
+ignore_imports =
+    # core reaching up into api route modules for domain logic (move to services).
+    src.core.background_tasks -> src.api.http
+    src.core.background_tasks -> src.api.integrations.github
+    # services reaching up into core (move shared types to a leaf module).
+    src.services.mcp_bridge -> src.core.llm
+    src.services.mcp_bridge -> src.core.session
+    src.services.mcp_bridge -> src.core.prompt_router
+    src.services.mcp_bridge -> src.core.permissions
+    src.services.telemetry_service -> src.core.llm
+
+# The deprecated tool_manager shim must not gain new first-party importers —
+# new code imports src.services.tools directly.
+[importlinter:contract:tool_manager_shim]
+name = tool_manager shim is deprecated
+type = forbidden
+source_modules =
+    src.core
+    src.api
+forbidden_modules =
+    src.services.tool_manager
+ignore_imports =
+    src.core.prompt_router -> src.services.tool_manager
+    src.core.agent_auth -> src.services.tool_manager
+    src.api.routes.auth -> src.services.tool_manager
+    src.api.routes.tools -> src.services.tool_manager

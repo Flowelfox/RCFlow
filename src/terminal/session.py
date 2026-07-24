@@ -220,6 +220,13 @@ class PTYSession:
         finally:
             exit_code = await self._wait_for_exit_unix()
             logger.info("PTY session %s exited (code=%s)", self.terminal_id, exit_code)
+            # Close the master fd on natural shell exit (user typed `exit`): the
+            # on_exit callback only pops the manager dict, never calls close(), so
+            # without this the fd leaks for every self-terminated terminal.
+            if self._master_fd is not None:
+                with contextlib.suppress(OSError):
+                    os.close(self._master_fd)
+                self._master_fd = None
             if self._on_exit and not self._closed:
                 await self._on_exit(exit_code)
 
@@ -289,7 +296,7 @@ class PTYSession:
         try:
             if hasattr(self._pty_process, "exitstatus"):
                 return self._pty_process.exitstatus
-        except Exception:
+        except Exception:  # noqa: S110 best-effort cleanup
             pass
         return None
 
@@ -377,7 +384,7 @@ class PTYSession:
             try:
                 if self._pty_process.isalive():
                     self._pty_process.terminate()
-            except Exception:
+            except Exception:  # noqa: S110 best-effort cleanup
                 pass
             self._pty_process = None
 

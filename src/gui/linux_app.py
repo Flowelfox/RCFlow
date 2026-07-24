@@ -278,7 +278,7 @@ def _read_install_api_key(default: str = "") -> str:
     return key if isinstance(key, str) and key else default
 
 
-def _find_listening_rcflow_pid(port: int) -> int | None:
+def _find_listening_rcflow_pid(port: int) -> int | None:  # noqa: C901
     """Best-effort lookup of the rcflow worker pid bound to *port* on loopback.
 
     Walks ``/proc/net/tcp`` and ``/proc/<pid>/cmdline`` so we don't depend
@@ -1010,11 +1010,13 @@ def main(argv: list[str]) -> int:
     # Resolve the API key the running systemd worker actually uses *before*
     # constructing the dashboard so ``poll_server_status`` (which reads the
     # key from ``Settings()``) hits ``/api/info`` with a key the worker
-    # accepts.  When the dispatcher passes ``--api-key`` we trust it; else
+    # accepts.  The dispatcher passes the key via the ``RCFLOW_API_KEY``
+    # environment variable (not argv, which would leak it to ``ps``); the
+    # legacy ``--api-key`` flag is still honoured for older dispatchers. Else
     # fall back to ``/opt/rcflow/settings.json`` (group-readable per the
     # deb postinst), then to whatever the user-side ``Settings()`` had.
     if not args.api_key:
-        args.api_key = _read_install_api_key()
+        args.api_key = os.environ.get("RCFLOW_API_KEY") or _read_install_api_key()
     if args.api_key:
         os.environ["RCFLOW_API_KEY"] = args.api_key
 

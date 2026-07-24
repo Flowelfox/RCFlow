@@ -106,12 +106,17 @@ class ContextBuilder:
     _FILE_REF_RE = re.compile(r"(?:^|(?<=\s))\$(\S+)")
 
     def _extract_tool_mentions(self, text: str) -> list[str]:
-        """Extract #ToolName mentions from user text."""
-        return self._TOOL_MENTION_RE.findall(text)
+        """Extract #ToolName mentions from user text.
+
+        Trailing sentence punctuation is stripped so natural phrasings like
+        ``"#ClaudeCode, fix this"`` still resolve (the non-whitespace capture
+        would otherwise include the comma and fail the registry lookup).
+        """
+        return [m.rstrip(".,;:!?") for m in self._TOOL_MENTION_RE.findall(text)]
 
     def _extract_file_references(self, text: str) -> list[str]:
-        """Extract $filename references from user text."""
-        return self._FILE_REF_RE.findall(text)
+        """Extract $filename references from user text (trailing punctuation trimmed)."""
+        return [m.rstrip(".,;:!?") for m in self._FILE_REF_RE.findall(text)]
 
     # ------------------------------------------------------------------
     # Project context

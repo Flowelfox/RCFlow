@@ -18,19 +18,30 @@ def _is_sqlite(url: str) -> bool:
     return url.startswith("sqlite")
 
 
+def _is_memory_sqlite(url: str) -> bool:
+    """Return True for an in-memory SQLite URL (``sqlite+aiosqlite://`` or ``/:memory:``)."""
+    return ":memory:" in url or url.split("://", 1)[-1] == ""
+
+
 def init_engine(settings: Settings) -> None:
     """Init engine."""
     global _engine, _session_factory
 
     kwargs: dict = {}
     if _is_sqlite(settings.DATABASE_URL):
-        # Ensure the parent directory exists for the SQLite database file
-        db_path = settings.DATABASE_URL.split("///", 1)[-1]
-        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-
-        # StaticPool shares a single connection across async tasks (required for aiosqlite)
         kwargs["connect_args"] = {"check_same_thread": False}
-        kwargs["poolclass"] = StaticPool
+        if _is_memory_sqlite(settings.DATABASE_URL):
+            # An in-memory database lives inside a single connection — StaticPool
+            # keeps every session on that one connection so they share state.
+            kwargs["poolclass"] = StaticPool
+        else:
+            # File-backed SQLite: use the default async pool so each AsyncSession
+            # gets its OWN connection. StaticPool here shared one connection across
+            # all tasks, so one task's commit/rollback could commit another task's
+            # half-written rows or wipe its in-flight transaction. WAL +
+            # busy_timeout (below) handle writer contention safely.
+            db_path = settings.DATABASE_URL.split("///", 1)[-1]
+            Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     else:
         kwargs["pool_pre_ping"] = True
 
@@ -43,6 +54,9 @@ def init_engine(settings: Settings) -> None:
             cursor = dbapi_conn.cursor()
             cursor.execute("PRAGMA journal_mode=WAL")
             cursor.execute("PRAGMA foreign_keys=ON")
+            # Wait up to 5s for a competing writer's lock instead of erroring
+            # immediately — now that sessions no longer share one connection.
+            cursor.execute("PRAGMA busy_timeout=5000")
             cursor.close()
 
     _session_factory = async_sessionmaker(_engine, expire_on_commit=False)

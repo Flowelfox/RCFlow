@@ -1,17 +1,21 @@
 """Console-script entry point for the ``rcflow`` command (``python -m src``)."""
 
-# ── Startup trace — uses only stdlib builtins available before any other import ──
-import datetime as _dt
-import os as _os
+# ── Startup trace (macOS only) — uses stdlib builtins available before imports ──
 import sys as _sys
 
-try:
-    _tdir = _os.path.expanduser("~/Library/Logs")
-    _os.makedirs(_tdir, exist_ok=True)
-    with open(_os.path.join(_tdir, "rcflow-worker-trace.log"), "a") as _tf:
-        _tf.write(f"{_dt.datetime.now().isoformat()} __main__ module loaded  frozen={getattr(_sys, 'frozen', False)}\n")
-except Exception:
-    pass
+if _sys.platform == "darwin":
+    # ~/Library/Logs is a macOS path; the earlier unconditional version created a
+    # spurious tree and appended forever on Linux/Windows too.
+    import datetime as _dt
+    import os as _os
+
+    try:
+        _tdir = _os.path.expanduser("~/Library/Logs")
+        _os.makedirs(_tdir, exist_ok=True)
+        with open(_os.path.join(_tdir, "rcflow-worker-trace.log"), "a") as _tf:
+            _tf.write(f"{_dt.datetime.now().isoformat()} __main__ loaded  frozen={getattr(_sys, 'frozen', False)}\n")
+    except Exception:  # noqa: S110 best-effort cleanup
+        pass
 # ────────────────────────────────────────────────────────────────────────────────
 
 import argparse
@@ -210,10 +214,9 @@ def _install_parent_death_watchdog() -> None:
                 try:
                     import signal as _signal  # noqa: PLC0415
 
-                    if sys.platform == "win32":
-                        os.kill(os.getpid(), _signal.SIGTERM)
-                    else:
-                        os.kill(os.getpid(), _signal.SIGTERM)
+                    # SIGTERM on both platforms (the previous if/else branches were
+                    # byte-identical); os._exit is the last-resort fallback.
+                    os.kill(os.getpid(), _signal.SIGTERM)
                 except Exception:
                     os._exit(0)
                 return
@@ -354,7 +357,7 @@ def _resolve_linux_gui_window_script() -> Path | None:
     return None
 
 
-def _run_linux_native_dashboard(*, minimized: bool) -> None:
+def _run_linux_native_dashboard(*, minimized: bool) -> None:  # noqa: C901
     """Open the worker dashboard as a native Linux app window.
 
     Starts the worker as a child subprocess if the systemd service is not
@@ -486,6 +489,10 @@ def _run_linux_native_dashboard(*, minimized: bool) -> None:
         # instead of the launcher's system-python interpreter.
         if getattr(sys, "frozen", False):
             clean_env["RCFLOW_SERVER_BIN"] = sys.executable
+        # Pass the API key via the environment, not argv — an argv element is
+        # visible to any user via ``ps``/``/proc/<pid>/cmdline``.
+        if api_key:
+            clean_env["RCFLOW_API_KEY"] = api_key
         argv = [
             system_python,
             str(launcher_script),
@@ -496,8 +503,6 @@ def _run_linux_native_dashboard(*, minimized: bool) -> None:
             "--scheme",
             scheme,
         ]
-        if api_key:
-            argv.extend(["--api-key", api_key])
         if minimized:
             argv.append("--minimized")
         try:

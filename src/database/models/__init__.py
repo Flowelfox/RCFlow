@@ -14,7 +14,7 @@ from src.database.models.session_pending_message import SessionPendingMessage
 from src.database.models.session_scheduled_wake import SessionScheduledWake
 from src.database.models.session_turn import SessionTurn
 from src.database.models.task import Task, TaskSession
-from src.database.models.telemetry import TelemetryMinutely
+from src.database.models.telemetry import TelemetryMinutely, TelemetryState
 from src.database.models.tool_call import ToolCall
 from src.database.models.tool_execution import ToolExecution
 
@@ -35,6 +35,7 @@ __all__ = [
     "Task",
     "TaskSession",
     "TelemetryMinutely",
+    "TelemetryState",
     "ToolCall",
     "ToolExecution",
 ]

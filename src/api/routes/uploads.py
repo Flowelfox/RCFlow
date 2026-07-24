@@ -70,16 +70,33 @@ async def upload_attachment(
             ),
         )
 
-    data = await file.read()
+    # Fast reject on the declared size before reading anything.
+    content_length = request.headers.get("content-length")
+    if content_length and content_length.isdigit() and int(content_length) > _MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large: {int(content_length):,} bytes (max {_MAX_UPLOAD_BYTES:,})",
+        )
+
+    # Read in bounded chunks and abort as soon as the cap is crossed, so a
+    # multi-gigabyte body is never fully buffered into memory just to be rejected.
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(1024 * 1024)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > _MAX_UPLOAD_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File too large (max {_MAX_UPLOAD_BYTES:,} bytes)",
+            )
+        chunks.append(chunk)
+    data = b"".join(chunks)
 
     if not data:
         raise HTTPException(status_code=400, detail="Empty file")
-
-    if len(data) > _MAX_UPLOAD_BYTES:
-        raise HTTPException(
-            status_code=413,
-            detail=f"File too large: {len(data):,} bytes (max {_MAX_UPLOAD_BYTES:,})",
-        )
 
     file_name = file.filename or "attachment"
     mime_type = file.content_type or "application/octet-stream"

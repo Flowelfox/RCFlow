@@ -1,5 +1,5 @@
 ---
-updated: 2026-06-02
+updated: 2026-07-23
 ---
 
 # Refactoring Log
@@ -16,7 +16,16 @@ above their previous values. PRs that add ≥10 lines under `src/` or
 `rcflowclient/lib/` must additionally raise the relevant gate by the
 new code's measured coverage.
 
-Current floors: Python **54%**, Flutter **14%**.
+Current floors: Python **64%**, Flutter **14%**.
+
+## Quality gates (enforced)
+
+- **Complexity**: `[tool.ruff.lint.mccabe] max-complexity = 15`. The ~21 functions that already exceed it are frozen with a per-function `# noqa: C901`; that list only shrinks. Do not raise the ceiling to silence a new offender — split the function.
+- **Coverage**: `fail_under = 64`; PR-diff coverage gate (`diff-cover --fail-under 80`) grades only new/changed lines.
+- **Layering**: `.importlinter` enforces `api → core → services → database` and forbids new importers of the deprecated `tool_manager` shim. The `ignore_imports` allowlist is the current violation debt (shrinks as the layering refactor lands).
+- **Security**: CI runs `pip-audit` (resolved deps) and `gitleaks` (secret scan); `.github/dependabot.yml` opens weekly version-update PRs.
+- **CI parity**: CI runs `ruff format --check` and lints `scripts/`, matching pre-commit; CI defaults to `contents: read` with the badge commit isolated to its own write-scoped push-to-main job.
+- **S110** (`try/except/pass`) is no longer globally ignored — each best-effort site carries a line-scoped `# noqa: S110`.
 
 ## Phase 1 — Tooling & Dead Code
 
