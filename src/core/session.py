@@ -1021,6 +1021,33 @@ class SessionManager:
         """Return serialised badges for *session* using the shared BadgeState."""
         return [b.to_dict() for b in self._badge_state.compute(session, worker_id=self._backend_id)]
 
+    @staticmethod
+    def _apply_session_to_row(session: ActiveSession, row: SessionModel, backend_id: str) -> None:
+        """Copy an ActiveSession's persisted fields onto a SessionModel row.
+
+        Single source for the session->row column mapping shared by archive /
+        flush / save_all (insert + update). Deliberately does NOT set ``id``
+        (identity) or ``ended_at`` — the latter genuinely varies per call site
+        (``session.ended_at`` for archive, a computed shutdown time for
+        save_all, untouched for an active flush), so callers set it themselves.
+        """
+        row.backend_id = backend_id
+        row.created_at = session.created_at
+        row.session_type = session.session_type.value
+        row.status = session.status.value
+        row.title = session.title
+        row.main_project_path = session.main_project_path
+        row.metadata_ = session.metadata
+        row.conversation_history = session.conversation_history or None
+        row.input_tokens = session.input_tokens
+        row.output_tokens = session.output_tokens
+        row.cache_creation_input_tokens = session.cache_creation_input_tokens
+        row.cache_read_input_tokens = session.cache_read_input_tokens
+        row.tool_input_tokens = session.tool_input_tokens
+        row.tool_output_tokens = session.tool_output_tokens
+        row.tool_cost_usd = session.tool_cost_usd
+        row.sort_order = session.sort_order
+
     async def archive_session(self, session_id: str, db: AsyncSession) -> None:
         """Archive a completed session to PostgreSQL and remove from memory."""
         session = self._sessions.get(session_id)
@@ -1038,47 +1065,11 @@ class SessionManager:
         # The row may already exist if created early by task-linking
         # (e.g. _create_tasks_from_session), so check first.
         existing = await db.get(SessionModel, session_uuid)
+        row = existing if existing is not None else SessionModel(id=session_uuid)
+        self._apply_session_to_row(session, row, self._backend_id)
+        row.ended_at = session.ended_at
         if existing is None:
-            db.add(
-                SessionModel(
-                    id=session_uuid,
-                    backend_id=self._backend_id,
-                    created_at=session.created_at,
-                    ended_at=session.ended_at,
-                    session_type=session.session_type.value,
-                    status=session.status.value,
-                    title=session.title,
-                    main_project_path=session.main_project_path,
-                    metadata_=session.metadata,
-                    conversation_history=session.conversation_history or None,
-                    input_tokens=session.input_tokens,
-                    output_tokens=session.output_tokens,
-                    cache_creation_input_tokens=session.cache_creation_input_tokens,
-                    cache_read_input_tokens=session.cache_read_input_tokens,
-                    tool_input_tokens=session.tool_input_tokens,
-                    tool_output_tokens=session.tool_output_tokens,
-                    tool_cost_usd=session.tool_cost_usd,
-                    sort_order=session.sort_order,
-                )
-            )
-        else:
-            existing.backend_id = self._backend_id
-            existing.created_at = session.created_at
-            existing.ended_at = session.ended_at
-            existing.session_type = session.session_type.value
-            existing.status = session.status.value
-            existing.title = session.title
-            existing.main_project_path = session.main_project_path
-            existing.metadata_ = session.metadata
-            existing.conversation_history = session.conversation_history or None
-            existing.input_tokens = session.input_tokens
-            existing.output_tokens = session.output_tokens
-            existing.cache_creation_input_tokens = session.cache_creation_input_tokens
-            existing.cache_read_input_tokens = session.cache_read_input_tokens
-            existing.tool_input_tokens = session.tool_input_tokens
-            existing.tool_output_tokens = session.tool_output_tokens
-            existing.tool_cost_usd = session.tool_cost_usd
-            existing.sort_order = session.sort_order
+            db.add(row)
         # Flush the parent row so the FK constraint
         # (session_messages.session_id → sessions.id) is satisfied when child
         # rows are flushed in the same transaction.  Using flush() instead of
@@ -1534,42 +1525,11 @@ class SessionManager:
             try:
                 session_uuid = uuid.UUID(session.id)
                 existing = await db.get(SessionModel, session_uuid)
+                # Active-session flush: leave ended_at untouched (not ended yet).
+                row = existing if existing is not None else SessionModel(id=session_uuid)
+                self._apply_session_to_row(session, row, self._backend_id)
                 if existing is None:
-                    db.add(
-                        SessionModel(
-                            id=session_uuid,
-                            backend_id=self._backend_id,
-                            created_at=session.created_at,
-                            session_type=session.session_type.value,
-                            status=session.status.value,
-                            title=session.title,
-                            main_project_path=session.main_project_path,
-                            metadata_=session.metadata,
-                            conversation_history=session.conversation_history or None,
-                            input_tokens=session.input_tokens,
-                            output_tokens=session.output_tokens,
-                            cache_creation_input_tokens=session.cache_creation_input_tokens,
-                            cache_read_input_tokens=session.cache_read_input_tokens,
-                            tool_input_tokens=session.tool_input_tokens,
-                            tool_output_tokens=session.tool_output_tokens,
-                            tool_cost_usd=session.tool_cost_usd,
-                            sort_order=session.sort_order,
-                        )
-                    )
-                else:
-                    existing.status = session.status.value
-                    existing.title = session.title
-                    existing.main_project_path = session.main_project_path
-                    existing.metadata_ = session.metadata
-                    existing.conversation_history = session.conversation_history or None
-                    existing.input_tokens = session.input_tokens
-                    existing.output_tokens = session.output_tokens
-                    existing.cache_creation_input_tokens = session.cache_creation_input_tokens
-                    existing.cache_read_input_tokens = session.cache_read_input_tokens
-                    existing.tool_input_tokens = session.tool_input_tokens
-                    existing.tool_output_tokens = session.tool_output_tokens
-                    existing.tool_cost_usd = session.tool_cost_usd
-                    existing.sort_order = session.sort_order
+                    db.add(row)
                 # Flush parent row before inserting child messages.
                 await db.flush()
                 if has_new_messages:
@@ -1644,47 +1604,11 @@ class SessionManager:
                     session.ended_at or datetime.now(UTC) if session.status in terminal_with_end else session.ended_at
                 )
 
+                row = existing if existing is not None else SessionModel(id=session_uuid)
+                self._apply_session_to_row(session, row, self._backend_id)
+                row.ended_at = effective_ended_at
                 if existing is None:
-                    db.add(
-                        SessionModel(
-                            id=session_uuid,
-                            backend_id=self._backend_id,
-                            created_at=session.created_at,
-                            ended_at=effective_ended_at,
-                            session_type=session.session_type.value,
-                            status=session.status.value,
-                            title=session.title,
-                            main_project_path=session.main_project_path,
-                            metadata_=session.metadata,
-                            input_tokens=session.input_tokens,
-                            output_tokens=session.output_tokens,
-                            cache_creation_input_tokens=session.cache_creation_input_tokens,
-                            cache_read_input_tokens=session.cache_read_input_tokens,
-                            tool_input_tokens=session.tool_input_tokens,
-                            tool_output_tokens=session.tool_output_tokens,
-                            tool_cost_usd=session.tool_cost_usd,
-                            conversation_history=session.conversation_history or None,
-                            sort_order=session.sort_order,
-                        )
-                    )
-                else:
-                    existing.backend_id = self._backend_id
-                    existing.created_at = session.created_at
-                    existing.ended_at = effective_ended_at
-                    existing.session_type = session.session_type.value
-                    existing.status = session.status.value
-                    existing.title = session.title
-                    existing.main_project_path = session.main_project_path
-                    existing.metadata_ = session.metadata
-                    existing.input_tokens = session.input_tokens
-                    existing.output_tokens = session.output_tokens
-                    existing.cache_creation_input_tokens = session.cache_creation_input_tokens
-                    existing.cache_read_input_tokens = session.cache_read_input_tokens
-                    existing.tool_input_tokens = session.tool_input_tokens
-                    existing.tool_output_tokens = session.tool_output_tokens
-                    existing.tool_cost_usd = session.tool_cost_usd
-                    existing.conversation_history = session.conversation_history or None
-                    existing.sort_order = session.sort_order
+                    db.add(row)
 
                 # Flush the session row before inserting child session_messages so
                 # the FK constraint (session_messages.session_id → sessions.id) is
