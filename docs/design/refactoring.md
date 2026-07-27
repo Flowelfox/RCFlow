@@ -21,7 +21,8 @@ Current floors: Python **64%**, Flutter **14%**.
 ## Consolidation refactors (in progress)
 
 - **Executor teardown** ✅ — the four lifecycle kill paths (cancel / end / pause / interrupt) now share one `SessionLifecycle._teardown_executors(session) -> bool` instead of hand-copying the 4-executor cancel+stream-cancel block, which had drifted.
-- **Pending** (recommended as a follow-up): managed-agent base class (agent_* siblings share ~60–80% skeleton), unified tool-install pipeline (plain+streaming twins), session row↔object mapping helper, PR/issue listing dedup + moving domain logic out of route modules (see the `.importlinter` `ignore_imports` debt list).
+- **PR/issue listing** ✅ — the backend-scoped PR and Linear-issue list query + serializer lived inline in four places (both WS channels × 2). Consolidated into `list_backend_prs` / `list_backend_issues` in the integration modules; the WS handlers call them (no more importing route-module private serializers).
+- **Pending** (recommended as a follow-up): managed-agent base class (agent_* siblings share ~60–80% skeleton), unified tool-install pipeline (plain+streaming twins), session row↔object mapping helper, and moving domain logic (task state machine, PR-sync pipeline) out of route modules into services (see the `.importlinter` `ignore_imports` debt list).
 
 ## Quality gates (enforced)
 

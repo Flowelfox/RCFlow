@@ -74,6 +74,21 @@ def _issue_to_dict(issue: LinearIssueModel) -> dict[str, Any]:
     }
 
 
+async def list_backend_issues(db: AsyncSession, backend_id: str) -> list[dict[str, Any]]:
+    """Return all Linear issues for *backend_id*, newest first, serialised for the client.
+
+    Single source for the backend-scoped issue list shared by the REST endpoint
+    and both WebSocket channels (previously each inlined the same query + serializer).
+    """
+    stmt = (
+        select(LinearIssueModel)
+        .where(LinearIssueModel.backend_id == backend_id)
+        .order_by(LinearIssueModel.updated_at.desc())
+    )
+    rows = (await db.execute(stmt)).scalars().all()
+    return [_issue_to_dict(r) for r in rows]
+
+
 def _get_linear_service(request: Request) -> LinearService:
     """Build a LinearService from the request's app settings.
 

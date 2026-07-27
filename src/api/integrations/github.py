@@ -104,6 +104,17 @@ def _pr_to_dict(pr: GitHubPRModel) -> dict[str, Any]:
     }
 
 
+async def list_backend_prs(db: AsyncSession, backend_id: str) -> list[dict[str, Any]]:
+    """Return all PRs for *backend_id*, newest first, serialised for the client.
+
+    Single source for the backend-scoped PR list shared by the REST endpoint and
+    both WebSocket channels (previously each inlined the same query + serializer).
+    """
+    stmt = select(GitHubPRModel).where(GitHubPRModel.backend_id == backend_id).order_by(GitHubPRModel.updated_at.desc())
+    rows = (await db.execute(stmt)).scalars().all()
+    return [_pr_to_dict(r) for r in rows]
+
+
 def _get_github_service(request: Request) -> GitHubService:
     """Build a GitHubService from the request's app settings.
 

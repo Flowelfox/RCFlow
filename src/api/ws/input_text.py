@@ -5,13 +5,10 @@ import json
 import logging
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
-from sqlalchemy import select
 
 from src.api.deps import handle_ws_first_message_auth, verify_ws_api_key
 from src.core.attachment_store import AttachmentStore, ResolvedAttachment
 from src.core.session import SessionStatus
-from src.database.models import GitHubPR as GitHubPRModel
-from src.database.models import LinearIssue as LinearIssueModel
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -368,39 +365,26 @@ async def ws_input_text(  # noqa: C901
                 continue
 
             if msg_type == "list_linear_issues":
-                from src.api.integrations.linear import _issue_to_dict  # noqa: PLC0415
+                from src.api.integrations.linear import list_backend_issues  # noqa: PLC0415
 
                 db_session_factory = websocket.app.state.db_session_factory
                 if db_session_factory is not None:
                     settings = websocket.app.state.settings
                     async with db_session_factory() as db:
-                        stmt = (
-                            select(LinearIssueModel)
-                            .where(LinearIssueModel.backend_id == settings.RCFLOW_BACKEND_ID)
-                            .order_by(LinearIssueModel.updated_at.desc())
-                        )
-                        result = await db.execute(stmt)
-                        issue_rows = result.scalars().all()
-                        issues_out = [_issue_to_dict(i) for i in issue_rows]
+                        issues_out = await list_backend_issues(db, settings.RCFLOW_BACKEND_ID)
                     await websocket.send_json({"type": "linear_issue_list", "issues": issues_out})
                 else:
                     await websocket.send_json({"type": "linear_issue_list", "issues": []})
                 continue
 
             if msg_type == "list_github_prs":
-                from src.api.integrations.github import _pr_to_dict  # noqa: PLC0415
+                from src.api.integrations.github import list_backend_prs  # noqa: PLC0415
 
                 db_session_factory = websocket.app.state.db_session_factory
                 if db_session_factory is not None:
                     settings = websocket.app.state.settings
                     async with db_session_factory() as db:
-                        stmt = (
-                            select(GitHubPRModel)
-                            .where(GitHubPRModel.backend_id == settings.RCFLOW_BACKEND_ID)
-                            .order_by(GitHubPRModel.updated_at.desc())
-                        )
-                        pr_rows = (await db.execute(stmt)).scalars().all()
-                        prs_out = [_pr_to_dict(p) for p in pr_rows]
+                        prs_out = await list_backend_prs(db, settings.RCFLOW_BACKEND_ID)
                     await websocket.send_json({"type": "github_pr_list", "prs": prs_out})
                 else:
                     await websocket.send_json({"type": "github_pr_list", "prs": []})
