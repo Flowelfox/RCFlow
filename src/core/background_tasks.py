@@ -640,7 +640,7 @@ class BackgroundTasks:
     async def _pr_detect(self) -> None:
         """Sync open PRs and attach badges to matching live sessions. Never raises."""
         try:
-            from src.api.integrations.github import sync_and_attach_prs  # noqa: PLC0415
+            from src.services.github_service import sync_and_attach_prs  # noqa: PLC0415
 
             await sync_and_attach_prs(self._r._settings, self._r._session_manager, self._r._db_session_factory)
         except Exception:

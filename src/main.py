@@ -415,9 +415,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:  # noqa: C901
 
     # GitHub startup sync (non-blocking background task)
     if settings.GITHUB_SYNC_ON_STARTUP and settings.GITHUB_TOKEN:
-        from src.api.integrations.github import _persist_synced_prs, _pr_to_dict  # noqa: PLC0415
         from src.services.github_service import GitHubService as _GitHubService  # noqa: PLC0415
         from src.services.github_service import GitHubServiceError as _GitHubServiceError  # noqa: PLC0415
+        from src.services.github_service import persist_synced_prs as _persist_synced_prs  # noqa: PLC0415
+        from src.services.github_service import serialize_pr as _pr_to_dict  # noqa: PLC0415
 
         async def _run_github_startup_sync() -> None:
             repo = settings.GITHUB_DEFAULT_REPO or None
