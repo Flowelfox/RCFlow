@@ -397,37 +397,12 @@ class OpenCodeAgent(ManagedAgentBase):
         prompt: str,
     ) -> None:
         """Spawn a new OpenCode resume process and stream events for a follow-up."""
-        try:
-            completed = await self._relay_opencode_stream(session, executor.restart_with_prompt(prompt))
-        except Exception as e:
-            logger.exception("OpenCode restart error in session %s", session.id)
-            session.buffer.push_text(
-                MessageType.AGENT_GROUP_END,
-                {"session_id": session.id},
-            )
-            session.buffer.push_text(
-                MessageType.ERROR,
-                {
-                    "session_id": session.id,
-                    "content": f"OpenCode error: {e}",
-                    "code": "OPENCODE_ERROR",
-                },
-            )
-            await self._end_opencode_session(session)
-            return
-
-        session.buffer.push_text(
-            MessageType.AGENT_GROUP_END,
-            {"session_id": session.id},
+        await self._restart_oneshot_agent(
+            session,
+            executor,
+            prompt,
+            display_name="OpenCode",
+            error_code="OPENCODE_ERROR",
+            relay=self._relay_opencode_stream,
+            end=self._end_opencode_session,
         )
-
-        if not completed:
-            logger.info(
-                "OpenCode restart stream ended without completion (session=%s), ending session",
-                session.id,
-            )
-            await self._end_opencode_session(session)
-            return
-
-        await executor.stop_process()
-        self._r.schedule_pending_drain(session)

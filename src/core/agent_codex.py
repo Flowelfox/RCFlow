@@ -581,37 +581,12 @@ class CodexAgent(ManagedAgentBase):
         prompt: str,
     ) -> None:
         """Spawn a new Codex resume process and stream events for a follow-up."""
-        try:
-            completed = await self._relay_codex_stream(session, executor.restart_with_prompt(prompt))
-        except Exception as e:
-            logger.exception("Codex restart error in session %s", session.id)
-            session.buffer.push_text(
-                MessageType.AGENT_GROUP_END,
-                {"session_id": session.id},
-            )
-            session.buffer.push_text(
-                MessageType.ERROR,
-                {
-                    "session_id": session.id,
-                    "content": f"Codex error: {e}",
-                    "code": "CODEX_ERROR",
-                },
-            )
-            await self._end_codex_session(session)
-            return
-
-        session.buffer.push_text(
-            MessageType.AGENT_GROUP_END,
-            {"session_id": session.id},
+        await self._restart_oneshot_agent(
+            session,
+            executor,
+            prompt,
+            display_name="Codex",
+            error_code="CODEX_ERROR",
+            relay=self._relay_codex_stream,
+            end=self._end_codex_session,
         )
-
-        if not completed:
-            logger.info(
-                "Codex follow-up stream ended without completion (session=%s), ending session",
-                session.id,
-            )
-            await self._end_codex_session(session)
-            return
-
-        await executor.stop_process()
-        self._r.schedule_pending_drain(session)

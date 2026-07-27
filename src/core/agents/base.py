@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -10,10 +11,13 @@ from src.core.buffer import MessageType
 from src.core.session import ActivityState, SessionStatus
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Coroutine
+    from collections.abc import AsyncGenerator, Callable, Coroutine
 
     from src.core.prompt_router import PromptRouter
     from src.core.session import ActiveSession
+    from src.executors.base import ExecutionChunk
+
+logger = logging.getLogger(__name__)
 
 MAX_TOOL_OUTPUT_CHARS = 100_000
 
@@ -135,3 +139,44 @@ class ManagedAgentBase:
         )
 
         setattr(session, task_attr, asyncio.create_task(restart(session, executor, text)))
+
+    async def _restart_oneshot_agent(
+        self,
+        session: ActiveSession,
+        executor: Any,
+        prompt: str,
+        *,
+        display_name: str,
+        error_code: str,
+        relay: Callable[[ActiveSession, AsyncGenerator[ExecutionChunk, None]], Coroutine[Any, Any, bool]],
+        end: Callable[[ActiveSession], Coroutine[Any, Any, None]],
+    ) -> None:
+        """Spawn a resume process, stream a follow-up turn, and settle the session.
+
+        Shared by Codex and OpenCode. *relay* returns whether the turn completed
+        successfully; on failure or an incomplete stream the session is ended via
+        *end* so the user is never left with a stuck subprocess.
+        """
+        try:
+            completed = await relay(session, executor.restart_with_prompt(prompt))
+        except Exception as e:
+            logger.exception("%s restart error in session %s", display_name, session.id)
+            session.buffer.push_text(MessageType.AGENT_GROUP_END, {"session_id": session.id})
+            session.buffer.push_text(
+                MessageType.ERROR,
+                {"session_id": session.id, "content": f"{display_name} error: {e}", "code": error_code},
+            )
+            await end(session)
+            return
+
+        session.buffer.push_text(MessageType.AGENT_GROUP_END, {"session_id": session.id})
+
+        if not completed:
+            logger.info(
+                "%s follow-up stream ended without completion (session=%s), ending session", display_name, session.id
+            )
+            await end(session)
+            return
+
+        await executor.stop_process()
+        self._r.schedule_pending_drain(session)
