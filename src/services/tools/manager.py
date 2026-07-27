@@ -378,45 +378,13 @@ class ToolManager:
 
     @staticmethod
     async def _download_codex_binary(install_dir: Path, binary_path: Path, tag: str, version: str, target: str) -> None:
-        """Download and place the codex binary for a specific target triple."""
-        if sys.platform == "win32":
-            asset_name = f"codex-{target}.exe"
-            download_url = f"{CODEX_RELEASE_BASE}/{tag}/{asset_name}"
-            async with httpx.AsyncClient(follow_redirects=True) as client:
-                checksums = await _fetch_codex_checksums(client, tag)
-                resp = await client.get(download_url, timeout=_DOWNLOAD_TIMEOUT)
-                resp.raise_for_status()
-                _verify_codex_asset_checksum(resp.content, asset_name, checksums)
-                tmp_path = install_dir / f".codex-{version}.tmp"
-                try:
-                    tmp_path.write_bytes(resp.content)
-                    _atomic_install_binary(tmp_path, binary_path)
-                finally:
-                    tmp_path.unlink(missing_ok=True)
-        else:
-            asset_name = f"codex-{target}.tar.gz"
-            download_url = f"{CODEX_RELEASE_BASE}/{tag}/{asset_name}"
+        """Download and place the codex binary — drains the streaming installer.
 
-            async with httpx.AsyncClient(follow_redirects=True) as client:
-                checksums = await _fetch_codex_checksums(client, tag)
-                resp = await client.get(download_url, timeout=_DOWNLOAD_TIMEOUT)
-                resp.raise_for_status()
-                _verify_codex_asset_checksum(resp.content, asset_name, checksums)
-
-                with tempfile.TemporaryDirectory(dir=str(install_dir)) as tmp_dir:
-                    tar_path = Path(tmp_dir) / asset_name
-                    tar_path.write_bytes(resp.content)
-
-                    with tarfile.open(tar_path, "r:gz") as tf:
-                        members = tf.getnames()
-                        if not members:
-                            raise RuntimeError("Codex tarball is empty")
-                        tf.extractall(tmp_dir, filter="data")
-                        extracted = _find_codex_binary(Path(tmp_dir), members)
-                        if not extracted:
-                            raise RuntimeError(f"Could not find codex binary in tarball: {members}")
-                        extracted.chmod(0o755)
-                        shutil.move(str(extracted), str(binary_path))
+        The streaming variant does the full download → verify → install; the
+        non-streaming path just consumes its progress events and discards them.
+        """
+        async for _ in ToolManager._stream_codex_download(install_dir, binary_path, tag, version, target):
+            pass
 
     async def _install_codex_acp(self) -> ManagedTool:
         """Download and install codex-acp native binary from GitHub Releases.
@@ -475,21 +443,9 @@ class ToolManager:
     async def _download_codex_acp_binary(
         install_dir: Path, binary_path: Path, tag: str, version: str, target: str
     ) -> None:
-        """Download and place the codex-acp binary for a specific target triple."""
-        ext = ".zip" if sys.platform == "win32" else ".tar.gz"
-        asset_name = f"codex-acp-{version}-{target}{ext}"
-        download_url = f"{CODEX_ACP_RELEASE_BASE}/{tag}/{asset_name}"
-
-        async with httpx.AsyncClient(follow_redirects=True) as client:
-            checksums = await _fetch_codex_acp_checksums(client, tag)
-            resp = await client.get(download_url, timeout=_DOWNLOAD_TIMEOUT)
-            resp.raise_for_status()
-            _verify_codex_asset_checksum(resp.content, asset_name, checksums)
-
-            with tempfile.TemporaryDirectory(dir=str(install_dir)) as tmp_dir:
-                archive_path = Path(tmp_dir) / asset_name
-                archive_path.write_bytes(resp.content)
-                ToolManager._extract_codex_acp_archive(archive_path, Path(tmp_dir), binary_path)
+        """Download and place the codex-acp binary — drains the streaming installer."""
+        async for _ in ToolManager._stream_codex_acp_download(install_dir, binary_path, tag, version, target):
+            pass
 
     @staticmethod
     def _extract_codex_acp_archive(archive_path: Path, tmp_dir: Path, binary_path: Path) -> None:
