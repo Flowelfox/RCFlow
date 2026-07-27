@@ -538,7 +538,7 @@ class BackgroundTasks:
                     changed = False
                     # Validate transition and enforce AI can't set done
                     if new_status != task.status and new_status != "done":
-                        from src.api.http import VALID_TASK_TRANSITIONS  # noqa: PLC0415
+                        from src.services.task_rules import VALID_TASK_TRANSITIONS  # noqa: PLC0415
 
                         allowed = VALID_TASK_TRANSITIONS.get(task.status, set())
                         if new_status in allowed:

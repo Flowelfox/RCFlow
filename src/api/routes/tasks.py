@@ -16,6 +16,7 @@ from src.api.deps import verify_http_api_key
 from src.database.models import Session as SessionModel
 from src.database.models import Task as TaskModel
 from src.database.models import TaskSession as TaskSessionModel
+from src.services.task_rules import AI_FORBIDDEN_STATUSES, VALID_TASK_TRANSITIONS
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,15 +29,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Tasks"])
 
 # ── Status-transition rules ──────────────────────────────────────────────
-
-VALID_TASK_TRANSITIONS: dict[str, set[str]] = {
-    "todo": {"in_progress", "done"},
-    "in_progress": {"todo", "review", "done"},
-    "review": {"in_progress", "done"},
-    "done": {"todo", "in_progress"},
-}
-
-AI_FORBIDDEN_STATUSES = {"done"}
+# VALID_TASK_TRANSITIONS / AI_FORBIDDEN_STATUSES live in src.services.task_rules
+# (domain data) so core imports them downward; the HTTP-raising validator below
+# stays here in the route layer.
 
 
 def validate_status_transition(current: str, new: str, *, source: str | None = None) -> None:

@@ -27,9 +27,6 @@ from src.api.routes import (
 )
 from src.api.routes.artifacts import TEXT_EXTENSIONS as TEXT_EXTENSIONS
 
-# Re-export for backward compatibility (used by src.core.background_tasks)
-from src.api.routes.tasks import VALID_TASK_TRANSITIONS as VALID_TASK_TRANSITIONS
-
 router = APIRouter(prefix="/api", tags=["API"])
 
 router.include_router(config_router)

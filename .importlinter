@@ -16,7 +16,6 @@ layers =
     src.database
 ignore_imports =
     # core reaching up into api route modules for domain logic (move to services).
-    src.core.background_tasks -> src.api.http
     src.core.background_tasks -> src.api.integrations.github
     # services reaching up into core (move shared types to a leaf module).
     src.services.mcp_bridge -> src.core.llm
