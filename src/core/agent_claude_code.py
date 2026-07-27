@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Any
 from claude_agent_sdk import PermissionResultAllow, PermissionResultDeny
 
 from src.core.agent_auth import agent_configuration_issue
-from src.core.agents import MAX_TOOL_OUTPUT_CHARS, truncate_tool_output
+from src.core.agents import MAX_TOOL_OUTPUT_CHARS, ManagedAgentBase, truncate_tool_output
 from src.core.buffer import MessageType
 from src.core.cwd_tracking import (
     apply_agent_cwd,
@@ -51,7 +51,6 @@ if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
     from src.core.llm import ToolCallRequest
-    from src.core.prompt_router import PromptRouter
     from src.core.session import ActiveSession
     from src.executors.base import ExecutionChunk
     from src.tools.loader import ToolDefinition
@@ -208,11 +207,8 @@ def _split_into_chunks(content: str, chunk_size: int) -> list[str]:
 _truncate_tool_output = truncate_tool_output
 
 
-class ClaudeCodeAgent:
+class ClaudeCodeAgent(ManagedAgentBase):
     """Claude Code subprocess lifecycle collaborator for PromptRouter."""
-
-    def __init__(self, router: PromptRouter) -> None:
-        self._r = router
 
     def _build_claude_code_extra_env(self) -> dict[str, str]:
         """Build extra environment variables for Claude Code subprocesses."""
@@ -810,19 +806,7 @@ class ClaudeCodeAgent:
                                 # with 1:1 tool_use/tool_result pairing.
                                 session._pending_snapshots.append(None)
                             # Update subprocess current_tool tracking
-                            session.subprocess_current_tool = tool_name
-                            if session.subprocess_started_at is not None:
-                                session.buffer.push_ephemeral(
-                                    MessageType.SUBPROCESS_STATUS,
-                                    {
-                                        "session_id": session.id,
-                                        "subprocess_type": session.subprocess_type,
-                                        "display_name": session.subprocess_display_name,
-                                        "working_directory": session.subprocess_working_directory,
-                                        "current_tool": tool_name,
-                                        "started_at": session.subprocess_started_at_iso,
-                                    },
-                                )
+                            self._push_subprocess_status(session, tool_name)
                             # Invalidate the worktree cache when a Bash
                             # command plausibly mutates the worktree set.
                             if tool_name == "Bash" and looks_like_git_worktree_mutation(
@@ -1076,7 +1060,7 @@ class ClaudeCodeAgent:
         )
         _ = block  # placeholder — kept for future tool_use_id linkage.
 
-    async def _process_tool_result(  # noqa: C901
+    async def _process_tool_result(
         self,
         session: ActiveSession,
         raw_content: Any,
@@ -1144,19 +1128,7 @@ class ClaudeCodeAgent:
             if content:
                 self._r._fire_text_artifact_scan(session, [content])
 
-        session.subprocess_current_tool = None
-        if session.subprocess_started_at is not None:
-            session.buffer.push_ephemeral(
-                MessageType.SUBPROCESS_STATUS,
-                {
-                    "session_id": session.id,
-                    "subprocess_type": session.subprocess_type,
-                    "display_name": session.subprocess_display_name,
-                    "working_directory": session.subprocess_working_directory,
-                    "current_tool": None,
-                    "started_at": session.subprocess_started_at_iso,
-                },
-            )
+        self._push_subprocess_status(session, None)
 
         # Output-side cwd inference.  Many tools that change the agent's
         # working location (wt attach, git worktree add, custom switch

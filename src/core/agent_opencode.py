@@ -18,7 +18,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from src.core.agent_auth import agent_configuration_issue
-from src.core.agents import truncate_tool_output
+from src.core.agents import ManagedAgentBase, truncate_tool_output
 from src.core.buffer import MessageType
 from src.core.cwd_tracking import (
     apply_agent_cwd,
@@ -33,7 +33,6 @@ if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
     from src.core.llm import ToolCallRequest
-    from src.core.prompt_router import PromptRouter
     from src.core.session import ActiveSession
     from src.executors.base import ExecutionChunk
     from src.tools.loader import ToolDefinition
@@ -43,11 +42,8 @@ logger = logging.getLogger(__name__)
 _truncate_tool_output = truncate_tool_output
 
 
-class OpenCodeAgent:
+class OpenCodeAgent(ManagedAgentBase):
     """OpenCode CLI subprocess lifecycle collaborator for PromptRouter."""
-
-    def __init__(self, router: PromptRouter) -> None:
-        self._r = router
 
     def _build_opencode_extra_env(self) -> dict[str, str]:
         """Build extra environment variables for OpenCode CLI subprocesses."""
@@ -244,19 +240,7 @@ class OpenCodeAgent:
                         "tool_input": tool_input,
                     },
                 )
-                session.subprocess_current_tool = tool_name
-                if session.subprocess_started_at is not None:
-                    session.buffer.push_ephemeral(
-                        MessageType.SUBPROCESS_STATUS,
-                        {
-                            "session_id": session.id,
-                            "subprocess_type": session.subprocess_type,
-                            "display_name": session.subprocess_display_name,
-                            "working_directory": session.subprocess_working_directory,
-                            "current_tool": tool_name,
-                            "started_at": session.subprocess_started_at_iso,
-                        },
-                    )
+                self._push_subprocess_status(session, tool_name)
                 # Live worktree-badge tracking for OpenCode's bash tool.
                 if tool_name in ("bash", "Bash"):
                     command = str(tool_input.get("command") or "")
@@ -286,19 +270,7 @@ class OpenCodeAgent:
                             },
                         )
                         self._r._fire_text_artifact_scan(session, [output])
-                    session.subprocess_current_tool = None
-                    if session.subprocess_started_at is not None:
-                        session.buffer.push_ephemeral(
-                            MessageType.SUBPROCESS_STATUS,
-                            {
-                                "session_id": session.id,
-                                "subprocess_type": session.subprocess_type,
-                                "display_name": session.subprocess_display_name,
-                                "working_directory": session.subprocess_working_directory,
-                                "current_tool": None,
-                                "started_at": session.subprocess_started_at_iso,
-                            },
-                        )
+                    self._push_subprocess_status(session, None)
 
             elif event_type == "step_finish":
                 # Accumulate per-step token usage

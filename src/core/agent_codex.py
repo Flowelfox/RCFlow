@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Any
 
 from src.core.agent_acp import resolve_mcp_proxy_command, worker_loopback_url
 from src.core.agent_auth import agent_configuration_issue
-from src.core.agents import truncate_tool_output
+from src.core.agents import ManagedAgentBase, truncate_tool_output
 from src.core.buffer import MessageType
 from src.core.cwd_tracking import (
     apply_agent_cwd,
@@ -36,7 +36,6 @@ if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
     from src.core.llm import ToolCallRequest
-    from src.core.prompt_router import PromptRouter
     from src.core.session import ActiveSession
     from src.executors.base import ExecutionChunk
     from src.tools.loader import ToolDefinition
@@ -46,11 +45,8 @@ logger = logging.getLogger(__name__)
 _truncate_tool_output = truncate_tool_output
 
 
-class CodexAgent:
+class CodexAgent(ManagedAgentBase):
     """Codex CLI subprocess lifecycle collaborator for PromptRouter."""
-
-    def __init__(self, router: PromptRouter) -> None:
-        self._r = router
 
     def _build_codex_extra_env(self) -> dict[str, str]:
         """Build extra environment variables for Codex CLI subprocesses."""
@@ -319,19 +315,7 @@ class CodexAgent:
                             "tool_input": {"command": item.get("command", "")},
                         },
                     )
-                    session.subprocess_current_tool = "command_execution"
-                    if session.subprocess_started_at is not None:
-                        session.buffer.push_ephemeral(
-                            MessageType.SUBPROCESS_STATUS,
-                            {
-                                "session_id": session.id,
-                                "subprocess_type": session.subprocess_type,
-                                "display_name": session.subprocess_display_name,
-                                "working_directory": session.subprocess_working_directory,
-                                "current_tool": "command_execution",
-                                "started_at": session.subprocess_started_at_iso,
-                            },
-                        )
+                    self._push_subprocess_status(session, "command_execution")
                     # Live worktree-badge tracking — same machinery the
                     # Claude Code Bash interception uses.
                     command = str(item.get("command", "") or "")
@@ -354,19 +338,7 @@ class CodexAgent:
                             "tool_input": {},
                         },
                     )
-                    session.subprocess_current_tool = "file_change"
-                    if session.subprocess_started_at is not None:
-                        session.buffer.push_ephemeral(
-                            MessageType.SUBPROCESS_STATUS,
-                            {
-                                "session_id": session.id,
-                                "subprocess_type": session.subprocess_type,
-                                "display_name": session.subprocess_display_name,
-                                "working_directory": session.subprocess_working_directory,
-                                "current_tool": "file_change",
-                                "started_at": session.subprocess_started_at_iso,
-                            },
-                        )
+                    self._push_subprocess_status(session, "file_change")
                 elif item_type == "mcp_tool_call":
                     post_tool_text_chunks.clear()
                     mcp_tool_name = f"mcp:{item.get('server', '')}:{item.get('tool', '')}"
@@ -378,19 +350,7 @@ class CodexAgent:
                             "tool_input": item.get("arguments", {}),
                         },
                     )
-                    session.subprocess_current_tool = mcp_tool_name
-                    if session.subprocess_started_at is not None:
-                        session.buffer.push_ephemeral(
-                            MessageType.SUBPROCESS_STATUS,
-                            {
-                                "session_id": session.id,
-                                "subprocess_type": session.subprocess_type,
-                                "display_name": session.subprocess_display_name,
-                                "working_directory": session.subprocess_working_directory,
-                                "current_tool": mcp_tool_name,
-                                "started_at": session.subprocess_started_at_iso,
-                            },
-                        )
+                    self._push_subprocess_status(session, mcp_tool_name)
 
             elif event_type == "item.updated":
                 item = event.get("item", {})
@@ -451,19 +411,7 @@ class CodexAgent:
                             },
                         )
                         self._r._fire_text_artifact_scan(session, [output])
-                    session.subprocess_current_tool = None
-                    if session.subprocess_started_at is not None:
-                        session.buffer.push_ephemeral(
-                            MessageType.SUBPROCESS_STATUS,
-                            {
-                                "session_id": session.id,
-                                "subprocess_type": session.subprocess_type,
-                                "display_name": session.subprocess_display_name,
-                                "working_directory": session.subprocess_working_directory,
-                                "current_tool": None,
-                                "started_at": session.subprocess_started_at_iso,
-                            },
-                        )
+                    self._push_subprocess_status(session, None)
                 elif item_type == "file_change":
                     diff = item.get("diff", "")
                     file_path = item.get("file_path", item.get("file", ""))
@@ -479,19 +427,7 @@ class CodexAgent:
                             },
                         )
                         self._r._fire_text_artifact_scan(session, [content])
-                    session.subprocess_current_tool = None
-                    if session.subprocess_started_at is not None:
-                        session.buffer.push_ephemeral(
-                            MessageType.SUBPROCESS_STATUS,
-                            {
-                                "session_id": session.id,
-                                "subprocess_type": session.subprocess_type,
-                                "display_name": session.subprocess_display_name,
-                                "working_directory": session.subprocess_working_directory,
-                                "current_tool": None,
-                                "started_at": session.subprocess_started_at_iso,
-                            },
-                        )
+                    self._push_subprocess_status(session, None)
                 elif item_type == "mcp_tool_call":
                     mcp_completed_name = f"mcp:{item.get('server', '')}:{item.get('tool', '')}"
                     output = item.get("output", item.get("result", ""))
@@ -509,19 +445,7 @@ class CodexAgent:
                             },
                         )
                         self._r._fire_text_artifact_scan(session, [output])
-                    session.subprocess_current_tool = None
-                    if session.subprocess_started_at is not None:
-                        session.buffer.push_ephemeral(
-                            MessageType.SUBPROCESS_STATUS,
-                            {
-                                "session_id": session.id,
-                                "subprocess_type": session.subprocess_type,
-                                "display_name": session.subprocess_display_name,
-                                "working_directory": session.subprocess_working_directory,
-                                "current_tool": None,
-                                "started_at": session.subprocess_started_at_iso,
-                            },
-                        )
+                    self._push_subprocess_status(session, None)
 
             elif event_type == "turn.completed":
                 completed_successfully = True

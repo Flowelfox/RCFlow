@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from src.core.agent_auth import agent_configuration_issue
-from src.core.agents import truncate_tool_output
+from src.core.agents import ManagedAgentBase, truncate_tool_output
 from src.core.buffer import MessageType
 from src.core.cwd_tracking import apply_agent_cwd, infer_cwd_from_tool_paths
 from src.core.permissions import PermissionDecision, PermissionManager
@@ -34,7 +34,6 @@ if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
     from src.core.llm import ToolCallRequest
-    from src.core.prompt_router import PromptRouter
     from src.core.session import ActiveSession
     from src.executors.base import ExecutionChunk
     from src.tools.loader import ToolDefinition
@@ -86,11 +85,8 @@ def _settings_key(tool_def: ToolDefinition) -> str:
     return tool_def.name
 
 
-class AcpAgent:
+class AcpAgent(ManagedAgentBase):
     """ACP agent subprocess lifecycle collaborator for PromptRouter."""
-
-    def __init__(self, router: PromptRouter) -> None:
-        self._r = router
 
     # -- spawn-time wiring ----------------------------------------------
 
@@ -264,22 +260,6 @@ class AcpAgent:
         return f"{display_name} session started in {working_path}"
 
     # -- relay -----------------------------------------------------------
-
-    def _push_subprocess_status(self, session: ActiveSession, current_tool: str | None) -> None:
-        session.subprocess_current_tool = current_tool
-        if session.subprocess_started_at is None:
-            return
-        session.buffer.push_ephemeral(
-            MessageType.SUBPROCESS_STATUS,
-            {
-                "session_id": session.id,
-                "subprocess_type": session.subprocess_type,
-                "display_name": session.subprocess_display_name,
-                "working_directory": session.subprocess_working_directory,
-                "current_tool": current_tool,
-                "started_at": session.subprocess_started_at_iso,
-            },
-        )
 
     def _track_cwd_from_locations(self, session: ActiveSession, locations: list[str]) -> None:
         if not locations:

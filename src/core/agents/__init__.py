@@ -11,6 +11,6 @@ The richer per-agent classes (``ClaudeCodeAgent``, ``CodexAgent``,
 now. Phase 2 of the refactor plan moves them into this package.
 """
 
-from src.core.agents.base import MAX_TOOL_OUTPUT_CHARS, truncate_tool_output
+from src.core.agents.base import MAX_TOOL_OUTPUT_CHARS, ManagedAgentBase, truncate_tool_output
 
-__all__ = ["MAX_TOOL_OUTPUT_CHARS", "truncate_tool_output"]
+__all__ = ["MAX_TOOL_OUTPUT_CHARS", "ManagedAgentBase", "truncate_tool_output"]
