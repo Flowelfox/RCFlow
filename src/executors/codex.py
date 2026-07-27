@@ -7,14 +7,15 @@ import os
 from collections.abc import AsyncGenerator
 from typing import Any
 
-from src.executors.base import BaseExecutor, ExecutionChunk, ExecutionResult
+from src.executors.base import ExecutionChunk
+from src.executors.oneshot_cli import OneShotCliExecutor
 from src.tools.loader import ToolDefinition
-from src.utils.process import kill_process_tree, new_session_kwargs
+from src.utils.process import new_session_kwargs
 
 logger = logging.getLogger(__name__)
 
 
-class CodexExecutor(BaseExecutor):
+class CodexExecutor(OneShotCliExecutor):
     """Executor that manages OpenAI Codex CLI as a one-shot subprocess per turn.
 
     Unlike the Claude Code executor which keeps a persistent bidirectional
@@ -54,10 +55,12 @@ class CodexExecutor(BaseExecutor):
         # Overrides from tool settings (managed-only), applied on top of tool_def config
         self._config_overrides: dict[str, Any] = config_overrides or {}
 
+    _AGENT_NAME = "Codex"
+    _SESSION_REF_LABEL = "thread"
+
     @property
-    def is_running(self) -> bool:
-        """Whether the process is currently running."""
-        return self._process is not None and self._process.returncode is None
+    def _session_ref(self) -> str | None:
+        return self._thread_id
 
     @property
     def thread_id(self) -> str | None:
@@ -165,59 +168,6 @@ class CodexExecutor(BaseExecutor):
             )
 
         return process
-
-    _STDERR_MAX_BYTES = 64 * 1024
-
-    async def _drain_stderr(self) -> None:
-        """Read stderr to prevent pipe deadlock and capture tail for diagnostics."""
-        if not self._process or not self._process.stderr:
-            return
-        try:
-            while True:
-                line = await self._process.stderr.readline()
-                if not line:
-                    break
-                decoded = line.decode("utf-8", errors="replace").rstrip("\n")
-                self._stderr_output += decoded + "\n"
-                if len(self._stderr_output) > self._STDERR_MAX_BYTES:
-                    self._stderr_output = self._stderr_output[-self._STDERR_MAX_BYTES :]
-                logger.debug("Codex stderr [thread=%s]: %s", self._thread_id, decoded)
-        except ConnectionResetError:
-            pass
-        # CancelledError deliberately propagates: swallowing it defeats the
-        # task.cancel() the session lifecycle uses to tear this reader down.
-
-    async def _wait_and_log_exit(self) -> None:
-        """Wait for process to exit and log diagnostics."""
-        if not self._process:
-            return
-        returncode = self._process.returncode
-        if returncode is None:
-            try:
-                returncode = await asyncio.wait_for(self._process.wait(), timeout=2.0)
-            except TimeoutError:
-                return
-
-        # Ensure stderr task finishes
-        if self._stderr_task and not self._stderr_task.done():
-            try:
-                await asyncio.wait_for(self._stderr_task, timeout=2.0)
-            except TimeoutError:
-                self._stderr_task.cancel()
-
-        if returncode != 0:
-            logger.warning(
-                "Codex exited with code %d (thread=%s). stderr: %s",
-                returncode,
-                self._thread_id,
-                self._stderr_output.strip() or "(empty)",
-            )
-        else:
-            logger.info(
-                "Codex exited normally (thread=%s, code=%d)",
-                self._thread_id,
-                returncode,
-            )
 
     async def _write_prompt_and_close(self, prompt: str) -> None:
         """Write the prompt to stdin and close it (Codex one-shot model)."""
@@ -358,58 +308,5 @@ class CodexExecutor(BaseExecutor):
         async for chunk in self._read_events():
             yield chunk
 
-    async def read_more_events(self) -> AsyncGenerator[ExecutionChunk, None]:
-        """Not supported — Codex CLI uses one-shot processes.
-
-        Raises RuntimeError because Codex does not support reading more
-        events from a completed turn. Use ``restart_with_prompt()`` instead.
-        """
-        raise RuntimeError(
-            "Codex CLI does not support reading more events from a completed turn; use restart_with_prompt() instead"
-        )
-        # Make this a generator so the type signature is correct
-        yield  # pragma: no cover
-
-    async def execute(
-        self,
-        tool: ToolDefinition,
-        parameters: dict[str, Any],
-    ) -> ExecutionResult:
-        """Non-streaming execution: collect all chunks and return final result."""
-        collected: list[str] = []
-        async for chunk in self.execute_streaming(tool, parameters):
-            collected.append(chunk.content)
-
-        output = "\n".join(collected)
-        exit_code = self._process.returncode if self._process else None
-        return ExecutionResult(output=output, exit_code=exit_code)
-
-    async def send_input(self, data: str) -> None:
-        """Not supported — Codex CLI uses one-shot processes.
-
-        Raises RuntimeError because stdin is closed after the initial prompt.
-        Use ``restart_with_prompt()`` for follow-up messages.
-        """
-        raise RuntimeError(
-            "Codex CLI does not support interactive stdin input; use restart_with_prompt() for follow-up messages"
-        )
-
-    async def _cleanup_process(self) -> None:
-        """Kill the entire process tree and wait for exit, cancel stderr drain."""
-        if self._stderr_task and not self._stderr_task.done():
-            self._stderr_task.cancel()
-            self._stderr_task = None
-        if self._process:
-            await kill_process_tree(self._process)
-            self._process = None
-
-    async def stop_process(self) -> None:
-        """Kill the subprocess to free resources while keeping executor state for restart."""
-        await self._cleanup_process()
-
-    async def cancel(self) -> None:
-        """Kill the Codex subprocess."""
-        if self._process:
-            logger.info("Cancelling Codex session (thread=%s)", self._thread_id)
-        await self._cleanup_process()
-        self._done = True
+    # send_input / read_more_events / execute / _cleanup_process / stop_process /
+    # cancel are inherited from OneShotCliExecutor.
