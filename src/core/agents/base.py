@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import asyncio
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any
 
 from src.core.buffer import MessageType
-from src.core.session import SessionStatus
+from src.core.session import ActivityState, SessionStatus
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Coroutine
+
     from src.core.prompt_router import PromptRouter
     from src.core.session import ActiveSession
 
@@ -88,3 +92,46 @@ class ManagedAgentBase:
         session.buffer.push_text(MessageType.SESSION_END, {"session_id": session.id, "reason": reason})
         session.complete()
         self._r._fire_archive_task(session.id)
+
+    async def _forward_to_oneshot_agent(
+        self,
+        session: ActiveSession,
+        text: str,
+        *,
+        tool_key: str,
+        executor_attr: str,
+        task_attr: str,
+        subprocess_type: str,
+        default_display_name: str,
+        working_dir_meta_key: str,
+        restart: Callable[[ActiveSession, Any, str], Coroutine[Any, Any, None]],
+    ) -> None:
+        """Forward a follow-up message to a one-shot CLI agent (Codex / OpenCode).
+
+        These CLIs use one process per turn, so a follow-up re-broadcasts the
+        subprocess status, opens a fresh agent group, and spawns a new resume
+        process via *restart*. Shared by Codex and OpenCode.
+        """
+        executor = getattr(session, executor_attr)
+        if executor is None or session.status == SessionStatus.PAUSED:
+            return
+
+        session.set_activity(ActivityState.RUNNING_SUBPROCESS)
+
+        tool_def = self._r._tool_registry.get(tool_key)
+        display_name = tool_def.display_name if tool_def and tool_def.display_name else default_display_name
+
+        # Re-broadcast subprocess status so the client shows the indicator again.
+        if session.subprocess_started_at is None:
+            session.subprocess_started_at = datetime.now(UTC)
+            session.subprocess_type = subprocess_type
+            session.subprocess_display_name = display_name
+            session.subprocess_working_directory = session.metadata.get(working_dir_meta_key, "")
+        self._push_subprocess_status(session, None)
+
+        session.buffer.push_text(
+            MessageType.AGENT_GROUP_START,
+            {"session_id": session.id, "tool_name": tool_key, "display_name": display_name},
+        )
+
+        setattr(session, task_attr, asyncio.create_task(restart(session, executor, text)))

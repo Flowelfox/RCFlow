@@ -26,7 +26,7 @@ from src.core.cwd_tracking import (
     parse_cwd_change,
     reset_worktree_cache,
 )
-from src.core.session import ActivityState, SessionStatus, SessionType
+from src.core.session import ActivityState, SessionType
 from src.executors.opencode import OpenCodeExecutor
 
 if TYPE_CHECKING:
@@ -378,49 +378,17 @@ class OpenCodeAgent(ManagedAgentBase):
         OpenCode CLI uses one-shot processes, so follow-ups always spawn a new
         process with ``--session-id SESSION_ID``.
         """
-        executor = session.opencode_executor
-        if executor is None:
-            return
-
-        if session.status == SessionStatus.PAUSED:
-            return
-
-        session.set_activity(ActivityState.RUNNING_SUBPROCESS)
-
-        if session.subprocess_started_at is None:
-            session.subprocess_started_at = datetime.now(UTC)
-            session.subprocess_type = "opencode"
-            opencode_def_for_name = self._r._tool_registry.get("opencode")
-            session.subprocess_display_name = (
-                opencode_def_for_name.display_name
-                if opencode_def_for_name and opencode_def_for_name.display_name
-                else "OpenCode"
-            )
-            session.subprocess_working_directory = session.metadata.get("opencode_working_directory", "")
-        session.subprocess_current_tool = None
-        session.buffer.push_ephemeral(
-            MessageType.SUBPROCESS_STATUS,
-            {
-                "session_id": session.id,
-                "subprocess_type": session.subprocess_type,
-                "display_name": session.subprocess_display_name,
-                "working_directory": session.subprocess_working_directory,
-                "current_tool": None,
-                "started_at": session.subprocess_started_at_iso,
-            },
+        await self._forward_to_oneshot_agent(
+            session,
+            text,
+            tool_key="opencode",
+            executor_attr="opencode_executor",
+            task_attr="_opencode_stream_task",
+            subprocess_type="opencode",
+            default_display_name="OpenCode",
+            working_dir_meta_key="opencode_working_directory",
+            restart=self._restart_opencode_with_prompt,
         )
-
-        opencode_def = self._r._tool_registry.get("opencode")
-        session.buffer.push_text(
-            MessageType.AGENT_GROUP_START,
-            {
-                "session_id": session.id,
-                "tool_name": "opencode",
-                "display_name": opencode_def.display_name if opencode_def and opencode_def.display_name else "OpenCode",
-            },
-        )
-
-        session._opencode_stream_task = asyncio.create_task(self._restart_opencode_with_prompt(session, executor, text))
 
     async def _restart_opencode_with_prompt(
         self,

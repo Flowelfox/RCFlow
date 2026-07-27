@@ -28,7 +28,7 @@ from src.core.cwd_tracking import (
     parse_cwd_change,
     reset_worktree_cache,
 )
-from src.core.session import ActivityState, SessionStatus, SessionType
+from src.core.session import ActivityState, SessionType
 from src.executors.codex import CodexExecutor
 from src.services.tool_settings import ensure_codex_mcp_registration
 
@@ -562,50 +562,17 @@ class CodexAgent(ManagedAgentBase):
         Codex CLI uses one-shot processes, so follow-ups always spawn a new
         process with ``codex exec resume THREAD_ID``.
         """
-        executor = session.codex_executor
-        if executor is None:
-            return
-
-        if session.status == SessionStatus.PAUSED:
-            return
-
-        session.set_activity(ActivityState.RUNNING_SUBPROCESS)
-
-        # Re-broadcast subprocess status so the client shows the indicator again
-        if session.subprocess_started_at is None:
-            session.subprocess_started_at = datetime.now(UTC)
-            session.subprocess_type = "codex"
-            codex_def_for_name = self._r._tool_registry.get("codex")
-            session.subprocess_display_name = (
-                codex_def_for_name.display_name if codex_def_for_name and codex_def_for_name.display_name else "Codex"
-            )
-            session.subprocess_working_directory = session.metadata.get("codex_working_directory", "")
-        session.subprocess_current_tool = None
-        session.buffer.push_ephemeral(
-            MessageType.SUBPROCESS_STATUS,
-            {
-                "session_id": session.id,
-                "subprocess_type": session.subprocess_type,
-                "display_name": session.subprocess_display_name,
-                "working_directory": session.subprocess_working_directory,
-                "current_tool": None,
-                "started_at": session.subprocess_started_at_iso,
-            },
+        await self._forward_to_oneshot_agent(
+            session,
+            text,
+            tool_key="codex",
+            executor_attr="codex_executor",
+            task_attr="_codex_stream_task",
+            subprocess_type="codex",
+            default_display_name="Codex",
+            working_dir_meta_key="codex_working_directory",
+            restart=self._restart_codex_with_prompt,
         )
-
-        # Open a new agent group for this follow-up turn
-        codex_def = self._r._tool_registry.get("codex")
-        session.buffer.push_text(
-            MessageType.AGENT_GROUP_START,
-            {
-                "session_id": session.id,
-                "tool_name": "codex",
-                "display_name": codex_def.display_name if codex_def and codex_def.display_name else "Codex",
-            },
-        )
-
-        # Codex always spawns a new process for follow-ups (no persistent stdin)
-        session._codex_stream_task = asyncio.create_task(self._restart_codex_with_prompt(session, executor, text))
 
     async def _restart_codex_with_prompt(
         self,
