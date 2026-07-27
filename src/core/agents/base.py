@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from src.core.buffer import MessageType
+from src.core.session import SessionStatus
 
 if TYPE_CHECKING:
     from src.core.prompt_router import PromptRouter
@@ -57,3 +58,33 @@ class ManagedAgentBase:
                 "started_at": session.subprocess_started_at_iso,
             },
         )
+
+    async def _end_agent_session(
+        self,
+        session: ActiveSession,
+        *,
+        executor_attr: str,
+        task_attr: str,
+        reason: str,
+    ) -> None:
+        """Run the standard end-of-session teardown for a one-executor subprocess agent.
+
+        Stop + drop the executor and its stream task, revoke MCP tokens, clear
+        subprocess tracking, then either complete a paused session silently or
+        push SESSION_END + complete + fire the archive. Shared by Codex /
+        OpenCode / ACP (Claude Code differs — it also terminates live monitors).
+        """
+        executor = getattr(session, executor_attr)
+        if executor is not None:
+            await executor.stop_process()
+        setattr(session, executor_attr, None)
+        setattr(session, task_attr, None)
+        if self._r._mcp_bridge is not None:
+            self._r._mcp_bridge.tokens.revoke_session(session.id)
+        session.clear_subprocess_tracking()
+        if session.status == SessionStatus.PAUSED:
+            session.complete()
+            return
+        session.buffer.push_text(MessageType.SESSION_END, {"session_id": session.id, "reason": reason})
+        session.complete()
+        self._r._fire_archive_task(session.id)

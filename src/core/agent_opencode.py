@@ -368,26 +368,9 @@ class OpenCodeAgent(ManagedAgentBase):
 
     async def _end_opencode_session(self, session: ActiveSession) -> None:
         """Clean up OpenCode state when the session ends."""
-        if session.opencode_executor is not None:
-            await session.opencode_executor.stop_process()
-        session.opencode_executor = None
-        session._opencode_stream_task = None
-
-        session.clear_subprocess_tracking()
-
-        if session.status == SessionStatus.PAUSED:
-            session.complete()
-            return
-
-        session.buffer.push_text(
-            MessageType.SESSION_END,
-            {
-                "session_id": session.id,
-                "reason": "opencode_finished",
-            },
+        await self._end_agent_session(
+            session, executor_attr="opencode_executor", task_attr="_opencode_stream_task", reason="opencode_finished"
         )
-        session.complete()
-        self._r._fire_archive_task(session.id)
 
     async def _forward_to_opencode(self, session: ActiveSession, text: str) -> None:
         """Forward a follow-up message to the active OpenCode session.

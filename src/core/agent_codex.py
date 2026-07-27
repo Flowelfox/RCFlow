@@ -552,29 +552,9 @@ class CodexAgent(ManagedAgentBase):
 
     async def _end_codex_session(self, session: ActiveSession) -> None:
         """Clean up Codex state when the session ends."""
-        if session.codex_executor is not None:
-            await session.codex_executor.stop_process()
-        session.codex_executor = None
-        session._codex_stream_task = None
-        if self._r._mcp_bridge is not None:
-            self._r._mcp_bridge.tokens.revoke_session(session.id)
-
-        # Clear subprocess tracking and broadcast null status
-        session.clear_subprocess_tracking()
-
-        if session.status == SessionStatus.PAUSED:
-            session.complete()
-            return
-
-        session.buffer.push_text(
-            MessageType.SESSION_END,
-            {
-                "session_id": session.id,
-                "reason": "codex_finished",
-            },
+        await self._end_agent_session(
+            session, executor_attr="codex_executor", task_attr="_codex_stream_task", reason="codex_finished"
         )
-        session.complete()
-        self._r._fire_archive_task(session.id)
 
     async def _forward_to_codex(self, session: ActiveSession, text: str) -> None:
         """Forward a follow-up message to the active Codex session.

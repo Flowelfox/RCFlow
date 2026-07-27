@@ -505,22 +505,6 @@ class AcpAgent(ManagedAgentBase):
 
     async def _end_acp_session(self, session: ActiveSession) -> None:
         """Clean up ACP state when the session ends."""
-        if session.acp_executor is not None:
-            await session.acp_executor.stop_process()
-        session.acp_executor = None
-        session._acp_stream_task = None
-        if self._r._mcp_bridge is not None:
-            self._r._mcp_bridge.tokens.revoke_session(session.id)
-
-        session.clear_subprocess_tracking()
-
-        if session.status == SessionStatus.PAUSED:
-            session.complete()
-            return
-
-        session.buffer.push_text(
-            MessageType.SESSION_END,
-            {"session_id": session.id, "reason": "acp_finished"},
+        await self._end_agent_session(
+            session, executor_attr="acp_executor", task_attr="_acp_stream_task", reason="acp_finished"
         )
-        session.complete()
-        self._r._fire_archive_task(session.id)
