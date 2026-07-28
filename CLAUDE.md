@@ -62,7 +62,9 @@ Run targets with `just <target>`. Run `just` with no arguments for the full anno
 - Single Flutter test: `cd rcflowclient && flutter test test/<path>_test.dart`
 - `vm <command>` — live worker/client E2E verification on the Ubuntu VM (see `docs/design/vm-verification.md`; `just vm help` lists subcommands)
 
-**Coverage floors are enforced** by `just check` and CI: Python ≥ 54% (`fail_under` in `pyproject.toml`), Flutter ≥ 14% (`rcflowclient/coverage_threshold.txt`). New code needs tests to keep the gates green. The floors are ratchets — raise them as coverage grows; never lower them.
+**Coverage floors are enforced** by `just check` and CI: Python ≥ 64% (`fail_under` in `pyproject.toml`), Flutter ≥ 14% (`rcflowclient/coverage_threshold.txt`). New code needs tests to keep the gates green. The floors are ratchets — raise them as coverage grows; never lower them.
+
+On pull requests CI additionally runs **diff-cover**: new/changed lines must be ≥80% covered, so a large PR can't hide untested code behind the repo-wide average.
 
 ### Database Migrations
 

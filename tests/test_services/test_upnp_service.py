@@ -16,7 +16,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.services.upnp_service import UpnpService, UpnpStatus
+from src.services.upnp_service import (
+    UpnpService,
+    UpnpStatus,
+    _is_safe_ssdp_location,
+    _parse_ssdp_location,
+)
 
 
 def _install_miniupnpc_stub(monkeypatch: pytest.MonkeyPatch, upnp_instance: MagicMock) -> MagicMock:
@@ -577,3 +582,86 @@ async def test_lease_renewal_task(monkeypatch: pytest.MonkeyPatch) -> None:
     await svc.stop()
     # After stop, the renewal task must be cancelled or completed.
     await asyncio.sleep(0)  # let any pending cancel propagate
+
+
+# ---------------------------------------------------------------------------
+# SSDP LOCATION validation (SSRF guard)
+# ---------------------------------------------------------------------------
+
+
+class TestSsdpLocationValidation:
+    """SSDP replies are unauthenticated, spoofable UDP from anyone on the LAN.
+
+    A hostile responder therefore controls the ``LOCATION`` URL the service
+    would otherwise fetch, so only http(s) URLs pointing at a private/loopback/
+    link-local IP literal may be followed.
+    """
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "http://192.168.1.1:5000/rootDesc.xml",
+            "http://10.0.0.1/desc.xml",
+            "http://172.16.0.1/desc.xml",
+            "https://192.168.0.254/desc.xml",
+            "http://127.0.0.1:8080/desc.xml",
+            "http://[fe80::1]/desc.xml",
+        ],
+    )
+    def test_accepts_private_ip_literals(self, url: str):
+        assert _is_safe_ssdp_location(url) is True
+
+    @pytest.mark.parametrize(
+        ("url", "reason"),
+        [
+            ("http://93.184.216.34/desc.xml", "public IP — SSRF to the internet"),
+            ("https://8.8.8.8/desc.xml", "public IP over https"),
+            ("file:///etc/passwd", "file scheme — local file read"),
+            ("ftp://192.168.1.1/desc.xml", "non-http scheme"),
+            ("http://evil.example.com/desc.xml", "hostname forces a DNS lookup"),
+            ("http://localhost/desc.xml", "hostname, not an IP literal"),
+            ("", "empty string"),
+            ("not a url", "unparseable"),
+            ("http:///desc.xml", "no host"),
+        ],
+    )
+    def test_rejects_unsafe_locations(self, url: str, reason: str):
+        assert _is_safe_ssdp_location(url) is False, reason
+
+    def test_parses_location_from_datagram(self):
+        raw = b"HTTP/1.1 200 OK\r\nCACHE-CONTROL: max-age=120\r\nLOCATION: http://192.168.1.1:5000/rootDesc.xml\r\n\r\n"
+        assert _parse_ssdp_location(raw) == "http://192.168.1.1:5000/rootDesc.xml"
+
+    def test_location_header_is_case_insensitive(self):
+        raw = b"HTTP/1.1 200 OK\r\nlocation: http://10.1.2.3/desc.xml\r\n\r\n"
+        assert _parse_ssdp_location(raw) == "http://10.1.2.3/desc.xml"
+
+    def test_drops_datagram_with_unsafe_location(self):
+        """A spoofed reply pointing off-LAN yields None rather than a fetchable URL."""
+        evil = b"HTTP/1.1 200 OK\r\nLOCATION: http://93.184.216.34/desc.xml\r\n\r\n"
+        assert _parse_ssdp_location(evil) is None
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "http://169.254.169.254/latest/meta-data/iam/security-credentials/",
+            "http://[fd00:ec2::254]/latest/meta-data/",
+        ],
+    )
+    def test_rejects_cloud_metadata_endpoint(self, url: str):
+        """The instance-metadata address is link-local but must never be fetched.
+
+        On a cloud VM an unauthenticated GET there can return instance
+        credentials, so a spoofed SSDP reply must not be able to point at it.
+        """
+        assert _is_safe_ssdp_location(url) is False
+
+    def test_drops_datagram_pointing_at_cloud_metadata(self):
+        raw = b"HTTP/1.1 200 OK\r\nLOCATION: http://169.254.169.254/latest/meta-data/\r\nX: y\r\n\r\n"
+        assert _parse_ssdp_location(raw) is None
+
+    def test_datagram_without_location_returns_none(self):
+        assert _parse_ssdp_location(b"HTTP/1.1 200 OK\r\nST: upnp:rootdevice\r\n\r\n") is None
+
+    def test_undecodable_bytes_do_not_raise(self):
+        assert _parse_ssdp_location(b"\xff\xfe\x00 garbage") is None

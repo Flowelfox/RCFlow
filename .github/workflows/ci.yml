@@ -34,6 +34,11 @@ jobs:
           # Don't leave a write-capable token in .git/config while running
           # untrusted PR test code.
           persist-credentials: false
+          # Full history so the diff-coverage step below can resolve
+          # origin/<base branch>; the default shallow single-branch clone
+          # doesn't fetch it and diff-cover fails with "Could not find the
+          # branch to compare to".
+          fetch-depth: 0
 
       # uv manages the virtual-env and Python installation.
       # enable-cache stores the uv download cache between runs.

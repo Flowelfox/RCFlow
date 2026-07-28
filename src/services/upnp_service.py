@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import ipaddress
 import logging
 import time
 from dataclasses import dataclass, replace
@@ -21,6 +22,16 @@ from enum import StrEnum
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# Cloud instance-metadata endpoints. Link-local by address, but never a UPnP
+# gateway — and the classic SSRF target, since an unauthenticated GET can hand
+# back instance credentials. Rejected by :func:`_is_safe_ssdp_location`.
+_CLOUD_METADATA_ADDRESSES = frozenset(
+    {
+        ipaddress.ip_address("169.254.169.254"),  # AWS / Azure / GCP / OpenStack
+        ipaddress.ip_address("fd00:ec2::254"),  # AWS IMDS over IPv6
+    }
+)
 
 # Retry up to 5 external ports on ConflictInMappingEntry (internal_port + 0..4).
 _CONFLICT_RETRY_OFFSETS: tuple[int, ...] = (0, 1, 2, 3, 4)
@@ -132,8 +143,11 @@ def _is_safe_ssdp_location(url: str) -> bool:
     are trivially spoofable, so a hostile responder controls the ``LOCATION`` we
     subsequently fetch. Restricting to http(s) with a private/loopback/link-local
     IP literal blocks ``file://`` reads and SSRF to arbitrary external hosts.
+
+    Cloud instance-metadata addresses are excluded even though they are
+    link-local: they are the canonical SSRF target (a plain GET can return
+    credentials), and no real UPnP gateway is ever reachable there.
     """
-    import ipaddress  # noqa: PLC0415
     from urllib.parse import urlsplit  # noqa: PLC0415
 
     parts = urlsplit(url)
@@ -144,6 +158,8 @@ def _is_safe_ssdp_location(url: str) -> bool:
     except ValueError:
         # A LAN gateway's SSDP LOCATION is an IP literal; a hostname would force
         # a DNS lookup that is itself an SSRF vector, so reject it.
+        return False
+    if ip in _CLOUD_METADATA_ADDRESSES:
         return False
     return ip.is_private or ip.is_loopback or ip.is_link_local
 

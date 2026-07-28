@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import tarfile
+import zipfile
 from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -882,4 +883,33 @@ class TestExtractOpencodeArchive:
         _make_opencode_tarball(archive, {"README.md": b"docs"})
 
         with pytest.raises(RuntimeError, match="Could not find opencode binary"):
+            ToolManager._extract_opencode_archive(archive, tmp_dir, install_dir / "opencode")
+
+    def test_extracts_from_zip(self, tmp_path: Path):
+        """macOS/Windows releases ship .zip archives, not tarballs."""
+        install_dir = tmp_path / "opencode"
+        install_dir.mkdir()
+        binary_path = install_dir / "opencode"
+
+        tmp_dir = install_dir / "tmp"
+        tmp_dir.mkdir()
+        archive = tmp_dir / "opencode-darwin-arm64.zip"
+        with zipfile.ZipFile(archive, "w") as zf:
+            zf.writestr("desktop/opencode", b"desktop-build")
+            zf.writestr("opencode", b"cli-build")
+
+        ToolManager._extract_opencode_archive(archive, tmp_dir, binary_path)
+
+        assert binary_path.read_bytes() == b"cli-build"
+
+    def test_missing_binary_in_zip_raises(self, tmp_path: Path):
+        install_dir = tmp_path / "opencode"
+        install_dir.mkdir()
+        tmp_dir = install_dir / "tmp"
+        tmp_dir.mkdir()
+        archive = tmp_dir / "opencode-darwin-arm64.zip"
+        with zipfile.ZipFile(archive, "w") as zf:
+            zf.writestr("README.md", b"docs")
+
+        with pytest.raises(RuntimeError, match="Could not find opencode binary in zip"):
             ToolManager._extract_opencode_archive(archive, tmp_dir, install_dir / "opencode")

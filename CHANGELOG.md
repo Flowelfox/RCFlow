@@ -22,6 +22,7 @@ and note which component is affected where it matters.
 - **The updater verifies downloads before running them** — the worker now checks a downloaded installer's checksum against the release's published checksums and refuses to launch it on a mismatch, for both the desktop updater and `rcflow update` (Backend).
 - **Terminal sessions are isolated per connection** — one connection can no longer resize, write to, or close another connection's terminal (Backend).
 - **Login now verifies the returned sign-in token** — the Claude Code browser login checks the returned state value before completing, closing a cross-site request risk (Backend).
+- **Router discovery can no longer be pointed at a cloud metadata service** — when automatic port-forwarding scans the network, a spoofed reply claiming to be a router is now refused if it points at the cloud instance-metadata address, which on a hosted server can hand out credentials (Backend).
 
 ### Fixed
 - **OpenAI-backed sessions and long Anthropic project chats no longer break** — project/file/tool context could accumulate cache markers that OpenAI rejected outright and that Anthropic rejected after a few turns, failing the session; context is now sent in a form each provider accepts (Backend).
