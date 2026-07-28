@@ -20,6 +20,7 @@ from src.api.ws.terminal import router as terminal_router
 from src.config import get_settings
 from src.core.attachment_store import AttachmentStore
 from src.core.llm import LLMClient
+from src.core.mcp_bridge import McpBridge
 from src.core.pending_store import SessionPendingMessageStore
 from src.core.prompt_router import PromptRouter
 from src.core.session import SessionManager
@@ -28,7 +29,6 @@ from src.database.engine import check_connection, dispose_engine, get_session_fa
 from src.logs import setup_logging
 from src.paths import get_data_dir, is_frozen
 from src.services.artifact_scanner import ArtifactScanner
-from src.services.mcp_bridge import McpBridge
 from src.services.model_catalog import ModelCatalog
 from src.services.telemetry_service import TelemetryService
 from src.services.tool_manager import ToolManager

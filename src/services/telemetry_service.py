@@ -19,7 +19,7 @@ from src.database.models import Session as SessionModel
 from src.database.models import SessionTurn, TelemetryMinutely, TelemetryState, ToolCall
 
 if TYPE_CHECKING:
-    from src.core.llm import TurnUsage
+    from src.usage import TurnUsage
 
 logger = logging.getLogger(__name__)
 

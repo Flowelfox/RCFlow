@@ -1,4 +1,4 @@
-"""Tests for the MCP agent bridge (src/services/mcp_bridge.py).
+"""Tests for the MCP agent bridge (src/core/mcp_bridge.py).
 
 Includes the seamlessness-contract test: a tool definition synthesised at test
 time (never registered anywhere in code) must flow through listing and
@@ -13,9 +13,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from src.core.mcp_bridge import McpBridge, McpSessionTokenRegistry
 from src.core.permissions import PermissionDecision
 from src.core.session import SessionStatus
-from src.services.mcp_bridge import McpBridge, McpSessionTokenRegistry
 from src.tools.registry import ToolRegistry
 
 if TYPE_CHECKING:

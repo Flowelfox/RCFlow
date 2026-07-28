@@ -1,5 +1,5 @@
 ---
-updated: 2026-07-23
+updated: 2026-07-28
 ---
 
 # Project Structure
@@ -75,6 +75,7 @@ RCFlow/
 │   │   ├── native_tools/       # Session-aware native tools (python executor: notify, tasks, …)
 │   │   ├── background_tasks.py  # Fire-and-forget background tasks (mixin)
 │   │   ├── llm.py               # LLM client (Anthropic, Bedrock, OpenAI)
+│   │   ├── mcp_bridge.py        # MCP agent bridge — drives router/session to dispatch agent tool calls
 │   │   └── buffer.py            # Output buffer for session history
 │   │
 │   ├── executors/
@@ -89,11 +90,11 @@ RCFlow/
 │   │   └── worktree.py          # Worktree executor (wtpython)
 │   │
 │   ├── mcp_proxy.py             # rcflow-mcp stdio proxy (MCP bridge for agent subprocesses)
+│   ├── usage.py                 # Leaf: TurnUsage value type shared by core.llm + services.telemetry
 │   │
 │   ├── services/
 │   │   ├── __init__.py
 │   │   ├── tool_manager.py      # Auto-install/update for Claude Code, Codex & OpenCode CLIs
-│   │   ├── mcp_bridge.py        # MCP agent bridge (registry-driven tool exposure + tokens)
 │   │   └── linear_service.py    # Linear GraphQL API client
 │   │
 │   ├── prompts/

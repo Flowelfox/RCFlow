@@ -33,7 +33,7 @@ from typing import Any
 PROTOCOL_VERSION = "2024-11-05"
 # Kept as a literal (not importing mcp_bridge) so the proxy stays a tiny,
 # dependency-light stdlib script that bundles trivially; must match
-# RCFLOW_MCP_SERVER_NAME in src/services/mcp_bridge.py.
+# RCFLOW_MCP_SERVER_NAME in src/core/mcp_bridge.py.
 SERVER_INFO = {"name": "rcflow", "version": "1.0.0"}
 _HTTP_TIMEOUT = 660.0  # generous — bounded by the tool's own executor timeout server-side
 

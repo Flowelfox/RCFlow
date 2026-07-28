@@ -25,10 +25,10 @@ from src.core.agent_auth import agent_configuration_issue
 from src.core.agents import ManagedAgentBase, truncate_tool_output
 from src.core.buffer import MessageType
 from src.core.cwd_tracking import apply_agent_cwd, infer_cwd_from_tool_paths
+from src.core.mcp_bridge import RCFLOW_MCP_SERVER_NAME
 from src.core.permissions import PermissionDecision, PermissionManager
 from src.core.session import ActivityState, SessionStatus, SessionType
 from src.executors.acp import AcpExecutor
-from src.services.mcp_bridge import RCFLOW_MCP_SERVER_NAME
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator

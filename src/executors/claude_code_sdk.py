@@ -41,14 +41,14 @@ from claude_agent_sdk import (
     tool,
 )
 
+from src.core.mcp_bridge import RCFLOW_MCP_SERVER_NAME
 from src.executors.base import BaseExecutor, ExecutionChunk, ExecutionResult
-from src.services.mcp_bridge import RCFLOW_MCP_SERVER_NAME
 
 if TYPE_CHECKING:
     from claude_agent_sdk import Message, PermissionResult, ToolPermissionContext
     from claude_agent_sdk.types import McpSdkServerConfig
 
-    from src.services.mcp_bridge import McpBridge
+    from src.core.mcp_bridge import McpBridge
     from src.tools.loader import ToolDefinition
 
 logger = logging.getLogger(__name__)

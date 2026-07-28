@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastapi.testclient import TestClient
 
-from src.services.mcp_bridge import McpSessionTokenRegistry, McpToolSpec, ToolCallOutcome
+from src.core.mcp_bridge import McpSessionTokenRegistry, McpToolSpec, ToolCallOutcome
 
 if TYPE_CHECKING:
     from fastapi import FastAPI

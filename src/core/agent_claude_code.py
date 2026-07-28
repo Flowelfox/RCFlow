@@ -36,6 +36,7 @@ from src.core.cwd_tracking import (
     looks_like_git_worktree_mutation,
     reset_worktree_cache,
 )
+from src.core.mcp_bridge import RCFLOW_MCP_TOOL_PREFIX
 from src.core.permissions import (
     PermissionDecision,
     PermissionManager,
@@ -45,7 +46,6 @@ from src.core.permissions import (
 )
 from src.core.session import ActivityState, MonitorState, SessionStatus, SessionType
 from src.executors.claude_code_sdk import ClaudeCodeSdkExecutor
-from src.services.mcp_bridge import RCFLOW_MCP_TOOL_PREFIX
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator

@@ -15,6 +15,7 @@ import openai
 from src.config import Settings
 from src.prompts import PromptBuilder
 from src.tools.registry import ToolRegistry
+from src.usage import TurnUsage
 
 logger = logging.getLogger(__name__)
 
@@ -72,23 +73,6 @@ class ToolCallRequest:
     tool_use_id: str
     tool_name: str
     tool_input: dict[str, Any]
-
-
-@dataclass
-class TurnUsage:
-    """Usage statistics from a single LLM API turn."""
-
-    message_id: str
-    model: str
-    input_tokens: int
-    output_tokens: int
-    cache_creation_input_tokens: int
-    cache_read_input_tokens: int
-    stop_reason: str
-    service_tier: str | None
-    inference_geo: str | None
-    started_at: datetime
-    ended_at: datetime
 
 
 @dataclass

@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from src.services.mcp_bridge import McpBridge
+    from src.core.mcp_bridge import McpBridge
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
