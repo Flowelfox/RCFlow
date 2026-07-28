@@ -38,6 +38,7 @@ and note which component is affected where it matters.
 - **Project-specific slash commands are now found** — they were read from the wrong folder, so real per-project commands never appeared and user commands were duplicated (Backend).
 - **A rotated or newly added OpenCode API key now reaches the agent** — updating only the key no longer left the old value in effect (Backend).
 - **`#tool` and `$file` mentions followed by punctuation now resolve** (e.g. "`#ClaudeCode, …`") (Backend).
+- **Updating a coding agent while it is running now works on Windows** — installing or updating Codex, codex-acp, or OpenCode failed with an "access is denied" error if the tool was in use; the new version is now swapped in cleanly (Backend).
 
 ### Changed
 - **PostgreSQL is now supported end to end** — database migrations run correctly against PostgreSQL (previously the worker failed to start when configured for it). Requires the `postgres` extra (Backend).

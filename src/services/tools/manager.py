@@ -465,7 +465,7 @@ class ToolManager:
                 if not extracted:
                     raise RuntimeError(f"Could not find codex-acp binary in tarball: {members}")
                 extracted.chmod(0o755)
-                shutil.move(str(extracted), str(binary_path))
+                _atomic_install_binary(extracted, binary_path)
         else:
             with zipfile.ZipFile(archive_path) as zf:
                 names = zf.namelist()
@@ -475,7 +475,7 @@ class ToolManager:
                     raise RuntimeError(f"Could not find codex-acp binary in zip: {names}")
                 if sys.platform != "win32":
                     extracted.chmod(0o755)
-                shutil.move(str(extracted), str(binary_path))
+                _atomic_install_binary(extracted, binary_path)
 
     async def _install_opencode(self) -> ManagedTool:
         """Download and install OpenCode native binary from GitHub Releases."""
@@ -526,6 +526,41 @@ class ToolManager:
         )
 
     @staticmethod
+    def _extract_opencode_archive(archive_path: Path, tmp_dir: Path, binary_path: Path) -> None:
+        """Extract the opencode CLI binary from a release archive into place.
+
+        Linux assets are ``.tar.gz`` and macOS/Windows assets are ``.zip``; both
+        may nest the binary alongside desktop/electron builds, so
+        :func:`_find_opencode_binary` picks the plain CLI executable.  Shared by
+        the plain and streaming installers so the two can't drift.
+
+        Raises ``RuntimeError`` when the archive is empty or holds no CLI
+        binary; the streaming caller converts that into an error event.
+        """
+        if archive_path.name.endswith(".tar.gz"):
+            with tarfile.open(archive_path, "r:gz") as tf:
+                members = tf.getnames()
+                if not members:
+                    raise RuntimeError("OpenCode tarball is empty")
+                tf.extractall(tmp_dir, filter="data")
+                extracted = _find_opencode_binary(tmp_dir, members)
+                if not extracted:
+                    raise RuntimeError(f"Could not find opencode binary in tarball: {members}")
+                extracted.chmod(0o755)
+                _atomic_install_binary(extracted, binary_path)
+        else:
+            # .zip (macOS and Windows)
+            with zipfile.ZipFile(archive_path) as zf:
+                names = zf.namelist()
+                zf.extractall(tmp_dir)  # noqa: S202
+                extracted = _find_opencode_binary(tmp_dir, names)
+                if not extracted:
+                    raise RuntimeError(f"Could not find opencode binary in zip: {names}")
+                if sys.platform != "win32":
+                    extracted.chmod(0o755)
+                _atomic_install_binary(extracted, binary_path)
+
+    @staticmethod
     async def _download_opencode_binary(
         install_dir: Path, binary_path: Path, download_url: str, asset_name: str, version: str
     ) -> None:
@@ -537,29 +572,7 @@ class ToolManager:
             with tempfile.TemporaryDirectory(dir=str(install_dir)) as tmp_dir:
                 archive_path = Path(tmp_dir) / asset_name
                 archive_path.write_bytes(resp.content)
-
-                if asset_name.endswith(".tar.gz"):
-                    with tarfile.open(archive_path, "r:gz") as tf:
-                        members = tf.getnames()
-                        if not members:
-                            raise RuntimeError("OpenCode tarball is empty")
-                        tf.extractall(tmp_dir, filter="data")
-                        extracted = _find_opencode_binary(Path(tmp_dir), members)
-                        if not extracted:
-                            raise RuntimeError(f"Could not find opencode binary in tarball: {members}")
-                        extracted.chmod(0o755)
-                        shutil.move(str(extracted), str(binary_path))
-                else:
-                    # .zip (macOS and Windows)
-                    with zipfile.ZipFile(archive_path) as zf:
-                        names = zf.namelist()
-                        zf.extractall(tmp_dir)  # noqa: S202
-                        extracted = _find_opencode_binary(Path(tmp_dir), names)
-                        if not extracted:
-                            raise RuntimeError(f"Could not find opencode binary in zip: {names}")
-                        if sys.platform != "win32":
-                            extracted.chmod(0o755)
-                        shutil.move(str(extracted), str(binary_path))
+                ToolManager._extract_opencode_archive(archive_path, Path(tmp_dir), binary_path)
 
     # ------------------------------------------------------------------
     # Streaming install (with progress events)
@@ -827,7 +840,7 @@ class ToolManager:
                     if not extracted:
                         raise RuntimeError(f"Could not find codex binary in tarball: {members}")
                     extracted.chmod(0o755)
-                    shutil.move(str(extracted), str(binary_path))
+                    _atomic_install_binary(extracted, binary_path)
 
     async def _install_codex_acp_streaming(self) -> AsyncGenerator[dict[str, Any], None]:
         """Download codex-acp with streaming progress."""
@@ -975,30 +988,11 @@ class ToolManager:
             archive_path = Path(tmp_dir) / asset_name
             archive_path.write_bytes(b"".join(chunks))
 
-            if asset_name.endswith(".tar.gz"):
-                with tarfile.open(archive_path, "r:gz") as tf:
-                    members = tf.getnames()
-                    if not members:
-                        yield {"step": "error", "message": "OpenCode tarball is empty"}
-                        return
-                    tf.extractall(tmp_dir, filter="data")
-                    extracted = _find_opencode_binary(Path(tmp_dir), members)
-                    if not extracted:
-                        yield {"step": "error", "message": f"Could not find opencode binary in tarball: {members}"}
-                        return
-                    extracted.chmod(0o755)
-                    shutil.move(str(extracted), str(binary_path))
-            else:
-                with zipfile.ZipFile(archive_path) as zf:
-                    names = zf.namelist()
-                    zf.extractall(tmp_dir)  # noqa: S202
-                    extracted = _find_opencode_binary(Path(tmp_dir), names)
-                    if not extracted:
-                        yield {"step": "error", "message": f"Could not find opencode binary in zip: {names}"}
-                        return
-                    if sys.platform != "win32":
-                        extracted.chmod(0o755)
-                    shutil.move(str(extracted), str(binary_path))
+            try:
+                ToolManager._extract_opencode_archive(archive_path, Path(tmp_dir), binary_path)
+            except RuntimeError as exc:
+                yield {"step": "error", "message": str(exc)}
+                return
 
         # Verify + musl fallback on old-glibc Linux
         if sys.platform not in ("win32", "darwin"):
