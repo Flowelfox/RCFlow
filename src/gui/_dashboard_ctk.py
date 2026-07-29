@@ -605,7 +605,7 @@ class RCFlowDashboard:
             self._natpmp_var.set(s.NATPMP_ENABLED)
             self._upnp_enabled_mirror = bool(s.UPNP_ENABLED)
             self._natpmp_enabled_mirror = bool(s.NATPMP_ENABLED)
-        except Exception:
+        except Exception:  # noqa: S110 best-effort cleanup
             pass
         self._apply_forwarding_mutex()
 

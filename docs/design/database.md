@@ -1,10 +1,14 @@
 ---
-updated: 2026-06-05
+updated: 2026-07-23
 ---
 
 # Database Schema
 
 Both SQLite and PostgreSQL supported. ORM uses `sa.JSON` columns (JSONB on PostgreSQL, TEXT with JSON serialization on SQLite). UUIDs stored as CHAR(32) on SQLite. Timestamps stored as ISO 8601 strings on SQLite.
+
+**Engine / pooling** (`src/database/engine.py`): file-backed SQLite uses the default async connection pool so each `AsyncSession` gets its own connection (with `PRAGMA journal_mode=WAL`, `foreign_keys=ON`, `busy_timeout=5000`). `StaticPool` is used **only** for in-memory (`:memory:`) SQLite, where every session must share the one connection. (Sharing a single connection across tasks for a file DB caused cross-task transaction interference and is no longer done.)
+
+**PostgreSQL** requires the `postgres` extra (`asyncpg` for the app, `psycopg[binary]` as the synchronous driver the Alembic migration engine uses — `postgresql+asyncpg://` is mapped to `postgresql+psycopg://` for migrations).
 
 **See also:**
 - [Sessions](sessions.md) — `sessions`, `session_pending_messages`, `drafts` lifecycle
@@ -363,6 +367,17 @@ CREATE TABLE telemetry_minutely (
     UNIQUE(backend_id, bucket, session_id)
 );
 CREATE INDEX idx_telemetry_minutely_lookup ON telemetry_minutely(backend_id, bucket, session_id);
+```
+
+### `telemetry_state` table
+
+Durable aggregation cursor (one row per backend) so a restart doesn't re-count history into the additive `telemetry_minutely` buckets. See [Telemetry](telemetry.md).
+
+```sql
+CREATE TABLE telemetry_state (
+    backend_id VARCHAR(36) PRIMARY KEY,
+    aggregation_watermark TIMESTAMPTZ  -- max ts_end already folded into telemetry_minutely
+);
 ```
 
 ### `session_pending_messages` table

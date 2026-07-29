@@ -17,7 +17,27 @@ from src.config import Settings, update_settings_file
 from src.database.models import Artifact as ArtifactModel
 
 if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
+
     from src.core.session import SessionManager
+
+
+async def _load_artifact_scoped(db: AsyncSession, artifact_uuid: uuid.UUID, backend_id: str) -> ArtifactModel:
+    """Load an artifact by id scoped to *backend_id*, raising 404 if absent.
+
+    By-id lookups must apply the same ``backend_id`` filter the list endpoints
+    use — a bare primary-key ``db.get`` would resolve an artifact owned by a
+    different backend sharing the database.
+    """
+    stmt = select(ArtifactModel).where(
+        ArtifactModel.id == artifact_uuid,
+        ArtifactModel.backend_id == backend_id,
+    )
+    artifact = (await db.execute(stmt)).scalar_one_or_none()
+    if artifact is None:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+    return artifact
+
 
 # Text file extensions that support content viewing/inclusion
 TEXT_EXTENSIONS: frozenset[str] = frozenset(
@@ -271,6 +291,7 @@ async def search_artifacts(
 )
 async def get_artifact(artifact_id: str, request: Request) -> dict[str, Any]:
     """Get a single artifact by ID."""
+    settings: Settings = request.app.state.settings
     db_session_factory = request.app.state.db_session_factory
     if db_session_factory is None:
         raise HTTPException(status_code=404, detail="Database not configured")
@@ -281,9 +302,7 @@ async def get_artifact(artifact_id: str, request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=f"Invalid artifact ID: {artifact_id}") from None
 
     async with db_session_factory() as db:
-        artifact = await db.get(ArtifactModel, artifact_uuid)
-        if artifact is None:
-            raise HTTPException(status_code=404, detail=f"Artifact not found: {artifact_id}")
+        artifact = await _load_artifact_scoped(db, artifact_uuid, settings.RCFLOW_BACKEND_ID)
         return _artifact_to_dict(artifact)
 
 
@@ -311,9 +330,7 @@ async def get_artifact_content(artifact_id: str, request: Request) -> PlainTextR
         raise HTTPException(status_code=400, detail=f"Invalid artifact ID: {artifact_id}") from None
 
     async with db_session_factory() as db:
-        artifact = await db.get(ArtifactModel, artifact_uuid)
-        if artifact is None:
-            raise HTTPException(status_code=404, detail=f"Artifact not found: {artifact_id}")
+        artifact = await _load_artifact_scoped(db, artifact_uuid, settings.RCFLOW_BACKEND_ID)
 
         # Check if file exists
         file_path = Path(artifact.file_path)
@@ -420,6 +437,7 @@ async def recheck_artifacts(request: Request) -> dict[str, Any]:
 )
 async def delete_artifact(artifact_id: str, request: Request) -> dict[str, str]:
     """Delete an artifact entry from the database."""
+    settings: Settings = request.app.state.settings
     db_session_factory = request.app.state.db_session_factory
     if db_session_factory is None:
         raise HTTPException(status_code=500, detail="Database not configured")
@@ -430,9 +448,7 @@ async def delete_artifact(artifact_id: str, request: Request) -> dict[str, str]:
         raise HTTPException(status_code=400, detail=f"Invalid artifact ID: {artifact_id}") from None
 
     async with db_session_factory() as db:
-        artifact = await db.get(ArtifactModel, artifact_uuid)
-        if artifact is None:
-            raise HTTPException(status_code=404, detail=f"Artifact not found: {artifact_id}")
+        artifact = await _load_artifact_scoped(db, artifact_uuid, settings.RCFLOW_BACKEND_ID)
 
         await db.delete(artifact)
         await db.commit()

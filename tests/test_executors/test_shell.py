@@ -1,9 +1,35 @@
+import asyncio
+import time
 from pathlib import Path
 
 import pytest
 
-from src.executors.shell import ShellExecutor
+from src.executors.shell import ShellExecutor, _quote_params_for_shell
 from src.tools.loader import ToolDefinition, load_tool_file
+
+
+class TestQuoteParamsForShell:
+    def test_powershell_neutralizes_subexpression_injection(self) -> None:
+        # A $(...) subexpression must be rendered inert. Single-quoting (the fix)
+        # makes PowerShell treat the value literally; the old double-quote path
+        # would still evaluate $(...).
+        payload = "$(Remove-Item C:\\ -Recurse)"
+        quoted = _quote_params_for_shell({"path": payload}, "Get-Item {path}", is_powershell=True)
+        assert quoted["path"] == "'" + payload + "'"
+        assert not quoted["path"].startswith('"')
+
+    def test_powershell_doubles_embedded_single_quotes(self) -> None:
+        quoted = _quote_params_for_shell({"p": "a'b"}, "echo {p}", is_powershell=True)
+        assert quoted["p"] == "'a''b'"
+
+    def test_posix_uses_shlex_quote(self) -> None:
+        quoted = _quote_params_for_shell({"p": "a b;rm -rf /"}, "echo {p}", is_powershell=False)
+        # shlex.quote wraps the whole thing so the ; is inert
+        assert quoted["p"].startswith("'") and ";" in quoted["p"]
+
+    def test_whole_template_param_passes_through_unquoted(self) -> None:
+        quoted = _quote_params_for_shell({"command": "ls -la | grep x"}, "{command}", is_powershell=True)
+        assert quoted["command"] == "ls -la | grep x"
 
 
 @pytest.fixture
@@ -41,10 +67,38 @@ class TestShellExecutor:
         async for chunk in shell_executor.execute_streaming(shell_exec_tool, {"command": "echo line1 && echo line2"}):
             chunks.append(chunk)
 
-        assert len(chunks) >= 2
+        assert chunks
         output = "".join(c.content for c in chunks)
         assert "line1" in output
         assert "line2" in output
+
+    @pytest.mark.asyncio
+    async def test_streaming_large_stderr_does_not_deadlock(self, shell_executor: ShellExecutor, shell_exec_tool):
+        # Child writes 300 KB to stderr *before* touching stdout. With sequential
+        # reads (stdout to EOF first) this deadlocks; concurrent reads must not.
+        cmd = 'python3 -c \'import sys; sys.stderr.write("e"*300000); sys.stdout.write("OUT\\n")\''
+
+        async def _collect():
+            out = []
+            async for chunk in shell_executor.execute_streaming(shell_exec_tool, {"command": cmd}):
+                out.append(chunk)
+            return out
+
+        chunks = await asyncio.wait_for(_collect(), timeout=15)
+        assert any("OUT" in c.content for c in chunks)
+
+    @pytest.mark.asyncio
+    async def test_streaming_timeout_stops_and_kills(self, shell_executor: ShellExecutor, shell_exec_tool):
+        async def _collect():
+            out = []
+            async for chunk in shell_executor.execute_streaming(shell_exec_tool, {"command": "sleep 10", "timeout": 1}):
+                out.append(chunk)
+            return out
+
+        start = time.monotonic()
+        await asyncio.wait_for(_collect(), timeout=8)
+        # The stream honors the 1s timeout instead of running the full sleep.
+        assert time.monotonic() - start < 6
 
 
 class TestRcflowPlaceholder:

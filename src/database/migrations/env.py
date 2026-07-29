@@ -34,6 +34,11 @@ def _get_sync_url() -> str:
     url = get_url()
     if "+aiosqlite" in url:
         url = url.replace("+aiosqlite", "")
+    elif "+asyncpg" in url:
+        # asyncpg is async-only, so a sync create_engine on it fails at connect
+        # (MissingGreenlet). psycopg (v3) provides the synchronous driver for the
+        # migration engine. Requires the ``postgres`` extra (psycopg[binary]).
+        url = url.replace("+asyncpg", "+psycopg")
     return url
 
 

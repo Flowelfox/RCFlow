@@ -245,8 +245,22 @@ async def install_tool_plugin(tool_name: str, body: InstallPluginRequest) -> dic
     if not plugin_name:
         raise HTTPException(status_code=422, detail="Could not derive a plugin name from source")
 
+    # An explicit body.name bypasses _derive_plugin_name, so a value like "../../x"
+    # or an absolute path could escape plugins_dir. Reduce to a single sanitized
+    # directory segment (same rule _derive_plugin_name applies) before joining.
+    plugin_name = re.sub(r"[^\w\-]", "-", plugin_name).strip("-")
+    if not plugin_name:
+        raise HTTPException(status_code=422, detail="Could not derive a valid plugin name from source")
+
     plugins_dir = get_tool_plugins_dir(tool_name)
     dest = plugins_dir / plugin_name
+
+    # Belt-and-suspenders: confirm the resolved destination stays within plugins_dir
+    # (matches the guard on the uninstall/patch endpoints).
+    try:
+        dest.resolve().relative_to(plugins_dir.resolve())
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid plugin name") from None
 
     if dest.exists():
         raise HTTPException(

@@ -98,7 +98,7 @@ def _save_disk_cache(commands: list[dict[str, str]], version: str | None) -> Non
             json.dumps({"version": version, "commands": commands}, indent=2),
             encoding="utf-8",
         )
-    except Exception:
+    except Exception:  # noqa: S110 best-effort cleanup
         pass
 
 
@@ -182,8 +182,9 @@ async def _get_cc_builtins() -> list[dict[str, str]]:
     if _cc_builtins_cache is not None:
         return _cc_builtins_cache
 
-    # Disk cache — avoids an API call across server restarts.
-    cached = _load_disk_cache()
+    # Disk cache — avoids an API call across server restarts. Runs off the loop
+    # because it shells out to `claude --version` (blocking subprocess).
+    cached = await asyncio.to_thread(_load_disk_cache)
     if cached:
         _cc_builtins_cache = cached
         return _cc_builtins_cache
@@ -193,7 +194,7 @@ async def _get_cc_builtins() -> list[dict[str, str]]:
     if binary:
         fetched = await _fetch_from_claude(binary)
         if fetched:
-            version = _get_cc_version()
+            version = await asyncio.to_thread(_get_cc_version)
             _save_disk_cache(fetched, version)
             _cc_builtins_cache = fetched
             return _cc_builtins_cache
@@ -456,12 +457,20 @@ async def list_slash_commands(
                 commands.append(cmd)
 
     # --- Project-level Claude Code commands: <projects_dir>/*/.claude/commands/*.md ---
+    # Each configured projects root contains project subdirectories; scan each
+    # project's own .claude/commands. (The previous code scanned the PARENT of the
+    # projects root, which for the default ~/Projects re-scanned ~/.claude/commands
+    # — duplicating every user command and never listing real per-project ones.)
     seen_project_commands: set[str] = set()
     for projects_dir in settings.projects_dirs:
         if not projects_dir.is_dir():
             continue
-        project_commands_dir = projects_dir.parent / ".claude" / "commands"
-        if project_commands_dir.is_dir():
+        for project in sorted(projects_dir.iterdir()):
+            if not project.is_dir():
+                continue
+            project_commands_dir = project / ".claude" / "commands"
+            if not project_commands_dir.is_dir():
+                continue
             for md_file in sorted(project_commands_dir.glob("*.md")):
                 if md_file.stem in seen_project_commands:
                     continue

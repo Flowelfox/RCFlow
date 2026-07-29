@@ -75,9 +75,45 @@ class SessionLifecycle:
         if self._r._mcp_bridge is not None:
             self._r._mcp_bridge.tokens.revoke_session(session.id)
 
+    async def _teardown_executors(self, session: ActiveSession) -> bool:
+        """Cancel every active agent executor and its background stream task.
+
+        Returns True if any executor was active (so the caller can close the
+        open agent group). This is the single shared teardown for cancel / end /
+        pause / interrupt — those four used to hand-copy this block, which is how
+        their agent-cleanup drifted apart.
+        """
+        had_any = False
+        # (executor attr, stream-task attr, uses stop_process instead of cancel)
+        specs = (
+            ("claude_code_executor", "_claude_code_stream_task", False),
+            ("codex_executor", "_codex_stream_task", False),
+            ("opencode_executor", "_opencode_stream_task", False),
+            ("acp_executor", "_acp_stream_task", True),
+        )
+        for exec_attr, task_attr, use_stop in specs:
+            executor = getattr(session, exec_attr)
+            if executor is not None:
+                had_any = True
+                if use_stop:
+                    await executor.stop_process()
+                else:
+                    await executor.cancel()
+                setattr(session, exec_attr, None)
+            task = getattr(session, task_attr)
+            if task is not None and not task.done():
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+            setattr(session, task_attr, None)
+        return had_any
+
     async def _drop_pending_on_session_end(self, session: ActiveSession, *, reason: str) -> None:
         """Drop any queued user messages when the session reaches a terminal state."""
-        store = getattr(self, "_pending_store", None)
+        # The stores live on the router, not on this collaborator (which only
+        # holds ``self._r``); reading them off ``self`` silently returned None,
+        # making clear-on-end a no-op that leaked queued messages and wakes.
+        store = self._r._pending_store
         if store is None or not session.pending_user_messages:
             return
         try:
@@ -87,8 +123,8 @@ class SessionLifecycle:
 
     async def _drop_wakes_on_session_end(self, session: ActiveSession, *, reason: str) -> None:
         """Cancel any pending ``ScheduleWakeup`` callbacks on session end."""
-        store = getattr(self, "_wakeup_store", None)
-        scheduler = getattr(self, "_wakeup_scheduler", None)
+        store = self._r._wakeup_store
+        scheduler = self._r._wakeup_scheduler
         if store is None or not session.scheduled_wakes:
             return
         wake_ids = [w.wake_id for w in session.scheduled_wakes]
@@ -196,54 +232,7 @@ class SessionLifecycle:
         if session.status in terminal_states:
             raise RuntimeError(f"Session already in terminal state: {session.status.value}")
 
-        # Kill Claude Code subprocess if running
-        had_claude_code = session.claude_code_executor is not None
-        if session.claude_code_executor is not None:
-            await session.claude_code_executor.cancel()
-            session.claude_code_executor = None
-
-        # Cancel the background stream task if running
-        if session._claude_code_stream_task is not None and not session._claude_code_stream_task.done():
-            session._claude_code_stream_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await session._claude_code_stream_task
-        session._claude_code_stream_task = None
-
-        # Kill Codex subprocess if running
-        had_codex = session.codex_executor is not None
-        if session.codex_executor is not None:
-            await session.codex_executor.cancel()
-            session.codex_executor = None
-
-        if session._codex_stream_task is not None and not session._codex_stream_task.done():
-            session._codex_stream_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await session._codex_stream_task
-        session._codex_stream_task = None
-
-        # Kill OpenCode subprocess if running
-        had_opencode = session.opencode_executor is not None
-        if session.opencode_executor is not None:
-            await session.opencode_executor.cancel()
-            session.opencode_executor = None
-
-        if session._opencode_stream_task is not None and not session._opencode_stream_task.done():
-            session._opencode_stream_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await session._opencode_stream_task
-        session._opencode_stream_task = None
-
-        # Kill the ACP agent subprocess if running
-        had_acp = session.acp_executor is not None
-        if session.acp_executor is not None:
-            await session.acp_executor.stop_process()
-            session.acp_executor = None
-
-        if session._acp_stream_task is not None and not session._acp_stream_task.done():
-            session._acp_stream_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await session._acp_stream_task
-        session._acp_stream_task = None
+        had_any_executor = await self._teardown_executors(session)
 
         # Auto-deny any pending permission requests
         if session.permission_manager is not None:
@@ -272,7 +261,7 @@ class SessionLifecycle:
         session.clear_subprocess_tracking()
 
         # Close any open agent group before ending the session
-        if had_claude_code or had_codex or had_opencode or had_acp:
+        if had_any_executor:
             session.buffer.push_text(
                 MessageType.AGENT_GROUP_END,
                 {"session_id": session.id},
@@ -325,61 +314,14 @@ class SessionLifecycle:
         if session.status in terminal_states:
             raise RuntimeError(f"Session already in terminal state: {session.status.value}")
 
-        # Kill Claude Code subprocess if running
-        had_claude_code = session.claude_code_executor is not None
-        if session.claude_code_executor is not None:
-            await session.claude_code_executor.cancel()
-            session.claude_code_executor = None
-
-        # Cancel the background stream task if running
-        if session._claude_code_stream_task is not None and not session._claude_code_stream_task.done():
-            session._claude_code_stream_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await session._claude_code_stream_task
-        session._claude_code_stream_task = None
-
-        # Kill Codex subprocess if running
-        had_codex = session.codex_executor is not None
-        if session.codex_executor is not None:
-            await session.codex_executor.cancel()
-            session.codex_executor = None
-
-        if session._codex_stream_task is not None and not session._codex_stream_task.done():
-            session._codex_stream_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await session._codex_stream_task
-        session._codex_stream_task = None
-
-        # Kill OpenCode subprocess if running
-        had_opencode = session.opencode_executor is not None
-        if session.opencode_executor is not None:
-            await session.opencode_executor.cancel()
-            session.opencode_executor = None
-
-        if session._opencode_stream_task is not None and not session._opencode_stream_task.done():
-            session._opencode_stream_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await session._opencode_stream_task
-        session._opencode_stream_task = None
-
-        # Kill the ACP agent subprocess if running
-        had_acp = session.acp_executor is not None
-        if session.acp_executor is not None:
-            await session.acp_executor.stop_process()
-            session.acp_executor = None
-
-        if session._acp_stream_task is not None and not session._acp_stream_task.done():
-            session._acp_stream_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await session._acp_stream_task
-        session._acp_stream_task = None
+        had_any_executor = await self._teardown_executors(session)
 
         # Clear subprocess tracking fields and broadcast null status
         self._revoke_mcp_tokens(session)
         session.clear_subprocess_tracking()
 
         # Close any open agent group before ending the session
-        if had_claude_code or had_codex or had_opencode or had_acp:
+        if had_any_executor:
             session.buffer.push_text(
                 MessageType.AGENT_GROUP_END,
                 {"session_id": session.id},
@@ -560,56 +502,9 @@ class SessionLifecycle:
         # leaving the client in an unrecoverable loading state after resume.
         session.pause()  # raises RuntimeError if already paused / terminal
 
-        # Kill Claude Code subprocess if running
-        had_claude_code = session.claude_code_executor is not None
-        if session.claude_code_executor is not None:
-            await session.claude_code_executor.cancel()
-            session.claude_code_executor = None
+        had_any_executor = await self._teardown_executors(session)
 
-        # Cancel the background stream task if running
-        if session._claude_code_stream_task is not None and not session._claude_code_stream_task.done():
-            session._claude_code_stream_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await session._claude_code_stream_task
-        session._claude_code_stream_task = None
-
-        # Kill Codex subprocess if running
-        had_codex = session.codex_executor is not None
-        if session.codex_executor is not None:
-            await session.codex_executor.cancel()
-            session.codex_executor = None
-
-        if session._codex_stream_task is not None and not session._codex_stream_task.done():
-            session._codex_stream_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await session._codex_stream_task
-        session._codex_stream_task = None
-
-        # Kill OpenCode subprocess if running
-        had_opencode = session.opencode_executor is not None
-        if session.opencode_executor is not None:
-            await session.opencode_executor.cancel()
-            session.opencode_executor = None
-
-        if session._opencode_stream_task is not None and not session._opencode_stream_task.done():
-            session._opencode_stream_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await session._opencode_stream_task
-        session._opencode_stream_task = None
-
-        # Kill the ACP agent subprocess if running
-        had_acp = session.acp_executor is not None
-        if session.acp_executor is not None:
-            await session.acp_executor.stop_process()
-            session.acp_executor = None
-
-        if session._acp_stream_task is not None and not session._acp_stream_task.done():
-            session._acp_stream_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await session._acp_stream_task
-        session._acp_stream_task = None
-
-        had_agent = had_claude_code or had_codex or had_opencode or had_acp
+        had_agent = had_any_executor
 
         # Close out any live Monitor watches so they do not appear as still ticking
         # in the UI while the session sits paused.
@@ -687,55 +582,13 @@ class SessionLifecycle:
         if session.status == SessionStatus.PAUSED:
             raise RuntimeError("Cannot interrupt subprocess of a paused session")
 
-        had_claude_code = session.claude_code_executor is not None
-        if session.claude_code_executor is not None:
-            await session.claude_code_executor.cancel()
-            session.claude_code_executor = None
-
-        if session._claude_code_stream_task is not None and not session._claude_code_stream_task.done():
-            session._claude_code_stream_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await session._claude_code_stream_task
-        session._claude_code_stream_task = None
-
-        had_codex = session.codex_executor is not None
-        if session.codex_executor is not None:
-            await session.codex_executor.cancel()
-            session.codex_executor = None
-
-        if session._codex_stream_task is not None and not session._codex_stream_task.done():
-            session._codex_stream_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await session._codex_stream_task
-        session._codex_stream_task = None
-
-        had_opencode = session.opencode_executor is not None
-        if session.opencode_executor is not None:
-            await session.opencode_executor.cancel()
-            session.opencode_executor = None
-
-        if session._opencode_stream_task is not None and not session._opencode_stream_task.done():
-            session._opencode_stream_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await session._opencode_stream_task
-        session._opencode_stream_task = None
-
-        had_acp = session.acp_executor is not None
-        if session.acp_executor is not None:
-            await session.acp_executor.stop_process()
-            session.acp_executor = None
-
-        if session._acp_stream_task is not None and not session._acp_stream_task.done():
-            session._acp_stream_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await session._acp_stream_task
-        session._acp_stream_task = None
+        had_any_executor = await self._teardown_executors(session)
 
         # Close out any live Monitor watches before broadcasting interrupt.
         await self._r._terminate_active_monitors(session, reason="cancelled")
 
         # Close any open agent group
-        if had_claude_code or had_codex or had_opencode or had_acp:
+        if had_any_executor:
             session.buffer.push_text(
                 MessageType.AGENT_GROUP_END,
                 {"session_id": session.id},
@@ -751,13 +604,7 @@ class SessionLifecycle:
 
         session.set_activity(ActivityState.IDLE)
 
-        logger.info(
-            "Interrupted subprocess for session %s (claude_code=%s, codex=%s, opencode=%s)",
-            session_id,
-            had_claude_code,
-            had_codex,
-            had_opencode,
-        )
+        logger.info("Interrupted subprocess for session %s (had_executor=%s)", session_id, had_any_executor)
         return session
 
     @staticmethod
@@ -781,7 +628,7 @@ class SessionLifecycle:
             session._question_tool_use_id = None
             session._question_event.set()
 
-    async def resume_session(self, session_id: str) -> ActiveSession:
+    async def resume_session(self, session_id: str) -> ActiveSession:  # noqa: C901
         """Resume a paused session.
 
         The client can subscribe to the session's output channel to receive

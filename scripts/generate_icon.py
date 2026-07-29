@@ -416,12 +416,12 @@ def draw_letter_c_5seg(
 
     cx = chamfer_ratio
     pts = [
-        (x + w + jitter(0),       y + jitter(0)),
-        (x + w * cx + jitter(0),  y + jitter(0)),
-        (x + jitter(0),           y + h * cx + jitter(0)),
-        (x + jitter(0),           y + h * (1 - cx) + jitter(0)),
-        (x + w * cx + jitter(0),  y + h + jitter(0)),
-        (x + w + jitter(0),       y + h + jitter(0)),
+        (x + w + jitter(0), y + jitter(0)),
+        (x + w * cx + jitter(0), y + jitter(0)),
+        (x + jitter(0), y + h * cx + jitter(0)),
+        (x + jitter(0), y + h * (1 - cx) + jitter(0)),
+        (x + w * cx + jitter(0), y + h + jitter(0)),
+        (x + w + jitter(0), y + h + jitter(0)),
     ]
     for i in range(len(pts) - 1):
         _thick_segment(draw, pts[i], pts[i + 1], stroke, color)
@@ -486,7 +486,7 @@ def generate_tray_template(width: int = 2048, height: int = 1024) -> Image.Image
     cy = height / 2
     flow_configs = [
         {"y_center": cy - letter_h * 0.40, "amplitude": letter_h * 0.27},
-        {"y_center": cy,                    "amplitude": letter_h * 0.22},
+        {"y_center": cy, "amplitude": letter_h * 0.22},
         {"y_center": cy + letter_h * 0.40, "amplitude": letter_h * 0.27},
     ]
 

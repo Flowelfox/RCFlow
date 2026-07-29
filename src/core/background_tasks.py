@@ -538,7 +538,7 @@ class BackgroundTasks:
                     changed = False
                     # Validate transition and enforce AI can't set done
                     if new_status != task.status and new_status != "done":
-                        from src.api.http import VALID_TASK_TRANSITIONS  # noqa: PLC0415
+                        from src.services.task_rules import VALID_TASK_TRANSITIONS  # noqa: PLC0415
 
                         allowed = VALID_TASK_TRANSITIONS.get(task.status, set())
                         if new_status in allowed:
@@ -640,7 +640,7 @@ class BackgroundTasks:
     async def _pr_detect(self) -> None:
         """Sync open PRs and attach badges to matching live sessions. Never raises."""
         try:
-            from src.api.integrations.github import sync_and_attach_prs  # noqa: PLC0415
+            from src.services.github_service import sync_and_attach_prs  # noqa: PLC0415
 
             await sync_and_attach_prs(self._r._settings, self._r._session_manager, self._r._db_session_factory)
         except Exception:

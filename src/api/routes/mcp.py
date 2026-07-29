@@ -18,7 +18,7 @@ from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
 
 if TYPE_CHECKING:
-    from src.services.mcp_bridge import McpBridge
+    from src.core.mcp_bridge import McpBridge
 
 logger = logging.getLogger(__name__)
 

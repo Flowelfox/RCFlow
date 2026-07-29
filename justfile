@@ -11,23 +11,28 @@ set windows-shell := ["powershell", "-NoLogo", "-Command"]
 install:
     uv sync
 
-# Install with dev dependencies
+# Install with dev dependencies (the dev group is installed by default)
 dev:
-    uv sync --extra dev
+    uv sync
     pre-commit install
 
 # Linting
 lint:
-    uv run ruff check src/ tests/
+    uv run ruff check src/ tests/ scripts/
+    uv run ruff format --check src/ tests/ scripts/
 
 # Format and fix code
 format:
-    uv run ruff format src/ tests/
-    uv run ruff check --fix src/ tests/
+    uv run ruff format src/ tests/ scripts/
+    uv run ruff check --fix src/ tests/ scripts/
 
 # Type checking — use uvx so the resolver mirrors CI exactly
 typecheck:
     uvx ty check src/
+
+# Architecture: enforce api -> core -> services -> database layering
+import-lint:
+    uvx --from import-linter lint-imports --config .importlinter
 
 # Run all tests (Python + Flutter)
 test:
@@ -40,8 +45,10 @@ coverage:
 
 # Run all static checks (ruff + ty + flutter analyze)
 check:
-    uv run ruff check src/ tests/
+    uv run ruff check src/ tests/ scripts/
+    uv run ruff format --check src/ tests/ scripts/
     uvx ty check src/
+    uvx --from import-linter lint-imports --config .importlinter
     uv run pytest tests/ -q --cov=src
     cd rcflowclient && flutter analyze
     cd rcflowclient && flutter test --coverage

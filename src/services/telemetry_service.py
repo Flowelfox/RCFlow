@@ -16,15 +16,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from src.database.models import Session as SessionModel
-from src.database.models import SessionTurn, TelemetryMinutely, ToolCall
+from src.database.models import SessionTurn, TelemetryMinutely, TelemetryState, ToolCall
 
 if TYPE_CHECKING:
-    from src.core.llm import TurnUsage
+    from src.usage import TurnUsage
 
 logger = logging.getLogger(__name__)
-
-# Cap inter-turn gap at 30 minutes when computing averages to exclude idle overnight gaps.
-_INTER_TURN_GAP_CAP_SECONDS = 30 * 60
 
 
 @dataclass
@@ -66,8 +63,11 @@ class TelemetryService:
         self._retention_days = retention_days
         # Per-session turn counter so callers don't need to query the DB.
         self._turn_counters: dict[str, int] = {}
-        # Watermark: last ts_start processed for aggregation (exclusive lower bound).
+        # Watermark: max ts_end already aggregated (exclusive lower bound). Loaded
+        # from telemetry_state on first aggregation and persisted after each run so
+        # a restart never re-folds already-counted rows.
         self._aggregation_watermark: datetime | None = None
+        self._watermark_loaded = False
 
     # ------------------------------------------------------------------
     # Session stub guard
@@ -291,7 +291,7 @@ class TelemetryService:
     async def aggregate_pending(self) -> None:
         """Aggregate new session_turns and tool_calls into telemetry_minutely.
 
-        Reads rows with ts_start > watermark (exclusive) and upserts minute
+        Reads rows with ts_end > watermark (exclusive) and upserts minute
         buckets for both the per-session and global (session_id=NULL) rollup.
         Runs in a background task every 60 seconds.
         """
@@ -300,18 +300,42 @@ class TelemetryService:
         except Exception:
             logger.exception("TelemetryService: aggregation failed")
 
+    async def _load_watermark(self) -> None:
+        """Load the persisted aggregation watermark for this backend (once)."""
+        try:
+            async with self._db_factory() as db:
+                state = await db.get(TelemetryState, self._backend_id)
+                if state is not None:
+                    self._aggregation_watermark = state.aggregation_watermark
+        except Exception:
+            logger.exception("TelemetryService: failed to load aggregation watermark")
+        finally:
+            self._watermark_loaded = True
+
+    async def _persist_watermark(self, db: AsyncSession, watermark: datetime) -> None:
+        """Upsert the aggregation watermark into telemetry_state (within *db*'s transaction)."""
+        state = await db.get(TelemetryState, self._backend_id)
+        if state is None:
+            db.add(TelemetryState(backend_id=self._backend_id, aggregation_watermark=watermark))
+        else:
+            state.aggregation_watermark = watermark
+
     async def _run_aggregation(self) -> None:
+        if not self._watermark_loaded:
+            await self._load_watermark()
         watermark = self._aggregation_watermark
 
         async with self._db_factory() as db:
             # ---- Turn data ----
+            # Filter/advance on ts_end (not ts_start): a turn that started before
+            # the watermark but finished after it must still be counted exactly once.
             stmt = select(SessionTurn).where(
                 SessionTurn.backend_id == self._backend_id,
                 SessionTurn.ts_end.is_not(None),
                 SessionTurn.interrupted.is_(False),
             )
             if watermark is not None:
-                stmt = stmt.where(SessionTurn.ts_start > watermark)
+                stmt = stmt.where(SessionTurn.ts_end > watermark)
             turns = (await db.execute(stmt)).scalars().all()
 
             # ---- Tool call data ----
@@ -320,7 +344,7 @@ class TelemetryService:
                 ToolCall.ts_end.is_not(None),
             )
             if watermark is not None:
-                stmt2 = stmt2.where(ToolCall.ts_start > watermark)
+                stmt2 = stmt2.where(ToolCall.ts_end > watermark)
             tool_calls = (await db.execute(stmt2)).scalars().all()
 
             if not turns and not tool_calls:
@@ -349,8 +373,8 @@ class TelemetryService:
                         turn_count_delta=1,
                     )
 
-                if new_watermark is None or turn.ts_start > new_watermark:
-                    new_watermark = turn.ts_start
+                if turn.ts_end is not None and (new_watermark is None or turn.ts_end > new_watermark):
+                    new_watermark = turn.ts_end
 
             # Aggregate tool calls into per-minute buckets
             for tc in tool_calls:
@@ -373,9 +397,11 @@ class TelemetryService:
                         error_count_delta=error_delta,
                     )
 
-                if new_watermark is None or tc.ts_start > new_watermark:
-                    new_watermark = tc.ts_start
+                if tc.ts_end is not None and (new_watermark is None or tc.ts_end > new_watermark):
+                    new_watermark = tc.ts_end
 
+            if new_watermark is not None and new_watermark != watermark:
+                await self._persist_watermark(db, new_watermark)
             await db.commit()
 
         if new_watermark is not None:

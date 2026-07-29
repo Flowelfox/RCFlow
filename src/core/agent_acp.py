@@ -22,19 +22,18 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from src.core.agent_auth import agent_configuration_issue
-from src.core.agents import truncate_tool_output
+from src.core.agents import ManagedAgentBase, truncate_tool_output
 from src.core.buffer import MessageType
 from src.core.cwd_tracking import apply_agent_cwd, infer_cwd_from_tool_paths
+from src.core.mcp_bridge import RCFLOW_MCP_SERVER_NAME
 from src.core.permissions import PermissionDecision, PermissionManager
 from src.core.session import ActivityState, SessionStatus, SessionType
 from src.executors.acp import AcpExecutor
-from src.services.mcp_bridge import RCFLOW_MCP_SERVER_NAME
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
     from src.core.llm import ToolCallRequest
-    from src.core.prompt_router import PromptRouter
     from src.core.session import ActiveSession
     from src.executors.base import ExecutionChunk
     from src.tools.loader import ToolDefinition
@@ -86,11 +85,8 @@ def _settings_key(tool_def: ToolDefinition) -> str:
     return tool_def.name
 
 
-class AcpAgent:
+class AcpAgent(ManagedAgentBase):
     """ACP agent subprocess lifecycle collaborator for PromptRouter."""
-
-    def __init__(self, router: PromptRouter) -> None:
-        self._r = router
 
     # -- spawn-time wiring ----------------------------------------------
 
@@ -265,22 +261,6 @@ class AcpAgent:
 
     # -- relay -----------------------------------------------------------
 
-    def _push_subprocess_status(self, session: ActiveSession, current_tool: str | None) -> None:
-        session.subprocess_current_tool = current_tool
-        if session.subprocess_started_at is None:
-            return
-        session.buffer.push_ephemeral(
-            MessageType.SUBPROCESS_STATUS,
-            {
-                "session_id": session.id,
-                "subprocess_type": session.subprocess_type,
-                "display_name": session.subprocess_display_name,
-                "working_directory": session.subprocess_working_directory,
-                "current_tool": current_tool,
-                "started_at": session.subprocess_started_at_iso,
-            },
-        )
-
     def _track_cwd_from_locations(self, session: ActiveSession, locations: list[str]) -> None:
         if not locations:
             return
@@ -291,7 +271,7 @@ class AcpAgent:
             self._r._session_manager.broadcast_session_update(session)
             self._r._fire_pr_detect(session)
 
-    async def _relay_acp_stream(
+    async def _relay_acp_stream(  # noqa: C901
         self,
         session: ActiveSession,
         executor: AcpExecutor,
@@ -525,22 +505,6 @@ class AcpAgent:
 
     async def _end_acp_session(self, session: ActiveSession) -> None:
         """Clean up ACP state when the session ends."""
-        if session.acp_executor is not None:
-            await session.acp_executor.stop_process()
-        session.acp_executor = None
-        session._acp_stream_task = None
-        if self._r._mcp_bridge is not None:
-            self._r._mcp_bridge.tokens.revoke_session(session.id)
-
-        session.clear_subprocess_tracking()
-
-        if session.status == SessionStatus.PAUSED:
-            session.complete()
-            return
-
-        session.buffer.push_text(
-            MessageType.SESSION_END,
-            {"session_id": session.id, "reason": "acp_finished"},
+        await self._end_agent_session(
+            session, executor_attr="acp_executor", task_attr="_acp_stream_task", reason="acp_finished"
         )
-        session.complete()
-        self._r._fire_archive_task(session.id)

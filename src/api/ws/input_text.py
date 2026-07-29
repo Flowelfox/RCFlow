@@ -5,13 +5,10 @@ import json
 import logging
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
-from sqlalchemy import select
 
 from src.api.deps import handle_ws_first_message_auth, verify_ws_api_key
 from src.core.attachment_store import AttachmentStore, ResolvedAttachment
 from src.core.session import SessionStatus
-from src.database.models import GitHubPR as GitHubPRModel
-from src.database.models import LinearIssue as LinearIssueModel
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -38,7 +35,7 @@ def _build_pr_assist_title(pr_info: dict, kind: str) -> str:
 
 
 @router.websocket("/ws/input/text")
-async def ws_input_text(
+async def ws_input_text(  # noqa: C901
     websocket: WebSocket,
     api_key: str | None = Query(None),
 ) -> None:
@@ -95,6 +92,14 @@ async def ws_input_text(
                 message = json.loads(raw)
             except json.JSONDecodeError:
                 await websocket.send_json({"type": "error", "content": "Invalid JSON", "code": "INVALID_JSON"})
+                continue
+
+            if not isinstance(message, dict):
+                # Valid JSON but not an object (bare string/array/number) — reject
+                # instead of crashing the connection on the .get() calls below.
+                await websocket.send_json(
+                    {"type": "error", "content": "Message must be a JSON object", "code": "INVALID_JSON"}
+                )
                 continue
 
             msg_type = message.get("type")
@@ -197,7 +202,7 @@ async def ws_input_text(
                 # AskUserQuestion tool answer.
                 answers = message.get("answers")
                 answers_map = {str(k): str(v) for k, v in answers.items()} if isinstance(answers, dict) else None
-                answer_text = message.get("text", "")
+                answer_text = message.get("text") or ""
                 if not answer_text and answers_map:
                     answer_text = "\n".join(f"{k}: {v}" for k, v in answers_map.items())
                 if not answer_text and not answers_map:
@@ -219,7 +224,7 @@ async def ws_input_text(
                         {"type": "error", "content": "Missing session_id", "code": "MISSING_SESSION_ID"}
                     )
                     continue
-                ir_text = message.get("text", "").strip()
+                ir_text = (message.get("text") or "").strip()
                 if not ir_text:
                     await websocket.send_json({"type": "error", "content": "Empty response", "code": "EMPTY_RESPONSE"})
                     continue
@@ -360,39 +365,26 @@ async def ws_input_text(
                 continue
 
             if msg_type == "list_linear_issues":
-                from src.api.integrations.linear import _issue_to_dict  # noqa: PLC0415
+                from src.api.integrations.linear import list_backend_issues  # noqa: PLC0415
 
                 db_session_factory = websocket.app.state.db_session_factory
                 if db_session_factory is not None:
                     settings = websocket.app.state.settings
                     async with db_session_factory() as db:
-                        stmt = (
-                            select(LinearIssueModel)
-                            .where(LinearIssueModel.backend_id == settings.RCFLOW_BACKEND_ID)
-                            .order_by(LinearIssueModel.updated_at.desc())
-                        )
-                        result = await db.execute(stmt)
-                        issue_rows = result.scalars().all()
-                        issues_out = [_issue_to_dict(i) for i in issue_rows]
+                        issues_out = await list_backend_issues(db, settings.RCFLOW_BACKEND_ID)
                     await websocket.send_json({"type": "linear_issue_list", "issues": issues_out})
                 else:
                     await websocket.send_json({"type": "linear_issue_list", "issues": []})
                 continue
 
             if msg_type == "list_github_prs":
-                from src.api.integrations.github import _pr_to_dict  # noqa: PLC0415
+                from src.api.integrations.github import list_backend_prs  # noqa: PLC0415
 
                 db_session_factory = websocket.app.state.db_session_factory
                 if db_session_factory is not None:
                     settings = websocket.app.state.settings
                     async with db_session_factory() as db:
-                        stmt = (
-                            select(GitHubPRModel)
-                            .where(GitHubPRModel.backend_id == settings.RCFLOW_BACKEND_ID)
-                            .order_by(GitHubPRModel.updated_at.desc())
-                        )
-                        pr_rows = (await db.execute(stmt)).scalars().all()
-                        prs_out = [_pr_to_dict(p) for p in pr_rows]
+                        prs_out = await list_backend_prs(db, settings.RCFLOW_BACKEND_ID)
                     await websocket.send_json({"type": "github_pr_list", "prs": prs_out})
                 else:
                     await websocket.send_json({"type": "github_pr_list", "prs": []})
@@ -568,7 +560,7 @@ async def ws_input_text(
                 )
                 continue
 
-            text = message.get("text", "").strip()
+            text = (message.get("text") or "").strip()
             if not text:
                 await websocket.send_json({"type": "error", "content": "Empty prompt", "code": "EMPTY_PROMPT"})
                 continue

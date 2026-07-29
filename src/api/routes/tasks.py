@@ -16,6 +16,7 @@ from src.api.deps import verify_http_api_key
 from src.database.models import Session as SessionModel
 from src.database.models import Task as TaskModel
 from src.database.models import TaskSession as TaskSessionModel
+from src.services.task_rules import AI_FORBIDDEN_STATUSES, VALID_TASK_TRANSITIONS
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,15 +29,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Tasks"])
 
 # ── Status-transition rules ──────────────────────────────────────────────
-
-VALID_TASK_TRANSITIONS: dict[str, set[str]] = {
-    "todo": {"in_progress", "done"},
-    "in_progress": {"todo", "review", "done"},
-    "review": {"in_progress", "done"},
-    "done": {"todo", "in_progress"},
-}
-
-AI_FORBIDDEN_STATUSES = {"done"}
+# VALID_TASK_TRANSITIONS / AI_FORBIDDEN_STATUSES live in src.services.task_rules
+# (domain data) so core imports them downward; the HTTP-raising validator below
+# stays here in the route layer.
 
 
 def validate_status_transition(current: str, new: str, *, source: str | None = None) -> None:
@@ -81,6 +76,17 @@ def _task_to_dict(task: TaskModel) -> dict[str, Any]:
         "updated_at": task.updated_at.isoformat() if task.updated_at else "",
         "sessions": sessions,
     }
+
+
+async def _get_task_scoped(db: AsyncSession, task_uuid: uuid.UUID, backend_id: str) -> TaskModel | None:
+    """Load a task by id scoped to *backend_id* (None if absent or owned elsewhere).
+
+    By-id lookups must apply the same ``backend_id`` filter ``list_tasks`` uses;
+    a bare primary-key ``db.get`` would resolve a task belonging to another
+    backend that shares the database.
+    """
+    stmt = select(TaskModel).where(TaskModel.id == task_uuid, TaskModel.backend_id == backend_id)
+    return (await db.execute(stmt)).scalar_one_or_none()
 
 
 async def _task_to_dict_full(task: TaskModel, db: AsyncSession) -> dict[str, Any]:
@@ -210,7 +216,7 @@ async def get_task(task_id: str, request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=f"Invalid task ID: {task_id}") from None
 
     async with db_session_factory() as db:
-        task = await db.get(TaskModel, task_uuid)
+        task = await _get_task_scoped(db, task_uuid, request.app.state.settings.RCFLOW_BACKEND_ID)
         if task is None:
             raise HTTPException(status_code=404, detail=f"Task not found: {task_id}")
         return await _task_to_dict_full(task, db)
@@ -307,7 +313,7 @@ async def update_task(task_id: str, body: UpdateTaskRequest, request: Request) -
         raise HTTPException(status_code=400, detail=f"Invalid task ID: {task_id}") from None
 
     async with db_session_factory() as db:
-        task = await db.get(TaskModel, task_uuid)
+        task = await _get_task_scoped(db, task_uuid, request.app.state.settings.RCFLOW_BACKEND_ID)
         if task is None:
             raise HTTPException(status_code=404, detail=f"Task not found: {task_id}")
 
@@ -386,8 +392,10 @@ async def start_task_plan(
     except RuntimeError as e:
         raise HTTPException(status_code=400, detail=str(e)) from None
 
-    # Fire agentic loop as a true background task (not tied to HTTP request lifetime)
-    _plan_task = asyncio.create_task(  # noqa: RUF006
+    # Fire the agentic loop as a true background task (not tied to the HTTP
+    # request lifetime). Keep a strong reference in the router's task set so the
+    # event loop doesn't garbage-collect the still-running task mid-plan.
+    plan_task = asyncio.create_task(
         prompt_router.handle_prompt(
             planning_prompt,
             plan_session_id,
@@ -397,6 +405,8 @@ async def start_task_plan(
             direct_tool=body.agent,
         )
     )
+    prompt_router._pending_prompt_tasks.add(plan_task)
+    plan_task.add_done_callback(prompt_router._pending_prompt_tasks.discard)
     return {"session_id": plan_session_id}
 
 
@@ -418,7 +428,7 @@ async def delete_task(task_id: str, request: Request) -> dict[str, str]:
         raise HTTPException(status_code=400, detail=f"Invalid task ID: {task_id}") from None
 
     async with db_session_factory() as db:
-        task = await db.get(TaskModel, task_uuid)
+        task = await _get_task_scoped(db, task_uuid, request.app.state.settings.RCFLOW_BACKEND_ID)
         if task is None:
             raise HTTPException(status_code=404, detail=f"Task not found: {task_id}")
         await db.delete(task)
@@ -459,7 +469,7 @@ async def attach_session_to_task(
         raise HTTPException(status_code=400, detail=f"Invalid session ID: {body.session_id}") from None
 
     async with db_session_factory() as db:
-        task = await db.get(TaskModel, task_uuid)
+        task = await _get_task_scoped(db, task_uuid, request.app.state.settings.RCFLOW_BACKEND_ID)
         if task is None:
             raise HTTPException(status_code=404, detail=f"Task not found: {task_id}")
 
@@ -548,7 +558,7 @@ async def detach_session_from_task(
 
         await db.delete(link_row)
 
-        task = await db.get(TaskModel, task_uuid)
+        task = await _get_task_scoped(db, task_uuid, request.app.state.settings.RCFLOW_BACKEND_ID)
         if task is not None:
             task.updated_at = datetime.now(UTC)
         await db.commit()

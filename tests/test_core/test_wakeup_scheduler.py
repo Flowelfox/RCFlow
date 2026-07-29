@@ -98,3 +98,31 @@ async def test_past_due_fires_immediately():
     scheduler.arm("sid-1", past)
     await asyncio.sleep(0.05)
     assert len(fired) == 1
+
+
+@pytest.mark.asyncio
+async def test_rearm_then_cancel_actually_cancels():
+    """Re-arming a wake must not leave the replacement timer untracked.
+
+    Regression: the cancelled first task's done-callback popped the replacement
+    by key, so cancel() became a silent no-op and the wake fired anyway.
+    """
+    fired: list[str] = []
+
+    async def on_fire(_sid: str, w: ScheduledWake) -> None:
+        fired.append(w.prompt)
+
+    scheduler = WakeupScheduler(on_fire)
+    now = datetime.now(UTC)
+
+    def _mk(prompt: str, delay: float) -> ScheduledWake:
+        return ScheduledWake(
+            wake_id="w-x", prompt=prompt, reason="", fire_at=now + timedelta(seconds=delay), created_at=now
+        )
+
+    scheduler.arm("s", _mk("first", 0.3))
+    scheduler.arm("s", _mk("second", 0.3))  # re-arm same id → cancels the first task
+    await asyncio.sleep(0.05)  # let the cancelled first task's done-callback run
+    scheduler.cancel("w-x")  # must actually cancel the live replacement
+    await asyncio.sleep(0.4)
+    assert fired == []

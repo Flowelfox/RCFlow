@@ -1,5 +1,5 @@
 ---
-updated: 2026-07-23
+updated: 2026-07-28
 ---
 
 # Pluggable Tool Definitions
@@ -211,8 +211,34 @@ RCFlow automatically manages the installation and updating of external CLI tools
 
 - **Claude Code**: Native binary downloaded from Anthropic's GCS bucket (`storage.googleapis.com/claude-code-dist-.../claude-code-releases`). SHA256 checksum verified against the official manifest. Binary placed at `~/.local/share/rcflow/tools/claude-code/claude` (Linux) or `%LOCALAPPDATA%\rcflow\tools\claude-code\claude.exe` (Windows).
 - **Codex**: Native binary downloaded from GitHub Releases (`github.com/openai/codex/releases`). The release tarball contains a single binary named `codex-<target>` (e.g. `codex-x86_64-unknown-linux-gnu`) which is extracted and renamed to `codex`. On Windows, the `.exe` is downloaded directly and renamed to `codex.exe`. The responses API proxy is built into the main binary as a subcommand. Binary placed at `~/.local/share/rcflow/tools/codex/codex` (Linux) or `%LOCALAPPDATA%\rcflow\tools\codex\codex.exe` (Windows).
-- **OpenCode**: Native binary downloaded from GitHub Releases (`github.com/sst/opencode/releases`). Linux releases ship as `.tar.gz` archives containing a single `opencode` binary; macOS and Windows releases ship as `.zip` archives. The binary is extracted and placed at `~/.local/share/rcflow/tools/opencode/opencode` (Linux/macOS) or `%LOCALAPPDATA%\rcflow\tools\opencode\opencode.exe` (Windows). On glibc-too-old Linux systems the installer automatically retries with the `-musl` variant. Version is checked via the GitHub Releases API (`api.github.com/repos/sst/opencode/releases/latest`).
+- **OpenCode**: Native binary downloaded from GitHub Releases (`github.com/sst/opencode/releases`). Linux releases ship as `.tar.gz` archives containing a single `opencode` binary; macOS and Windows releases ship as `.zip` archives. Release archives also carry desktop/electron builds, so extraction picks the plain CLI executable and skips anything named `desktop`/`electron`. The binary is extracted and placed at `~/.local/share/rcflow/tools/opencode/opencode` (Linux/macOS) or `%LOCALAPPDATA%\rcflow\tools\opencode\opencode.exe` (Windows). On glibc-too-old Linux systems the installer automatically retries with the `-musl` variant. Version is checked via the GitHub Releases API (`api.github.com/repos/sst/opencode/releases/latest`); the repo has since moved to `anomalyco/opencode` and GitHub 301-redirects, which the client follows transparently.
 - **codex-acp** (tool key `codex_acp`): the ACP adapter for Codex, used by the [ACP executor](executors.md#acp-executor). Native Rust binary downloaded from GitHub Releases (`github.com/zed-industries/codex-acp/releases` — the `agentclientprotocol/codex-acp` repo publishes no binary assets as of 2026-07). Archives (`codex-acp-<version>-<target>.tar.gz`, `.zip` on Windows) contain a single root-level binary, extracted to `~/.local/share/rcflow/tools/codex-acp/codex-acp`. Reuses Codex's Rust target triples including the musl GLIBC fallback. The binary rejects `--version` (as of v0.16.0), so version reporting relies on a `.version` file written at install time.
+
+**Binary integrity and placement:**
+
+All four installers place the binary through one atomic swap helper
+(`_atomic_install_binary`), which uses `Path.replace` on POSIX and, on Windows,
+renames a running `.exe` aside to `<name>.<pid>.old` before dropping the new
+file in — overwriting an in-use binary on Windows otherwise fails with
+`PermissionError: [WinError 5]`. Parked files are swept on the next install.
+
+Download-integrity coverage differs by upstream, because it depends on what
+each project publishes:
+
+| Tool | Checksum verification | Source |
+|------|----------------------|--------|
+| Claude Code | ✅ SHA-256 | per-platform `checksum` in the GCS release manifest |
+| Codex | ✅ SHA-256 (when present) | `checksums.txt` in the GitHub release |
+| codex-acp | ⚠️ skipped | releases publish no `checksums.txt`; verification activates automatically if upstream adds one |
+| OpenCode | ❌ not available | see below |
+
+OpenCode publishes **no checksums for the CLI assets** RCFlow installs. Its
+releases carry `latest.json` / `latest*.yml`, but those are electron-builder
+and Tauri auto-update manifests that cover only the *desktop* artifacts
+(`.AppImage`/`.deb`/`.rpm`/`.dmg`) — not the `opencode-<platform>.tar.gz`/`.zip`
+CLI archives (verified against release v1.18.9, 2026-07-28). Integrity
+therefore rests on HTTPS to GitHub alone. If upstream starts publishing a
+`checksums.txt`, wire it in the same way Codex does.
 
 **Platform strings:**
 

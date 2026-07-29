@@ -22,6 +22,7 @@ See ``Queued User Messages`` in ``docs/design/sessions.md`` for the full lifecyc
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import re
@@ -272,7 +273,7 @@ class SessionPendingMessageStore:
                     await asyncio.to_thread(shutil.rmtree, queued_dir, ignore_errors=True)
                     removed += 1
             # Best-effort: drop empty session dirs.
-            with _suppress_oserror():
+            with contextlib.suppress(OSError):
                 session_dir.rmdir()
         if removed:
             logger.info("Swept %d orphaned pending-attachment directories", removed)
@@ -399,19 +400,3 @@ class SessionPendingMessageStore:
                 )
             )
         return result
-
-
-# ---------------------------------------------------------------------------
-# Tiny utility — avoids importing ``contextlib`` twice for a single-line guard.
-
-
-class _SuppressOSError:
-    def __enter__(self) -> None:  # pragma: no cover - trivial
-        return None
-
-    def __exit__(self, exc_type, exc, tb) -> bool:
-        return exc_type is not None and issubclass(exc_type, OSError)
-
-
-def _suppress_oserror() -> _SuppressOSError:
-    return _SuppressOSError()

@@ -1,6 +1,6 @@
 [project]
 name = "rcflow"
-version = "0.45.0"
+version = "0.46.0"
 description = "WebSocket-based action server that translates natural language prompts into tool executions via LLM"
 readme = "README.md"
 license = "AGPL-3.0-or-later"
@@ -31,6 +31,9 @@ dependencies = [
 [project.optional-dependencies]
 postgres = [
     "asyncpg>=0.30.0",
+    # Synchronous driver used by the Alembic migration engine (asyncpg is
+    # async-only and cannot back a sync create_engine).
+    "psycopg[binary]>=3.2.0",
 ]
 bundle = [
     "pyinstaller>=6.0.0",
@@ -41,13 +44,6 @@ tray = [
     "pyobjc-framework-Cocoa>=9.0; sys_platform == 'darwin'",
     "Pillow>=12.3.0",
     "pywinpty>=2.0.0; sys_platform == 'win32'",
-]
-dev = [
-    "pytest>=9.0.3",
-    "pytest-asyncio>=0.24.0",
-    "pytest-cov>=6.0.0",
-    "httpx",
-    "ruff>=0.8.0",
 ]
 
 [project.scripts]
@@ -80,7 +76,8 @@ omit = ["src/__main__.py"]
 [tool.coverage.report]
 show_missing = true
 skip_empty = true
-fail_under = 54
+# Ratchet — raise as coverage grows, never lower (see docs/design/refactoring.md).
+fail_under = 64
 
 [tool.ty.src]
 # GUI modules import optional native UI deps (customtkinter, pystray, PIL,
@@ -132,7 +129,9 @@ select = [
 ignore = [
     "S104",     # bind to 0.0.0.0 — intentional for the server listener
     "S108",     # /tmp paths — used in tests and platform-specific bundling
-    "S110",     # try/except/pass — used for best-effort cleanup paths
+    # S110 (try/except/pass) is NOT globally ignored — each best-effort cleanup
+    # is annotated with a line-scoped `# noqa: S110` so a NEW swallowed exception
+    # can't land silently.
     "S310",     # urllib.request.urlopen — used for trusted release-asset fetches
     "S603",     # subprocess without shell=False — we launch trusted CLIs
     "S607",     # start-process with partial path — `claude`, `codex`, `opencode`
@@ -142,16 +141,15 @@ ignore = [
     "D107",     # undocumented __init__ — documented at the class level instead
 ]
 
-# Complexity ratchet: the current ceiling is set high so that landing the rule
-# is a no-op for working code. Phase 2 (composition refactor) reduces this
-# organically by splitting the highest-complexity functions
-# (handle_prompt=43, ws_input_text=63, _relay_claude_code_stream=49, etc.).
-# Lower the ceiling step by step as those splits land.
 [tool.ruff.lint.pydocstyle]
 convention = "pep257"
 
 [tool.ruff.lint.mccabe]
-max-complexity = 70
+# New code is held at 15. The ~21 functions that already exceed this are frozen
+# with a per-function `# noqa: C901` carrying their score — a shrinking,
+# self-documenting list; each refactor deletes its own noqa. Do NOT raise this
+# ceiling to silence a new offender; split the function instead.
+max-complexity = 15
 
 [tool.ruff.lint.per-file-ignores]
 # Tests use assert and rotate through local temp files / fake subprocesses.
@@ -164,15 +162,26 @@ max-complexity = 70
 # The VM smoke test is a test script: assert is its failure mechanism, step
 # helpers are self-documenting, and it talks to a self-signed-TLS worker.
 "scripts/vm/*" = ["S101", "S501", "D103"]
+# Tool scripts probe hardware/OS best-effort; every branch is a try/except/pass
+# platform probe where swallowing is the intended behaviour.
+"src/tools/scripts/*" = ["S110"]
+# Build/bundle/dev scripts: file-mode bits on installers (S103), RNG for temp
+# names (S311/S112), and docstring/complexity gates don't fit one-off tooling.
+# They are still format-checked and pyflakes-linted.
+"scripts/*" = ["S103", "S311", "S112", "C901", "D103", "RUF002", "RET504"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["src"]
 
 [dependency-groups]
+# Single dev list (the old [project.optional-dependencies].dev duplicated these
+# and disagreed on the pytest-asyncio pin). uv installs this group by default.
 dev = [
     "anybadge>=1.16.0",
+    "httpx>=0.28.0",
     "pytest>=9.0.3",
     "pytest-asyncio>=1.3.0",
     "pytest-cov>=6.0.0",
     "pytest-timeout>=2.3.0",
+    "ruff>=0.8.0",
 ]

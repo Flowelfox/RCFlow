@@ -24,7 +24,7 @@ router = APIRouter()
 
 
 @router.websocket("/ws/terminal")
-async def ws_terminal(
+async def ws_terminal(  # noqa: C901
     websocket: WebSocket,
     api_key: str | None = Query(None),
 ) -> None:
@@ -109,6 +109,11 @@ async def ws_terminal(
                         await websocket.send_json({"type": "error", "message": "Invalid JSON"})
                     continue
 
+                if not isinstance(msg, dict):
+                    async with send_lock:
+                        await websocket.send_json({"type": "error", "message": "Message must be a JSON object"})
+                    continue
+
                 msg_type = msg.get("type")
                 terminal_id = msg.get("terminal_id")
 
@@ -159,7 +164,9 @@ async def ws_terminal(
                             )
 
                 elif msg_type == "resize":
-                    if terminal_id:
+                    # Only act on terminals this connection owns — a terminal_id
+                    # is a guessable/observable UUID and the manager is global.
+                    if terminal_id and terminal_id in connection_terminals:
                         session = terminal_manager.get_session(terminal_id)
                         if session:
                             session.resize(
@@ -168,7 +175,7 @@ async def ws_terminal(
                             )
 
                 elif msg_type == "close":
-                    if terminal_id:
+                    if terminal_id and terminal_id in connection_terminals:
                         connection_terminals.discard(terminal_id)
                         await terminal_manager.close_session(terminal_id)
                         async with send_lock:
@@ -191,10 +198,15 @@ async def ws_terminal(
                 payload = data[17:]
 
                 if direction == 0x00:
-                    terminal_id = str(uuid_mod.UUID(bytes=bytes(terminal_id_bytes)))
-                    session = terminal_manager.get_session(terminal_id)
-                    if session:
-                        await session.write(payload)
+                    try:
+                        terminal_id = str(uuid_mod.UUID(bytes=bytes(terminal_id_bytes)))
+                    except ValueError:
+                        continue
+                    # Only write to terminals this connection owns.
+                    if terminal_id in connection_terminals:
+                        session = terminal_manager.get_session(terminal_id)
+                        if session:
+                            await session.write(payload)
 
     except (WebSocketDisconnect, RuntimeError):
         logger.info("Client %s disconnected from /ws/terminal", client_id)

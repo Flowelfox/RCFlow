@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -248,7 +249,7 @@ class PermissionManager:
                 return rule.decision
             if rule.scope == PermissionScope.TOOL_PATH and rule.tool_name == tool_name:
                 path = _extract_path(tool_name, tool_input)
-                if path and rule.path_prefix and path.startswith(rule.path_prefix):
+                if path and rule.path_prefix and _path_within(path, rule.path_prefix):
                     return rule.decision
 
         return None
@@ -373,6 +374,22 @@ class PermissionManager:
                         path_prefix=rule_data.get("path_prefix"),
                     )
                 )
+
+
+def _path_within(path: str, prefix: str) -> bool:
+    """Return True if *path* resolves inside the directory tree rooted at *prefix*.
+
+    Both operands are normalized (``~`` expanded, ``..``/``.`` collapsed) before
+    comparison so that traversal (``/proj/../etc/x``) and sibling-prefix
+    (``/proj-secrets`` vs ``/proj``) inputs cannot spoof a cached allow/deny.
+    A relative path never matches an absolute prefix (and vice versa): such an
+    input falls through to an interactive prompt instead of a cached decision.
+    """
+    norm_path = os.path.normpath(os.path.expanduser(path))
+    norm_prefix = os.path.normpath(os.path.expanduser(prefix))
+    if os.path.isabs(norm_path) != os.path.isabs(norm_prefix):
+        return False
+    return norm_path == norm_prefix or norm_path.startswith(norm_prefix.rstrip(os.sep) + os.sep)
 
 
 def _extract_path(tool_name: str, tool_input: dict[str, Any]) -> str | None:

@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Any
 
 from src.core.agent_acp import resolve_mcp_proxy_command, worker_loopback_url
 from src.core.agent_auth import agent_configuration_issue
-from src.core.agents import truncate_tool_output
+from src.core.agents import ManagedAgentBase, truncate_tool_output
 from src.core.buffer import MessageType
 from src.core.cwd_tracking import (
     apply_agent_cwd,
@@ -28,7 +28,7 @@ from src.core.cwd_tracking import (
     parse_cwd_change,
     reset_worktree_cache,
 )
-from src.core.session import ActivityState, SessionStatus, SessionType
+from src.core.session import ActivityState, SessionType
 from src.executors.codex import CodexExecutor
 from src.services.tool_settings import ensure_codex_mcp_registration
 
@@ -36,7 +36,6 @@ if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
     from src.core.llm import ToolCallRequest
-    from src.core.prompt_router import PromptRouter
     from src.core.session import ActiveSession
     from src.executors.base import ExecutionChunk
     from src.tools.loader import ToolDefinition
@@ -46,11 +45,8 @@ logger = logging.getLogger(__name__)
 _truncate_tool_output = truncate_tool_output
 
 
-class CodexAgent:
+class CodexAgent(ManagedAgentBase):
     """Codex CLI subprocess lifecycle collaborator for PromptRouter."""
-
-    def __init__(self, router: PromptRouter) -> None:
-        self._r = router
 
     def _build_codex_extra_env(self) -> dict[str, str]:
         """Build extra environment variables for Codex CLI subprocesses."""
@@ -259,21 +255,23 @@ class CodexAgent:
 
         return f"Codex session started in {working_path}"
 
-    async def _relay_codex_stream(
+    async def _relay_codex_stream(  # noqa: C901
         self,
         session: ActiveSession,
         stream: AsyncGenerator[ExecutionChunk, None],
-    ) -> None:
+    ) -> bool:
         """Parse Codex CLI JSONL events and push structured buffer messages.
 
         Translates Codex event types (item.started/updated/completed,
         turn.completed/failed) into the same message types used by the
-        RCFlow LLM pipeline.
+        RCFlow LLM pipeline. Returns True only if the turn completed
+        successfully; callers end the session when it did not.
         """
         # Track last emitted text for agent_message items to enable incremental updates
         last_agent_text: dict[str, str] = {}
         # Collect agent_message text after the last tool call for the summary
         post_tool_text_chunks: list[str] = []
+        completed_successfully = False
 
         async for chunk in stream:
             line = chunk.content.strip()
@@ -317,19 +315,7 @@ class CodexAgent:
                             "tool_input": {"command": item.get("command", "")},
                         },
                     )
-                    session.subprocess_current_tool = "command_execution"
-                    if session.subprocess_started_at is not None:
-                        session.buffer.push_ephemeral(
-                            MessageType.SUBPROCESS_STATUS,
-                            {
-                                "session_id": session.id,
-                                "subprocess_type": session.subprocess_type,
-                                "display_name": session.subprocess_display_name,
-                                "working_directory": session.subprocess_working_directory,
-                                "current_tool": "command_execution",
-                                "started_at": session.subprocess_started_at_iso,
-                            },
-                        )
+                    self._push_subprocess_status(session, "command_execution")
                     # Live worktree-badge tracking — same machinery the
                     # Claude Code Bash interception uses.
                     command = str(item.get("command", "") or "")
@@ -352,19 +338,7 @@ class CodexAgent:
                             "tool_input": {},
                         },
                     )
-                    session.subprocess_current_tool = "file_change"
-                    if session.subprocess_started_at is not None:
-                        session.buffer.push_ephemeral(
-                            MessageType.SUBPROCESS_STATUS,
-                            {
-                                "session_id": session.id,
-                                "subprocess_type": session.subprocess_type,
-                                "display_name": session.subprocess_display_name,
-                                "working_directory": session.subprocess_working_directory,
-                                "current_tool": "file_change",
-                                "started_at": session.subprocess_started_at_iso,
-                            },
-                        )
+                    self._push_subprocess_status(session, "file_change")
                 elif item_type == "mcp_tool_call":
                     post_tool_text_chunks.clear()
                     mcp_tool_name = f"mcp:{item.get('server', '')}:{item.get('tool', '')}"
@@ -376,19 +350,7 @@ class CodexAgent:
                             "tool_input": item.get("arguments", {}),
                         },
                     )
-                    session.subprocess_current_tool = mcp_tool_name
-                    if session.subprocess_started_at is not None:
-                        session.buffer.push_ephemeral(
-                            MessageType.SUBPROCESS_STATUS,
-                            {
-                                "session_id": session.id,
-                                "subprocess_type": session.subprocess_type,
-                                "display_name": session.subprocess_display_name,
-                                "working_directory": session.subprocess_working_directory,
-                                "current_tool": mcp_tool_name,
-                                "started_at": session.subprocess_started_at_iso,
-                            },
-                        )
+                    self._push_subprocess_status(session, mcp_tool_name)
 
             elif event_type == "item.updated":
                 item = event.get("item", {})
@@ -449,19 +411,7 @@ class CodexAgent:
                             },
                         )
                         self._r._fire_text_artifact_scan(session, [output])
-                    session.subprocess_current_tool = None
-                    if session.subprocess_started_at is not None:
-                        session.buffer.push_ephemeral(
-                            MessageType.SUBPROCESS_STATUS,
-                            {
-                                "session_id": session.id,
-                                "subprocess_type": session.subprocess_type,
-                                "display_name": session.subprocess_display_name,
-                                "working_directory": session.subprocess_working_directory,
-                                "current_tool": None,
-                                "started_at": session.subprocess_started_at_iso,
-                            },
-                        )
+                    self._push_subprocess_status(session, None)
                 elif item_type == "file_change":
                     diff = item.get("diff", "")
                     file_path = item.get("file_path", item.get("file", ""))
@@ -477,19 +427,7 @@ class CodexAgent:
                             },
                         )
                         self._r._fire_text_artifact_scan(session, [content])
-                    session.subprocess_current_tool = None
-                    if session.subprocess_started_at is not None:
-                        session.buffer.push_ephemeral(
-                            MessageType.SUBPROCESS_STATUS,
-                            {
-                                "session_id": session.id,
-                                "subprocess_type": session.subprocess_type,
-                                "display_name": session.subprocess_display_name,
-                                "working_directory": session.subprocess_working_directory,
-                                "current_tool": None,
-                                "started_at": session.subprocess_started_at_iso,
-                            },
-                        )
+                    self._push_subprocess_status(session, None)
                 elif item_type == "mcp_tool_call":
                     mcp_completed_name = f"mcp:{item.get('server', '')}:{item.get('tool', '')}"
                     output = item.get("output", item.get("result", ""))
@@ -507,21 +445,10 @@ class CodexAgent:
                             },
                         )
                         self._r._fire_text_artifact_scan(session, [output])
-                    session.subprocess_current_tool = None
-                    if session.subprocess_started_at is not None:
-                        session.buffer.push_ephemeral(
-                            MessageType.SUBPROCESS_STATUS,
-                            {
-                                "session_id": session.id,
-                                "subprocess_type": session.subprocess_type,
-                                "display_name": session.subprocess_display_name,
-                                "working_directory": session.subprocess_working_directory,
-                                "current_tool": None,
-                                "started_at": session.subprocess_started_at_iso,
-                            },
-                        )
+                    self._push_subprocess_status(session, None)
 
             elif event_type == "turn.completed":
+                completed_successfully = True
                 session.set_activity(ActivityState.IDLE)
                 # Extract token usage from Codex turn
                 codex_usage = event.get("usage") or {}
@@ -537,6 +464,10 @@ class CodexAgent:
                 self._r._fire_task_update_task(session, summary_text)
 
             elif event_type == "turn.failed":
+                # A failed turn is terminal: settle the UI state (idle + clear the
+                # running indicator) so the client isn't left showing a live turn.
+                session.set_activity(ActivityState.IDLE)
+                session.clear_subprocess_tracking()
                 error = event.get("error", {})
                 session.buffer.push_text(
                     MessageType.ERROR,
@@ -548,6 +479,8 @@ class CodexAgent:
                 )
 
             elif event_type == "error":
+                session.set_activity(ActivityState.IDLE)
+                session.clear_subprocess_tracking()
                 session.buffer.push_text(
                     MessageType.ERROR,
                     {
@@ -560,6 +493,8 @@ class CodexAgent:
             else:
                 logger.debug("Skipping unknown Codex event type: %s", event_type)
 
+        return completed_successfully
+
     async def _stream_codex_events(
         self,
         session: ActiveSession,
@@ -569,7 +504,9 @@ class CodexAgent:
     ) -> None:
         """Background task: read Codex CLI events and push to session buffer."""
         try:
-            await self._relay_codex_stream(session, executor.execute_streaming(tool_def, tool_call.tool_input))
+            completed = await self._relay_codex_stream(
+                session, executor.execute_streaming(tool_def, tool_call.tool_input)
+            )
         except Exception as e:
             logger.exception("Codex streaming error in session %s", session.id)
             session.buffer.push_text(
@@ -587,12 +524,23 @@ class CodexAgent:
             await self._end_codex_session(session)
             return
 
-        await executor.stop_process()
-
         session.buffer.push_text(
             MessageType.AGENT_GROUP_END,
             {"session_id": session.id},
         )
+
+        if not completed:
+            # Stream ended without turn.completed (turn.failed or crash/EOF).
+            # End the session so the user isn't left with a stuck subprocess and
+            # a pinned running indicator (mirrors the OpenCode/ACP relays).
+            logger.info(
+                "Codex stream ended without completion (session=%s), ending session",
+                session.id,
+            )
+            await self._end_codex_session(session)
+            return
+
+        await executor.stop_process()
 
         # Codex process exits after each turn (one-shot model).
         # Follow-up messages use restart_with_prompt (codex exec resume) to respawn.
@@ -604,29 +552,9 @@ class CodexAgent:
 
     async def _end_codex_session(self, session: ActiveSession) -> None:
         """Clean up Codex state when the session ends."""
-        if session.codex_executor is not None:
-            await session.codex_executor.stop_process()
-        session.codex_executor = None
-        session._codex_stream_task = None
-        if self._r._mcp_bridge is not None:
-            self._r._mcp_bridge.tokens.revoke_session(session.id)
-
-        # Clear subprocess tracking and broadcast null status
-        session.clear_subprocess_tracking()
-
-        if session.status == SessionStatus.PAUSED:
-            session.complete()
-            return
-
-        session.buffer.push_text(
-            MessageType.SESSION_END,
-            {
-                "session_id": session.id,
-                "reason": "codex_finished",
-            },
+        await self._end_agent_session(
+            session, executor_attr="codex_executor", task_attr="_codex_stream_task", reason="codex_finished"
         )
-        session.complete()
-        self._r._fire_archive_task(session.id)
 
     async def _forward_to_codex(self, session: ActiveSession, text: str) -> None:
         """Forward a follow-up message to the active Codex session.
@@ -634,50 +562,17 @@ class CodexAgent:
         Codex CLI uses one-shot processes, so follow-ups always spawn a new
         process with ``codex exec resume THREAD_ID``.
         """
-        executor = session.codex_executor
-        if executor is None:
-            return
-
-        if session.status == SessionStatus.PAUSED:
-            return
-
-        session.set_activity(ActivityState.RUNNING_SUBPROCESS)
-
-        # Re-broadcast subprocess status so the client shows the indicator again
-        if session.subprocess_started_at is None:
-            session.subprocess_started_at = datetime.now(UTC)
-            session.subprocess_type = "codex"
-            codex_def_for_name = self._r._tool_registry.get("codex")
-            session.subprocess_display_name = (
-                codex_def_for_name.display_name if codex_def_for_name and codex_def_for_name.display_name else "Codex"
-            )
-            session.subprocess_working_directory = session.metadata.get("codex_working_directory", "")
-        session.subprocess_current_tool = None
-        session.buffer.push_ephemeral(
-            MessageType.SUBPROCESS_STATUS,
-            {
-                "session_id": session.id,
-                "subprocess_type": session.subprocess_type,
-                "display_name": session.subprocess_display_name,
-                "working_directory": session.subprocess_working_directory,
-                "current_tool": None,
-                "started_at": session.subprocess_started_at_iso,
-            },
+        await self._forward_to_oneshot_agent(
+            session,
+            text,
+            tool_key="codex",
+            executor_attr="codex_executor",
+            task_attr="_codex_stream_task",
+            subprocess_type="codex",
+            default_display_name="Codex",
+            working_dir_meta_key="codex_working_directory",
+            restart=self._restart_codex_with_prompt,
         )
-
-        # Open a new agent group for this follow-up turn
-        codex_def = self._r._tool_registry.get("codex")
-        session.buffer.push_text(
-            MessageType.AGENT_GROUP_START,
-            {
-                "session_id": session.id,
-                "tool_name": "codex",
-                "display_name": codex_def.display_name if codex_def and codex_def.display_name else "Codex",
-            },
-        )
-
-        # Codex always spawns a new process for follow-ups (no persistent stdin)
-        session._codex_stream_task = asyncio.create_task(self._restart_codex_with_prompt(session, executor, text))
 
     async def _restart_codex_with_prompt(
         self,
@@ -686,29 +581,12 @@ class CodexAgent:
         prompt: str,
     ) -> None:
         """Spawn a new Codex resume process and stream events for a follow-up."""
-        try:
-            await self._relay_codex_stream(session, executor.restart_with_prompt(prompt))
-        except Exception as e:
-            logger.exception("Codex restart error in session %s", session.id)
-            session.buffer.push_text(
-                MessageType.AGENT_GROUP_END,
-                {"session_id": session.id},
-            )
-            session.buffer.push_text(
-                MessageType.ERROR,
-                {
-                    "session_id": session.id,
-                    "content": f"Codex error: {e}",
-                    "code": "CODEX_ERROR",
-                },
-            )
-            await self._end_codex_session(session)
-            return
-
-        await executor.stop_process()
-
-        session.buffer.push_text(
-            MessageType.AGENT_GROUP_END,
-            {"session_id": session.id},
+        await self._restart_oneshot_agent(
+            session,
+            executor,
+            prompt,
+            display_name="Codex",
+            error_code="CODEX_ERROR",
+            relay=self._relay_codex_stream,
+            end=self._end_codex_session,
         )
-        self._r.schedule_pending_drain(session)

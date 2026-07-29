@@ -1,0 +1,33 @@
+[importlinter]
+root_package = src
+
+# Enforce the intended dependency direction: api (transport) -> core
+# (orchestration) -> services (integrations) -> database. A lower layer must
+# never import a higher one. This contract now passes with NO exceptions —
+# keep it that way. Shared value types live in leaf modules (e.g. src.usage)
+# that any layer may import; never add an ignore_imports entry to paper over a
+# new upward import — invert the dependency instead.
+[importlinter:contract:layers]
+name = api -> core -> services -> database layering
+type = layers
+layers =
+    src.api
+    src.core
+    src.services
+    src.database
+
+# The deprecated tool_manager shim must not gain new first-party importers —
+# new code imports src.services.tools directly.
+[importlinter:contract:tool_manager_shim]
+name = tool_manager shim is deprecated
+type = forbidden
+source_modules =
+    src.core
+    src.api
+forbidden_modules =
+    src.services.tool_manager
+ignore_imports =
+    src.core.prompt_router -> src.services.tool_manager
+    src.core.agent_auth -> src.services.tool_manager
+    src.api.routes.auth -> src.services.tool_manager
+    src.api.routes.tools -> src.services.tool_manager

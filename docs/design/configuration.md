@@ -1,5 +1,5 @@
 ---
-updated: 2026-07-08
+updated: 2026-07-23
 ---
 
 # Configuration
@@ -18,14 +18,14 @@ All configuration is via environment variables, loaded from a `settings.json` fi
 
 | Variable                | Required | Default         | Description                          |
 |-------------------------|----------|-----------------|--------------------------------------|
-| `RCFLOW_HOST`           | no       | `127.0.0.1`     | Server bind address                  |
+| `RCFLOW_HOST`           | no       | `0.0.0.0`       | Server bind address (binds all interfaces by default) |
 | `RCFLOW_PORT`           | no       | `53890` (Linux) / `53891` (Windows) | Server port                          |
 | `RCFLOW_API_KEY`        | yes      |                 | API key for WebSocket auth           |
 | `RCFLOW_BACKEND_ID`     | no       | auto-generated  | Unique backend instance ID (UUID). Auto-generated and persisted to `settings.json` on first run. Used to isolate sessions per backend when multiple backends share one database. |
 | `SSL_CERTFILE`          | no       |                 | Path to TLS certificate (enables WSS when both cert+key set) |
 | `SSL_KEYFILE`           | no       |                 | Path to TLS private key (enables WSS when both cert+key set) |
 | `DATABASE_URL`          | no       | `sqlite+aiosqlite:///./data/rcflow.db` | Database connection string (SQLite or PostgreSQL) |
-| `LLM_PROVIDER`          | no       | `anthropic`     | LLM provider: `anthropic`, `bedrock`, `openai`, or `none` (direct tool mode). Changing this invalidates the dynamic model catalog for the affected provider. |
+| `LLM_PROVIDER`          | no       | `none`          | LLM provider: `anthropic`, `bedrock`, `openai`, or `none` (direct tool mode — the default). Changing this invalidates the dynamic model catalog for the affected provider. |
 | `ANTHROPIC_API_KEY`     | cond.    |                 | Anthropic API key (required when `LLM_PROVIDER=anthropic`) |
 | `ANTHROPIC_MODEL`       | no       | `claude-sonnet-4-6`| Anthropic model ID (use Bedrock model IDs when `LLM_PROVIDER=bedrock`) |
 | `AWS_REGION`            | no       | `us-east-1`     | AWS region (used when `LLM_PROVIDER=bedrock`) |

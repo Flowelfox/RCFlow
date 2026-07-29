@@ -12,6 +12,40 @@ and note which component is affected where it matters.
 
 ## [Unreleased]
 
+### Security
+- **Telemetry data now requires the API key** — the usage/metrics endpoints were reachable without authentication; they now require the worker key like every other endpoint, and a worker can no longer ship an endpoint that forgot to require it (Backend).
+- **Approved file-access permissions can no longer be tricked into covering other paths** — a granted "always allow" for a folder is now matched by real path, so `..` traversal or a similarly named sibling folder no longer reuses the approval (Backend).
+- **Shell tools are safe from command injection on Windows** — parameter values passed to PowerShell tools can no longer smuggle in commands via `$(...)`; they are now treated as literal text (Backend).
+- **Installing a tool plugin can no longer write outside the plugins folder** — a crafted plugin name is sanitized and confined to the plugins directory (Backend).
+- **The worker's API key is no longer written to logs or the process list** — a freshly generated key is only stored in settings, and the desktop dashboard receives it privately instead of on the command line (Backend).
+- **Tool settings files holding provider keys are now private** — they are written owner-only instead of world-readable (Backend).
+- **The updater verifies downloads before running them** — the worker now checks a downloaded installer's checksum against the release's published checksums and refuses to launch it on a mismatch, for both the desktop updater and `rcflow update` (Backend).
+- **Terminal sessions are isolated per connection** — one connection can no longer resize, write to, or close another connection's terminal (Backend).
+- **Login now verifies the returned sign-in token** — the Claude Code browser login checks the returned state value before completing, closing a cross-site request risk (Backend).
+- **Router discovery can no longer be pointed at a cloud metadata service** — when automatic port-forwarding scans the network, a spoofed reply claiming to be a router is now refused if it points at the cloud instance-metadata address, which on a hosted server can hand out credentials (Backend).
+
+### Fixed
+- **OpenAI-backed sessions and long Anthropic project chats no longer break** — project/file/tool context could accumulate cache markers that OpenAI rejected outright and that Anthropic rejected after a few turns, failing the session; context is now sent in a form each provider accepts (Backend).
+- **Ending or cancelling a session now clears its queued messages and scheduled wake-ups** — these were silently left behind, could leak, and a stale wake-up could even revive an ended session (Backend).
+- **A queued message can no longer be delivered twice (or dropped)** — the queue is drained by a single worker that hands off each message exactly once (Backend).
+- **A wake-up or second message arriving mid-turn no longer interrupts the running agent** — it is queued and delivered when the current turn finishes (Backend).
+- **Usage totals no longer inflate after a restart** — the metrics roll-up remembers what it already counted, so restarting the worker no longer re-adds past history, and long-running turns are counted once (Backend).
+- **Codex sessions recover cleanly from a failed or crashed turn** — the session settles and reports the error instead of appearing stuck with a spinning indicator (Backend).
+- **Claude Code reconnects after the underlying process dies** — a follow-up message now restarts the agent instead of hanging (Backend).
+- **Shell tools that produce large error output no longer hang, and honour their timeout** — output is streamed without deadlocking, the configured timeout is enforced, and a timed-out or cancelled command no longer leaves a stray process running (Backend).
+- **Malformed input can no longer drop a live connection** — a non-object or `null`-field message returns an error instead of tearing down the WebSocket connection (Backend).
+- **Self-terminated terminals no longer leak resources** (Backend).
+- **Uploads over the size limit are rejected without buffering the whole file in memory** (Backend).
+- **Project-specific slash commands are now found** — they were read from the wrong folder, so real per-project commands never appeared and user commands were duplicated (Backend).
+- **A rotated or newly added OpenCode API key now reaches the agent** — updating only the key no longer left the old value in effect (Backend).
+- **`#tool` and `$file` mentions followed by punctuation now resolve** (e.g. "`#ClaudeCode, …`") (Backend).
+- **Updating a coding agent while it is running now works on Windows** — installing or updating Codex, codex-acp, or OpenCode failed with an "access is denied" error if the tool was in use; the new version is now swapped in cleanly (Backend).
+
+### Changed
+- **PostgreSQL is now supported end to end** — database migrations run correctly against PostgreSQL (previously the worker failed to start when configured for it). Requires the `postgres` extra (Backend).
+- **More reliable database access under load** — the worker no longer shares a single database connection across all in-flight work, removing a class of rare transaction interference (Backend).
+- **Settings are safe to write from multiple processes at once** — concurrent updates from the worker, dashboard, and CLI no longer risk losing each other's changes (Backend).
+
 ## [Backend 0.45.0 / Client 1.60.0] — 2026-07-23
 
 ### Added

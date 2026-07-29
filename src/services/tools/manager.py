@@ -378,45 +378,13 @@ class ToolManager:
 
     @staticmethod
     async def _download_codex_binary(install_dir: Path, binary_path: Path, tag: str, version: str, target: str) -> None:
-        """Download and place the codex binary for a specific target triple."""
-        if sys.platform == "win32":
-            asset_name = f"codex-{target}.exe"
-            download_url = f"{CODEX_RELEASE_BASE}/{tag}/{asset_name}"
-            async with httpx.AsyncClient(follow_redirects=True) as client:
-                checksums = await _fetch_codex_checksums(client, tag)
-                resp = await client.get(download_url, timeout=_DOWNLOAD_TIMEOUT)
-                resp.raise_for_status()
-                _verify_codex_asset_checksum(resp.content, asset_name, checksums)
-                tmp_path = install_dir / f".codex-{version}.tmp"
-                try:
-                    tmp_path.write_bytes(resp.content)
-                    _atomic_install_binary(tmp_path, binary_path)
-                finally:
-                    tmp_path.unlink(missing_ok=True)
-        else:
-            asset_name = f"codex-{target}.tar.gz"
-            download_url = f"{CODEX_RELEASE_BASE}/{tag}/{asset_name}"
+        """Download and place the codex binary — drains the streaming installer.
 
-            async with httpx.AsyncClient(follow_redirects=True) as client:
-                checksums = await _fetch_codex_checksums(client, tag)
-                resp = await client.get(download_url, timeout=_DOWNLOAD_TIMEOUT)
-                resp.raise_for_status()
-                _verify_codex_asset_checksum(resp.content, asset_name, checksums)
-
-                with tempfile.TemporaryDirectory(dir=str(install_dir)) as tmp_dir:
-                    tar_path = Path(tmp_dir) / asset_name
-                    tar_path.write_bytes(resp.content)
-
-                    with tarfile.open(tar_path, "r:gz") as tf:
-                        members = tf.getnames()
-                        if not members:
-                            raise RuntimeError("Codex tarball is empty")
-                        tf.extractall(tmp_dir, filter="data")
-                        extracted = _find_codex_binary(Path(tmp_dir), members)
-                        if not extracted:
-                            raise RuntimeError(f"Could not find codex binary in tarball: {members}")
-                        extracted.chmod(0o755)
-                        shutil.move(str(extracted), str(binary_path))
+        The streaming variant does the full download → verify → install; the
+        non-streaming path just consumes its progress events and discards them.
+        """
+        async for _ in ToolManager._stream_codex_download(install_dir, binary_path, tag, version, target):
+            pass
 
     async def _install_codex_acp(self) -> ManagedTool:
         """Download and install codex-acp native binary from GitHub Releases.
@@ -475,21 +443,9 @@ class ToolManager:
     async def _download_codex_acp_binary(
         install_dir: Path, binary_path: Path, tag: str, version: str, target: str
     ) -> None:
-        """Download and place the codex-acp binary for a specific target triple."""
-        ext = ".zip" if sys.platform == "win32" else ".tar.gz"
-        asset_name = f"codex-acp-{version}-{target}{ext}"
-        download_url = f"{CODEX_ACP_RELEASE_BASE}/{tag}/{asset_name}"
-
-        async with httpx.AsyncClient(follow_redirects=True) as client:
-            checksums = await _fetch_codex_acp_checksums(client, tag)
-            resp = await client.get(download_url, timeout=_DOWNLOAD_TIMEOUT)
-            resp.raise_for_status()
-            _verify_codex_asset_checksum(resp.content, asset_name, checksums)
-
-            with tempfile.TemporaryDirectory(dir=str(install_dir)) as tmp_dir:
-                archive_path = Path(tmp_dir) / asset_name
-                archive_path.write_bytes(resp.content)
-                ToolManager._extract_codex_acp_archive(archive_path, Path(tmp_dir), binary_path)
+        """Download and place the codex-acp binary — drains the streaming installer."""
+        async for _ in ToolManager._stream_codex_acp_download(install_dir, binary_path, tag, version, target):
+            pass
 
     @staticmethod
     def _extract_codex_acp_archive(archive_path: Path, tmp_dir: Path, binary_path: Path) -> None:
@@ -509,7 +465,7 @@ class ToolManager:
                 if not extracted:
                     raise RuntimeError(f"Could not find codex-acp binary in tarball: {members}")
                 extracted.chmod(0o755)
-                shutil.move(str(extracted), str(binary_path))
+                _atomic_install_binary(extracted, binary_path)
         else:
             with zipfile.ZipFile(archive_path) as zf:
                 names = zf.namelist()
@@ -519,7 +475,7 @@ class ToolManager:
                     raise RuntimeError(f"Could not find codex-acp binary in zip: {names}")
                 if sys.platform != "win32":
                     extracted.chmod(0o755)
-                shutil.move(str(extracted), str(binary_path))
+                _atomic_install_binary(extracted, binary_path)
 
     async def _install_opencode(self) -> ManagedTool:
         """Download and install OpenCode native binary from GitHub Releases."""
@@ -570,6 +526,41 @@ class ToolManager:
         )
 
     @staticmethod
+    def _extract_opencode_archive(archive_path: Path, tmp_dir: Path, binary_path: Path) -> None:
+        """Extract the opencode CLI binary from a release archive into place.
+
+        Linux assets are ``.tar.gz`` and macOS/Windows assets are ``.zip``; both
+        may nest the binary alongside desktop/electron builds, so
+        :func:`_find_opencode_binary` picks the plain CLI executable.  Shared by
+        the plain and streaming installers so the two can't drift.
+
+        Raises ``RuntimeError`` when the archive is empty or holds no CLI
+        binary; the streaming caller converts that into an error event.
+        """
+        if archive_path.name.endswith(".tar.gz"):
+            with tarfile.open(archive_path, "r:gz") as tf:
+                members = tf.getnames()
+                if not members:
+                    raise RuntimeError("OpenCode tarball is empty")
+                tf.extractall(tmp_dir, filter="data")
+                extracted = _find_opencode_binary(tmp_dir, members)
+                if not extracted:
+                    raise RuntimeError(f"Could not find opencode binary in tarball: {members}")
+                extracted.chmod(0o755)
+                _atomic_install_binary(extracted, binary_path)
+        else:
+            # .zip (macOS and Windows)
+            with zipfile.ZipFile(archive_path) as zf:
+                names = zf.namelist()
+                zf.extractall(tmp_dir)  # noqa: S202
+                extracted = _find_opencode_binary(tmp_dir, names)
+                if not extracted:
+                    raise RuntimeError(f"Could not find opencode binary in zip: {names}")
+                if sys.platform != "win32":
+                    extracted.chmod(0o755)
+                _atomic_install_binary(extracted, binary_path)
+
+    @staticmethod
     async def _download_opencode_binary(
         install_dir: Path, binary_path: Path, download_url: str, asset_name: str, version: str
     ) -> None:
@@ -581,29 +572,7 @@ class ToolManager:
             with tempfile.TemporaryDirectory(dir=str(install_dir)) as tmp_dir:
                 archive_path = Path(tmp_dir) / asset_name
                 archive_path.write_bytes(resp.content)
-
-                if asset_name.endswith(".tar.gz"):
-                    with tarfile.open(archive_path, "r:gz") as tf:
-                        members = tf.getnames()
-                        if not members:
-                            raise RuntimeError("OpenCode tarball is empty")
-                        tf.extractall(tmp_dir, filter="data")
-                        extracted = _find_opencode_binary(Path(tmp_dir), members)
-                        if not extracted:
-                            raise RuntimeError(f"Could not find opencode binary in tarball: {members}")
-                        extracted.chmod(0o755)
-                        shutil.move(str(extracted), str(binary_path))
-                else:
-                    # .zip (macOS and Windows)
-                    with zipfile.ZipFile(archive_path) as zf:
-                        names = zf.namelist()
-                        zf.extractall(tmp_dir)  # noqa: S202
-                        extracted = _find_opencode_binary(Path(tmp_dir), names)
-                        if not extracted:
-                            raise RuntimeError(f"Could not find opencode binary in zip: {names}")
-                        if sys.platform != "win32":
-                            extracted.chmod(0o755)
-                        shutil.move(str(extracted), str(binary_path))
+                ToolManager._extract_opencode_archive(archive_path, Path(tmp_dir), binary_path)
 
     # ------------------------------------------------------------------
     # Streaming install (with progress events)
@@ -871,7 +840,7 @@ class ToolManager:
                     if not extracted:
                         raise RuntimeError(f"Could not find codex binary in tarball: {members}")
                     extracted.chmod(0o755)
-                    shutil.move(str(extracted), str(binary_path))
+                    _atomic_install_binary(extracted, binary_path)
 
     async def _install_codex_acp_streaming(self) -> AsyncGenerator[dict[str, Any], None]:
         """Download codex-acp with streaming progress."""
@@ -1019,30 +988,11 @@ class ToolManager:
             archive_path = Path(tmp_dir) / asset_name
             archive_path.write_bytes(b"".join(chunks))
 
-            if asset_name.endswith(".tar.gz"):
-                with tarfile.open(archive_path, "r:gz") as tf:
-                    members = tf.getnames()
-                    if not members:
-                        yield {"step": "error", "message": "OpenCode tarball is empty"}
-                        return
-                    tf.extractall(tmp_dir, filter="data")
-                    extracted = _find_opencode_binary(Path(tmp_dir), members)
-                    if not extracted:
-                        yield {"step": "error", "message": f"Could not find opencode binary in tarball: {members}"}
-                        return
-                    extracted.chmod(0o755)
-                    shutil.move(str(extracted), str(binary_path))
-            else:
-                with zipfile.ZipFile(archive_path) as zf:
-                    names = zf.namelist()
-                    zf.extractall(tmp_dir)  # noqa: S202
-                    extracted = _find_opencode_binary(Path(tmp_dir), names)
-                    if not extracted:
-                        yield {"step": "error", "message": f"Could not find opencode binary in zip: {names}"}
-                        return
-                    if sys.platform != "win32":
-                        extracted.chmod(0o755)
-                    shutil.move(str(extracted), str(binary_path))
+            try:
+                ToolManager._extract_opencode_archive(archive_path, Path(tmp_dir), binary_path)
+            except RuntimeError as exc:
+                yield {"step": "error", "message": str(exc)}
+                return
 
         # Verify + musl fallback on old-glibc Linux
         if sys.platform not in ("win32", "darwin"):

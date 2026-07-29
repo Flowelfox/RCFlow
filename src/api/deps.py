@@ -87,6 +87,12 @@ async def handle_ws_first_message_auth(websocket: WebSocket) -> bool:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Invalid JSON in auth message")
         return False
 
+    if not isinstance(msg, dict):
+        # Valid JSON but not an object (e.g. a bare string/array) — reject before
+        # calling .get(), which would raise AttributeError on the unauth'd path.
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Auth message must be a JSON object")
+        return False
+
     if msg.get("type") != "auth":
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="First message must be auth")
         return False

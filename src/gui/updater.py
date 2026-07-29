@@ -48,7 +48,6 @@ KEY_CACHED_RELEASE_URL = "RCFLOW_UPDATE_CACHED_RELEASE_URL"
 KEY_CACHED_DOWNLOAD_URL = "RCFLOW_UPDATE_CACHED_DOWNLOAD_URL"
 KEY_CACHED_ASSET_NAME = "RCFLOW_UPDATE_CACHED_ASSET_NAME"
 KEY_DISMISSED_VERSION = "RCFLOW_UPDATE_DISMISSED_VERSION"
-KEY_AUTO_CHECK = "RCFLOW_UPDATE_AUTO_CHECK"
 
 
 class UpdateInfo(NamedTuple):
@@ -63,6 +62,8 @@ class UpdateInfo(NamedTuple):
     download_url: str | None
     asset_name: str | None
     asset_size: int | None
+    checksums_url: str | None = None
+    """browser_download_url of the release's ``SHA256SUMS`` asset, if published."""
 
 
 def normalize_version(value: str) -> str:
@@ -197,7 +198,7 @@ def resolve_current_version() -> str:
         from importlib.metadata import version as _pkg_version  # noqa: PLC0415
 
         return normalize_version(_pkg_version("rcflow"))
-    except Exception:
+    except Exception:  # noqa: S110 best-effort cleanup
         pass
     with contextlib.suppress(Exception):
         version_file = get_install_dir() / "VERSION"
@@ -252,6 +253,7 @@ class HttpUpdateFetcher:
         version = normalize_version(tag)
         assets = payload.get("assets") or []
         download_url, asset_name, asset_size = self._select_asset(assets)
+        checksums_url = _select_checksums_url(assets)
 
         return UpdateInfo(
             version=version,
@@ -259,6 +261,7 @@ class HttpUpdateFetcher:
             download_url=download_url,
             asset_name=asset_name,
             asset_size=asset_size,
+            checksums_url=checksums_url,
         )
 
     def _select_asset(self, assets: list[dict[str, object]]) -> tuple[str | None, str | None, int | None]:
@@ -276,6 +279,53 @@ class HttpUpdateFetcher:
                     size if isinstance(size, int) else None,
                 )
         return None, None, None
+
+
+def _select_checksums_url(assets: list[dict[str, object]]) -> str | None:
+    """Return the ``browser_download_url`` of the release's ``SHA256SUMS`` asset."""
+    for asset in assets:
+        if asset.get("name") == "SHA256SUMS":
+            url = asset.get("browser_download_url")
+            return url if isinstance(url, str) else None
+    return None
+
+
+def verify_sha256(dest: Path, info: UpdateInfo) -> None:
+    """Verify *dest*'s SHA-256 against the release ``SHA256SUMS``, or raise.
+
+    Fail-closed: an installer that cannot be integrity-checked is never handed to
+    the OS. The release pipeline publishes ``SHA256SUMS`` (and a GPG-signed
+    ``SHA256SUMS.asc``) alongside every asset; this fetches that file, looks up
+    the line for *info*'s ``asset_name``, and compares hashes.
+    """
+    import hashlib  # noqa: PLC0415
+
+    if not info.checksums_url or not info.asset_name:
+        raise RuntimeError("Cannot verify update: no published checksums for this release.")
+
+    req = urllib.request.Request(info.checksums_url, headers={"User-Agent": "rcflow-worker"})
+    with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_S) as resp:
+        checksums_text = resp.read().decode("utf-8", errors="replace")
+
+    expected: str | None = None
+    for line in checksums_text.splitlines():
+        # Format: "<hex>  <filename>" (sha256sum output; name may have a leading '*').
+        parts = line.split()
+        if len(parts) >= 2 and parts[-1].lstrip("*") == info.asset_name:
+            expected = parts[0].lower()
+            break
+    if expected is None:
+        raise RuntimeError(f"No checksum published for {info.asset_name!r}.")
+
+    digest = hashlib.sha256()
+    with dest.open("rb") as fh:
+        for block in iter(lambda: fh.read(DOWNLOAD_CHUNK), b""):
+            digest.update(block)
+    actual = digest.hexdigest().lower()
+    if actual != expected:
+        with contextlib.suppress(OSError):
+            dest.unlink()
+        raise RuntimeError(f"Checksum mismatch for {info.asset_name}: expected {expected}, got {actual}.")
 
 
 # ── Service ────────────────────────────────────────────────────────────────
@@ -504,10 +554,15 @@ class UpdateService:
             assert info is not None  # noqa: S101
             try:
                 dest = self._download_path(info)
+                # Reuse a cached download only if it passes the checksum too — a
+                # size match alone lets any user-writable file of the right size
+                # be executed as an installer.
                 if info.asset_size is not None and dest.exists() and dest.stat().st_size == info.asset_size:
+                    verify_sha256(dest, info)
                     on_done(dest)
                     return
                 self._stream_download(info, dest, on_progress)
+                verify_sha256(dest, info)
                 on_done(dest)
             except Exception as exc:
                 logger.warning("Update download failed: %s", exc)

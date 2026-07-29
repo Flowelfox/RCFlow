@@ -364,7 +364,7 @@ class TestCancel:
         mock_proc.pid = 12345
         executor._process = mock_proc
 
-        with patch("src.executors.opencode.kill_process_tree", new_callable=AsyncMock) as mock_kill:
+        with patch("src.executors.oneshot_cli.kill_process_tree", new_callable=AsyncMock) as mock_kill:
             await executor.cancel()
 
         mock_kill.assert_called_once_with(mock_proc)

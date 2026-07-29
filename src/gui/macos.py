@@ -826,7 +826,7 @@ class RCFlowMacOSGUI:
             self._wss_var.set(s.WSS_ENABLED)
             self._upnp_var.set(s.UPNP_ENABLED)
             self._natpmp_var.set(s.NATPMP_ENABLED)
-        except Exception:
+        except Exception:  # noqa: S110 best-effort cleanup
             pass
         self._apply_forwarding_mutex()
 
@@ -1213,7 +1213,7 @@ class RCFlowMacOSGUI:
             self._status_sticky_until = time.monotonic() + 3.0
         self._status_label.configure(text=f"  {text}  ", fg_color=color)
 
-    def _update_ui(self) -> None:
+    def _update_ui(self) -> None:  # noqa: C901
         """Periodic UI refresh (300 ms).
 
         Also drains ObjC-callback flags — the only safe place to call Tk or
@@ -2248,7 +2248,7 @@ def run_gui_macos(*, minimized: bool = False) -> None:
                 f"RCFlow failed to start.\n\n{crash_msg[:500]}\n\nFull log: {_get_crash_log_path()}",
             )
             _hidden.destroy()
-        except Exception:
+        except Exception:  # noqa: S110 best-effort cleanup
             pass
 
         raise

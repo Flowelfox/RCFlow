@@ -132,7 +132,7 @@ def _make_dmg_background(icns_path: Path, output_png: Path, width: int = 540, he
             try:
                 font = ImageFont.truetype(font_path, 13)
                 break
-            except Exception:  # noqa: S112 — try the next candidate font
+            except Exception:
                 continue
     if font:
         bbox = draw.textbbox((0, 0), label, font=font)
@@ -303,7 +303,7 @@ def create_pkg(app_path: Path, version: str, arch: str) -> Path:
     postinstall.write_text(
         f'#!/bin/bash\nset -e\nxattr -dr com.apple.quarantine "/Applications/{APP_NAME}" 2>/dev/null || true\n'
     )
-    os.chmod(postinstall, 0o755)  # noqa: S103 — installer postinstall script must be executable
+    os.chmod(postinstall, 0o755)
 
     print(f"Building {pkg_name}...")
     subprocess.check_call(

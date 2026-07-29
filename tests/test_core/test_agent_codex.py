@@ -109,6 +109,35 @@ class TestRelayCodexStream:
         assert texts[0]["content"] == "not json at all"
 
     @pytest.mark.asyncio
+    async def test_turn_completed_returns_true(self) -> None:
+        session = _make_session()
+        agent = _make_agent()
+        completed = await agent._relay_codex_stream(session, _chunks([{"type": "turn.completed", "usage": {}}]))
+        assert completed is True
+
+    @pytest.mark.asyncio
+    async def test_turn_failed_returns_false_and_settles_state(self) -> None:
+        session = _make_session()
+        agent = _make_agent()
+        completed = await agent._relay_codex_stream(
+            session, _chunks([{"type": "turn.failed", "error": {"message": "boom"}}])
+        )
+        assert completed is False
+        # A failed turn must settle UI state so the running indicator isn't pinned.
+        session.set_activity.assert_called()
+        session.clear_subprocess_tracking.assert_called()
+        errors = _pushes(session, MessageType.ERROR)
+        assert errors and errors[0]["code"] == "CODEX_TURN_FAILED"
+
+    @pytest.mark.asyncio
+    async def test_stream_without_completion_returns_false(self) -> None:
+        session = _make_session()
+        agent = _make_agent()
+        # thread.started but no turn.completed → incomplete
+        completed = await agent._relay_codex_stream(session, _chunks([{"type": "thread.started", "thread_id": "t"}]))
+        assert completed is False
+
+    @pytest.mark.asyncio
     async def test_command_execution_start_and_completed(self) -> None:
         session = _make_session()
         agent = _make_agent()

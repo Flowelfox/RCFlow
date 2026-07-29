@@ -129,6 +129,12 @@ class TestExtractToolMentions:
         result = host._extract_tool_mentions("color#ff0000")
         assert result == []
 
+    def test_trailing_punctuation_stripped(self) -> None:
+        host = _ContextHost()
+        # Natural phrasing with a trailing comma must still resolve to the tool.
+        assert host._extract_tool_mentions("#ClaudeCode, fix this") == ["ClaudeCode"]
+        assert host._extract_file_references("look at $main.py.") == ["main.py"]
+
     def test_mention_case_preserved(self) -> None:
         host = _ContextHost()
         result = host._extract_tool_mentions("#ClaudeCode")

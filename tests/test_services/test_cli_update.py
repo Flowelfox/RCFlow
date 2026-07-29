@@ -55,6 +55,9 @@ def _defaults(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     monkeypatch.setattr(cli_update, "resolve_current_version", lambda: "1.0.0")
     monkeypatch.setattr("src.gui.updater._download_cache_dir", lambda: tmp_path)
     monkeypatch.setattr(cli_update.sys.stdin, "isatty", lambda: True, raising=False)
+    # These tests exercise the download/install flow; checksum verification is
+    # covered separately in the updater unit tests. Stub it to a no-op here.
+    monkeypatch.setattr(cli_update, "verify_sha256", lambda *a, **k: None)
 
 
 def _no_download(monkeypatch: pytest.MonkeyPatch) -> list:

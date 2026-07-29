@@ -11,8 +11,6 @@ from sqlalchemy import select
 from src.api.deps import handle_ws_first_message_auth, verify_ws_api_key
 from src.core.prompt_router import PromptRouter
 from src.database.models import Artifact as ArtifactModel
-from src.database.models import GitHubPR as GitHubPRModel
-from src.database.models import LinearIssue as LinearIssueModel
 from src.database.models import Session as SessionModel
 from src.database.models import Task as TaskModel
 from src.database.models import TaskSession as TaskSessionModel
@@ -22,7 +20,7 @@ router = APIRouter()
 
 
 @router.websocket("/ws/output/text")
-async def ws_output_text(
+async def ws_output_text(  # noqa: C901
     websocket: WebSocket,
     api_key: str | None = Query(None),
 ) -> None:
@@ -141,6 +139,12 @@ async def ws_output_text(
                 message = json.loads(raw)
             except json.JSONDecodeError:
                 await websocket.send_json({"type": "error", "content": "Invalid JSON", "code": "INVALID_JSON"})
+                continue
+
+            if not isinstance(message, dict):
+                await websocket.send_json(
+                    {"type": "error", "content": "Message must be a JSON object", "code": "INVALID_JSON"}
+                )
                 continue
 
             msg_type = message.get("type")
@@ -322,38 +326,25 @@ async def ws_output_text(
                     await websocket.send_json({"type": "artifact_list", "artifacts": []})
 
             elif msg_type == "list_linear_issues":
-                from src.api.integrations.linear import _issue_to_dict  # noqa: PLC0415
+                from src.api.integrations.linear import list_backend_issues  # noqa: PLC0415
 
                 db_session_factory = websocket.app.state.db_session_factory
                 if db_session_factory is not None:
                     settings = websocket.app.state.settings
                     async with db_session_factory() as db:
-                        stmt = (
-                            select(LinearIssueModel)
-                            .where(LinearIssueModel.backend_id == settings.RCFLOW_BACKEND_ID)
-                            .order_by(LinearIssueModel.updated_at.desc())
-                        )
-                        result = await db.execute(stmt)
-                        issue_rows = result.scalars().all()
-                        issues_out = [_issue_to_dict(i) for i in issue_rows]
+                        issues_out = await list_backend_issues(db, settings.RCFLOW_BACKEND_ID)
                     await websocket.send_json({"type": "linear_issue_list", "issues": issues_out})
                 else:
                     await websocket.send_json({"type": "linear_issue_list", "issues": []})
 
             elif msg_type == "list_github_prs":
-                from src.api.integrations.github import _pr_to_dict  # noqa: PLC0415
+                from src.api.integrations.github import list_backend_prs  # noqa: PLC0415
 
                 db_session_factory = websocket.app.state.db_session_factory
                 if db_session_factory is not None:
                     settings = websocket.app.state.settings
                     async with db_session_factory() as db:
-                        stmt = (
-                            select(GitHubPRModel)
-                            .where(GitHubPRModel.backend_id == settings.RCFLOW_BACKEND_ID)
-                            .order_by(GitHubPRModel.updated_at.desc())
-                        )
-                        pr_rows = (await db.execute(stmt)).scalars().all()
-                        prs_out = [_pr_to_dict(p) for p in pr_rows]
+                        prs_out = await list_backend_prs(db, settings.RCFLOW_BACKEND_ID)
                     await websocket.send_json({"type": "github_pr_list", "prs": prs_out})
                 else:
                     await websocket.send_json({"type": "github_pr_list", "prs": []})

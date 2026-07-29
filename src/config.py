@@ -2,18 +2,22 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import secrets
 import sys
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from src.paths import get_default_tools_dir
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 # Provider-aware model lists for model_select fields.
 PROVIDER_MODELS: dict[str, dict[str, Any]] = {
@@ -374,7 +378,9 @@ def get_settings() -> Settings:
         api_key = secrets.token_urlsafe(32)
         update_settings_file({"RCFLOW_API_KEY": api_key})
         settings.RCFLOW_API_KEY = api_key
-        logger.info("Generated new RCFLOW_API_KEY: %s", api_key)
+        # Never log the key itself — it grants full control of the worker and log
+        # files persist (data dir + journald). View it with `rcflow api-key`.
+        logger.info("Generated new RCFLOW_API_KEY (stored in settings.json)")
     if not settings.RCFLOW_BACKEND_ID:
         backend_id = str(uuid.uuid4())
         update_settings_file({"RCFLOW_BACKEND_ID": backend_id})
@@ -862,12 +868,43 @@ def get_config_schema(settings: Settings) -> list[dict[str, Any]]:
 CONFIGURABLE_KEYS: set[str] = {opt["key"] for opt in CONFIG_OPTIONS}
 
 
+@contextlib.contextmanager
+def _settings_file_lock(path: Path) -> Iterator[None]:
+    """Best-effort cross-process exclusive lock around a settings read-merge-write.
+
+    Three processes write settings.json (worker, GUI, CLI); without a lock two
+    concurrent read-merge-writes can lose an update (e.g. a freshly generated API
+    key). Uses ``fcntl.flock`` on POSIX; on Windows / when unavailable it is a
+    no-op (the atomic rename still prevents corruption, only the rare lost-update
+    race remains).
+    """
+    lock_path = path.with_suffix(".lock")
+    fh = None
+    try:
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        fh = open(lock_path, "a+")  # noqa: SIM115
+        import fcntl  # noqa: PLC0415
+
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+    except (OSError, ImportError, ModuleNotFoundError):
+        # Lock unavailable (Windows or permission) — proceed unlocked; the atomic
+        # rename still prevents corruption, only the rare lost-update race remains.
+        pass
+    try:
+        yield
+    finally:
+        if fh is not None:
+            with contextlib.suppress(Exception):
+                fh.close()
+
+
 def update_settings_file(updates: dict[str, str]) -> None:
     """Apply key=value updates to settings.json.
 
     Creates the file if it does not exist. Existing keys are updated; new keys
     are added. Also updates ``os.environ`` so that any subsequent ``Settings()``
-    call picks up the new values.
+    call picks up the new values. The read-merge-write is guarded by a
+    cross-process lock so concurrent writers don't lose each other's updates.
 
     If the settings file cannot be read or written due to permission errors,
     the environment variables are still updated in-memory but the file is
@@ -876,30 +913,31 @@ def update_settings_file(updates: dict[str, str]) -> None:
     import os  # noqa: PLC0415
 
     path = _get_settings_path()
-    data: dict[str, str] = {}
 
-    try:
-        if path.exists():
-            data = json.loads(path.read_text(encoding="utf-8"))
-    except PermissionError:
-        pass
+    with _settings_file_lock(path):
+        data: dict[str, str] = {}
+        try:
+            if path.exists():
+                data = json.loads(path.read_text(encoding="utf-8"))
+        except PermissionError:
+            pass
 
-    for key, value in updates.items():
-        data[key] = value
-        os.environ[key.upper()] = value
+        for key, value in updates.items():
+            data[key] = value
+            os.environ[key.upper()] = value
 
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        # Atomic write: write to a temp file first, then rename so a crash
-        # mid-write cannot corrupt the settings file (F16 remediation).
-        tmp_path = path.with_suffix(".tmp")
-        tmp_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-        tmp_path.replace(path)
-    except PermissionError:
-        print(
-            f"WARNING: Cannot write to {path} — permission denied. Settings applied in-memory only.",
-            file=sys.stderr,
-        )
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            # Atomic write: write to a temp file first, then rename so a crash
+            # mid-write cannot corrupt the settings file (F16 remediation).
+            tmp_path = path.with_suffix(".tmp")
+            tmp_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+            tmp_path.replace(path)
+        except PermissionError:
+            print(
+                f"WARNING: Cannot write to {path} — permission denied. Settings applied in-memory only.",
+                file=sys.stderr,
+            )
 
 
 _load_settings_into_env()

@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from src.core.mcp_bridge import McpToolSpec, ToolCallOutcome
 from src.executors.claude_code_sdk import ClaudeCodeSdkExecutor
-from src.services.mcp_bridge import McpToolSpec, ToolCallOutcome
 
 _SCHEMA = {"type": "object", "properties": {"category": {"type": "string"}}, "required": ["category"]}
 

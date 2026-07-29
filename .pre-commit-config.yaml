@@ -15,8 +15,20 @@ repos:
         pass_filenames: false
         types: [python]
 
+      - id: import-linter
+        name: import-linter (layering)
+        entry: uvx --from import-linter lint-imports --config .importlinter
+        language: system
+        pass_filenames: false
+        types: [python]
+
       - id: pytest-fast
         name: pytest-fast (core + executors)
+        # NOTE: tests/test_api is intentionally NOT here yet — it surfaced a
+        # pre-existing test-ordering bug (a test_executors test pollutes global
+        # git state, breaking test_github's remote setup when run afterwards).
+        # CI runs the full suite in a passing order; add test_api to this fast
+        # subset once pytest-randomly lands and the ordering bug is fixed.
         entry: uv run pytest -x -q --no-cov tests/test_core tests/test_executors
         language: system
         pass_filenames: false

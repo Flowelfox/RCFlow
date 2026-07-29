@@ -41,14 +41,14 @@ from claude_agent_sdk import (
     tool,
 )
 
+from src.core.mcp_bridge import RCFLOW_MCP_SERVER_NAME
 from src.executors.base import BaseExecutor, ExecutionChunk, ExecutionResult
-from src.services.mcp_bridge import RCFLOW_MCP_SERVER_NAME
 
 if TYPE_CHECKING:
     from claude_agent_sdk import Message, PermissionResult, ToolPermissionContext
     from claude_agent_sdk.types import McpSdkServerConfig
 
-    from src.services.mcp_bridge import McpBridge
+    from src.core.mcp_bridge import McpBridge
     from src.tools.loader import ToolDefinition
 
 logger = logging.getLogger(__name__)
@@ -382,6 +382,11 @@ class ClaudeCodeSdkExecutor(BaseExecutor):
     # -- streaming ------------------------------------------------------
 
     async def _ensure_client(self, options: ClaudeAgentOptions) -> ClaudeSDKClient:
+        # If the previous client died (stream ended / EOF set _connected=False
+        # without clearing _client), tear it down first — otherwise this returned
+        # the dead client and the next turn hung forever, breaking crash-resume.
+        if self._client is not None and not self._connected:
+            await self._disconnect()
         if self._client is None:
             self._client = ClaudeSDKClient(options=options)
             await self._client.connect()

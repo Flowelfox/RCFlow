@@ -1,5 +1,5 @@
 ---
-updated: 2026-07-09
+updated: 2026-07-28
 ---
 
 # MCP Agent Bridge
@@ -25,7 +25,7 @@ Everything the bridge serves derives from the `ToolRegistry` at call time:
 - **Fresh list per agent spawn.** Claude Code's in-process server is built at connect from a live registry read; Codex's proxy fetches the list from the worker per request. Worker restart is the delivery mechanism for new tool files (hot-reload deliberately not needed — the worker restarts frequently).
 - **Recursion guard.** Tools with an agent executor (`claude_code`, `codex`, `opencode`) are never exposed, regardless of the flag — enforced at load time (loader forces the flag off with a warning) and again in the bridge.
 
-The contract is enforced by test: `tests/test_services/test_mcp_bridge.py::TestSeamlessnessContract` synthesises a tool JSON at test time and asserts it lists and dispatches with no registration anywhere.
+The contract is enforced by test: `tests/test_core/test_mcp_bridge.py::TestSeamlessnessContract` synthesises a tool JSON at test time and asserts it lists and dispatches with no registration anywhere.
 
 ## Architecture
 
@@ -41,14 +41,14 @@ The contract is enforced by test: `tests/test_services/test_mcp_bridge.py::TestS
                          └────────────────────────────────────────────┘
 ```
 
-`McpBridge` (`src/services/mcp_bridge.py`) is the single shared component:
+`McpBridge` (`src/core/mcp_bridge.py`) is the single shared component:
 
 - `list_agent_tools()` — registry tools with `expose_to_agents: true`, minus agent executors, mapped to MCP tool shape.
 - `call_tool(session_id, tool_name, arguments)` — resolves the session and tool, dispatches through `PromptRouter.execute_one_shot_tool(..., origin="agent")`, returns `(text, is_error)` as a `ToolCallOutcome`. All failures (unknown session, unexposed tool, executor error, denied permission) come back as `is_error=True` outcomes, never exceptions, so both consumers relay them as MCP tool errors.
 - **Worktree gate.** Mutating worktree operations (everything except `list`) always require explicit user approval — the same invariant as the LLM tool loop. The bridge is the single gate for both agents: it runs the interactive permission check itself, and Claude Code's `can_use_tool` waves `mcp__rcflow__*` tools through so the prompt is never doubled.
 - `tokens` — the per-session token registry (below).
 
-Constructed in `main.py` after the `PromptRouter` (bidirectional dependency: the bridge dispatches through the router; the router hands executors the bridge at spawn). Available as `app.state.mcp_bridge`; injected into the router via `set_mcp_bridge()`.
+Constructed in `main.py` after the `PromptRouter` (bidirectional dependency: the bridge dispatches through the router; the router hands executors the bridge at spawn). Available as `app.state.mcp_bridge`; injected into the router via `set_mcp_bridge()`. It lives in the `core` layer (not `services`) because it *is* an orchestration collaborator — it drives the router and session manager to run a tool call — so the `api → core → services → database` layering contract holds with no exceptions.
 
 Bridge-originated tool calls push `TOOL_START`-path buffer messages with an `origin: "agent"` field so the client can distinguish agent-initiated calls from LLM-loop calls.
 

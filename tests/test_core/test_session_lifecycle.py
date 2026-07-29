@@ -638,3 +638,187 @@ class TestAgentType:
         assert msg.get("agent_type") == "claude_code"
 
         session_manager.unsubscribe_updates("test-sub")
+
+
+# ---------------------------------------------------------------------------
+# Clear-on-end: queued messages + scheduled wakes are dropped on end/cancel
+# ---------------------------------------------------------------------------
+
+
+class TestClearOnEnd:
+    """Ending/cancelling a session must clear its queued messages (regression:
+    the drop helpers read the stores off the wrong object and no-op'd).
+    """
+
+    async def _router_with_pending_store(self, session_manager: SessionManager, tmp_path: Path):
+        import uuid as _uuid  # noqa: PLC0415
+        from datetime import UTC as _UTC  # noqa: PLC0415
+        from datetime import datetime as _dt  # noqa: PLC0415
+
+        from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine  # noqa: PLC0415
+        from sqlalchemy.pool import StaticPool  # noqa: PLC0415
+
+        from src.core.pending_store import SessionPendingMessageStore  # noqa: PLC0415
+        from src.database.models import Base  # noqa: PLC0415
+        from src.database.models import Session as SessionModel  # noqa: PLC0415
+
+        engine = create_async_engine(
+            "sqlite+aiosqlite://",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        factory = async_sessionmaker(engine, expire_on_commit=False)
+
+        store = SessionPendingMessageStore(factory, tmp_path / "attachments")
+        registry = ToolRegistry()
+        registry.load_from_directory(_TOOLS_DIR)
+        settings = MagicMock()
+        settings.SESSION_INPUT_TOKEN_LIMIT = 0
+        settings.SESSION_OUTPUT_TOKEN_LIMIT = 0
+        settings.SESSION_INACTIVITY_TIMEOUT_MINUTES = 360
+        router = PromptRouter(
+            MagicMock(),
+            session_manager,
+            registry,
+            db_session_factory=factory,
+            settings=settings,
+            pending_store=store,
+        )
+
+        session = session_manager.create_session(SessionType.CONVERSATIONAL)
+        session.set_active()
+        # FK target row for the pending-message insert.
+        async with factory() as db:
+            db.add(
+                SessionModel(
+                    id=_uuid.UUID(session.id),
+                    backend_id="test",
+                    created_at=_dt.now(_UTC),
+                    session_type="conversational",
+                    status="active",
+                    metadata_={},
+                    conversation_history=[],
+                )
+            )
+            await db.commit()
+        return engine, factory, store, router, session
+
+    async def test_end_session_clears_queued_messages(self, session_manager: SessionManager, tmp_path: Path) -> None:
+        engine, factory, store, router, session = await self._router_with_pending_store(session_manager, tmp_path)
+        try:
+            await store.enqueue(
+                session,
+                content="queued",
+                display_content="queued",
+                attachments=None,
+                project_name=None,
+                selected_worktree_path=None,
+                task_id=None,
+            )
+            assert session.pending_user_messages  # sanity: something to clear
+
+            await router.end_session(session.id)
+
+            # In-memory mirror cleared and the DB rows deleted — before the fix
+            # the drop helper read the store off the wrong object and no-op'd,
+            # leaving both populated.
+            assert session.pending_user_messages == []
+            from sqlalchemy import select  # noqa: PLC0415
+
+            from src.database.models import SessionPendingMessage  # noqa: PLC0415
+
+            async with factory() as db:
+                remaining = (await db.execute(select(SessionPendingMessage))).scalars().all()
+            assert remaining == []
+        finally:
+            # Let fire-and-forget archive/persist tasks finish against the live
+            # engine before tearing it down, so they don't hit a closed database.
+            pending = list(router._pending_archive_tasks) + list(router._pending_persist_tasks)
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
+            await engine.dispose()
+
+    async def test_cancel_session_clears_queued_messages(self, session_manager: SessionManager, tmp_path: Path) -> None:
+        engine, _factory, store, router, session = await self._router_with_pending_store(session_manager, tmp_path)
+        try:
+            await store.enqueue(
+                session,
+                content="queued",
+                display_content="queued",
+                attachments=None,
+                project_name=None,
+                selected_worktree_path=None,
+                task_id=None,
+            )
+            await router.cancel_session(session.id)
+            assert session.pending_user_messages == []
+        finally:
+            pending = list(router._pending_archive_tasks) + list(router._pending_persist_tasks)
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
+            await engine.dispose()
+
+
+class TestDrainGuard:
+    """schedule_pending_drain must not start a second drain while one is running
+    for the same session (regression: two drains double-delivered a queued msg).
+    """
+
+    def test_skips_when_already_draining(self, session_manager: SessionManager) -> None:
+        router = _make_router(session_manager)
+        router._pending_store = MagicMock()  # non-None → drain is eligible
+        session = session_manager.create_session(SessionType.CONVERSATIONAL)
+        session.set_active()
+        session.pending_user_messages.append(MagicMock())  # something to drain
+        router._draining_sessions.add(session.id)
+
+        before = len(router._drain_tasks)
+        router.schedule_pending_drain(session)
+        assert len(router._drain_tasks) == before  # guard blocked the second drain
+
+    async def test_schedules_once_when_not_draining(self, session_manager: SessionManager) -> None:
+        router = _make_router(session_manager)
+        router._pending_store = MagicMock()
+        session = session_manager.create_session(SessionType.CONVERSATIONAL)
+        session.set_active()
+        session.pending_user_messages.append(MagicMock())
+
+        router.schedule_pending_drain(session)
+        assert session.id in router._draining_sessions
+        # second call is a no-op while the first is in flight
+        router.schedule_pending_drain(session)
+        assert len(router._drain_tasks) == 1
+
+        for t in list(router._drain_tasks):
+            t.cancel()
+        await asyncio.gather(*router._drain_tasks, return_exceptions=True)
+
+
+class TestTeardownExecutors:
+    """The shared executor-teardown helper cancels + nulls every agent."""
+
+    async def test_teardown_nulls_executors_and_reports_active(self, session_manager: SessionManager) -> None:
+        router = _make_router(session_manager)
+        session = session_manager.create_session(SessionType.CONVERSATIONAL)
+        session.set_active()
+        # Attach a Claude Code executor + a live stream task.
+        cc = AsyncMock()
+        session.claude_code_executor = cc
+        task = asyncio.create_task(asyncio.sleep(3600))
+        session._claude_code_stream_task = task
+
+        had_any = await router._lifecycle._teardown_executors(session)
+
+        assert had_any is True
+        cc.cancel.assert_awaited_once()
+        assert session.claude_code_executor is None
+        assert session._claude_code_stream_task is None
+        assert task.cancelled() or task.done()
+
+    async def test_teardown_reports_none_active_when_idle(self, session_manager: SessionManager) -> None:
+        router = _make_router(session_manager)
+        session = session_manager.create_session(SessionType.CONVERSATIONAL)
+        session.set_active()
+        assert await router._lifecycle._teardown_executors(session) is False

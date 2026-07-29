@@ -18,7 +18,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from src.core.agent_auth import agent_configuration_issue
-from src.core.agents import truncate_tool_output
+from src.core.agents import ManagedAgentBase, truncate_tool_output
 from src.core.buffer import MessageType
 from src.core.cwd_tracking import (
     apply_agent_cwd,
@@ -26,14 +26,13 @@ from src.core.cwd_tracking import (
     parse_cwd_change,
     reset_worktree_cache,
 )
-from src.core.session import ActivityState, SessionStatus, SessionType
+from src.core.session import ActivityState, SessionType
 from src.executors.opencode import OpenCodeExecutor
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
     from src.core.llm import ToolCallRequest
-    from src.core.prompt_router import PromptRouter
     from src.core.session import ActiveSession
     from src.executors.base import ExecutionChunk
     from src.tools.loader import ToolDefinition
@@ -43,11 +42,8 @@ logger = logging.getLogger(__name__)
 _truncate_tool_output = truncate_tool_output
 
 
-class OpenCodeAgent:
+class OpenCodeAgent(ManagedAgentBase):
     """OpenCode CLI subprocess lifecycle collaborator for PromptRouter."""
-
-    def __init__(self, router: PromptRouter) -> None:
-        self._r = router
 
     def _build_opencode_extra_env(self) -> dict[str, str]:
         """Build extra environment variables for OpenCode CLI subprocesses."""
@@ -165,7 +161,7 @@ class OpenCodeAgent:
 
         return f"OpenCode session started in {working_path}"
 
-    async def _relay_opencode_stream(
+    async def _relay_opencode_stream(  # noqa: C901
         self,
         session: ActiveSession,
         stream: AsyncGenerator[ExecutionChunk, None],
@@ -244,19 +240,7 @@ class OpenCodeAgent:
                         "tool_input": tool_input,
                     },
                 )
-                session.subprocess_current_tool = tool_name
-                if session.subprocess_started_at is not None:
-                    session.buffer.push_ephemeral(
-                        MessageType.SUBPROCESS_STATUS,
-                        {
-                            "session_id": session.id,
-                            "subprocess_type": session.subprocess_type,
-                            "display_name": session.subprocess_display_name,
-                            "working_directory": session.subprocess_working_directory,
-                            "current_tool": tool_name,
-                            "started_at": session.subprocess_started_at_iso,
-                        },
-                    )
+                self._push_subprocess_status(session, tool_name)
                 # Live worktree-badge tracking for OpenCode's bash tool.
                 if tool_name in ("bash", "Bash"):
                     command = str(tool_input.get("command") or "")
@@ -286,19 +270,7 @@ class OpenCodeAgent:
                             },
                         )
                         self._r._fire_text_artifact_scan(session, [output])
-                    session.subprocess_current_tool = None
-                    if session.subprocess_started_at is not None:
-                        session.buffer.push_ephemeral(
-                            MessageType.SUBPROCESS_STATUS,
-                            {
-                                "session_id": session.id,
-                                "subprocess_type": session.subprocess_type,
-                                "display_name": session.subprocess_display_name,
-                                "working_directory": session.subprocess_working_directory,
-                                "current_tool": None,
-                                "started_at": session.subprocess_started_at_iso,
-                            },
-                        )
+                    self._push_subprocess_status(session, None)
 
             elif event_type == "step_finish":
                 # Accumulate per-step token usage
@@ -396,26 +368,9 @@ class OpenCodeAgent:
 
     async def _end_opencode_session(self, session: ActiveSession) -> None:
         """Clean up OpenCode state when the session ends."""
-        if session.opencode_executor is not None:
-            await session.opencode_executor.stop_process()
-        session.opencode_executor = None
-        session._opencode_stream_task = None
-
-        session.clear_subprocess_tracking()
-
-        if session.status == SessionStatus.PAUSED:
-            session.complete()
-            return
-
-        session.buffer.push_text(
-            MessageType.SESSION_END,
-            {
-                "session_id": session.id,
-                "reason": "opencode_finished",
-            },
+        await self._end_agent_session(
+            session, executor_attr="opencode_executor", task_attr="_opencode_stream_task", reason="opencode_finished"
         )
-        session.complete()
-        self._r._fire_archive_task(session.id)
 
     async def _forward_to_opencode(self, session: ActiveSession, text: str) -> None:
         """Forward a follow-up message to the active OpenCode session.
@@ -423,49 +378,17 @@ class OpenCodeAgent:
         OpenCode CLI uses one-shot processes, so follow-ups always spawn a new
         process with ``--session-id SESSION_ID``.
         """
-        executor = session.opencode_executor
-        if executor is None:
-            return
-
-        if session.status == SessionStatus.PAUSED:
-            return
-
-        session.set_activity(ActivityState.RUNNING_SUBPROCESS)
-
-        if session.subprocess_started_at is None:
-            session.subprocess_started_at = datetime.now(UTC)
-            session.subprocess_type = "opencode"
-            opencode_def_for_name = self._r._tool_registry.get("opencode")
-            session.subprocess_display_name = (
-                opencode_def_for_name.display_name
-                if opencode_def_for_name and opencode_def_for_name.display_name
-                else "OpenCode"
-            )
-            session.subprocess_working_directory = session.metadata.get("opencode_working_directory", "")
-        session.subprocess_current_tool = None
-        session.buffer.push_ephemeral(
-            MessageType.SUBPROCESS_STATUS,
-            {
-                "session_id": session.id,
-                "subprocess_type": session.subprocess_type,
-                "display_name": session.subprocess_display_name,
-                "working_directory": session.subprocess_working_directory,
-                "current_tool": None,
-                "started_at": session.subprocess_started_at_iso,
-            },
+        await self._forward_to_oneshot_agent(
+            session,
+            text,
+            tool_key="opencode",
+            executor_attr="opencode_executor",
+            task_attr="_opencode_stream_task",
+            subprocess_type="opencode",
+            default_display_name="OpenCode",
+            working_dir_meta_key="opencode_working_directory",
+            restart=self._restart_opencode_with_prompt,
         )
-
-        opencode_def = self._r._tool_registry.get("opencode")
-        session.buffer.push_text(
-            MessageType.AGENT_GROUP_START,
-            {
-                "session_id": session.id,
-                "tool_name": "opencode",
-                "display_name": opencode_def.display_name if opencode_def and opencode_def.display_name else "OpenCode",
-            },
-        )
-
-        session._opencode_stream_task = asyncio.create_task(self._restart_opencode_with_prompt(session, executor, text))
 
     async def _restart_opencode_with_prompt(
         self,
@@ -474,37 +397,12 @@ class OpenCodeAgent:
         prompt: str,
     ) -> None:
         """Spawn a new OpenCode resume process and stream events for a follow-up."""
-        try:
-            completed = await self._relay_opencode_stream(session, executor.restart_with_prompt(prompt))
-        except Exception as e:
-            logger.exception("OpenCode restart error in session %s", session.id)
-            session.buffer.push_text(
-                MessageType.AGENT_GROUP_END,
-                {"session_id": session.id},
-            )
-            session.buffer.push_text(
-                MessageType.ERROR,
-                {
-                    "session_id": session.id,
-                    "content": f"OpenCode error: {e}",
-                    "code": "OPENCODE_ERROR",
-                },
-            )
-            await self._end_opencode_session(session)
-            return
-
-        session.buffer.push_text(
-            MessageType.AGENT_GROUP_END,
-            {"session_id": session.id},
+        await self._restart_oneshot_agent(
+            session,
+            executor,
+            prompt,
+            display_name="OpenCode",
+            error_code="OPENCODE_ERROR",
+            relay=self._relay_opencode_stream,
+            end=self._end_opencode_session,
         )
-
-        if not completed:
-            logger.info(
-                "OpenCode restart stream ended without completion (session=%s), ending session",
-                session.id,
-            )
-            await self._end_opencode_session(session)
-            return
-
-        await executor.stop_process()
-        self._r.schedule_pending_drain(session)

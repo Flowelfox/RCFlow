@@ -190,7 +190,7 @@ async def _stream_browser_auth(binary_path: str, config_dir: Path) -> AsyncGener
             proc.kill()
 
 
-async def _stream_device_auth(binary_path: str, config_dir: Path) -> AsyncGenerator[str, None]:
+async def _stream_device_auth(binary_path: str, config_dir: Path) -> AsyncGenerator[str, None]:  # noqa: C901
     """Run ``codex login --device-auth`` and stream progress events."""
     env = dict(os.environ)
     env["CODEX_HOME"] = str(config_dir)
@@ -475,10 +475,21 @@ async def claude_code_login_code(request: Request, body: _ClaudeCodeLoginBody) -
     config_dir = tool_settings.get_config_dir("claude_code")
     config_dir.mkdir(parents=True, exist_ok=True)
 
+    import hmac  # noqa: PLC0415
+
+    stored_state: str | None = getattr(request.app.state, "_claude_login_state", None)
     raw_code = body.code.strip()
-    # The callback page concatenates code#state — split and use only the code part
-    code = raw_code.split("#")[0] if "#" in raw_code else raw_code
-    state: str | None = getattr(request.app.state, "_claude_login_state", None)
+    # The callback page concatenates code#state. When the state is present,
+    # validate it against the one we issued (CSRF protection) before exchanging.
+    # A manually-pasted bare code (no "#state") skips this — there is nothing to
+    # compare — but the automatic browser callback always carries state.
+    if "#" in raw_code:
+        code, returned_state = raw_code.split("#", 1)
+        if stored_state and not hmac.compare_digest(returned_state, stored_state):
+            raise HTTPException(status_code=400, detail="OAuth state mismatch — restart the login flow.")
+    else:
+        code = raw_code
+    state: str | None = stored_state
 
     payload = {
         "grant_type": "authorization_code",
@@ -551,8 +562,8 @@ async def claude_code_login_code(request: Request, body: _ClaudeCodeLoginBody) -
     # the Keychain, so a stale Keychain entry (from a prior `claude` login)
     # would shadow the new file and report logged-out. Delete it so the file we
     # control becomes authoritative; `claude` re-persists to the Keychain with
-    # its own ACL on next use.
-    _clear_claude_keychain(config_dir)
+    # its own ACL on next use. Runs the blocking `security` call off the loop.
+    await asyncio.to_thread(_clear_claude_keychain, config_dir)
 
     # Auto-set provider to anthropic_login on successful login
     tool_settings.update_settings("claude_code", {"provider": "anthropic_login"})

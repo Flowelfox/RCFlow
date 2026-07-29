@@ -300,6 +300,32 @@ class TestPermissionManagerScopes:
         result = pm.check_cached("Read", {"path": "/etc/hosts"})
         assert result is None
 
+    def test_tool_path_scope_traversal_does_not_bypass(self) -> None:
+        pm = PermissionManager()
+        p = pm.create_request("Read", {"path": "/home/user/project/file.py"})
+        pm.resolve_request(
+            p.request_id,
+            PermissionDecision.ALLOW,
+            PermissionScope.TOOL_PATH,
+            path_prefix="/home/user/project",
+        )
+        # ../ traversal escapes the approved tree → must NOT match the cached allow
+        result = pm.check_cached("Read", {"path": "/home/user/project/../../etc/cron.d/evil"})
+        assert result is None
+
+    def test_tool_path_scope_sibling_prefix_does_not_bypass(self) -> None:
+        pm = PermissionManager()
+        p = pm.create_request("Read", {"path": "/home/user/project/file.py"})
+        pm.resolve_request(
+            p.request_id,
+            PermissionDecision.ALLOW,
+            PermissionScope.TOOL_PATH,
+            path_prefix="/home/user/project",
+        )
+        # A sibling directory sharing the string prefix must not match
+        result = pm.check_cached("Read", {"path": "/home/user/project-secrets/creds"})
+        assert result is None
+
 
 class TestPermissionManagerCancelAll:
     def test_cancel_all_denies_pending_requests(self) -> None:

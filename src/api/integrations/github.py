@@ -45,14 +45,31 @@ from src.database.models import GitHubPR as GitHubPRModel
 from src.database.models import GitHubRepoDefault as GitHubRepoDefaultModel
 from src.database.models import GitHubReviewDraft as GitHubReviewDraftModel
 from src.services import git_ops
-from src.services.github_service import GitHubService, GitHubServiceError, evaluate_scopes
+from src.services.github_service import (
+    GitHubService,
+    GitHubServiceError,
+    evaluate_scopes,
+)
+from src.services.github_service import (
+    attach_pr_badges as _attach_pr_badges,
+)
+from src.services.github_service import (
+    persist_synced_prs as _persist_synced_prs,
+)
+from src.services.github_service import (
+    serialize_pr as _pr_to_dict,
+)
+from src.services.github_service import (
+    sync_and_attach_prs as sync_and_attach_prs,
+)
+from src.services.github_service import (
+    upsert_prs as _upsert_prs,
+)
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from sqlalchemy.ext.asyncio import AsyncSession
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import func, select
 
 logger = logging.getLogger(__name__)
 
@@ -71,37 +88,15 @@ _DEFAULT_SYNC_ROLES = ("for_me", "created")
 # ---------------------------------------------------------------------------
 
 
-def _pr_to_dict(pr: GitHubPRModel) -> dict[str, Any]:
-    """Serialise a GitHubPR ORM row to a JSON-safe dict."""
-    return {
-        "id": str(pr.id),
-        "github_id": pr.github_id,
-        "repo_owner": pr.repo_owner,
-        "repo_name": pr.repo_name,
-        "number": pr.number,
-        "title": pr.title,
-        "body": pr.body,
-        "state": pr.state,
-        "draft": pr.draft,
-        "review_decision": pr.review_decision,
-        "merge_status": pr.merge_status,
-        "project_name": pr.project_name,
-        "project_path": pr.project_path,
-        "author": pr.author,
-        "author_avatar_url": pr.author_avatar_url,
-        "url": pr.url,
-        "base_ref": pr.base_ref,
-        "head_ref": pr.head_ref,
-        "head_sha": pr.head_sha,
-        "additions": pr.additions,
-        "deletions": pr.deletions,
-        "changed_files": pr.changed_files,
-        "role": pr.role,
-        "created_at": pr.created_at.isoformat(),
-        "updated_at": pr.updated_at.isoformat(),
-        "synced_at": pr.synced_at.isoformat(),
-        "task_id": str(pr.task_id) if pr.task_id else None,
-    }
+async def list_backend_prs(db: AsyncSession, backend_id: str) -> list[dict[str, Any]]:
+    """Return all PRs for *backend_id*, newest first, serialised for the client.
+
+    Single source for the backend-scoped PR list shared by the REST endpoint and
+    both WebSocket channels (previously each inlined the same query + serializer).
+    """
+    stmt = select(GitHubPRModel).where(GitHubPRModel.backend_id == backend_id).order_by(GitHubPRModel.updated_at.desc())
+    rows = (await db.execute(stmt)).scalars().all()
+    return [_pr_to_dict(r) for r in rows]
 
 
 def _get_github_service(request: Request) -> GitHubService:
@@ -116,225 +111,6 @@ def _get_github_service(request: Request) -> GitHubService:
             detail="GitHub token is not configured. Set GITHUB_TOKEN in Settings → GitHub.",
         )
     return GitHubService(token=settings.GITHUB_TOKEN)
-
-
-async def _upsert_prs(
-    db: AsyncSession,
-    backend_id: str,
-    parsed_prs: list[dict[str, Any]],
-) -> list[GitHubPRModel]:
-    """Insert or update cached pull requests.  Returns the upserted rows."""
-    results: list[GitHubPRModel] = []
-    now = datetime.now(UTC)
-
-    _fields = (
-        "repo_owner",
-        "repo_name",
-        "number",
-        "title",
-        "body",
-        "state",
-        "draft",
-        "review_decision",
-        "merge_status",
-        "project_name",
-        "project_path",
-        "author",
-        "author_avatar_url",
-        "url",
-        "base_ref",
-        "head_ref",
-        "head_sha",
-        "additions",
-        "deletions",
-        "changed_files",
-        "role",
-        "created_at",
-        "updated_at",
-    )
-
-    for data in parsed_prs:
-        stmt = select(GitHubPRModel).where(
-            GitHubPRModel.backend_id == backend_id,
-            GitHubPRModel.github_id == data["github_id"],
-        )
-        existing = (await db.execute(stmt)).scalar_one_or_none()
-
-        if existing:
-            for field in _fields:
-                # Don't let an "all"-bucket sync downgrade a PR that's already
-                # tagged for_me/created — those drive the For me / Owned tabs,
-                # while the All tab ignores role and shows everything anyway.
-                if field == "role" and data["role"] == "all" and existing.role in ("for_me", "created"):
-                    continue
-                setattr(existing, field, data[field])
-            existing.synced_at = now
-            results.append(existing)
-        else:
-            row = GitHubPRModel(
-                id=uuid.uuid4(),
-                backend_id=backend_id,
-                github_id=data["github_id"],
-                synced_at=now,
-                **{field: data[field] for field in _fields},
-            )
-            db.add(row)
-            results.append(row)
-
-    await db.commit()
-    for r in results:
-        await db.refresh(r)
-    return results
-
-
-async def _persist_synced_prs(
-    db: AsyncSession,
-    backend_id: str,
-    parsed: list[dict[str, Any]],
-    projects_dirs: list[Path] | None = None,
-) -> tuple[list[GitHubPRModel], list[str]]:
-    """Upsert fetched PRs, skipping (and pruning) archived-repo PRs.
-
-    PRs whose repository is archived are read-only — they can't be reviewed or
-    merged — so they are never cached, and any previously-cached rows for those
-    repos are deleted. Each kept PR is stamped with the local checkout this
-    worker maps its repo to (``project_name``/``project_path``, memoized per
-    repo) so the client can show the worker/project badge and route writable
-    actions. Returns ``(upserted_rows, deleted_pr_ids)``; callers broadcast the
-    updates/deletions.
-    """
-    archived_repos = {(p["repo_owner"], p["repo_name"]) for p in parsed if p.get("archived")}
-    fresh = [p for p in parsed if not p.get("archived")]
-
-    # Resolve the local checkout per repo once (filesystem scan is not free).
-    if projects_dirs:
-        repo_project: dict[tuple[str, str], Path | None] = {}
-        for p in fresh:
-            key = (p["repo_owner"], p["repo_name"])
-            if key not in repo_project:
-                repo_project[key] = await git_ops.find_local_repo(projects_dirs, *key)
-            match = repo_project[key]
-            p["project_name"] = match.name if match else None
-            p["project_path"] = str(match) if match else None
-
-    upserted = await _upsert_prs(db, backend_id, fresh)
-
-    deleted_ids: list[str] = []
-    if archived_repos:
-        conds = [
-            and_(GitHubPRModel.repo_owner == owner, GitHubPRModel.repo_name == name) for owner, name in archived_repos
-        ]
-        stmt = select(GitHubPRModel).where(GitHubPRModel.backend_id == backend_id, or_(*conds))
-        for row in (await db.execute(stmt)).scalars().all():
-            deleted_ids.append(str(row.id))
-            await db.delete(row)
-        await db.commit()
-
-    return upserted, deleted_ids
-
-
-async def _attach_pr_badges(
-    session_manager: Any,
-    db_factory: Any,
-    pr_dicts: list[dict[str, Any]],
-    *,
-    restrict_to_path: str | None = None,
-) -> None:
-    """Attach PR badges to live sessions on each PR's head branch, then persist.
-
-    For every PR in ``pr_dicts`` this asks the session manager to stamp the PR
-    descriptor onto any active session working on that PR's head branch (which
-    broadcasts a ``session_update`` so the badge renders live), then writes the
-    updated session metadata to the DB so the badge survives a restart. A
-    no-op when no session matches. ``restrict_to_path`` scopes matching to a
-    single worktree (the open-PR flow passes the pushed worktree).
-    """
-    affected: dict[str, Any] = {}
-    for pr in pr_dicts:
-        for session in await session_manager.attach_pr_to_sessions(pr, restrict_to_path=restrict_to_path):
-            affected[session.id] = session
-    if affected:
-        async with db_factory() as db:
-            for session in affected.values():
-                await session_manager.persist_session_metadata(session, db)
-
-
-async def sync_and_attach_prs(
-    settings: Any,
-    session_manager: Any,
-    db_factory: Any,
-    *,
-    throttle_seconds: int = 60,
-) -> int:
-    """Fetch open PRs, persist/broadcast them, and attach PR badges to sessions.
-
-    Used by background triggers when a session starts on / switches to a branch
-    or worktree, so an existing open PR for that branch shows up as a session
-    badge (see :meth:`SessionManager.attach_pr_to_sessions`). No-op without a
-    GitHub token.
-
-    A recency throttle skips the GitHub fetch when a sync ran within
-    ``throttle_seconds`` — but the badge attach still runs against PRs already in
-    the DB, so a session moving onto an already-synced branch gets its badge with
-    no network round-trip. Returns the number of PRs upserted (0 when throttled
-    or token-less). Never raises.
-    """
-    token = getattr(settings, "GITHUB_TOKEN", "")
-    if not token:
-        return 0
-    backend_id = settings.RCFLOW_BACKEND_ID
-    default_repo = settings.GITHUB_DEFAULT_REPO or None
-
-    async with db_factory() as db:
-        latest = (
-            await db.execute(select(func.max(GitHubPRModel.synced_at)).where(GitHubPRModel.backend_id == backend_id))
-        ).scalar_one_or_none()
-    # SQLite returns naive datetimes; treat a naive value as UTC before diffing.
-    if latest is not None and latest.tzinfo is None:
-        latest = latest.replace(tzinfo=UTC)
-    stale = latest is None or (datetime.now(UTC) - latest).total_seconds() >= throttle_seconds
-
-    upserted: list[GitHubPRModel] = []
-    fetched = False
-    if stale:
-        try:
-            svc = GitHubService(token=token)
-            try:
-                parsed: list[dict[str, Any]] = []
-                for role in ("for_me", "created"):
-                    parsed.extend(await svc.list_pull_requests(role, repo=default_repo))
-            finally:
-                await svc.aclose()
-            async with db_factory() as db:
-                upserted, deleted_ids = await _persist_synced_prs(db, backend_id, parsed, list(settings.projects_dirs))
-            fetched = True
-            for row in upserted:
-                session_manager.broadcast_github_pr_update(_pr_to_dict(row))
-            for pr_id in deleted_ids:
-                session_manager.broadcast_github_pr_deleted(pr_id)
-        except (GitHubServiceError, Exception) as exc:
-            logger.warning("Background PR sync failed: %s", exc)
-
-    # Attach badges. When we fetched, match the fresh set; otherwise match open
-    # PRs already in the DB (cheap path for throttled calls / already-synced PRs).
-    if fetched:
-        pr_dicts = [_pr_to_dict(row) for row in upserted]
-    else:
-        async with db_factory() as db:
-            rows = (
-                (
-                    await db.execute(
-                        select(GitHubPRModel).where(
-                            GitHubPRModel.backend_id == backend_id, GitHubPRModel.state == "open"
-                        )
-                    )
-                )
-                .scalars()
-                .all()
-            )
-        pr_dicts = [_pr_to_dict(row) for row in rows]
-    await _attach_pr_badges(session_manager, db_factory, pr_dicts)
-    return len(upserted)
 
 
 async def _cached_repo_slugs(db: AsyncSession, backend_id: str) -> list[str]:

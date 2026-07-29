@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import tarfile
+import zipfile
 from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -806,3 +807,109 @@ class TestAtomicInstallBinary:
         # just assert that nothing broke.
         for p in parked:
             assert p != target
+
+
+# ---------------------------------------------------------------------------
+# OpenCode archive extraction (shared by the plain + streaming installers)
+# ---------------------------------------------------------------------------
+
+
+def _make_opencode_tarball(path: Path, names_to_content: dict[str, bytes]) -> None:
+    """Build a .tar.gz holding the given member paths."""
+    staging = path.parent / "staging"
+    staging.mkdir(exist_ok=True)
+    with tarfile.open(path, "w:gz") as tf:
+        for name, content in names_to_content.items():
+            member_file = staging / Path(name).name
+            member_file.write_bytes(content)
+            tf.add(member_file, arcname=name)
+
+
+class TestExtractOpencodeArchive:
+    def test_extracts_cli_binary_over_existing(self, tmp_path: Path):
+        """The CLI binary is installed, replacing an already-installed one."""
+        install_dir = tmp_path / "opencode"
+        install_dir.mkdir()
+        binary_path = install_dir / "opencode"
+        binary_path.write_bytes(b"old-version")
+
+        tmp_dir = install_dir / "tmp"
+        tmp_dir.mkdir()
+        archive = tmp_dir / "opencode-linux-x64.tar.gz"
+        _make_opencode_tarball(archive, {"opencode": b"new-version"})
+
+        ToolManager._extract_opencode_archive(archive, tmp_dir, binary_path)
+
+        assert binary_path.read_bytes() == b"new-version"
+
+    def test_skips_desktop_variant(self, tmp_path: Path):
+        """A desktop/electron build must not be mistaken for the CLI binary."""
+        install_dir = tmp_path / "opencode"
+        install_dir.mkdir()
+        binary_path = install_dir / "opencode"
+
+        tmp_dir = install_dir / "tmp"
+        tmp_dir.mkdir()
+        archive = tmp_dir / "opencode-linux-x64.tar.gz"
+        _make_opencode_tarball(
+            archive,
+            {"desktop/opencode": b"desktop-build", "opencode": b"cli-build"},
+        )
+
+        ToolManager._extract_opencode_archive(archive, tmp_dir, binary_path)
+
+        assert binary_path.read_bytes() == b"cli-build"
+
+    def test_empty_tarball_raises(self, tmp_path: Path):
+        """An empty archive raises — the streaming installer turns this into an error event."""
+        install_dir = tmp_path / "opencode"
+        install_dir.mkdir()
+        tmp_dir = install_dir / "tmp"
+        tmp_dir.mkdir()
+        archive = tmp_dir / "opencode-linux-x64.tar.gz"
+        with tarfile.open(archive, "w:gz"):
+            pass
+
+        with pytest.raises(RuntimeError, match="empty"):
+            ToolManager._extract_opencode_archive(archive, tmp_dir, install_dir / "opencode")
+
+    def test_missing_binary_raises(self, tmp_path: Path):
+        """An archive without the CLI binary raises rather than installing junk."""
+        install_dir = tmp_path / "opencode"
+        install_dir.mkdir()
+        tmp_dir = install_dir / "tmp"
+        tmp_dir.mkdir()
+        archive = tmp_dir / "opencode-linux-x64.tar.gz"
+        _make_opencode_tarball(archive, {"README.md": b"docs"})
+
+        with pytest.raises(RuntimeError, match="Could not find opencode binary"):
+            ToolManager._extract_opencode_archive(archive, tmp_dir, install_dir / "opencode")
+
+    def test_extracts_from_zip(self, tmp_path: Path):
+        """macOS/Windows releases ship .zip archives, not tarballs."""
+        install_dir = tmp_path / "opencode"
+        install_dir.mkdir()
+        binary_path = install_dir / "opencode"
+
+        tmp_dir = install_dir / "tmp"
+        tmp_dir.mkdir()
+        archive = tmp_dir / "opencode-darwin-arm64.zip"
+        with zipfile.ZipFile(archive, "w") as zf:
+            zf.writestr("desktop/opencode", b"desktop-build")
+            zf.writestr("opencode", b"cli-build")
+
+        ToolManager._extract_opencode_archive(archive, tmp_dir, binary_path)
+
+        assert binary_path.read_bytes() == b"cli-build"
+
+    def test_missing_binary_in_zip_raises(self, tmp_path: Path):
+        install_dir = tmp_path / "opencode"
+        install_dir.mkdir()
+        tmp_dir = install_dir / "tmp"
+        tmp_dir.mkdir()
+        archive = tmp_dir / "opencode-darwin-arm64.zip"
+        with zipfile.ZipFile(archive, "w") as zf:
+            zf.writestr("README.md", b"docs")
+
+        with pytest.raises(RuntimeError, match="Could not find opencode binary in zip"):
+            ToolManager._extract_opencode_archive(archive, tmp_dir, install_dir / "opencode")

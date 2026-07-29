@@ -35,6 +35,7 @@ from src.gui.updater import (
     launch_installer,
     resolve_current_version,
     stream_download,
+    verify_sha256,
 )
 from src.paths import is_frozen
 
@@ -176,12 +177,14 @@ def _download(info: UpdateInfo, plat: str) -> Path:
     cleanup_partial_downloads()
     dest = download_path(info, plat)
     if info.asset_size is not None and dest.exists() and dest.stat().st_size == info.asset_size:
+        verify_sha256(dest, info)
         print(f"Using cached download: {dest}")
         return dest
     on_progress = _progress_printer(info)
     stream_download(info, dest, on_progress)
     if on_progress is not None:
         print()  # terminate the \r progress line
+    verify_sha256(dest, info)
     return dest
 
 
