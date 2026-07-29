@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Models"])
 
 
-_VALID_PROVIDERS: set[str] = {"anthropic", "openai", "bedrock", "openrouter"}
+_VALID_PROVIDERS: set[str] = {"anthropic", "openai", "bedrock", "openrouter", "google"}
 _VALID_SCOPES: set[str] = {"global", "claude_code", "codex", "opencode"}
 
 
@@ -46,6 +46,8 @@ def _global_credentials(settings: Settings, provider: str) -> Credentials:
         return Credentials(api_key=settings.ANTHROPIC_API_KEY or None)
     if provider == "openai":
         return Credentials(api_key=settings.OPENAI_API_KEY or None)
+    if provider == "google":
+        return Credentials(api_key=settings.GOOGLE_API_KEY or None)
     if provider == "bedrock":
         return Credentials(
             aws_region=settings.AWS_REGION or None,
@@ -106,7 +108,7 @@ async def list_models(
     request: Request,
     provider: Annotated[
         str,
-        Query(description="Upstream provider: anthropic, openai, bedrock, openrouter"),
+        Query(description="Upstream provider: anthropic, openai, bedrock, openrouter, google"),
     ],
     scope: Annotated[
         str,

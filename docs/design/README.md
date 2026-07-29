@@ -1,5 +1,5 @@
 ---
-updated: 2026-07-07
+updated: 2026-07-23
 ---
 
 # RCFlow Design
@@ -12,7 +12,7 @@ Entry point for RCFlow architecture, conventions, and decisions. **Read this fir
 
 ## Overview
 
-RCFlow is a background server running on Linux, macOS, or Windows that exposes a WebSocket-based interface for executing actions on the host machine via natural language prompts. Users connect from client applications (Android and Windows/macOS/Linux desktop), send text prompts, and the server uses an LLM (Anthropic Messages API, AWS Bedrock, or OpenAI Chat Completions API) to interpret prompts into tool calls. Tools are pluggable and defined via JSON files. Results stream back to the client in real time.
+RCFlow is a background server running on Linux, macOS, or Windows that exposes a WebSocket-based interface for executing actions on the host machine via natural language prompts. Users connect from client applications (Android and Windows/macOS/Linux desktop), send text prompts, and the server uses an LLM (Anthropic Messages API, AWS Bedrock, OpenAI Chat Completions API, or Google Gemini via its OpenAI-compatible endpoint) to interpret prompts into tool calls. Tools are pluggable and defined via JSON files. Results stream back to the client in real time.
 
 ## How to Use This Doc
 
@@ -74,7 +74,7 @@ This file is the **index**. Detailed sections live in sibling files (`./architec
 | Web Framework        | FastAPI                       |
 | ORM                  | SQLAlchemy 2.0 (async)        |
 | Database             | SQLite (default) or PostgreSQL |
-| LLM                  | Anthropic Messages API, AWS Bedrock, or OpenAI Chat Completions API |
+| LLM                  | Anthropic Messages API, AWS Bedrock, OpenAI Chat Completions API, or Google Gemini (OpenAI-compat endpoint via the openai SDK) |
 | Claude Code agent    | claude-agent-sdk (drives the managed `claude` binary; `can_use_tool` powers interactive AskUserQuestion + permissions) |
 | ACP agents (Codex, OpenCode) | agent-client-protocol (official Python ACP SDK — client side; agents run as stdio subprocesses) |
 | Prompt Templates     | Jinja2                        |

@@ -1,5 +1,5 @@
 ---
-updated: 2026-07-07
+updated: 2026-07-23
 ---
 
 # HTTP API
@@ -56,7 +56,7 @@ REST endpoints. All except `/api/health` require the `X-API-Key` header (same ke
 
 | Method | Endpoint      | Auth | Description |
 |--------|---------------|------|-------------|
-| GET    | `/api/models` | Yes  | Dynamic LLM model catalog. Query params: `provider` (one of `anthropic`, `openai`, `bedrock`, `openrouter`), `scope` (one of `global`, `claude_code`, `codex`, `opencode`; default `global`), `refresh` (bool, default `false`). Returns `{provider, scope, options: [{value, label}], allow_custom: true, source: "live"|"cached"|"fallback", fetched_at: ISO8601|null, ttl_seconds: int, error: str|null}`. Upstream failures stay `200` with `source="fallback"` and `error` populated; 422 for unknown provider/scope. Credentials resolve from `Settings` for `scope=global` and from `ToolSettingsManager.get_settings(scope)` otherwise. See [Configuration → Dynamic Model Catalog](configuration.md#dynamic-model-catalog) for cache semantics. |
+| GET    | `/api/models` | Yes  | Dynamic LLM model catalog. Query params: `provider` (one of `anthropic`, `openai`, `bedrock`, `openrouter`, `google`), `scope` (one of `global`, `claude_code`, `codex`, `opencode`; default `global`), `refresh` (bool, default `false`). Returns `{provider, scope, options: [{value, label}], allow_custom: true, source: "live"|"cached"|"fallback", fetched_at: ISO8601|null, ttl_seconds: int, error: str|null}`. Upstream failures stay `200` with `source="fallback"` and `error` populated; 422 for unknown provider/scope. Credentials resolve from `Settings` for `scope=global` and from `ToolSettingsManager.get_settings(scope)` otherwise. See [Configuration → Dynamic Model Catalog](configuration.md#dynamic-model-catalog) for cache semantics. |
 
 ## Sessions
 

@@ -864,6 +864,7 @@ class WorkerConnection extends ChangeNotifier {
           String? llmProvider;
           String? anthropicKey;
           String? openaiKey;
+          String? googleKey;
           for (final opt in configOptions) {
             final key = opt['key'] as String?;
             final value = opt['value'];
@@ -883,12 +884,15 @@ class WorkerConnection extends ChangeNotifier {
               anthropicKey = value is String ? value : null;
             } else if (key == 'OPENAI_API_KEY') {
               openaiKey = value is String ? value : null;
+            } else if (key == 'GOOGLE_API_KEY') {
+              googleKey = value is String ? value : null;
             }
           }
           hasLlmConfigured = _computeLlmConfigured(
             llmProvider,
             anthropicKey,
             openaiKey,
+            googleKey,
           );
           if (hasLinear) {
             fetchLinearViewer();
@@ -936,6 +940,7 @@ class WorkerConnection extends ChangeNotifier {
     String? provider,
     String? anthropicKey,
     String? openaiKey,
+    String? googleKey,
   ) {
     final p = (provider ?? '').toLowerCase();
     if (p == 'none' || p == 'bedrock') return true;
@@ -943,6 +948,7 @@ class WorkerConnection extends ChangeNotifier {
       return anthropicKey != null && anthropicKey.isNotEmpty;
     }
     if (p == 'openai') return openaiKey != null && openaiKey.isNotEmpty;
+    if (p == 'google') return googleKey != null && googleKey.isNotEmpty;
     // Unknown provider — assume configured; server-side init will raise if
     // it's actually wrong.
     return true;

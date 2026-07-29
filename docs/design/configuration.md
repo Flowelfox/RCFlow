@@ -25,7 +25,7 @@ All configuration is via environment variables, loaded from a `settings.json` fi
 | `SSL_CERTFILE`          | no       |                 | Path to TLS certificate (enables WSS when both cert+key set) |
 | `SSL_KEYFILE`           | no       |                 | Path to TLS private key (enables WSS when both cert+key set) |
 | `DATABASE_URL`          | no       | `sqlite+aiosqlite:///./data/rcflow.db` | Database connection string (SQLite or PostgreSQL) |
-| `LLM_PROVIDER`          | no       | `none`          | LLM provider: `anthropic`, `bedrock`, `openai`, or `none` (direct tool mode — the default). Changing this invalidates the dynamic model catalog for the affected provider. |
+| `LLM_PROVIDER`          | no       | `none`          | LLM provider: `anthropic`, `bedrock`, `openai`, `google`, or `none` (direct tool mode — the default). Changing this invalidates the dynamic model catalog for the affected provider. |
 | `ANTHROPIC_API_KEY`     | cond.    |                 | Anthropic API key (required when `LLM_PROVIDER=anthropic`) |
 | `ANTHROPIC_MODEL`       | no       | `claude-sonnet-4-6`| Anthropic model ID (use Bedrock model IDs when `LLM_PROVIDER=bedrock`) |
 | `AWS_REGION`            | no       | `us-east-1`     | AWS region (used when `LLM_PROVIDER=bedrock`) |
@@ -33,6 +33,8 @@ All configuration is via environment variables, loaded from a `settings.json` fi
 | `AWS_SECRET_ACCESS_KEY` | no       |                 | AWS secret access key (optional if using IAM roles/instance profiles) |
 | `OPENAI_API_KEY`        | cond.    |                 | OpenAI API key (required when `LLM_PROVIDER=openai`) |
 | `OPENAI_MODEL`          | no       | `gpt-5.4`       | OpenAI model ID (e.g. gpt-5.4, gpt-4.1, o3) |
+| `GOOGLE_API_KEY`        | cond.    |                 | Google Gemini API key (required when `LLM_PROVIDER=google`) |
+| `GEMINI_MODEL`          | no       | `gemini-2.5-flash` | Gemini model ID (e.g. gemini-2.5-flash, gemini-2.5-pro) |
 | `PROJECTS_DIR`          | no       | `~/Projects`    | Comma-separated list of project directories (used in system prompt, path resolution, and `/api/projects` endpoint) |
 | `TOOLS_DIR`             | no       | `<install_dir>/tools` (frozen) / `./tools` (dev) | Path to tool definitions directory. Resolved each launch from `sys.executable`; deliberately **not** persisted to `settings.json` so movable bundles (macOS `.app` from DMG, `/Applications`, etc.) keep working when relocated. Set explicitly to override. |
 | `CODEX_API_KEY`         | no       |                 | OpenAI API key for Codex CLI         |
@@ -115,6 +117,7 @@ LLM, Prompt, Claude Code, Codex, Paths, Session Limits, Logging, Linear, Network
 - **OpenAI** — `openai.AsyncOpenAI.models.list()` filtered to chat-capable IDs (kept: `gpt-N`, `oN`, `chatgpt-`; dropped: `audio`, `tts`, `whisper`, `embedding`, `moderation`, `dall-e`, `davinci`, `babbage`, `search`, `realtime`, `transcribe`, `image`).
 - **Bedrock** — `aioboto3.Session.client("bedrock").list_foundation_models(byOutputModality="TEXT", byInferenceType="ON_DEMAND")` filtered to `providerName == "Anthropic"` with the regional inference-profile prefix prepended (`us.`, `eu.`, `apac.`).
 - **OpenRouter** — public unauthenticated `https://openrouter.ai/api/v1/models`. Used for OpenCode whose model strings are in OpenRouter's `provider/model` form.
+- **Google** — native `https://generativelanguage.googleapis.com/v1beta/models` (paginated), filtered to models supporting `generateContent` and excluding media-generation/realtime variants (`embedding`, `imagen`, `veo`, `tts`, `image`, `audio`, `live`); the `models/` ID prefix is stripped so values match the chat endpoint.
 
 **Cache** lives in memory and on disk at `<data_dir>/model_cache.json`, keyed by `(provider, scope, sha256(api_key)[:8])` so swapping keys produces a fresh fetch and no raw key is ever persisted. Default TTL is 600 seconds. The cap of 64 entries prevents unbounded growth across many key rotations. Concurrent fetches for the same key are de-duplicated via per-key `asyncio.Lock`.
 
@@ -149,4 +152,4 @@ When `NATPMP_ENABLED=true`, the worker runs `src/services/natpmp_service.py:NatP
 
 **Client UI**: The Flutter client shows a "Settings" button on each connected worker card. Tapping it opens a dialog (desktop) or bottom sheet (mobile) that renders a dynamic form based on the server's config schema. Fields are grouped by section and rendered as text fields, multi-line text areas, dropdowns, switches, or password fields depending on type.
 
-**LLM-missing warning banner**: When the worker's configured `LLM_PROVIDER` (anthropic/openai) has no API key set, the new-session pane shows a yellow banner at the top reading *"LLM key is not configured."* with a **Configure** button that opens the worker edit dialog directly on the Server → LLM section (`initialTabIndex`/`initialServerSection` params on `showWorkerEditDialog`). Readiness is derived client-side from the existing `/api/config` response — no new endpoint — by checking that secrets returned masked by `_mask_secret` are non-empty (empty string → unset). Bedrock and the `none` provider are always treated as configured (AWS credential chain / direct tool mode). The banner lives on `WorkerConnection.hasLlmConfigured` and refreshes via `WorkerConnection.reloadDerivedConfig()` whenever the user saves changes in the embedded config screen, so it clears without a reconnect.
+**LLM-missing warning banner**: When the worker's configured `LLM_PROVIDER` (anthropic/openai/google) has no API key set, the new-session pane shows a yellow banner at the top reading *"LLM key is not configured."* with a **Configure** button that opens the worker edit dialog directly on the Server → LLM section (`initialTabIndex`/`initialServerSection` params on `showWorkerEditDialog`). Readiness is derived client-side from the existing `/api/config` response — no new endpoint — by checking that secrets returned masked by `_mask_secret` are non-empty (empty string → unset). Bedrock and the `none` provider are always treated as configured (AWS credential chain / direct tool mode). The banner lives on `WorkerConnection.hasLlmConfigured` and refreshes via `WorkerConnection.reloadDerivedConfig()` whenever the user saves changes in the embedded config screen, so it clears without a reconnect.
