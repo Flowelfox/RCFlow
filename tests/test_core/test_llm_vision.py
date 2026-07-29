@@ -29,6 +29,8 @@ def _make_llm_client(provider: str, model: str) -> LLMClient:
     settings.AWS_SECRET_ACCESS_KEY = ""
     settings.ANTHROPIC_API_KEY = "test"
     settings.OPENAI_API_KEY = "test"
+    settings.GOOGLE_API_KEY = "test"
+    settings.GEMINI_MODEL = model
     settings.TITLE_MODEL = ""
     settings.TASK_MODEL = ""
     settings.GLOBAL_PROMPT = ""
@@ -150,6 +152,27 @@ class TestOpenAIVisionSupport:
     def test_openai_reasoning_no_vision(self, model: str) -> None:
         client = _make_llm_client("openai", model)
         assert client.supports_vision is False
+
+
+# ---------------------------------------------------------------------------
+# Google — vision support
+# ---------------------------------------------------------------------------
+
+
+class TestGoogleVisionSupport:
+    """All Gemini chat models are multimodal."""
+
+    @pytest.mark.parametrize(
+        "model",
+        [
+            "gemini-2.5-flash",
+            "gemini-2.5-pro",
+            "gemini-3-pro-preview",
+        ],
+    )
+    def test_google_vision_true(self, model: str) -> None:
+        client = _make_llm_client("google", model)
+        assert client.supports_vision is True
 
 
 # ---------------------------------------------------------------------------

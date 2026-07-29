@@ -47,6 +47,20 @@ class TestFinalizeMessagesForProvider:
         # original history is not mutated
         assert messages[0]["content"][0]["cache_control"] == {"type": "ephemeral"}
 
+    def test_google_strips_all_cache_control(self) -> None:
+        """Gemini talks the OpenAI wire format, so it rejects cache_control too.
+
+        Guards the seam between the Gemini provider and the cache_control
+        reconciliation: gating the strip on ``== "openai"`` would send the
+        unknown field to Gemini and 400 the request.
+        """
+        messages = [_msg(("a", True), ("b", False)), _msg(("c", True))]
+        out = finalize_messages_for_provider(messages, "google")
+        for m in out:
+            for block in m["content"]:
+                assert "cache_control" not in block
+        assert messages[0]["content"][0]["cache_control"] == {"type": "ephemeral"}
+
     def test_anthropic_caps_breakpoints_at_four(self) -> None:
         # Six cache_control blocks across messages → only the last 4 survive.
         messages = [_msg((f"m{i}", True)) for i in range(6)]
@@ -79,6 +93,8 @@ def _make_llm_client(provider: str, model: str) -> LLMClient:
     settings.AWS_SECRET_ACCESS_KEY = ""
     settings.ANTHROPIC_API_KEY = "test"
     settings.OPENAI_API_KEY = "test"
+    settings.GOOGLE_API_KEY = "test"
+    settings.GEMINI_MODEL = model
     settings.TITLE_MODEL = ""
     settings.TASK_MODEL = ""
     settings.GLOBAL_PROMPT = ""
@@ -238,6 +254,15 @@ class TestBuildAssistantMessage:
 
         assert len(msg["tool_calls"]) == 2
 
+    def test_google_uses_openai_format(self) -> None:
+        client = _make_llm_client("google", "gemini-2.5-flash")
+        tc = ToolCallRequest(tool_use_id="tc1", tool_name="read_file", tool_input={"path": "/tmp/x"})
+        turn = ConversationTurn(text="Checking.", tool_calls=[tc])
+        msg = client._build_assistant_message(turn)
+
+        assert msg["content"] == "Checking."
+        assert msg["tool_calls"][0]["type"] == "function"
+
 
 # ---------------------------------------------------------------------------
 # _build_tool_result_messages
@@ -286,6 +311,15 @@ class TestBuildToolResultMessages:
         assert len(msgs) == 2  # OpenAI: one message per tool result
         assert msgs[0]["tool_call_id"] == "t1"
         assert msgs[1]["tool_call_id"] == "t2"
+
+    def test_google_uses_openai_format(self) -> None:
+        client = _make_llm_client("google", "gemini-2.5-flash")
+        tc = ToolCallRequest(tool_use_id="t1", tool_name="a", tool_input={})
+        msgs = client._build_tool_result_messages([tc], ["r1"])
+
+        assert len(msgs) == 1
+        assert msgs[0]["role"] == "tool"
+        assert msgs[0]["tool_call_id"] == "t1"
 
 
 # ---------------------------------------------------------------------------
@@ -687,6 +721,7 @@ def _settings_for(provider: str, **overrides: str) -> MagicMock:
     settings.LLM_PROVIDER = provider
     settings.ANTHROPIC_API_KEY = ""
     settings.OPENAI_API_KEY = ""
+    settings.GOOGLE_API_KEY = ""
     for k, v in overrides.items():
         setattr(settings, k, v)
     return settings
@@ -708,6 +743,10 @@ def _settings_for(provider: str, **overrides: str) -> MagicMock:
         (_settings_for("openai", OPENAI_API_KEY="sk-oai"), False),
         # OpenAI with no key → reason returned.
         (_settings_for("openai"), True),
+        # Google with a key set → OK.
+        (_settings_for("google", GOOGLE_API_KEY="AIza-xxx"), False),
+        # Google with no key → reason returned.
+        (_settings_for("google"), True),
         # Mixed casing still resolves.
         (_settings_for("Anthropic"), True),
     ],

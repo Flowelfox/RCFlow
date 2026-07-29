@@ -51,6 +51,15 @@ PROVIDER_MODELS: dict[str, dict[str, Any]] = {
         ],
         "allow_custom": True,
     },
+    "google": {
+        "options": [
+            {"value": "gemini-3-pro-preview", "label": "Gemini 3 Pro Preview"},
+            {"value": "gemini-2.5-pro", "label": "Gemini 2.5 Pro"},
+            {"value": "gemini-2.5-flash", "label": "Gemini 2.5 Flash"},
+            {"value": "gemini-2.5-flash-lite", "label": "Gemini 2.5 Flash-Lite"},
+        ],
+        "allow_custom": True,
+    },
 }
 
 # Default backend port across platforms
@@ -182,7 +191,7 @@ class Settings(BaseSettings):
     # Database
     DATABASE_URL: str = "sqlite+aiosqlite:///./data/rcflow.db"
 
-    # LLM provider: "anthropic" (direct API), "bedrock" (AWS Bedrock), "openai", or "none" (direct tool mode)
+    # LLM provider: "anthropic", "bedrock", "openai", "google" (Gemini), or "none" (direct tool mode)
     # Default is "none" so a fresh install (Linux, macOS, Windows) starts in
     # direct-tool mode and the user explicitly opts into a paid LLM provider.
     LLM_PROVIDER: str = "none"
@@ -199,6 +208,10 @@ class Settings(BaseSettings):
     # OpenAI (used when LLM_PROVIDER = "openai")
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL: str = "gpt-5.4"
+
+    # Google Gemini (used when LLM_PROVIDER = "google")
+    GOOGLE_API_KEY: str = ""
+    GEMINI_MODEL: str = "gemini-2.5-flash"
 
     # Projects (comma-separated list of directories)
     PROJECTS_DIR: str = "~/Projects"
@@ -406,6 +419,7 @@ CONFIG_OPTIONS: list[dict[str, Any]] = [
             {"value": "anthropic", "label": "Anthropic Key"},
             {"value": "bedrock", "label": "Bedrock"},
             {"value": "openai", "label": "OpenAI"},
+            {"value": "google", "label": "Google Gemini"},
             {"value": "none", "label": "None (Direct Tool Mode)"},
         ],
         "group": "LLM",
@@ -499,6 +513,33 @@ CONFIG_OPTIONS: list[dict[str, Any]] = [
         "fetch_scope": "global",
     },
     {
+        "key": "GOOGLE_API_KEY",
+        "label": "Google API Key",
+        "type": "secret",
+        "group": "LLM",
+        "description": "API key for the Google Gemini API (Google AI Studio)",
+        "required": False,
+        "restart_required": False,
+        "visible_when": {"key": "LLM_PROVIDER", "value": "google"},
+    },
+    {
+        "key": "GEMINI_MODEL",
+        "label": "Gemini Model",
+        "type": "model_select",
+        "group": "LLM",
+        "description": "Gemini model ID (e.g. gemini-2.5-flash, gemini-2.5-pro)",
+        "required": False,
+        "restart_required": False,
+        "visible_when": {"key": "LLM_PROVIDER", "value": "google"},
+        "provider_key": "LLM_PROVIDER",
+        "models": {
+            "google": PROVIDER_MODELS["google"],
+        },
+        "dynamic": True,
+        "fetch_endpoint": "/api/models",
+        "fetch_scope": "global",
+    },
+    {
         "key": "TITLE_MODEL",
         "label": "Title Model",
         "type": "model_select",
@@ -512,6 +553,7 @@ CONFIG_OPTIONS: list[dict[str, Any]] = [
             "anthropic": PROVIDER_MODELS["anthropic"],
             "bedrock": PROVIDER_MODELS["bedrock"],
             "openai": PROVIDER_MODELS["openai"],
+            "google": PROVIDER_MODELS["google"],
         },
         "dynamic": True,
         "fetch_endpoint": "/api/models",
@@ -531,6 +573,7 @@ CONFIG_OPTIONS: list[dict[str, Any]] = [
             "anthropic": PROVIDER_MODELS["anthropic"],
             "bedrock": PROVIDER_MODELS["bedrock"],
             "openai": PROVIDER_MODELS["openai"],
+            "google": PROVIDER_MODELS["google"],
         },
         "dynamic": True,
         "fetch_endpoint": "/api/models",

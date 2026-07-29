@@ -21,6 +21,17 @@ logger = logging.getLogger(__name__)
 
 _OPENAI_REASONING_PREFIXES = ("o1", "o3", "o4")
 
+# Google Gemini is driven through its OpenAI-compatible endpoint via the
+# already-bundled openai SDK — no separate Google SDK dependency needed.
+_GEMINI_OPENAI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
+
+# Providers spoken to over the OpenAI wire format. Gemini reaches us through its
+# OpenAI-compatible endpoint, so it shares every OpenAI code path: message
+# building, streaming, and the cache_control stripping in
+# finalize_messages_for_provider. Single source of truth — add a provider here
+# and all of those follow.
+_OPENAI_STYLE_PROVIDERS = frozenset({"openai", "google"})
+
 # Maximum number of LLM ↔ tool-execution round-trips per prompt (F5).
 # Prevents runaway agentic loops that could exhaust memory or API budget.
 _MAX_AGENTIC_TURNS = 50
@@ -97,6 +108,8 @@ def llm_configuration_issue(settings: Settings) -> str | None:
         return "Anthropic API key is not configured. Open worker settings → LLM to add one."
     if provider == "openai" and not settings.OPENAI_API_KEY:
         return "OpenAI API key is not configured. Open worker settings → LLM to add one."
+    if provider == "google" and not settings.GOOGLE_API_KEY:
+        return "Google API key is not configured. Open worker settings → LLM to add one."
     return None
 
 
@@ -144,8 +157,12 @@ def finalize_messages_for_provider(messages: list[dict[str, Any]], provider: str
     so this returns a request-only view: OpenAI gets it stripped everywhere;
     Anthropic keeps only the four most-recent breakpoints. The stored history is
     never mutated.
+
+    Google Gemini is served over the OpenAI-compatible endpoint, so it uses the
+    OpenAI wire format and must have ``cache_control`` stripped too; both this
+    and ``LLMClient._openai_style`` read ``_OPENAI_STYLE_PROVIDERS``.
     """
-    if provider == "openai":
+    if provider in _OPENAI_STYLE_PROVIDERS:
         return [_strip_cache_control_from_message(m) for m in messages]
 
     positions = [
@@ -202,9 +219,22 @@ class LLMClient:
             self._model = settings.OPENAI_MODEL
             logger.info("LLM provider: OpenAI (model=%s)", settings.OPENAI_MODEL)
 
+        elif self._provider == "google":
+            self._openai_client = openai.AsyncOpenAI(
+                api_key=settings.GOOGLE_API_KEY,
+                base_url=_GEMINI_OPENAI_BASE_URL,
+            )
+            self._model = settings.GEMINI_MODEL
+            logger.info("LLM provider: Google Gemini (model=%s)", settings.GEMINI_MODEL)
+
         else:
-            msg = f"Unknown LLM provider: {self._provider!r}. Must be 'anthropic', 'bedrock', or 'openai'."
+            msg = f"Unknown LLM provider: {self._provider!r}. Must be 'anthropic', 'bedrock', 'openai', or 'google'."
             raise ValueError(msg)
+
+        # Google Gemini speaks the OpenAI wire format through its
+        # OpenAI-compatible endpoint, so all message building and streaming
+        # follows the OpenAI code paths for both providers.
+        self._openai_style = self._provider in _OPENAI_STYLE_PROVIDERS
 
         self._title_model = settings.TITLE_MODEL or self._model
         self._task_model = settings.TASK_MODEL or self._model
@@ -216,7 +246,7 @@ class LLMClient:
 
     @property
     def provider(self) -> str:
-        """The active LLM provider name: ``'anthropic'``, ``'bedrock'``, or ``'openai'``."""
+        """The active LLM provider name: ``'anthropic'``, ``'bedrock'``, ``'openai'``, or ``'google'``."""
         return self._provider
 
     @property
@@ -240,8 +270,11 @@ class LLMClient:
         Anthropic/Bedrock: claude-3.x series and claude-[variant]-4 family.
         OpenAI: gpt-4o, gpt-4-turbo, gpt-4-vision, gpt-4.1+, gpt-5+ are multimodal
           and support image input. Reasoning-only models (o1/o3/o4 series) do not.
+        Google: all Gemini chat models are multimodal.
         """
         model = self._model.lower()
+        if self._provider == "google":
+            return True
         if self._provider in ("anthropic", "bedrock"):
             # claude-3.x family and claude-[name]-4 family support vision
             return bool(re.search(r"claude-3", model) or re.search(r"claude-\w+-4", model))
@@ -292,7 +325,7 @@ class LLMClient:
         # content-block rules (see finalize_messages_for_provider). Request-only;
         # the caller's conversation_history is left untouched.
         messages = finalize_messages_for_provider(messages, self._provider)
-        if self._provider == "openai":
+        if self._openai_style:
             async for event in self._stream_turn_openai(messages, system):
                 yield event
         else:
@@ -423,38 +456,20 @@ class LLMClient:
         finish_reason: str | None = None
         chunk_id = ""
         chunk_model = ""
+        usage: Any = None
+        service_tier: str | None = None
 
         stream = await self._openai_client.chat.completions.create(**kwargs)
         async for chunk in stream:
             chunk_id = chunk.id or chunk_id
             chunk_model = chunk.model or chunk_model
 
-            # Final chunk with usage stats (empty choices)
-            if not chunk.choices and chunk.usage:
-                ended_at = datetime.now(UTC)
+            # Usage arrives on a trailing empty-choices chunk (OpenAI) or on
+            # the final content chunk (Gemini's OpenAI-compat endpoint), so
+            # capture it wherever it shows up and emit StreamDone after the loop.
+            if chunk.usage:
                 usage = chunk.usage
-                stop = finish_reason or "end_turn"
-                cached = 0
-                details = getattr(usage, "prompt_tokens_details", None)
-                if details:
-                    cached = getattr(details, "cached_tokens", 0) or 0
-                yield StreamDone(
-                    stop_reason=stop,
-                    usage=TurnUsage(
-                        message_id=chunk_id,
-                        model=chunk_model,
-                        input_tokens=usage.prompt_tokens or 0,
-                        output_tokens=usage.completion_tokens or 0,
-                        cache_creation_input_tokens=0,
-                        cache_read_input_tokens=cached,
-                        stop_reason=stop,
-                        service_tier=getattr(chunk, "service_tier", None),
-                        inference_geo=None,
-                        started_at=started_at,
-                        ended_at=ended_at,
-                    ),
-                )
-                continue
+                service_tier = getattr(chunk, "service_tier", None)
 
             if not chunk.choices:
                 continue
@@ -498,13 +513,36 @@ class LLMClient:
                     )
                 tool_calls_in_progress.clear()
 
+        ended_at = datetime.now(UTC)
+        stop = finish_reason or "end_turn"
+        cached = 0
+        details = getattr(usage, "prompt_tokens_details", None) if usage else None
+        if details:
+            cached = getattr(details, "cached_tokens", 0) or 0
+        yield StreamDone(
+            stop_reason=stop,
+            usage=TurnUsage(
+                message_id=chunk_id,
+                model=chunk_model,
+                input_tokens=(usage.prompt_tokens or 0) if usage else 0,
+                output_tokens=(usage.completion_tokens or 0) if usage else 0,
+                cache_creation_input_tokens=0,
+                cache_read_input_tokens=cached,
+                stop_reason=stop,
+                service_tier=service_tier,
+                inference_geo=None,
+                started_at=started_at,
+                ended_at=ended_at,
+            ),
+        )
+
     # ------------------------------------------------------------------
     # Provider-aware message builders (for the agentic loop)
     # ------------------------------------------------------------------
 
     def _build_assistant_message(self, turn: ConversationTurn) -> dict[str, Any]:
         """Build the assistant message in the correct format for the current provider."""
-        if self._provider == "openai":
+        if self._openai_style:
             msg: dict[str, Any] = {"role": "assistant", "content": turn.text or None}
             if turn.tool_calls:
                 msg["tool_calls"] = [
@@ -539,7 +577,7 @@ class LLMClient:
         self, tool_calls: list[ToolCallRequest], results: list[str]
     ) -> list[dict[str, Any]]:
         """Build tool result messages in the correct format for the current provider."""
-        if self._provider == "openai":
+        if self._openai_style:
             # OpenAI: one message per tool result with role="tool"
             return [
                 {"role": "tool", "tool_call_id": tc.tool_use_id, "content": result}
@@ -673,7 +711,7 @@ class LLMClient:
             "No descriptions, no explanations, no markdown, no headers, no quotes, "
             "no punctuation at the end, no special characters. Just a few words as a title."
         )
-        if self._provider == "openai":
+        if self._openai_style:
             title = await self._openai_create(system, content, max_tokens=30, model=self._title_model)
         else:
             title = await self._anthropic_create(system, content, max_tokens=30, model=self._title_model)
@@ -686,7 +724,7 @@ class LLMClient:
             "You are a concise summarizer. Produce a single sentence summary of the following text. "
             "Be direct and informative. No markdown."
         )
-        if self._provider == "openai":
+        if self._openai_style:
             return await self._openai_create(system, text, max_tokens=80)
         return await self._anthropic_create(system, text, max_tokens=80)
 
@@ -795,7 +833,7 @@ class LLMClient:
             "Return ONLY valid JSON, no markdown fences around the JSON itself."
         )
         try:
-            if self._provider == "openai":
+            if self._openai_style:
                 raw = await self._openai_create(system, content, max_tokens=1024, model=self._task_model)
             else:
                 raw = await self._anthropic_create(system, content, max_tokens=1024, model=self._task_model)
@@ -842,7 +880,7 @@ class LLMClient:
         )
         truncated = session_result[:2000] if session_result else ""
         try:
-            if self._provider == "openai":
+            if self._openai_style:
                 raw = await self._openai_create(system, truncated, max_tokens=512, model=self._task_model)
             else:
                 raw = await self._anthropic_create(system, truncated, max_tokens=512, model=self._task_model)

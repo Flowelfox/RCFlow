@@ -745,7 +745,9 @@ class PromptRouter:
                             ),
                         }
                     )
-                elif provider == "openai":
+                elif provider in ("openai", "google"):
+                    # Google Gemini goes through the OpenAI-compat endpoint,
+                    # so it takes OpenAI-style image_url blocks too.
                     b64 = base64.standard_b64encode(att.data).decode()
                     blocks.append(
                         {

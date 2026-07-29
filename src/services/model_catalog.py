@@ -51,6 +51,12 @@ MODEL_CACHE_MAX_ENTRIES = 64
 _OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
 _OPENROUTER_TIMEOUT = httpx.Timeout(10.0, connect=5.0)
 
+_GOOGLE_MODELS_URL = "https://generativelanguage.googleapis.com/v1beta/models"
+# Keep only chat-capable Gemini models: the ``generateContent`` method filter
+# removes embeddings/AQA, and the deny regex drops media-generation and
+# realtime variants that technically expose generateContent.
+_GOOGLE_DENY_RE = re.compile(r"(embedding|imagen|veo|tts|image|audio|live)", re.IGNORECASE)
+
 # OpenAI: keep only chat-capable model ids. Allow gpt-N-…, oN-…, chatgpt-…
 # explicitly; reject anything that smells like embeddings/audio/image/etc.
 _OPENAI_KEEP_RE = re.compile(r"^(gpt-[0-9]|o[0-9]|chatgpt-)")
@@ -327,6 +333,55 @@ class BedrockFetcher:
         return entries
 
 
+class GoogleFetcher:
+    """Fetch the Gemini model list from the Generative Language API.
+
+    Uses the native ``models.list`` REST endpoint (not the OpenAI-compat
+    layer) because it exposes ``supportedGenerationMethods`` and
+    ``displayName``, letting us filter to chat-capable models and show
+    polished labels. IDs are returned as ``models/gemini-…`` — the prefix
+    is stripped so values match what the chat endpoint accepts.
+    """
+
+    name = "google"
+
+    async def fetch(self, creds: Credentials) -> list[ModelEntry]:
+        """Fetch."""
+        if not creds.api_key:
+            raise ValueError("Google API key is required to list models")
+
+        entries: list[ModelEntry] = []
+        page_token: str | None = None
+        async with httpx.AsyncClient(timeout=_OPENROUTER_TIMEOUT) as client:
+            while True:
+                params: dict[str, str] = {"pageSize": "200"}
+                if page_token:
+                    params["pageToken"] = page_token
+                response = await client.get(
+                    _GOOGLE_MODELS_URL,
+                    params=params,
+                    headers={"x-goog-api-key": creds.api_key},
+                )
+                response.raise_for_status()
+                payload = response.json()
+                for model in payload.get("models", []):
+                    name = model.get("name") or ""
+                    model_id = name.removeprefix("models/")
+                    if not model_id:
+                        continue
+                    if "generateContent" not in model.get("supportedGenerationMethods", []):
+                        continue
+                    if _GOOGLE_DENY_RE.search(model_id):
+                        continue
+                    label = model.get("displayName") or model_id
+                    entries.append(ModelEntry(value=model_id, label=label))
+                page_token = payload.get("nextPageToken")
+                if not page_token:
+                    break
+        entries.sort(key=lambda e: e.value, reverse=True)
+        return entries
+
+
 class OpenRouterFetcher:
     """Fetch the public OpenRouter model catalog (unauthenticated)."""
 
@@ -354,6 +409,7 @@ _DEFAULT_FETCHERS: dict[str, ProviderFetcher] = {
     "openai": OpenAIFetcher(),
     "bedrock": BedrockFetcher(),
     "openrouter": OpenRouterFetcher(),
+    "google": GoogleFetcher(),
 }
 
 

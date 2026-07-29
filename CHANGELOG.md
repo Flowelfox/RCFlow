@@ -12,6 +12,9 @@ and note which component is affected where it matters.
 
 ## [Unreleased]
 
+### Added
+- **Google Gemini as an LLM provider** — the worker's LLM settings now offer Google alongside Anthropic, Bedrock, and OpenAI: pick "Google Gemini", paste a Google AI Studio API key, and choose a Gemini model from a live model list. Streaming, tool calls, and image attachments all work, and the client warns when the key is missing just like for other providers (Backend + Client)
+
 ### Security
 - **Telemetry data now requires the API key** — the usage/metrics endpoints were reachable without authentication; they now require the worker key like every other endpoint, and a worker can no longer ship an endpoint that forgot to require it (Backend).
 - **Approved file-access permissions can no longer be tricked into covering other paths** — a granted "always allow" for a folder is now matched by real path, so `..` traversal or a similarly named sibling folder no longer reuses the approval (Backend).

@@ -260,10 +260,11 @@ async def update_config(body: UpdateConfigRequest, request: Request) -> dict[str
 _GLOBAL_MODEL_CACHE_TRIGGERS: dict[str, tuple[str, ...]] = {
     "ANTHROPIC_API_KEY": ("anthropic", "openrouter"),
     "OPENAI_API_KEY": ("openai",),
+    "GOOGLE_API_KEY": ("google",),
     "AWS_ACCESS_KEY_ID": ("bedrock",),
     "AWS_SECRET_ACCESS_KEY": ("bedrock",),
     "AWS_REGION": ("bedrock",),
-    "LLM_PROVIDER": ("anthropic", "openai", "bedrock", "openrouter"),
+    "LLM_PROVIDER": ("anthropic", "openai", "bedrock", "openrouter", "google"),
 }
 
 

@@ -16,6 +16,7 @@ from src.services.model_catalog import (
     BedrockFetcher,
     CatalogResult,
     Credentials,
+    GoogleFetcher,
     ModelCatalog,
     ModelEntry,
     OpenAIFetcher,
@@ -273,6 +274,69 @@ async def test_openai_fetcher_requires_key() -> None:
     fetcher = OpenAIFetcher()
     with pytest.raises(ValueError, match="OpenAI API key"):
         await fetcher.fetch(Credentials(api_key=None))
+
+
+@pytest.mark.asyncio
+async def test_google_fetcher_requires_key() -> None:
+    fetcher = GoogleFetcher()
+    with pytest.raises(ValueError, match="Google API key"):
+        await fetcher.fetch(Credentials(api_key=None))
+
+
+@pytest.mark.asyncio
+async def test_google_fetcher_filters_and_strips_prefix(monkeypatch: pytest.MonkeyPatch) -> None:
+    """GoogleFetcher keeps only generateContent chat models and strips models/."""
+
+    class _StubResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, Any]:
+            return {
+                "models": [
+                    {
+                        "name": "models/gemini-2.5-flash",
+                        "displayName": "Gemini 2.5 Flash",
+                        "supportedGenerationMethods": ["generateContent"],
+                    },
+                    {
+                        "name": "models/gemini-2.5-flash-image",
+                        "displayName": "Nano Banana",
+                        "supportedGenerationMethods": ["generateContent"],
+                    },
+                    {
+                        "name": "models/text-embedding-004",
+                        "displayName": "Embedding",
+                        "supportedGenerationMethods": ["embedContent"],
+                    },
+                    {
+                        "name": "models/aqa",
+                        "displayName": "AQA",
+                        "supportedGenerationMethods": ["generateAnswer"],
+                    },
+                ]
+            }
+
+    class _StubClient:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        async def __aenter__(self) -> Any:
+            return self
+
+        async def __aexit__(self, *args: Any) -> None:
+            return None
+
+        async def get(self, *args: Any, **kwargs: Any) -> _StubResponse:
+            return _StubResponse()
+
+    monkeypatch.setattr("src.services.model_catalog.httpx.AsyncClient", _StubClient)
+
+    fetcher = GoogleFetcher()
+    entries = await fetcher.fetch(Credentials(api_key="AIza-test"))
+
+    assert [e.value for e in entries] == ["gemini-2.5-flash"]
+    assert entries[0].label == "Gemini 2.5 Flash"
 
 
 @pytest.mark.asyncio
