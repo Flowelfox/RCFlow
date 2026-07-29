@@ -112,7 +112,7 @@ jobs:
 
       # Upload everything produced in dist/ so the artifact panel lists them.
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4.6.2
+        uses: actions/upload-artifact@v7
         with:
           name: backend-${{ matrix.label }}
           path: dist/
@@ -335,7 +335,7 @@ jobs:
       # Upload all dist/ files for this platform as a named artifact.
       # The workflow run summary will show a separate download per platform.
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4.6.2
+        uses: actions/upload-artifact@v7
         with:
           name: client-${{ matrix.label }}
           path: dist/
