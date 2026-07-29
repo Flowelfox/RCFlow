@@ -47,6 +47,20 @@ class TestFinalizeMessagesForProvider:
         # original history is not mutated
         assert messages[0]["content"][0]["cache_control"] == {"type": "ephemeral"}
 
+    def test_google_strips_all_cache_control(self) -> None:
+        """Gemini talks the OpenAI wire format, so it rejects cache_control too.
+
+        Guards the seam between the Gemini provider and the cache_control
+        reconciliation: gating the strip on ``== "openai"`` would send the
+        unknown field to Gemini and 400 the request.
+        """
+        messages = [_msg(("a", True), ("b", False)), _msg(("c", True))]
+        out = finalize_messages_for_provider(messages, "google")
+        for m in out:
+            for block in m["content"]:
+                assert "cache_control" not in block
+        assert messages[0]["content"][0]["cache_control"] == {"type": "ephemeral"}
+
     def test_anthropic_caps_breakpoints_at_four(self) -> None:
         # Six cache_control blocks across messages → only the last 4 survive.
         messages = [_msg((f"m{i}", True)) for i in range(6)]
