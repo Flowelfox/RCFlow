@@ -83,10 +83,10 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
           cache-dependency-glob: "uv.lock"
@@ -112,7 +112,7 @@ jobs:
 
       # Upload everything produced in dist/ so the artifact panel lists them.
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4.6.2
+        uses: actions/upload-artifact@v7
         with:
           name: backend-${{ matrix.label }}
           path: dist/
@@ -164,7 +164,7 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       # ── Android: set up Java 17 before Flutter ────────────────────────────
       # AGP 8+ requires JDK 17; the default JVM on ubuntu-latest may be older.
@@ -335,7 +335,7 @@ jobs:
       # Upload all dist/ files for this platform as a named artifact.
       # The workflow run summary will show a separate download per platform.
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4.6.2
+        uses: actions/upload-artifact@v7
         with:
           name: client-${{ matrix.label }}
           path: dist/
