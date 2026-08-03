@@ -125,7 +125,7 @@ jobs:
           uv export --format requirements-txt --no-emit-project --no-hashes > /tmp/req.txt
           uvx pip-audit -r /tmp/req.txt
       - name: Secret scan (gitleaks)
-        uses: gitleaks/gitleaks-action@v2
+        uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
