@@ -98,7 +98,7 @@ jobs:
 
       - name: Upload coverage badge
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-badge
           path: docs/assets/coverage.svg
