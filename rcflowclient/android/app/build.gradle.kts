@@ -1,5 +1,6 @@
 import java.util.Properties
 import java.io.FileInputStream
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     id("com.android.application")
@@ -28,10 +29,6 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
-    }
-
-    kotlinOptions {
-        jvmTarget = "17"
     }
 
     defaultConfig {
@@ -67,6 +64,15 @@ android {
                 signingConfigs.getByName("debug")
             }
         }
+    }
+}
+
+// Kotlin JVM target. Set via the compilerOptions DSL rather than the android
+// block's kotlinOptions, which Kotlin 2.4 turned from a deprecation into a
+// hard error. Must stay in step with compileOptions above.
+kotlin {
+    compilerOptions {
+        jvmTarget = JvmTarget.JVM_17
     }
 }
 
