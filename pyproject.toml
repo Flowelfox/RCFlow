@@ -25,7 +25,7 @@ dependencies = [
     "rust-just[dev]>=1.46.0",
     "wtpython @ git+https://github.com/Flowelfox/worktree-manager-python",
     "claude-agent-sdk>=0.2.87",
-    "agent-client-protocol>=0.11.0,<0.12",
+    "agent-client-protocol>=0.11.0,<0.13",
 ]
 
 [project.optional-dependencies]
